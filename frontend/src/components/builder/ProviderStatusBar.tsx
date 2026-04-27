@@ -77,14 +77,14 @@ const PROVIDER_CONFIG: Record<SupportedProvider, {
   claude: {
     label: 'Claude',
     tagline: 'Anthropic',
-    borderActive: 'border-orange-500/70',
-    borderIdle: 'border-orange-500/15',
-    bgActive: 'bg-gradient-to-br from-orange-950/60 via-black to-orange-950/25',
-    textActive: 'text-orange-300',
-    glowActive: 'shadow-[0_0_24px_rgba(251,146,60,0.18)]',
-    dotWorking: 'bg-orange-400',
+    borderActive: 'border-violet-500/70',
+    borderIdle: 'border-violet-500/15',
+    bgActive: 'bg-gradient-to-br from-violet-950/60 via-black to-violet-950/25',
+    textActive: 'text-violet-300',
+    glowActive: 'shadow-[0_0_24px_rgba(139,92,246,0.18)]',
+    dotWorking: 'bg-violet-400',
     dotThinking: 'bg-yellow-400',
-    badgeActive: 'bg-orange-500/20 border-orange-500/40 text-orange-300',
+    badgeActive: 'bg-violet-500/20 border-violet-500/40 text-violet-300',
   },
   ollama: {
     label: 'Kimi / Local',
@@ -125,7 +125,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
   }
 
   return (
-    <div className="flex border-b border-gray-900 shrink-0 overflow-x-auto" style={{ minHeight: '108px' }}>
+    <div className="build-screen-panel build-screen-provider-grid shrink-0" style={{ minHeight: '124px' }}>
       {DISPLAY_ORDER.map((provider) => {
         const panel = panelMap[provider]
         const cfg = PROVIDER_CONFIG[provider]
@@ -156,30 +156,30 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
           <div
             key={provider}
             className={cn(
-              'flex-1 min-w-[104px] border-r last:border-r-0 flex flex-col justify-between gap-1 px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
+              'min-w-0 rounded-[20px] border flex flex-col justify-between gap-2 px-3 py-3 transition-all duration-500',
               isActive
                 ? `${cfg.borderActive} ${cfg.bgActive} ${cfg.glowActive}`
-                : `${cfg.borderIdle} bg-black/30`,
+                : `${cfg.borderIdle} bg-[rgba(7,12,20,0.72)]`,
               isUnavailable && 'opacity-35 grayscale',
-              isError && 'border-red-500/30 bg-red-950/15 opacity-100 grayscale-0',
+              isError && 'border-red-500/30 bg-red-950/15 opacity-100 grayscale-0 shadow-[0_0_18px_rgba(239,68,68,0.12)]',
             )}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className={cn(
                   'text-sm font-bold leading-tight truncate',
-                  isActive ? cfg.textActive : localDisabled ? 'text-gray-700' : 'text-gray-500'
+                  isActive ? cfg.textActive : localDisabled ? 'text-gray-700' : 'text-slate-300'
                 )}>
                   {cfg.label}
                 </div>
-                <div className="text-[9px] text-gray-700 font-mono">{cfg.tagline}</div>
+                <div className="text-[9px] text-slate-500 font-mono uppercase tracking-[0.18em]">{cfg.tagline}</div>
               </div>
               <div className={dotClass} />
             </div>
 
             <div className={cn(
               'text-[10px] font-mono leading-tight truncate',
-              isActive ? 'text-gray-300' : localDisabled ? 'text-gray-800' : 'text-gray-700'
+              isActive ? 'text-slate-200' : localDisabled ? 'text-gray-800' : 'text-slate-500'
             )}>
               {panel?.liveModelName || (localDisabled ? 'connect key' : '-')}
             </div>
@@ -187,7 +187,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
             {canConfigureModel ? (
               <select
                 aria-label={`${cfg.label} model`}
-                className="w-full rounded border border-gray-800 bg-black/70 px-1.5 py-1 text-[10px] text-gray-200 outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-lg border border-[rgba(184,226,255,0.12)] bg-[rgba(4,8,14,0.82)] px-2 py-1.5 text-[10px] text-slate-200 outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 value={selectedModel}
                 disabled={!isBuildActive || isUnavailable || modelUpdatePendingProvider === provider}
                 onChange={(event) => onModelSelect?.(provider, event.target.value)}
@@ -205,7 +205,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
                 isCompleted ? 'bg-green-500/15 border-green-500/25 text-green-500' :
                   isError ? 'bg-red-500/15 border-red-500/25 text-red-400' :
                     localDisabled ? 'bg-gray-900/40 border-gray-800 text-gray-700' :
-                      'bg-gray-900/60 border-gray-800 text-gray-600'
+                      'bg-[rgba(255,255,255,0.04)] border-[rgba(184,226,255,0.1)] text-slate-400'
             )}>
               {statusLabel}
             </div>

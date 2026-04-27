@@ -417,16 +417,18 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
   }, [desc])
 
   return (
-    <div className="shrink-0 flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-0 border-b border-gray-900 bg-black/60"
-      style={{ minHeight: '56px' }}>
+    <div
+      className="build-screen-panel shrink-0 flex flex-wrap items-center gap-3 px-4 py-4 sm:px-5"
+      style={{ minHeight: '84px' }}
+    >
 
       {/* Title + status */}
       <div className="flex-1 min-w-0 flex items-center gap-2 sm:gap-3">
         <div className="min-w-0">
-          <div className="text-xs sm:text-sm font-semibold text-gray-200 truncate select-text" title={desc}>
+          <div className="text-sm sm:text-[15px] font-semibold text-slate-100 truncate select-text" title={desc}>
             {desc}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-[11px] text-gray-600 font-mono">
+          <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-[11px] text-slate-500 font-mono uppercase tracking-[0.18em]">
             <span>{phaseLabel}</span>
             {gateStatusText && (
               <span className={cn('text-[9px] sm:text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border', gateStatusClass)}>
@@ -442,18 +444,18 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
 
       {/* Progress bar (mobile: show inline, smaller) */}
       <div className="flex items-center gap-2 w-24 sm:w-44">
-        <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+        <div className="flex-1 h-2 rounded-full bg-[rgba(184,226,255,0.08)] overflow-hidden">
           <div
             className={cn(
               'h-full rounded-full transition-all duration-500',
               status === 'completed' ? 'bg-green-500'
                 : status === 'failed' ? 'bg-red-500'
-                : 'bg-gradient-to-r from-red-600 to-orange-500'
+                : 'bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-300'
             )}
             style={{ width: `${Math.min(100, progress)}%` }}
           />
         </div>
-        <span className="text-[10px] font-mono text-gray-500 w-8 text-right">{progress}%</span>
+        <span className="text-[10px] font-mono text-slate-400 w-8 text-right">{progress}%</span>
       </div>
 
       {/* Build controls */}
@@ -469,7 +471,7 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
               ? 'border-emerald-700/60 bg-emerald-950/40 text-emerald-200'
               : copyState === 'failed'
                 ? 'border-amber-700/60 bg-amber-950/30 text-amber-200'
-                : 'border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white'
+                : 'border-[rgba(184,226,255,0.12)] bg-[rgba(255,255,255,0.02)] text-slate-200 hover:border-[rgba(184,226,255,0.24)] hover:bg-[rgba(56,189,248,0.08)]'
           )}
         >
           {copyState === 'copied' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -482,7 +484,7 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
             type="button"
             onClick={onOpenPlannerConsole}
             aria-label="Steer Build"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-700/60 text-red-200 hover:bg-red-950/40 text-xs font-semibold uppercase tracking-wide"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[rgba(56,189,248,0.35)] bg-[rgba(56,189,248,0.08)] text-cyan-200 hover:bg-[rgba(56,189,248,0.14)] text-xs font-semibold uppercase tracking-wide"
           >
             <MessageSquare className="w-3 h-3" />
             Steer
@@ -500,14 +502,14 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
             </button>
             <button
               onClick={onOpenInIDE}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600 text-xs"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[rgba(184,226,255,0.12)] text-slate-400 hover:text-slate-200 hover:border-[rgba(184,226,255,0.24)] text-xs"
             >
               <ExternalLink className="w-3 h-3" />
               IDE
             </button>
             <button
               onClick={onDownload}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600 text-xs"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[rgba(184,226,255,0.12)] text-slate-400 hover:text-slate-200 hover:border-[rgba(184,226,255,0.24)] text-xs"
             >
               <Download className="w-3 h-3" />
             </button>
@@ -537,7 +539,7 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
             <button
               onClick={onPause}
               disabled={buildActionPending !== null}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-amber-300 hover:border-amber-700 text-xs disabled:opacity-50"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[rgba(184,226,255,0.12)] text-slate-400 hover:text-cyan-200 hover:border-[rgba(56,189,248,0.35)] text-xs disabled:opacity-50"
             >
               <Pause className="w-3 h-3" />
             </button>
@@ -576,7 +578,7 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
         : 'Message the planner...')
 
   return (
-    <div className="shrink-0 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 sm:py-2.5 border-t border-gray-900 bg-black/60">
+    <div className="build-screen-panel shrink-0 flex items-center gap-1.5 sm:gap-2 px-3 py-3 sm:px-4">
       {/* Mode toggle */}
       <div className="flex rounded-lg overflow-hidden border border-gray-800 shrink-0">
         <button
@@ -585,8 +587,8 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
           className={cn(
             'px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors',
             plannerSendMode === 'lead'
-              ? 'bg-red-700 text-white'
-              : 'bg-transparent text-gray-600 hover:text-gray-400'
+              ? 'bg-slate-100 text-slate-950'
+              : 'bg-transparent text-slate-500 hover:text-slate-300'
           )}
         >
           Lead
@@ -598,8 +600,8 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
           className={cn(
             'px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors',
             plannerSendMode === 'all_agents'
-              ? 'bg-cyan-700 text-white'
-              : 'bg-transparent text-gray-600 hover:text-gray-400 disabled:opacity-30'
+              ? 'bg-cyan-500 text-slate-950'
+              : 'bg-transparent text-slate-500 hover:text-slate-300 disabled:opacity-30'
           )}
         >
           All
@@ -613,13 +615,13 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
         onChange={(e) => setChatInput(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && !pending && onSend()}
         placeholder={placeholder}
-        className="flex-1 min-w-0 bg-gray-950/80 border border-gray-800 rounded-xl px-3 sm:px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-red-700/60 focus:ring-1 focus:ring-red-900/30 transition-all"
+        className="flex-1 min-w-0 bg-[rgba(4,8,14,0.86)] border border-[rgba(184,226,255,0.12)] rounded-xl px-3 sm:px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-[rgba(56,189,248,0.45)] focus:ring-1 focus:ring-cyan-500/25 transition-all"
       />
 
       <button
         onClick={onSend}
         disabled={!chatInput.trim() || pending}
-        className="shrink-0 px-3 sm:px-4 py-2.5 bg-red-700 hover:bg-red-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center gap-2"
+        className="shrink-0 px-3 sm:px-4 py-2.5 bg-gradient-to-r from-sky-400 via-cyan-400 to-emerald-300 text-slate-950 rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center gap-2"
       >
         {pending ? (
           <span className="inline-flex gap-0.5">
@@ -791,7 +793,7 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
   isBuildActive, generatedFilesCount, issueCount, hasUrgentIssue, buildStatus,
 }) => {
   return (
-    <div className="shrink-0 flex items-center gap-0.5 sm:gap-1 px-2 sm:px-3 py-1 sm:py-1.5 border-t border-gray-900 bg-black/80 overflow-x-auto"
+    <div className="build-screen-bottomnav shrink-0 flex items-center gap-0.5 sm:gap-1 px-2 sm:px-3 py-2 overflow-x-auto"
       style={{ WebkitOverflowScrolling: 'touch' }}>
       {/* Preview — special, always direct action */}
       <button
@@ -799,8 +801,8 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
         className={cn(
           'flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all',
           buildStatus === 'completed'
-            ? 'bg-green-700/80 hover:bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.2)]'
-            : 'text-gray-500 hover:text-gray-300 hover:bg-gray-900'
+            ? 'bg-green-600/80 hover:bg-green-500 text-white shadow-[0_0_12px_rgba(34,197,94,0.2)]'
+            : 'text-slate-500 hover:text-slate-300 hover:bg-[rgba(255,255,255,0.04)]'
         )}
       >
         <Eye className="w-3.5 h-3.5" />
@@ -820,10 +822,10 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
             className={cn(
               'relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all',
               isActive
-                ? 'bg-red-700/80 text-white'
+                ? 'bg-[rgba(56,189,248,0.18)] text-cyan-100 border border-[rgba(56,189,248,0.32)]'
                 : urgent
                   ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-900/20'
-                  : 'text-gray-500 hover:text-gray-300 hover:bg-gray-900'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-[rgba(255,255,255,0.04)]'
             )}
           >
             <Icon className="w-3.5 h-3.5" />
@@ -831,7 +833,7 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
             {badge > 0 && (
               <span className={cn(
                 'ml-0.5 px-1.5 py-px rounded-full text-[9px] font-bold',
-                urgent ? 'bg-amber-500/20 text-amber-300' : 'bg-gray-700 text-gray-300'
+                urgent ? 'bg-amber-500/20 text-amber-300' : 'bg-[rgba(184,226,255,0.08)] text-slate-300'
               )}>
                 {badge}
               </span>
@@ -847,7 +849,7 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
       <button
         onClick={onStartOver}
         disabled={isBuildActive || isStartingOver}
-        className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs text-gray-600 hover:text-gray-400 hover:bg-gray-900 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs text-slate-500 hover:text-slate-300 hover:bg-[rgba(255,255,255,0.04)] whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed transition-all"
       >
         <ChevronLeft className="w-3.5 h-3.5" />
         <span className="hidden sm:inline">Back to Setup</span>
@@ -1545,102 +1547,103 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     (buildState.status === 'awaiting_review' ? 1 : 0)
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-black text-white">
+    <div className="build-screen-shell flex-1 min-h-0 flex flex-col overflow-hidden text-white">
       <h1 className="sr-only">Build Flow</h1>
+      <div className="flex-1 min-h-0 flex flex-col gap-3 px-3 pb-3 pt-2 sm:px-4 sm:pb-4 lg:px-5 lg:pb-5">
+        {/* Row 1: Build Header */}
+        <BuildHeader
+          buildState={buildState}
+          phaseLabel={phaseLabel}
+          isBuildActive={isBuildActive}
+          buildPaused={buildPaused}
+          buildActionPending={buildActionPending}
+          onPause={onPause}
+          onResume={onResume}
+          onRestart={onRestart}
+          isPreparingPreview={isPreparingPreview}
+          onPreviewWorkspace={onPreviewWorkspace}
+          onOpenInIDE={onOpenInIDE}
+          onDownload={onDownload}
+          onOpenPlannerConsole={openPlannerConsole}
+          createdProjectId={createdProjectId}
+        />
 
-      {/* Row 1: Build Header */}
-      <BuildHeader
-        buildState={buildState}
-        phaseLabel={phaseLabel}
-        isBuildActive={isBuildActive}
-        buildPaused={buildPaused}
-        buildActionPending={buildActionPending}
-        onPause={onPause}
-        onResume={onResume}
-        onRestart={onRestart}
-        isPreparingPreview={isPreparingPreview}
-        onPreviewWorkspace={onPreviewWorkspace}
-        onOpenInIDE={onOpenInIDE}
-        onDownload={onDownload}
-        onOpenPlannerConsole={openPlannerConsole}
-        createdProjectId={createdProjectId}
-      />
+        {/* Row 2: Provider Status Bar */}
+        <ProviderStatusBar
+          providerPanels={providerPanels}
+          hasBYOK={hasBYOK}
+          isBuildActive={isBuildActive}
+          selectedModels={providerModelOverrides}
+          modelOptions={providerModelOptions}
+          modelUpdatePendingProvider={providerModelPendingProvider}
+          onModelSelect={onSelectProviderModel}
+        />
 
-      {/* Row 2: Provider Status Bar */}
-      <ProviderStatusBar
-        providerPanels={providerPanels}
-        hasBYOK={hasBYOK}
-        isBuildActive={isBuildActive}
-        selectedModels={providerModelOverrides}
-        modelOptions={providerModelOptions}
-        modelUpdatePendingProvider={providerModelPendingProvider}
-        onModelSelect={onSelectProviderModel}
-      />
-
-      {/* Row 3: Production command surface */}
-      <BuildCommandSurface
-        buildStatus={buildState.status}
-        generatedFilesCount={generatedFiles.length}
-        issueCount={issueCount}
-        hasBYOK={hasBYOK}
-        qualityGateStatus={buildState.qualityGateStatus}
-        qualityGateStage={buildState.qualityGateStage}
-        guarantee={buildState.guarantee}
-        createdProjectId={createdProjectId}
-        isPreparingPreview={isPreparingPreview}
-        onSelectOverlay={setActiveOverlay}
-        onOpenPreview={onPreviewWorkspace}
-        onOpenInIDE={onOpenInIDE}
-        onDownload={onDownload}
-      />
-
-      {/* Row 4: Live Activity Feed (flex-1) */}
-      <div className="relative flex-1 min-h-0 overflow-hidden">
-        <LiveActivityFeed
-          aiThoughts={aiThoughts}
-          chatMessages={chatMessages}
+        {/* Row 3: Production command surface */}
+        <BuildCommandSurface
           buildStatus={buildState.status}
-          interaction={buildState.interaction}
+          generatedFilesCount={generatedFiles.length}
+          issueCount={issueCount}
+          hasBYOK={hasBYOK}
+          qualityGateStatus={buildState.qualityGateStatus}
+          qualityGateStage={buildState.qualityGateStage}
+          guarantee={buildState.guarantee}
+          createdProjectId={createdProjectId}
+          isPreparingPreview={isPreparingPreview}
+          onSelectOverlay={setActiveOverlay}
+          onOpenPreview={onPreviewWorkspace}
+          onOpenInIDE={onOpenInIDE}
+          onDownload={onDownload}
+        />
+
+        {/* Row 4: Live Activity Feed (flex-1) */}
+        <div className="build-screen-feed-shell relative flex-1 min-h-0 overflow-hidden">
+          <LiveActivityFeed
+            aiThoughts={aiThoughts}
+            chatMessages={chatMessages}
+            buildStatus={buildState.status}
+            interaction={buildState.interaction}
+            isBuildActive={isBuildActive}
+            pendingQuestion={pendingQuestion}
+            pendingPermissionRequests={pendingPermissionRequests}
+            buildPaused={buildPaused}
+            onFocusChatInput={focusChatInput}
+            onOpenIssues={openIssuesOverlay}
+            onResume={onResume}
+            buildCompleted={buildCompleted}
+            onOpenPreview={onPreviewWorkspace}
+            isPreparingPreview={isPreparingPreview}
+          />
+        </div>
+
+        {/* Row 5: Chat Input */}
+        <ChatInputBar
+          chatInput={chatInput}
+          setChatInput={setChatInput}
+          plannerSendMode={plannerSendMode}
+          setPlannerSendMode={setPlannerSendMode}
+          onSend={onSendChatMessage}
+          pending={plannerMessagePending}
           isBuildActive={isBuildActive}
           pendingQuestion={pendingQuestion}
-          pendingPermissionRequests={pendingPermissionRequests}
           buildPaused={buildPaused}
-          onFocusChatInput={focusChatInput}
-          onOpenIssues={openIssuesOverlay}
-          onResume={onResume}
-          buildCompleted={buildCompleted}
+          inputRef={chatInputRef}
+        />
+
+        {/* Row 6: Bottom Nav Strip */}
+        <BottomNavStrip
+          activeOverlay={activeOverlay}
+          onSelectOverlay={setActiveOverlay}
           onOpenPreview={onPreviewWorkspace}
-          isPreparingPreview={isPreparingPreview}
+          onStartOver={onStartOver}
+          isStartingOver={isStartingOver}
+          isBuildActive={isBuildActive}
+          generatedFilesCount={generatedFiles.length}
+          issueCount={issueCount}
+          hasUrgentIssue={hasUrgentIssue}
+          buildStatus={buildState.status}
         />
       </div>
-
-      {/* Row 5: Chat Input */}
-      <ChatInputBar
-        chatInput={chatInput}
-        setChatInput={setChatInput}
-        plannerSendMode={plannerSendMode}
-        setPlannerSendMode={setPlannerSendMode}
-        onSend={onSendChatMessage}
-        pending={plannerMessagePending}
-        isBuildActive={isBuildActive}
-        pendingQuestion={pendingQuestion}
-        buildPaused={buildPaused}
-        inputRef={chatInputRef}
-      />
-
-      {/* Row 6: Bottom Nav Strip */}
-      <BottomNavStrip
-        activeOverlay={activeOverlay}
-        onSelectOverlay={setActiveOverlay}
-        onOpenPreview={onPreviewWorkspace}
-        onStartOver={onStartOver}
-        isStartingOver={isStartingOver}
-        isBuildActive={isBuildActive}
-        generatedFilesCount={generatedFiles.length}
-        issueCount={issueCount}
-        hasUrgentIssue={hasUrgentIssue}
-        buildStatus={buildState.status}
-      />
 
       {/* Overlay panels */}
       {activeOverlay && (

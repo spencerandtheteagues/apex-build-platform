@@ -78,12 +78,12 @@ const viewportLabels: Record<ViewportSize, string> = {
 }
 
 const runtimeStateClasses: Record<PreviewRuntimeState, string> = {
-  starting: 'bg-yellow-500/20 text-yellow-400',
-  running: 'bg-green-500/20 text-green-400',
-  degraded: 'bg-amber-500/20 text-amber-300',
-  backend_down: 'bg-orange-500/20 text-orange-400',
-  failed: 'bg-red-500/20 text-red-400',
-  stopped: 'bg-gray-700 text-gray-400',
+  starting: 'border border-[rgba(255,214,102,0.25)] bg-[rgba(255,214,102,0.14)] text-[#ffd76b]',
+  running: 'border border-[rgba(112,248,184,0.25)] bg-[rgba(112,248,184,0.14)] text-[#70f8b8]',
+  degraded: 'border border-[rgba(255,184,107,0.24)] bg-[rgba(255,184,107,0.12)] text-[#ffcf91]',
+  backend_down: 'border border-[rgba(255,184,107,0.24)] bg-[rgba(255,184,107,0.12)] text-[#ffcf91]',
+  failed: 'border border-[rgba(255,118,118,0.24)] bg-[rgba(255,118,118,0.12)] text-[#ff9494]',
+  stopped: 'border border-[#17314d] bg-[rgba(7,13,24,0.82)] text-[#7f95ad]',
 }
 
 export default function PreviewToolbar({
@@ -133,10 +133,10 @@ export default function PreviewToolbar({
   const runtimeLabel = previewRuntimeStateLabels[runtimeState]
 
   return (
-    <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
+    <div className="flex items-center justify-between border-b border-[rgba(138,223,255,0.08)] bg-[rgba(6,12,22,0.9)] px-3 py-2.5">
       <div className="flex items-center gap-2">
         <div
-          className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs ${runtimeStateClasses[runtimeState]}`}
+          className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs ${runtimeStateClasses[runtimeState]}`}
           title={
             runtimeState === 'starting'
               ? 'Starting preview...'
@@ -181,7 +181,7 @@ export default function PreviewToolbar({
           <button
             onClick={onStopPreview}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-md text-sm transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-xl border border-[rgba(255,118,118,0.24)] bg-[rgba(255,118,118,0.12)] px-3 py-1.5 text-sm text-[#ff9494] transition-colors hover:bg-[rgba(255,118,118,0.18)] disabled:opacity-50"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Square className="w-4 h-4" />}
             Stop
@@ -190,7 +190,7 @@ export default function PreviewToolbar({
           <button
             onClick={onStartPreview}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded-md text-sm transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-xl border border-[rgba(112,248,184,0.25)] bg-[rgba(112,248,184,0.14)] px-3 py-1.5 text-sm text-[#70f8b8] transition-colors hover:bg-[rgba(112,248,184,0.2)] disabled:opacity-50"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             Start Preview
@@ -201,7 +201,7 @@ export default function PreviewToolbar({
           <button
             onClick={onRestartPreview}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 rounded-md text-sm transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-xl border border-[rgba(138,223,255,0.26)] bg-[rgba(47,168,255,0.14)] px-3 py-1.5 text-sm text-[#bdeeff] transition-colors hover:bg-[rgba(47,168,255,0.2)] disabled:opacity-50"
             title="Restart preview runtime"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -212,21 +212,21 @@ export default function PreviewToolbar({
         <button
           onClick={onRefreshPreview}
           disabled={!status?.active || loading}
-          className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+          className="rounded-lg p-1.5 text-[#8499af] transition-colors hover:bg-[rgba(11,20,35,0.92)] hover:text-white disabled:opacity-50"
           title="Reload frame"
         >
           <RefreshCw className="w-4 h-4" />
         </button>
 
         {serverDetection?.has_backend && (
-          <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-gray-600">
+          <div className="ml-2 flex items-center gap-1.5 border-l border-[rgba(138,223,255,0.08)] pl-2">
             <div
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs ${
+              className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs ${
                 !backendPreviewAvailable
-                  ? 'bg-gray-700 text-gray-400'
+                  ? 'border border-[#17314d] bg-[rgba(7,13,24,0.82)] text-[#7f95ad]'
                   : serverStatus?.running
-                    ? 'bg-purple-500/20 text-purple-400'
-                    : 'bg-gray-700 text-gray-400'
+                    ? 'border border-[rgba(138,223,255,0.24)] bg-[rgba(47,168,255,0.14)] text-[#bdeeff]'
+                    : 'border border-[#17314d] bg-[rgba(7,13,24,0.82)] text-[#7f95ad]'
               }`}
               title={!backendPreviewAvailable && backendPreviewReason ? backendPreviewReason : undefined}
             >
@@ -240,7 +240,7 @@ export default function PreviewToolbar({
               <button
                 onClick={onStopServer}
                 disabled={serverLoading}
-                className="flex items-center gap-1 px-2 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-md text-xs transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 rounded-xl border border-[rgba(255,118,118,0.24)] bg-[rgba(255,118,118,0.12)] px-2 py-1 text-xs text-[#ff9494] transition-colors hover:bg-[rgba(255,118,118,0.18)] disabled:opacity-50"
                 title="Stop Backend Server"
               >
                 {serverLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <PowerOff className="w-3 h-3" />}
@@ -250,7 +250,7 @@ export default function PreviewToolbar({
               <button
                 onClick={onStartServer}
                 disabled={serverLoading || !backendPreviewAvailable}
-                className="flex items-center gap-1 px-2 py-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 rounded-md text-xs transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 rounded-xl border border-[rgba(138,223,255,0.24)] bg-[rgba(47,168,255,0.14)] px-2 py-1 text-xs text-[#bdeeff] transition-colors hover:bg-[rgba(47,168,255,0.2)] disabled:opacity-50"
                 title={
                   backendPreviewAvailable
                     ? `Start ${serverDetection.framework || serverDetection.server_type} Server`
@@ -268,8 +268,8 @@ export default function PreviewToolbar({
               serverStatus?.exit_code !== undefined) && (
               <button
                 onClick={onToggleServerLogs}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
-                  showServerLogs ? 'bg-purple-600 text-white' : 'hover:bg-gray-700 text-gray-400 hover:text-white'
+                className={`flex items-center gap-1 rounded-xl px-2 py-1 text-xs transition-colors ${
+                  showServerLogs ? 'bg-[rgba(47,168,255,0.18)] text-white' : 'text-[#7f95ad] hover:bg-[rgba(11,20,35,0.92)] hover:text-white'
                 }`}
                 title="Server Logs"
               >
@@ -281,14 +281,14 @@ export default function PreviewToolbar({
         )}
 
         {serverDetection?.has_backend && !backendPreviewAvailable && backendPreviewReason && (
-          <div className="ml-2 text-[11px] text-gray-500">{backendPreviewReason}</div>
+          <div className="ml-2 text-[11px] text-[#6a8096]">{backendPreviewReason}</div>
         )}
 
-        <div className="flex items-center bg-gray-800 rounded-md p-0.5 ml-2">
+        <div className="ml-2 flex items-center rounded-xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] p-0.5">
           <button
             onClick={() => onActiveTabChange('preview')}
             className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-              activeTab === 'preview' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
+              activeTab === 'preview' ? 'bg-[linear-gradient(135deg,rgba(138,223,255,0.18),rgba(47,168,255,0.24))] text-white' : 'text-[#7f95ad] hover:text-white'
             }`}
           >
             Preview
@@ -298,7 +298,7 @@ export default function PreviewToolbar({
               <button
                 onClick={() => onActiveTabChange('console')}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                  activeTab === 'console' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
+                  activeTab === 'console' ? 'bg-[linear-gradient(135deg,rgba(138,223,255,0.18),rgba(47,168,255,0.24))] text-white' : 'text-[#7f95ad] hover:text-white'
                 }`}
               >
                 <Terminal className="w-3 h-3" />
@@ -306,7 +306,7 @@ export default function PreviewToolbar({
                 {(errorCount > 0 || warnCount > 0) && (
                   <span
                     className={`px-1.5 py-0.5 rounded-full text-[10px] ${
-                      errorCount > 0 ? 'bg-red-500 text-white' : 'bg-yellow-500 text-black'
+                      errorCount > 0 ? 'bg-[rgba(255,118,118,0.92)] text-white' : 'bg-[rgba(255,214,102,0.92)] text-black'
                     }`}
                   >
                     {errorCount > 0 ? errorCount : warnCount}
@@ -316,13 +316,13 @@ export default function PreviewToolbar({
               <button
                 onClick={() => onActiveTabChange('network')}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                  activeTab === 'network' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
+                  activeTab === 'network' ? 'bg-[linear-gradient(135deg,rgba(138,223,255,0.18),rgba(47,168,255,0.24))] text-white' : 'text-[#7f95ad] hover:text-white'
                 }`}
               >
                 <Globe className="w-3 h-3" />
                 Network
                 {networkErrorCount > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white">{networkErrorCount}</span>
+                  <span className="rounded-full bg-[rgba(255,118,118,0.92)] px-1.5 py-0.5 text-[10px] text-white">{networkErrorCount}</span>
                 )}
               </button>
             </>
@@ -331,31 +331,31 @@ export default function PreviewToolbar({
       </div>
 
       <div className="flex items-center gap-1">
-        <div className="flex items-center bg-gray-800 rounded-md p-0.5 mr-2">
+        <div className="mr-2 flex items-center rounded-xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] p-0.5">
           <button
             onClick={() => onViewportChange('mobile')}
-            className={`p-1.5 rounded ${viewport === 'mobile' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
+            className={`rounded-lg p-1.5 ${viewport === 'mobile' ? 'bg-[linear-gradient(135deg,rgba(138,223,255,0.18),rgba(47,168,255,0.24))] text-white' : 'text-[#7f95ad] hover:text-white'}`}
             title={viewportLabels.mobile}
           >
             <Smartphone className="w-4 h-4" />
           </button>
           <button
             onClick={() => onViewportChange('tablet')}
-            className={`p-1.5 rounded ${viewport === 'tablet' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
+            className={`rounded-lg p-1.5 ${viewport === 'tablet' ? 'bg-[linear-gradient(135deg,rgba(138,223,255,0.18),rgba(47,168,255,0.24))] text-white' : 'text-[#7f95ad] hover:text-white'}`}
             title={viewportLabels.tablet}
           >
             <Tablet className="w-4 h-4" />
           </button>
           <button
             onClick={() => onViewportChange('desktop')}
-            className={`p-1.5 rounded ${viewport === 'desktop' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
+            className={`rounded-lg p-1.5 ${viewport === 'desktop' ? 'bg-[linear-gradient(135deg,rgba(138,223,255,0.18),rgba(47,168,255,0.24))] text-white' : 'text-[#7f95ad] hover:text-white'}`}
             title={viewportLabels.desktop}
           >
             <Monitor className="w-4 h-4" />
           </button>
           <button
             onClick={() => onViewportChange('full')}
-            className={`p-1.5 rounded ${viewport === 'full' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
+            className={`rounded-lg p-1.5 ${viewport === 'full' ? 'bg-[linear-gradient(135deg,rgba(138,223,255,0.18),rgba(47,168,255,0.24))] text-white' : 'text-[#7f95ad] hover:text-white'}`}
             title={viewportLabels.full}
           >
             <Maximize2 className="w-4 h-4" />
@@ -364,7 +364,7 @@ export default function PreviewToolbar({
 
         <button
           onClick={onToggleFullscreen}
-          className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors"
+          className="rounded-lg p-1.5 text-[#8499af] transition-colors hover:bg-[rgba(11,20,35,0.92)] hover:text-white"
           title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
         >
           {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -373,7 +373,7 @@ export default function PreviewToolbar({
         <button
           onClick={onOpenInNewTab}
           disabled={!status?.active || !hasPreviewSource}
-          className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+          className="rounded-lg p-1.5 text-[#8499af] transition-colors hover:bg-[rgba(11,20,35,0.92)] hover:text-white disabled:opacity-50"
           title="Open in New Tab"
         >
           <ExternalLink className="w-4 h-4" />
@@ -382,7 +382,7 @@ export default function PreviewToolbar({
         <div className="relative">
           <button
             onClick={() => setShowSettings(prev => !prev)}
-            className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors"
+            className="rounded-lg p-1.5 text-[#8499af] transition-colors hover:bg-[rgba(11,20,35,0.92)] hover:text-white"
             title="Settings"
           >
             <Settings className="w-4 h-4" />
@@ -391,12 +391,12 @@ export default function PreviewToolbar({
           {showSettings && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setShowSettings(false)} />
-              <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800/95 backdrop-blur-md border border-gray-700/80 rounded-xl shadow-2xl shadow-black/60 z-50">
+              <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-2xl border border-[#17314d] bg-[rgba(4,9,18,0.96)] shadow-2xl shadow-black/60 backdrop-blur-xl">
                 <div className="p-3">
                   <h4 className="text-sm font-medium text-white mb-3">Preview Settings</h4>
                   <div className="space-y-3">
                     <label className="flex items-center justify-between">
-                      <span className="text-sm text-gray-400">Auto-refresh on save</span>
+                      <span className="text-sm text-[#8fa4bc]">Auto-refresh on save</span>
                       <input
                         type="checkbox"
                         checked={autoRefreshEnabled}
@@ -406,7 +406,7 @@ export default function PreviewToolbar({
                     </label>
 
                     <label className="flex items-center justify-between">
-                      <span className="text-sm text-gray-400">Show dev tools</span>
+                      <span className="text-sm text-[#8fa4bc]">Show dev tools</span>
                       <input
                         type="checkbox"
                         checked={showDevTools}
@@ -422,7 +422,7 @@ export default function PreviewToolbar({
                         ) : (
                           <ShieldOff className="w-3.5 h-3.5 text-gray-500" />
                         )}
-                        <span className="text-sm text-gray-400">Docker Sandbox</span>
+                        <span className="text-sm text-[#8fa4bc]">Docker Sandbox</span>
                       </div>
                       <input
                         type="checkbox"
@@ -439,7 +439,7 @@ export default function PreviewToolbar({
                     ) : sandboxRequired ? (
                       <p className="text-[10px] text-cyan-500 -mt-1">Secure preview is enforced by the server</p>
                     ) : !dockerAvailable ? (
-                      <p className="text-[10px] text-gray-600 -mt-1">Docker not available on server</p>
+                      <p className="text-[10px] text-[#6a8096] -mt-1">Docker not available on server</p>
                     ) : null}
                     {sandboxRequired && !dockerAvailable && (
                       <p className="text-[10px] text-amber-400 -mt-1">
@@ -448,10 +448,10 @@ export default function PreviewToolbar({
                     )}
 
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-400">esbuild Bundler</span>
+                      <span className="text-sm text-[#8fa4bc]">esbuild Bundler</span>
                       <span
                         className={`text-xs px-1.5 py-0.5 rounded ${
-                          bundlerAvailable ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'
+                          bundlerAvailable ? 'bg-[rgba(112,248,184,0.14)] text-[#70f8b8]' : 'bg-[rgba(7,13,24,0.82)] text-[#6a8096]'
                         }`}
                       >
                         {bundlerAvailable ? 'Available' : 'Not Found'}
@@ -459,13 +459,13 @@ export default function PreviewToolbar({
                     </div>
 
                     <div>
-                      <span className="text-sm text-gray-400">Custom URL</span>
+                      <span className="text-sm text-[#8fa4bc]">Custom URL</span>
                       <input
                         type="text"
                         placeholder="/custom-path"
                         value={customPath}
                         onChange={event => onCustomPathChange(event.target.value)}
-                        className="w-full mt-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm text-white"
+                        className="mt-1 w-full rounded-xl border border-[#17314d] bg-[rgba(7,13,24,0.9)] px-2.5 py-2 text-sm text-white"
                       />
                     </div>
                   </div>

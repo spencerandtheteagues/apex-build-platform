@@ -71,7 +71,7 @@ const PROVIDER_LABEL: Record<string, string> = {
 }
 
 const PROVIDER_BADGE: Record<string, string> = {
-  claude: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  claude: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
   gpt4: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
   gemini: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
   grok: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30',
@@ -210,14 +210,14 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
   else if (lastAgentMsg) attentionMsg = lastAgentMsg.content
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden rounded-[24px] bg-[rgba(4,8,14,0.74)]">
 
       {/* Scrollable activity feed */}
       <div
         ref={feedRef}
         onScroll={handleFeedScroll}
         aria-label="Live activity feed"
-        className="flex-1 overflow-y-auto px-4 py-3 overscroll-contain"
+        className="flex-1 overflow-y-auto px-4 py-4 overscroll-contain"
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: 'rgba(255,255,255,0.08) transparent',
@@ -228,7 +228,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
       >
         {displayThoughts.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
-            <div className="w-8 h-8 rounded-full border-2 border-gray-800 border-t-red-600 animate-spin" />
+            <div className="w-8 h-8 rounded-full border-2 border-[rgba(184,226,255,0.16)] border-t-cyan-400 animate-spin" />
             <div className="text-gray-600 text-sm font-mono">
               {isBuildActive ? 'Agents are initializing...' : 'No activity yet'}
             </div>
@@ -262,7 +262,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                     isError && 'text-red-400'
                   )}
                 >
-                  <span className="text-gray-700 text-[11px] sm:text-[10px] shrink-0 mt-px w-[52px] sm:w-[54px] tabular-nums">
+                  <span className="text-slate-600 text-[11px] sm:text-[10px] shrink-0 mt-px w-[52px] sm:w-[54px] tabular-nums">
                     {ts}
                   </span>
                   <span className={cn(
@@ -272,18 +272,18 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                     {label}
                   </span>
                   <span className={cn(
-                    'flex-1 break-words text-[13px] sm:text-sm leading-snug text-gray-300',
+                    'flex-1 break-words text-[13px] sm:text-sm leading-snug text-slate-200',
                     isError && 'text-red-400',
                     thought.isInternal && 'text-gray-500 italic'
                   )}>
                     {metaItems.length > 0 && (
-                      <span className="mr-2 text-[10px] uppercase tracking-[0.12em] text-gray-600 not-italic">
+                      <span className="mr-2 text-[10px] uppercase tracking-[0.12em] text-slate-500 not-italic">
                         {metaItems.join(' / ')}
                       </span>
                     )}
                     <span>{thought.content}</span>
                     {Array.isArray(thought.files) && thought.files.length > 0 && (
-                      <span className="ml-2 text-[11px] text-gray-600 not-italic">
+                      <span className="ml-2 text-[11px] text-slate-500 not-italic">
                         {thought.files.slice(0, 3).join(', ')}{thought.files.length > 3 ? ` (+${thought.files.length - 3})` : ''}
                       </span>
                     )}
@@ -306,7 +306,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
               setUserScrolledUp(false)
               scrollToLatest('smooth')
             }}
-            className="text-[10px] px-2.5 py-1.5 rounded-full bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 font-semibold flex items-center gap-1"
+            className="text-[10px] px-2.5 py-1.5 rounded-full bg-[rgba(7,12,20,0.88)] border border-[rgba(184,226,255,0.12)] text-slate-300 hover:bg-[rgba(13,21,34,0.94)] font-semibold flex items-center gap-1"
           >
             ↓ Latest
           </button>
@@ -353,8 +353,8 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
             needsUserInput
               ? 'border-amber-500/60 bg-amber-950/25'
               : needsAttention
-                ? 'border-amber-500/25 bg-amber-950/10'
-                : 'border-gray-800/60 bg-black/30',
+                ? 'border-sky-500/25 bg-sky-950/10'
+                : 'border-[rgba(184,226,255,0.08)] bg-[rgba(255,255,255,0.02)]',
           )}
           style={{ minHeight: '68px' }}
         >
@@ -365,8 +365,8 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
               needsUserInput
                 ? 'bg-amber-500/25 text-amber-300'
                 : needsAttention
-                  ? 'bg-amber-500/15 text-amber-500'
-                  : 'bg-gray-800/80 text-gray-600'
+                  ? 'bg-sky-500/15 text-sky-300'
+                  : 'bg-[rgba(184,226,255,0.08)] text-slate-500'
             )}>
               {needsAttention
                 ? <AlertTriangle className="w-3.5 h-3.5" />
@@ -380,9 +380,9 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                 <div className={cn(
                   'text-[10px] font-bold uppercase tracking-widest mb-0.5',
                   needsUserInput ? 'text-amber-400' :
-                  buildPaused ? 'text-amber-600' :
+                  buildPaused ? 'text-amber-500' :
                   awaitingReview ? 'text-sky-500' :
-                  'text-amber-600'
+                  'text-sky-400'
                 )}>
                   {needsUserInput ? 'Your input needed' :
                     buildPaused ? 'Build paused' :
@@ -393,7 +393,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
               )}
               <div className={cn(
                 'text-sm leading-snug',
-                needsAttention ? 'text-gray-200' : 'text-gray-600'
+                needsAttention ? 'text-slate-200' : 'text-slate-500'
               )}>
                 {attentionMsg || (isBuildActive ? 'Agents are working...' : 'Ready')}
               </div>
@@ -405,7 +405,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                 {(needsUserInput || buildPaused) && (
                   <button
                     onClick={onFocusChatInput}
-                    className="text-[10px] px-2 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 font-bold uppercase tracking-wide"
+                    className="text-[10px] px-2 py-1 rounded bg-sky-500/20 border border-sky-500/40 text-sky-300 hover:bg-sky-500/30 font-bold uppercase tracking-wide"
                   >
                     {buildPaused ? 'Send Note' : 'Answer'}
                   </button>

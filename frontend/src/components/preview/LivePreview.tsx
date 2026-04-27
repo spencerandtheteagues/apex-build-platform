@@ -209,10 +209,10 @@ export default function LivePreview({
   return (
     <div
       ref={containerRef}
-      className={`min-h-0 flex flex-col bg-gray-900 border border-gray-700 rounded-lg overflow-hidden ${className}`}
+      className={`min-h-0 flex flex-col overflow-hidden rounded-[26px] border border-[rgba(138,223,255,0.14)] bg-[rgba(3,7,14,0.86)] shadow-[0_20px_60px_rgba(0,0,0,0.3)] ${className}`}
     >
       {runtime.sandboxDegraded && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-200 text-xs">
+        <div className="flex items-center gap-2 border-b border-[rgba(255,184,107,0.18)] bg-[rgba(255,184,107,0.1)] px-3 py-2 text-xs text-[#ffd3a2]">
           <AlertCircle className="w-3.5 h-3.5 text-amber-300" />
           <span>Platform Docker is unavailable. Preview is using process fallback mode.</span>
         </div>
@@ -277,8 +277,8 @@ export default function LivePreview({
       />
 
       {runtime.status?.active && activeTab === 'preview' && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900/50 border-b border-gray-700/60">
-          <div className="flex-1 flex items-center gap-2 bg-gray-800/60 rounded-lg px-3 py-1.5 border border-gray-700/40">
+        <div className="flex items-center gap-2 border-b border-[rgba(138,223,255,0.08)] bg-[rgba(4,9,18,0.76)] px-3 py-1.5">
+          <div className="flex flex-1 items-center gap-2 rounded-xl border border-[#17314d] bg-[rgba(7,13,24,0.76)] px-3 py-1.5">
             {runtime.connected ? (
               <CheckCircle className="w-3 h-3 text-green-400 shrink-0" />
             ) : (
@@ -289,7 +289,7 @@ export default function LivePreview({
               value={displayUrl}
               readOnly
               aria-label="Preview URL"
-              className="flex-1 bg-transparent text-xs text-gray-400 outline-none font-mono truncate cursor-default select-all"
+              className="flex-1 cursor-default truncate bg-transparent font-mono text-xs text-[#8fa4bc] outline-none select-all"
             />
           </div>
         </div>
@@ -362,12 +362,12 @@ export default function LivePreview({
       </div>
 
       {showServerLogs && serverDetection?.has_backend && (
-        <div className="border-t border-gray-700 bg-gray-900 max-h-64 overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
+        <div className="flex max-h-64 flex-col overflow-hidden border-t border-[rgba(138,223,255,0.08)] bg-[rgba(4,9,18,0.96)]">
+          <div className="flex items-center justify-between border-b border-[rgba(138,223,255,0.08)] bg-[rgba(7,13,24,0.86)] px-3 py-2">
             <div className="flex items-center gap-2">
-              <Server className="w-4 h-4 text-purple-400" />
+              <Server className="h-4 w-4 text-[#8adfff]" />
               <span className="text-sm font-medium text-white">Backend Server Logs</span>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-[#6a8096]">
                 {serverDetection.framework || serverDetection.server_type || 'runtime'} | Port {serverStatus?.port ?? 'n/a'}
               </span>
             </div>
@@ -376,14 +376,14 @@ export default function LivePreview({
                 onClick={() => {
                   void fetchServerLogs()
                 }}
-                className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
+                className="rounded-lg p-1 text-[#8499af] hover:bg-[rgba(11,20,35,0.92)] hover:text-white"
                 title="Refresh Logs"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setShowServerLogs(false)}
-                className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
+                className="rounded-lg p-1 text-[#8499af] hover:bg-[rgba(11,20,35,0.92)] hover:text-white"
                 title="Close"
               >
                 <Square className="w-3.5 h-3.5" />
@@ -404,28 +404,28 @@ export default function LivePreview({
               </div>
             )}
             {!serverLogs.stdout && !serverLogs.stderr && (
-              <div className="text-gray-500 text-center py-4">No logs yet...</div>
+              <div className="py-4 text-center text-[#6a8096]">No logs yet...</div>
             )}
           </div>
         </div>
       )}
 
       {runtime.status?.active && (
-        <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800/30 border-t border-gray-700 text-xs text-gray-500">
+        <div className="flex items-center justify-between border-t border-[rgba(138,223,255,0.08)] bg-[rgba(7,13,24,0.82)] px-3 py-1.5 text-xs text-[#6a8096]">
           <div className="flex items-center gap-4">
             <span>Port: {runtime.status.port}</span>
             <span>Clients: {runtime.status.connected_clients}</span>
-            <span className="text-gray-600">|</span>
+            <span className="text-[#43596f]">|</span>
             <span>Console: {consoleEntries.length}</span>
             <span>Network: {networkRequests.length}</span>
             {serverStatus?.running && (
               <>
-                <span className="text-gray-600">|</span>
-                <span className="flex items-center gap-1 text-purple-400">
+                <span className="text-[#43596f]">|</span>
+                <span className="flex items-center gap-1 text-[#8adfff]">
                   <Server className="w-3 h-3" />
                   API: {serverStatus.port}
                   {serverStatus.uptime_seconds && serverStatus.uptime_seconds > 0 && (
-                    <span className="text-gray-500">
+                    <span className="text-[#6a8096]">
                       ({Math.floor(serverStatus.uptime_seconds / 60)}m {serverStatus.uptime_seconds % 60}s)
                     </span>
                   )}
@@ -440,7 +440,7 @@ export default function LivePreview({
             </span>
             {serverStatus?.running && (
               <span className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                <div className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
                 API Running
               </span>
             )}

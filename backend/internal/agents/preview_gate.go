@@ -305,12 +305,65 @@ func (am *AgentManager) applyPreviewDeterministicRepair(
 	}
 
 	switch result.FailureKind {
+	case "missing_entrypoint":
+		return am.applyPreviewMissingFrontendShellRepair(build, result, now)
 	case "corrupt_content":
 		return am.applyPreviewFenceStripRepair(build, allFiles, result, now)
 	case "js_runtime_error":
 		return am.applyPreviewRouterContextRepair(build, result, now)
 	}
 	return false
+}
+
+func (am *AgentManager) applyPreviewMissingFrontendShellRepair(
+	build *Build,
+	result *PreviewVerificationResult,
+	now time.Time,
+) bool {
+	if build == nil || result == nil || !strings.EqualFold(strings.TrimSpace(result.FailureKind), "missing_entrypoint") {
+		return false
+	}
+
+	readinessErrors := []string{
+		"No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.).",
+	}
+	bundle, summary := am.applyDeterministicMissingFrontendShellRepair(build, readinessErrors)
+	if bundle == nil {
+		return false
+	}
+	bundle.BuildID = build.ID
+	if strings.TrimSpace(bundle.Justification) == "" && strings.TrimSpace(summary) != "" {
+		bundle.Justification = "missing_frontend_shell_repair: " + summary
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		return false
+	}
+	if previewPatchBundleRecordingEnabled(build) {
+		appendPatchBundle(build, *bundle)
+	}
+
+	build.mu.Lock()
+	build.PreviewVerificationAttempts++
+	build.Status = BuildTesting
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	build.Progress = 95
+	build.Error = fmt.Sprintf("Preview verification: synthesized a frontend shell after missing-entrypoint failure. Re-checking. (%s)", result.Details)
+	build.mu.Unlock()
+
+	log.Printf("Build %s: preview missing-entrypoint repair applied (%s), re-checking", build.ID, summary)
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":   "preview_verification",
+			"status":  string(BuildTesting),
+			"message": "Preview verification: synthesized a previewable frontend shell after missing entrypoint detection. Re-checking preview readiness.",
+		},
+	})
+	am.checkBuildCompletion(build)
+	return true
 }
 
 // applyPreviewFenceStripRepair removes unmatched markdown code fences from

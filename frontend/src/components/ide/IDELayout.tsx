@@ -125,15 +125,15 @@ type ViewMode = 'projects' | 'dashboard' | 'editor' | 'preview'
 type PanelState = 'collapsed' | 'normal' | 'expanded'
 type MobilePanel = 'explorer' | 'editor' | 'terminal' | 'ai' | 'settings'
 
-const ideChromeButtonClass = 'touch-target !h-9 rounded-xl !border !border-gray-700/80 !bg-gray-900/75 !px-3 !text-gray-200 !shadow-none hover:!border-gray-600 hover:!bg-gray-800 hover:!text-white'
-const ideChromeButtonActiveClass = 'touch-target !h-9 rounded-xl !border !border-red-500/50 !bg-red-500/12 !px-3 !text-white !shadow-none hover:!bg-red-500/18'
-const ideIconButtonClass = 'touch-target !h-8 !w-8 rounded-lg !border !border-gray-700/70 !bg-gray-900/75 !p-0 !text-gray-300 !shadow-none hover:!border-gray-600 hover:!bg-gray-800 hover:!text-white'
+const ideChromeButtonClass = 'touch-target !h-10 rounded-2xl !border !border-[#17314d] !bg-[rgba(7,13,24,0.82)] !px-3.5 !text-[#b7c9dc] !shadow-none hover:!border-[#2f5f87] hover:!bg-[rgba(11,20,35,0.92)] hover:!text-white'
+const ideChromeButtonActiveClass = 'touch-target !h-10 rounded-2xl !border !border-[rgba(138,223,255,0.55)] !bg-[linear-gradient(135deg,rgba(138,223,255,0.2),rgba(47,168,255,0.22))] !px-3.5 !text-white !shadow-[0_0_18px_rgba(47,168,255,0.16)] hover:!bg-[linear-gradient(135deg,rgba(138,223,255,0.24),rgba(47,168,255,0.26))]'
+const ideIconButtonClass = 'touch-target !h-9 !w-9 rounded-xl !border !border-[#17314d] !bg-[rgba(7,13,24,0.82)] !p-0 !text-[#9bb1c8] !shadow-none hover:!border-[#2f5f87] hover:!bg-[rgba(11,20,35,0.92)] hover:!text-white'
 
 const idePanelTabClass = (active: boolean) => cn(
   'touch-target !h-10 rounded-none !border-0 !px-3 !text-[13px] !font-medium !shadow-none',
   active
-    ? '!bg-red-500/15 !text-white'
-    : '!bg-transparent !text-gray-400 hover:!bg-gray-800/85 hover:!text-white'
+    ? '!bg-[linear-gradient(135deg,rgba(138,223,255,0.14),rgba(47,168,255,0.18))] !text-white'
+    : '!bg-transparent !text-[#7388a0] hover:!bg-[rgba(11,20,35,0.92)] hover:!text-white'
 )
 
 export const IDELayout: React.FC<IDELayoutProps> = ({
@@ -1034,21 +1034,21 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
         )
       case 'preview':
         return currentProject ? (
-          <div className="h-full flex flex-col bg-[radial-gradient(circle_at_top,#141b27_0%,#0b0f16_45%,#05070b_100%)]">
-            <div className="border-b border-gray-800/80 px-4 py-4 md:px-6">
+          <div className="h-full flex flex-col bg-[radial-gradient(circle_at_top,#10223a_0%,#07101c_45%,#02050b_100%)]">
+            <div className="border-b border-[rgba(138,223,255,0.08)] px-4 py-4 md:px-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
-                  <div className="text-[11px] uppercase tracking-[0.24em] text-red-300/80">Preview Workspace</div>
+                  <div className="text-[11px] uppercase tracking-[0.24em] text-[#8adfff]/80">Preview Workspace</div>
                   <div className="mt-1 flex flex-wrap items-center gap-3">
                     <h2 className="text-xl font-semibold text-white">{currentProject.name}</h2>
-                    <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-200">
+                    <Badge variant="outline" className="border-[rgba(138,223,255,0.32)] bg-[rgba(47,168,255,0.12)] text-[#bdeeff]">
                       Live Runtime
                     </Badge>
-                    <Badge variant="outline" className="border-gray-700 bg-gray-900/70 text-gray-300">
+                    <Badge variant="outline" className="border-[#17314d] bg-[rgba(7,13,24,0.82)] text-[#9fb5cb]">
                       Auto-refresh {previewAutoRefresh ? 'on' : 'off'}
                     </Badge>
                   </div>
-                  <p className="mt-2 max-w-2xl text-sm text-gray-400">
+                  <p className="mt-2 max-w-2xl text-sm text-[#91a6bc]">
                     Run the generated app in a dedicated workspace, then jump back into the editor only when you need to patch code.
                   </p>
                 </div>
@@ -1057,7 +1057,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
                     size="sm"
                     variant="outline"
                     onClick={() => setPreviewAutoRefresh((prev) => !prev)}
-                    className="border-gray-700 bg-gray-900/70 text-gray-200 hover:bg-gray-800"
+                    className="border-[#17314d] bg-[rgba(7,13,24,0.82)] text-[#c2d5e7] hover:bg-[rgba(11,20,35,0.92)]"
                   >
                     {previewAutoRefresh ? 'Pause Auto-refresh' : 'Enable Auto-refresh'}
                   </Button>
@@ -1065,7 +1065,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
                     size="sm"
                     variant="outline"
                     onClick={() => openEditorWorkspace({ keepPreview: true })}
-                    className="border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+                    className="border-[rgba(138,223,255,0.34)] bg-[rgba(47,168,255,0.12)] text-[#bdeeff] hover:bg-[rgba(47,168,255,0.18)]"
                   >
                     Split With Editor
                   </Button>
@@ -1073,7 +1073,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
                     size="sm"
                     variant="outline"
                     onClick={() => openEditorWorkspace()}
-                    className="border-gray-700 bg-gray-900/70 text-gray-200 hover:bg-gray-800"
+                    className="border-[#17314d] bg-[rgba(7,13,24,0.82)] text-[#c2d5e7] hover:bg-[rgba(11,20,35,0.92)]"
                   >
                     Open Editor Only
                   </Button>
@@ -1089,7 +1089,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
               </div>
             </div>
             <div className="flex-1 min-h-0 p-4 md:p-6">
-              <div className="h-full overflow-hidden rounded-2xl border border-red-500/20 bg-black/60 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+              <div className="h-full overflow-hidden rounded-[28px] border border-[rgba(138,223,255,0.16)] bg-[rgba(3,7,14,0.82)] shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
                 <Suspense fallback={<EditorLoadingFallback />}>
                   <LivePreview
                     projectId={currentProject.id}
@@ -1179,14 +1179,15 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
 
   // Desktop/Tablet layout
   return (
-    <div className={cn('h-full flex flex-col bg-[radial-gradient(circle_at_top,#141b27_0%,#0b0f16_38%,#05070b_100%)] min-h-0', className)}>
+    <div className={cn('h-full flex flex-col bg-[radial-gradient(circle_at_top,#10223a_0%,#07101c_42%,#02050b_100%)] text-white min-h-0', className)}>
       {/* Loading overlay */}
       <LoadingOverlay isVisible={isLoading} text="Loading APEX-BUILD..." />
 
       {/* Top bar */}
-      <div className="h-14 bg-[#0b0f16]/92 backdrop-blur-md border-b border-white/5 shadow-[0_1px_0_rgba(255,255,255,0.03)] flex items-center justify-between px-4">
+      <div className="px-3 pt-3">
+        <div className="flex min-h-[72px] flex-wrap items-center justify-between gap-3 rounded-[28px] border border-[rgba(138,223,255,0.16)] bg-[rgba(4,9,18,0.84)] px-4 py-3 shadow-[0_24px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl">
         {/* Left side */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded overflow-hidden flex items-center justify-center">
               <img
@@ -1206,7 +1207,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
           </div>
 
           {/* Navigation */}
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1.5">
               <Button
                 size="sm"
                 variant="ghost"
@@ -1262,12 +1263,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
         </div>
 
         {/* Right side */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Project info */}
           {currentProject && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-gray-900/75 border border-gray-700/80 rounded-xl">
-              <span className="text-sm font-medium text-gray-100 truncate max-w-[150px]">{currentProject.name}</span>
-              <Badge variant="outline" size="xs">
+            <div className="hidden md:flex items-center gap-2 rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] px-3 py-2">
+              <span className="max-w-[150px] truncate text-sm font-medium text-[#f4fbff]">{currentProject.name}</span>
+              <Badge variant="outline" size="xs" className="border-[#2b5f89] bg-[rgba(47,168,255,0.12)] text-[#bdeeff]">
                 {currentProject.language}
               </Badge>
             </div>
@@ -1348,13 +1349,13 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
                       className="fixed inset-0 z-40"
                       onClick={() => setShowNotifications(false)}
                     />
-                    <div className="absolute right-0 mt-2 w-64 bg-gray-900/95 backdrop-blur-md border border-gray-700/80 rounded-xl shadow-2xl shadow-black/60 z-50">
-                      <div className="px-4 py-3 border-b border-gray-800 text-sm font-semibold text-white">
+                    <div className="absolute right-0 mt-2 z-50 w-64 rounded-2xl border border-[#17314d] bg-[rgba(4,9,18,0.96)] shadow-2xl shadow-black/60 backdrop-blur-xl">
+                      <div className="border-b border-[rgba(138,223,255,0.08)] px-4 py-3 text-sm font-semibold text-white">
                         Notifications
                       </div>
                       <div className="px-4 py-6 text-center">
-                        <Bell className="w-8 h-8 text-gray-700 mx-auto mb-2" />
-                        <p className="text-xs text-gray-500">No notifications yet</p>
+                        <Bell className="mx-auto mb-2 h-8 w-8 text-[#294563]" />
+                        <p className="text-xs text-[#7b90a7]">No notifications yet</p>
                       </div>
                     </div>
                   </>
@@ -1371,20 +1372,22 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
           )}
         </div>
       </div>
+      </div>
 
       {/* Main content area */}
-      <div ref={mainContentRef} className="flex-1 flex overflow-hidden min-h-0 min-w-0">
+      <div className="flex-1 min-h-0 px-3 pb-3 pt-3">
+        <div ref={mainContentRef} className="flex h-full overflow-hidden min-h-0 min-w-0 rounded-[30px] border border-[rgba(138,223,255,0.14)] bg-[rgba(3,7,14,0.78)] shadow-[0_26px_80px_rgba(0,0,0,0.34)] backdrop-blur-xl">
         {/* Left sidebar */}
         {(viewMode === 'dashboard' || viewMode === 'editor') && currentProject && (
           <div className={cn(
-            'bg-gray-900/80 border-r border-gray-800 flex flex-col',
+            'bg-[rgba(6,12,22,0.86)] border-r border-[rgba(138,223,255,0.08)] flex flex-col',
             reducedMotion ? '' : 'transition-all duration-300',
             leftPanelState === 'collapsed' && 'w-12',
             leftPanelState === 'normal' && 'w-64 lg:w-80',
             leftPanelState === 'expanded' && 'w-80 lg:w-96'
           )}>
             {/* Sidebar tabs */}
-            <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between shrink-0">
+            <div className="h-10 bg-[rgba(9,16,28,0.86)] border-b border-[rgba(138,223,255,0.08)] flex items-center justify-between shrink-0">
               {leftPanelState === 'collapsed' ? (
                 /* Collapsed: show only expand button, centered */
                 <div className="flex-1 flex items-center justify-center">
@@ -1470,15 +1473,15 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
           </div>
 
           {/* Bottom panel */}
-          {(viewMode === 'dashboard' || viewMode === 'editor') && bottomPanelState !== 'collapsed' && (
-            <div className={cn(
-              'bg-gray-900/80 border-t border-gray-800',
-              reducedMotion ? '' : 'transition-all duration-300',
-              bottomPanelState === 'normal' && 'h-48 md:h-60',
-              bottomPanelState === 'expanded' && 'h-72 md:h-96'
-            )}>
-              {/* Bottom tabs */}
-              <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between">
+        {(viewMode === 'dashboard' || viewMode === 'editor') && bottomPanelState !== 'collapsed' && (
+          <div className={cn(
+            'bg-[rgba(6,12,22,0.86)] border-t border-[rgba(138,223,255,0.08)]',
+            reducedMotion ? '' : 'transition-all duration-300',
+            bottomPanelState === 'normal' && 'h-48 md:h-60',
+            bottomPanelState === 'expanded' && 'h-72 md:h-96'
+          )}>
+            {/* Bottom tabs */}
+            <div className="h-10 bg-[rgba(9,16,28,0.86)] border-b border-[rgba(138,223,255,0.08)] flex items-center justify-between">
                 <div className="flex">
                   <Button
                     size="sm"
@@ -1532,14 +1535,14 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
         {/* Right sidebar */}
         {(viewMode === 'dashboard' || viewMode === 'editor') && currentProject && (
           <div className={cn(
-            'bg-gray-900/80 border-l border-gray-800 flex flex-col',
+            'bg-[rgba(6,12,22,0.86)] border-l border-[rgba(138,223,255,0.08)] flex flex-col',
             reducedMotion ? '' : 'transition-all duration-300',
             rightPanelState === 'collapsed' && 'w-12',
             rightPanelState === 'normal' && 'w-64 lg:w-80',
             rightPanelState === 'expanded' && 'w-80 lg:w-96'
           )}>
             {/* Sidebar tabs */}
-            <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between shrink-0">
+            <div className="h-10 bg-[rgba(9,16,28,0.86)] border-b border-[rgba(138,223,255,0.08)] flex items-center justify-between shrink-0">
               {rightPanelState === 'collapsed' ? (
                 /* Collapsed: show only expand button, centered */
                 <div className="flex-1 flex items-center justify-center">
@@ -1657,10 +1660,11 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* Footer for panels toggle */}
-      <div className="h-7 bg-gray-900/95 border-t border-gray-800/60 flex items-center justify-between px-3 shrink-0">
+      <div className="mx-3 mb-3 flex h-8 shrink-0 items-center justify-between rounded-[18px] border border-[rgba(138,223,255,0.12)] bg-[rgba(4,9,18,0.9)] px-3">
         <div className="flex items-center gap-1">
           <button
             onClick={() => setBottomPanelState(bottomPanelState === 'collapsed' ? 'normal' : 'collapsed')}
@@ -1669,15 +1673,15 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
             className={cn(
               'flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors duration-150',
               bottomPanelState !== 'collapsed'
-                ? 'text-white bg-red-500/15 hover:bg-red-500/20'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'
+                ? 'bg-[linear-gradient(135deg,rgba(138,223,255,0.14),rgba(47,168,255,0.18))] text-white'
+                : 'text-[#8298b0] hover:text-white hover:bg-[rgba(11,20,35,0.92)]'
             )}
           >
             <Terminal size={11} />
             <span>Terminal</span>
           </button>
         </div>
-        <div className="text-[10px] text-gray-600 font-mono select-none">APEX-BUILD</div>
+        <div className="select-none font-mono text-[10px] text-[#5f7690]">APEX-BUILD</div>
       </div>
 
       {/* Floating AI Agent Button */}

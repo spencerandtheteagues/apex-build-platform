@@ -76,6 +76,100 @@ func TestApplyPreviewFenceStripRepairResetsProgressAndAttempts(t *testing.T) {
 	}
 }
 
+func TestRunPreviewVerificationGateAppliesMissingFrontendShellRepair(t *testing.T) {
+	manager := &AgentManager{
+		ctx: context.Background(),
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{
+				Passed:      false,
+				FailureKind: "missing_entrypoint",
+				Details:     "No recognized frontend entry point found",
+			},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:       "preview-missing-entrypoint-repair",
+		Status:   BuildCompleted,
+		Progress: 100,
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Tasks: []*Task{
+			{
+				ID:   "backend-only-gen",
+				Type: TaskGenerateUI,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "backend-only-build",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}`,
+						},
+						{
+							Path: "src/server.ts",
+							Content: `import express from "express";
+
+const app = express();
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.listen(process.env.PORT || 3001, () => {
+  console.log("ready");
+});
+`,
+						},
+					},
+				},
+			},
+		},
+	}
+	status := BuildCompleted
+	buildError := ""
+
+	if !manager.runPreviewVerificationGate(build, nil, &status, &buildError, now) {
+		t.Fatal("expected missing-entrypoint preview repair to restart finalization")
+	}
+	if build.Status != BuildTesting {
+		t.Fatalf("expected build status testing after repair, got %s", build.Status)
+	}
+	if build.Progress != 95 {
+		t.Fatalf("expected build progress 95 after repair, got %d", build.Progress)
+	}
+	if build.PreviewVerificationAttempts != 1 {
+		t.Fatalf("expected preview verification attempts=1, got %d", build.PreviewVerificationAttempts)
+	}
+
+	files := manager.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+	for _, required := range []string{"index.html", "src/main.tsx", "src/App.tsx", "vite.config.ts", "package.json"} {
+		if strings.TrimSpace(byPath[required]) == "" {
+			t.Fatalf("expected %s after preview repair, got files %+v", required, files)
+		}
+	}
+	if !strings.Contains(byPath["vite.config.ts"], "http://localhost:3001") {
+		t.Fatalf("expected recovered Vite proxy target to use backend port, got %q", byPath["vite.config.ts"])
+	}
+}
+
 func TestRunPreviewVerificationGateTerminalFailureDropsProgressBelowCompletion(t *testing.T) {
 	manager := &AgentManager{
 		ctx: context.Background(),
