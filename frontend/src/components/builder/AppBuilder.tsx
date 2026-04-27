@@ -5101,7 +5101,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           setCreatedProjectId(appliedProject.id)
           setCurrentProject(appliedProject)
           addSystemMessage(
-            `Project "${appliedProject.name}" ${applyResponse.result?.created_project ? 'created' : 'updated'} from canonical build artifacts (${applyResponse.result?.total_files ?? 0} files)`
+            `Project "${appliedProject.name}" ${applyResponse.created_project ? 'created' : 'updated'} from canonical build artifacts (${applyResponse.applied_files ?? 0} files)`
           )
           return appliedProject
         } catch (applyError: any) {

@@ -813,16 +813,11 @@ export class ApiService {
     success: boolean
     build_id: string
     project_id: number
-    revision: string
-    result: {
-      project_id: number
-      created_project: boolean
-      inserted: number
-      updated: number
-      deleted: number
-      total_files: number
-      revision: string
-    }
+    created_project: boolean
+    applied_files: number
+    deleted_files: number
+    applied_revision: string
+    message: string
   }> {
     const response = await this.client.post(`/build/${buildId}/apply`, data || {}, {
       timeout: 90000,
