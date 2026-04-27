@@ -1,7 +1,7 @@
 // APEX-BUILD Main Application
 // Dark Demon Theme - Cloud Development Platform
 
-import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { useStore } from './hooks/useStore'
 import apiService from './services/api'
 import CostTicker from './components/ide/CostTicker'
@@ -29,7 +29,7 @@ const AuthParticle: React.FC<{ delay: number; startX: number; startY: number }> 
 );
 
 type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'settings' | 'spending'
-type UIColorScheme = 'red-dark' | 'blue-light'
+type UIColorScheme = 'blue-light'
 type IDELaunchTarget = 'dashboard' | 'editor' | 'preview'
 
 const AppBuilder = lazy(() =>
@@ -276,15 +276,7 @@ function App() {
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentId | null>(() => getRequestedLegalDocument())
   const [showHelpCenter, setShowHelpCenter] = useState<boolean>(() => shouldOpenHelpCenterFromLocation())
-  const [uiColorScheme, setUIColorScheme] = useState<UIColorScheme>(() => {
-    if (typeof window === 'undefined') return 'red-dark'
-    try {
-      const saved = localStorage.getItem('apex_ui_color_scheme')
-      return saved === 'blue-light' ? 'blue-light' : 'red-dark'
-    } catch {
-      return 'red-dark'
-    }
-  })
+  const uiColorScheme: UIColorScheme = 'blue-light'
   const [defaultModel, setDefaultModel] = useState(() => {
     if (typeof window === 'undefined') return 'auto'
     try {
@@ -505,8 +497,8 @@ function App() {
 
   const shellScrollViewClass = 'absolute inset-0 min-h-0 overflow-y-auto overscroll-contain'
   const renderSettingsSectionFallback = (title: string, description: string) => (
-    <div className="rounded-xl border border-red-900/40 bg-red-950/10 p-6">
-      <h2 className="mb-2 text-lg font-bold text-red-300">{title} is temporarily unavailable</h2>
+    <div className="rounded-xl border border-[rgba(138,223,255,0.24)] bg-[rgba(47,168,255,0.06)] p-6">
+      <h2 className="mb-2 text-lg font-bold text-[#c8f4ff]">{title} is temporarily unavailable</h2>
       <p className="text-sm text-gray-400">{description}</p>
     </div>
   )
@@ -851,11 +843,11 @@ function App() {
     }
   }, [currentProject?.id, currentView])
 
-  // Persist UI color scheme and apply to the whole app.
-  useEffect(() => {
+  // Lock the authenticated app to the redesigned theme and clear legacy theme drift.
+  useLayoutEffect(() => {
     if (typeof window === 'undefined') return
     localStorage.setItem('apex_ui_color_scheme', uiColorScheme)
-    document.documentElement.setAttribute('data-ui-theme', uiColorScheme === 'blue-light' ? 'blue' : 'red')
+    document.documentElement.setAttribute('data-ui-theme', 'blue')
   }, [uiColorScheme])
 
   // Loading screen
@@ -1451,6 +1443,7 @@ function App() {
                       projectId: options?.projectId ?? null,
                     })
                   }}
+                  onNavigateToView={navigateToView}
                   startOverSignal={builderStartOverSignal}
                 />
               </Suspense>
@@ -1510,55 +1503,35 @@ function App() {
                 <div className="min-h-full bg-black p-6">
                   <div className="max-w-4xl mx-auto space-y-8">
                     <div>
-                      <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500 mb-2">
+                      <h1 className="mb-2 text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#f4fdff] via-[#8adfff] to-[#2fa8ff]">
                         Settings
                       </h1>
-                      <p className="text-gray-400">Configure your AI providers and API keys</p>
+                      <p className="text-gray-400">Configure providers, budgets, billing, and project safeguards from the redesigned shell.</p>
                     </div>
 
                     {/* UI Color Scheme Section */}
-                    <ErrorBoundary fallback={renderSettingsSectionFallback('UI Color Scheme', 'Theme controls hit an unexpected error. The rest of Settings is still available.')}>
-                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('Interface Theme', 'Theme status is temporarily unavailable. The rest of Settings is still available.')}>
+                      <div className="rounded-xl border border-[rgba(138,223,255,0.2)] bg-[rgba(7,15,32,0.8)] p-6">
                         <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                          <Palette className="w-5 h-5 text-red-400" />
-                          UI Color Scheme
+                          <Palette className="w-5 h-5 text-[#8adfff]" />
+                          Interface Theme
                         </h2>
                         <p className="text-gray-400 text-sm mb-4">
-                          Choose between the default red/black cyberpunk mode and a friendlier blue/white mode.
+                          The authenticated workspace is now locked to the redesigned interface so old theme preferences cannot leak legacy styling back into the shell.
                         </p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setUIColorScheme('red-dark')}
-                            aria-pressed={uiColorScheme === 'red-dark'}
-                            className={`rounded-lg border p-4 text-left transition-all duration-200 ${
-                              uiColorScheme === 'red-dark'
-                                ? 'bg-red-900/20 border-red-700 text-red-300 shadow-sm shadow-red-900/30'
-                                : 'bg-black/40 border-gray-700 text-gray-300 hover:border-red-600/60'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">Red & Black</span>
-                              {uiColorScheme === 'red-dark' && <Check className="w-4 h-4" />}
+                        <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-white">Redesigned shell active</div>
+                              <p className="mt-1 text-xs leading-6 text-gray-400">
+                                Stored red/legacy theme state is ignored and replaced with the new production interface.
+                              </p>
                             </div>
-                            <p className="text-xs mt-2 opacity-80">Default cyberpunk look</p>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setUIColorScheme('blue-light')}
-                            aria-pressed={uiColorScheme === 'blue-light'}
-                            className={`rounded-lg border p-4 text-left transition-all duration-200 ${
-                              uiColorScheme === 'blue-light'
-                                ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-sm shadow-blue-200'
-                                : 'bg-black/40 border-gray-700 text-gray-300 hover:border-blue-500/70'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">Blue & White</span>
-                              {uiColorScheme === 'blue-light' && <Check className="w-4 h-4" />}
-                            </div>
-                            <p className="text-xs mt-2 opacity-80">Friendly light interface</p>
-                          </button>
+                            <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(138,223,255,0.35)] bg-[rgba(47,168,255,0.08)] px-3 py-1 text-xs font-semibold text-[#c8f4ff]">
+                              <Check className="h-3.5 w-3.5" />
+                              Locked
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </ErrorBoundary>

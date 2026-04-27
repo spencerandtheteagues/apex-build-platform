@@ -91,11 +91,11 @@ export default function ModelRoleConfig({
   }
 
   return (
-    <Card variant="cyberpunk" glow="intense" className="border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">
+    <Card variant="cyberpunk" glow="intense" className="border border-[rgba(188,239,255,0.18)] bg-[rgba(7,15,32,0.78)] backdrop-blur-xl">
       <CardContent className="p-6 md:p-8">
         {/* Header */}
         <h3 className="text-xl font-bold text-gray-200 mb-6 flex items-center gap-3">
-          <Settings className="w-6 h-6 text-red-400" />
+          <Settings className="w-6 h-6 text-[#8adfff]" />
           Model Configuration
         </h3>
 
@@ -106,12 +106,12 @@ export default function ModelRoleConfig({
             className={cn(
               'relative flex items-center gap-3 px-6 py-3 rounded-xl transition-all duration-300 overflow-hidden',
               mode === 'auto'
-                ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
+                ? 'bg-gradient-to-r from-[rgba(47,168,255,0.18)] to-[rgba(138,223,255,0.12)] border border-[rgba(138,223,255,0.42)] text-[#c8f4ff] shadow-xl shadow-[rgba(47,168,255,0.16)]'
                 : 'bg-gray-900/60 border-2 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
             )}
           >
             {mode === 'auto' && (
-              <div className="absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
+              <div className="absolute inset-0 bg-gradient-to-r from-[rgba(47,168,255,0.14)] via-[rgba(138,223,255,0.1)] to-[rgba(47,168,255,0.14)] animate-pulse" />
             )}
             <Sparkles className={cn('w-5 h-5 relative z-10', mode === 'auto' && 'animate-pulse')} />
             <span className="relative z-10 font-bold">Auto</span>
@@ -127,12 +127,12 @@ export default function ModelRoleConfig({
             className={cn(
               'relative flex items-center gap-3 px-6 py-3 rounded-xl transition-all duration-300 overflow-hidden',
               mode === 'manual'
-                ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
+                ? 'bg-gradient-to-r from-[rgba(47,168,255,0.18)] to-[rgba(138,223,255,0.12)] border border-[rgba(138,223,255,0.42)] text-[#c8f4ff] shadow-xl shadow-[rgba(47,168,255,0.16)]'
                 : 'bg-gray-900/60 border-2 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
             )}
           >
             {mode === 'manual' && (
-              <div className="absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
+              <div className="absolute inset-0 bg-gradient-to-r from-[rgba(47,168,255,0.14)] via-[rgba(138,223,255,0.1)] to-[rgba(47,168,255,0.14)] animate-pulse" />
             )}
             <Settings className={cn('w-5 h-5 relative z-10', mode === 'manual' && 'animate-pulse')} />
             <span className="relative z-10 font-bold">Manual</span>

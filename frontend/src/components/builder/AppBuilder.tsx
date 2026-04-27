@@ -287,6 +287,7 @@ interface BuildTechStack {
 
 interface AppBuilderProps {
   onNavigateToIDE?: (options?: { target?: 'dashboard' | 'editor' | 'preview'; projectId?: number | null }) => void
+  onNavigateToView?: (view: 'settings' | 'spending') => void
   startOverSignal?: number
 }
 
@@ -1009,8 +1010,8 @@ const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxL
         "premium-textarea-border absolute -inset-[2px] rounded-2xl transition-all duration-500",
         isEmpty && !isFocused && "animate-pulse",
         isFocused
-          ? "bg-gradient-to-r from-red-500 via-orange-500 to-red-500 shadow-lg shadow-red-900/50"
-          : "bg-gradient-to-r from-red-900/50 to-red-800/50"
+          ? "bg-gradient-to-r from-[#8adfff] via-[#2fa8ff] to-[#8adfff] shadow-lg shadow-[rgba(47,168,255,0.28)]"
+          : "bg-gradient-to-r from-[rgba(138,223,255,0.28)] to-[rgba(47,168,255,0.18)]"
       )} style={isFocused ? { backgroundSize: '200% auto', animation: 'gradient-shift 2s linear infinite' } : {}} />
 
       {/* Glass effect background */}
@@ -1018,7 +1019,7 @@ const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxL
 
       {/* Inner glow on focus */}
       {isFocused && (
-        <div className="absolute inset-0 rounded-xl bg-gradient-to-b from-red-900/20 via-transparent to-red-900/10 pointer-events-none" />
+        <div className="absolute inset-0 rounded-xl bg-gradient-to-b from-[rgba(47,168,255,0.14)] via-transparent to-[rgba(47,168,255,0.08)] pointer-events-none" />
       )}
 
       {/* Textarea */}
@@ -1090,7 +1091,7 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
         "tech-stack-card relative group min-h-[6rem] sm:min-h-[8.6rem] p-2 sm:p-4 rounded-xl transition-all duration-300 text-left overflow-hidden",
         "border-2 backdrop-blur-sm",
         isSelected
-          ? "is-selected border-red-500 bg-red-950/40 shadow-lg shadow-red-900/40 sm:scale-[1.02]"
+          ? "is-selected border-[rgba(138,223,255,0.48)] bg-[rgba(47,168,255,0.12)] shadow-lg shadow-[rgba(47,168,255,0.18)] sm:scale-[1.02]"
           : "border-gray-800 bg-gray-900/50 hover:border-gray-600 hover:bg-gray-900/70 sm:hover:scale-[1.01]"
       )}
     >
@@ -1103,9 +1104,9 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
       {/* Selected glow */}
       {isSelected && (
         <>
-          <div className="absolute inset-0 bg-gradient-to-br from-red-600/20 via-transparent to-orange-600/20 pointer-events-none" />
-          <div className="absolute -inset-[1px] bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-xl opacity-40 blur-sm -z-10" />
-          <div className="tech-stack-selected-indicator absolute top-2 right-2 z-20 rounded-full border border-red-400/70 bg-red-950/60 p-1 text-red-100 shadow-lg shadow-red-900/40">
+          <div className="absolute inset-0 bg-gradient-to-br from-[rgba(47,168,255,0.18)] via-transparent to-[rgba(138,223,255,0.14)] pointer-events-none" />
+          <div className="absolute -inset-[1px] bg-gradient-to-r from-[#8adfff] via-[#2fa8ff] to-[#8adfff] rounded-xl opacity-30 blur-sm -z-10" />
+          <div className="tech-stack-selected-indicator absolute top-2 right-2 z-20 rounded-full border border-[rgba(138,223,255,0.7)] bg-[rgba(4,18,34,0.82)] p-1 text-[#f4fdff] shadow-lg shadow-[rgba(47,168,255,0.22)]">
             <CheckCircle2 className="w-3.5 h-3.5" />
           </div>
         </>
@@ -1116,7 +1117,7 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
         <div className={cn(
           "tech-stack-icon w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition-all duration-300 flex-shrink-0",
           isSelected
-            ? "bg-red-600 text-white shadow-lg shadow-red-900/50"
+            ? "bg-[#2fa8ff] text-[#00111d] shadow-lg shadow-[rgba(47,168,255,0.28)]"
             : "bg-gray-800 text-gray-400 group-hover:text-white group-hover:bg-gray-700"
         )}>
           {stack.icon}
@@ -1130,7 +1131,7 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
           </h4>
           <p className={cn(
             "tech-stack-description mt-0.5 sm:mt-1 [overflow-wrap:anywhere] break-words text-[10px] sm:text-xs leading-snug transition-colors",
-            isSelected ? "text-red-300" : "text-gray-500"
+            isSelected ? "text-[#c8f4ff]" : "text-gray-500"
           )}>{stack.description}</p>
         </div>
       </div>
@@ -1776,14 +1777,15 @@ const BuilderControlSurface: React.FC<{
   onImportGitHub: () => void
   onAttachImage: () => void
   onOpenIDE: () => void
-}> = ({ onImportReplit, onImportGitHub, onAttachImage, onOpenIDE }) => {
+  onOpenSettings?: () => void
+  onOpenBilling?: () => void
+}> = ({ onImportReplit, onImportGitHub, onAttachImage, onOpenIDE, onOpenSettings, onOpenBilling }) => {
   const controls: Array<{
     title: string
     body: string
     icon: React.ReactNode
     actionLabel: string
     onClick?: () => void
-    href?: string
   }> = [
     {
       title: 'GitHub import/export',
@@ -1811,7 +1813,7 @@ const BuilderControlSurface: React.FC<{
       body: 'OpenAI, Claude, Gemini, Grok, Kimi, and Ollama keys stay configurable.',
       icon: <KeyRound className="w-5 h-5" />,
       actionLabel: 'Open settings',
-      href: '/settings',
+      onClick: onOpenSettings,
     },
     {
       title: 'MCP connectors',
@@ -1839,7 +1841,7 @@ const BuilderControlSurface: React.FC<{
       body: 'Budget caps, credits, trials, and live spend stay visible before runs.',
       icon: <CreditCard className="w-5 h-5" />,
       actionLabel: 'Billing',
-      href: '/settings/billing',
+      onClick: onOpenBilling,
     },
   ]
 
@@ -1872,16 +1874,14 @@ const BuilderControlSurface: React.FC<{
             </>
           )
 
-          if (control.href) {
-            return (
-              <a key={control.title} className="builder-control-surface__card" href={control.href}>
-                {content}
-              </a>
-            )
-          }
-
           return (
-            <button key={control.title} type="button" className="builder-control-surface__card" onClick={control.onClick}>
+            <button
+              key={control.title}
+              type="button"
+              className="builder-control-surface__card"
+              onClick={control.onClick}
+              disabled={!control.onClick}
+            >
               {content}
             </button>
           )
@@ -1891,11 +1891,377 @@ const BuilderControlSurface: React.FC<{
   )
 }
 
+const BUILDER_LAUNCH_PRESETS = [
+  {
+    title: 'Realtime crypto tracker',
+    body: 'Top 15 coins, price chart, market cap, volume, and BUY / SELL / HOLD signals.',
+    prompt: 'Build a real-time cryptocurrency price tracker for the top 15 cryptocurrencies using the CoinGecko free API. Show live prices, 24h % change, market cap, volume, and a clean dashboard. Add buy/sell signal logic based on RSI (14-period), 20/50 EMA crossover, and a 24h volume spike above 2x average. Show each coin signal as BUY / SELL / HOLD with color coding and auto-refresh every 30 seconds. No API key required.',
+  },
+  {
+    title: 'SaaS analytics cockpit',
+    body: 'Traffic, funnels, retention, conversion, alerts, and multi-site reporting.',
+    prompt: 'Build a SaaS analytics dashboard with multi-site tracking, pageviews, unique visitors, bounce rate, average session duration, top pages, and referrer sources. Include a date range picker, realtime visitor count, and interactive charts for traffic over time, top pages, and geography.',
+  },
+  {
+    title: 'Ops control center',
+    body: 'Incidents, deploys, runbooks, budgets, and team approvals in one workspace.',
+    prompt: 'Build an operations control center with incident timelines, service health, deployment history, on-call ownership, budget thresholds, and approval workflows. Include role-based access, audit logs, and a responsive dark interface.',
+  },
+] as const
+
+interface BuilderLaunchpadProps {
+  buildMode: BuildMode
+  powerMode: 'fast' | 'balanced' | 'max'
+  appDescription: string
+  promptMaxLength: number
+  isBuilding: boolean
+  isRoleAssignmentValid: boolean
+  maxPowerPromptLimitEnabled: boolean
+  balancedPromptLimitEnabled: boolean
+  wireframeImage: string
+  createdProjectId: number | null
+  selectedStack: Set<string>
+  autoStackId: string
+  techStacks: TechStack[]
+  roleConfigMode: 'auto' | 'manual'
+  roleAssignments: Record<string, string>
+  providerStatuses: Record<string, string>
+  userPlan?: string
+  userId?: number | null
+  wireframeInputRef: React.RefObject<HTMLInputElement | null>
+  onSetBuildMode: (mode: BuildMode) => void
+  onSetPowerMode: (mode: 'fast' | 'balanced' | 'max') => void
+  onSetAppDescription: (value: string) => void
+  onSetWireframeImage: (value: string) => void
+  onClearWireframe: () => void
+  onToggleStack: (id: string) => void
+  onSetRoleConfigMode: (mode: 'auto' | 'manual') => void
+  onSetRoleAssignments: (assignments: Record<string, string>) => void
+  onStartBuild: () => void
+  onImportReplit: () => void
+  onImportGitHub: () => void
+  onOpenIDE: () => void
+  onOpenSettings: () => void
+  onOpenBilling: () => void
+  onBuildHistoryOpen?: (buildId: string, action?: 'resume' | 'open_files') => void
+  buildTechStackSummary: () => string
+}
+
+const BuilderLaunchpad: React.FC<BuilderLaunchpadProps> = ({
+  buildMode,
+  powerMode,
+  appDescription,
+  promptMaxLength,
+  isBuilding,
+  isRoleAssignmentValid,
+  maxPowerPromptLimitEnabled,
+  balancedPromptLimitEnabled,
+  wireframeImage,
+  createdProjectId,
+  selectedStack,
+  autoStackId,
+  techStacks,
+  roleConfigMode,
+  roleAssignments,
+  providerStatuses,
+  userPlan,
+  userId,
+  wireframeInputRef,
+  onSetBuildMode,
+  onSetPowerMode,
+  onSetAppDescription,
+  onSetWireframeImage,
+  onClearWireframe,
+  onToggleStack,
+  onSetRoleConfigMode,
+  onSetRoleAssignments,
+  onStartBuild,
+  onImportReplit,
+  onImportGitHub,
+  onOpenIDE,
+  onOpenSettings,
+  onOpenBilling,
+  onBuildHistoryOpen,
+  buildTechStackSummary,
+}) => {
+  const planAllowsBackend = ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(userPlan || '')
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-8">
+      <section className="overflow-hidden rounded-[28px] border border-[rgba(188,239,255,0.18)] bg-[linear-gradient(135deg,rgba(5,12,24,0.96),rgba(6,18,40,0.88),rgba(4,8,18,0.98))] px-6 py-8 shadow-[0_28px_90px_rgba(2,8,20,0.55)] sm:px-8 sm:py-10 md:px-10">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr),minmax(320px,0.8fr)] lg:items-end">
+          <div className="space-y-5">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(138,223,255,0.35)] bg-[rgba(47,168,255,0.08)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8adfff]">
+              Authenticated Build Surface
+            </div>
+            <div className="space-y-3">
+              <h1 className="max-w-4xl text-4xl font-black tracking-[-0.04em] text-white sm:text-5xl lg:text-6xl">
+                One builder. One control surface. No fallback to the legacy shell.
+              </h1>
+              <p className="max-w-3xl text-sm leading-7 text-[#9eb3c7] sm:text-base">
+                Describe the product, choose the build depth, lock the model routing, attach visual references, and launch the workflow without dropping back into the older card stack.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-[11px] font-medium text-[#c8f4ff]">
+              {['Realtime orchestration', 'Frontend + backend', 'BYOK + hosted providers', 'Preview / IDE / deploy'].map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-white/10 bg-[rgba(7,15,32,0.78)] p-5 backdrop-blur-xl">
+            <div className="text-[11px] uppercase tracking-[0.22em] text-[#6f89a3]">Launch policy</div>
+            <div className="mt-3 space-y-3 text-sm leading-6 text-[#c7d4e2]">
+              <p>
+                {planAllowsBackend
+                  ? 'Your plan can execute full-stack work: frontend, backend, database, auth, billing, realtime, preview, and deploy handoff.'
+                  : 'Free stays honest: frontend-only builds and static experiences complete without pretending backend, auth, billing, or database work happened.'}
+              </p>
+              <div className="rounded-2xl border border-[rgba(138,223,255,0.18)] bg-[rgba(47,168,255,0.07)] px-4 py-3 text-xs text-[#9ecfe4]">
+                Build mode controls scope. Power mode controls model quality and orchestration depth. Both remain visible before you spend anything.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <BuilderControlSurface
+        onImportReplit={onImportReplit}
+        onImportGitHub={onImportGitHub}
+        onAttachImage={() => wireframeInputRef.current?.click()}
+        onOpenIDE={onOpenIDE}
+        onOpenSettings={onOpenSettings}
+        onOpenBilling={onOpenBilling}
+      />
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr),380px]">
+        <div className="space-y-6">
+          <section className="rounded-[28px] border border-[rgba(188,239,255,0.16)] bg-[rgba(6,14,28,0.78)] p-5 shadow-[0_20px_60px_rgba(2,8,20,0.32)] backdrop-blur-xl sm:p-6 md:p-8">
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-wrap gap-3">
+                {([
+                  { id: 'fast' as const, label: 'Fast Build', hint: '~3-5 min' },
+                  { id: 'full' as const, label: 'Full Build', hint: '10+ min' },
+                ]).map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => onSetBuildMode(mode.id)}
+                    className={cn(
+                      'min-w-[11rem] rounded-2xl border px-4 py-3 text-left transition-all duration-200',
+                      buildMode === mode.id
+                        ? 'border-[rgba(138,223,255,0.45)] bg-[rgba(47,168,255,0.12)] text-white shadow-[0_0_24px_rgba(47,168,255,0.16)]'
+                        : 'border-white/10 bg-white/[0.03] text-[#9eb3c7] hover:border-white/20 hover:text-white'
+                    )}
+                  >
+                    <div className="text-sm font-semibold">{mode.label}</div>
+                    <div className="mt-1 text-xs text-inherit/70">{mode.hint}</div>
+                  </button>
+                ))}
+              </div>
+
+              <div>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-[#6f89a3]">Build brief</div>
+                    <h2 className="mt-1 text-2xl font-black tracking-[-0.03em] text-white">Describe the app exactly once.</h2>
+                  </div>
+                  <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-[#9eb3c7]">
+                    {buildMode === 'full' ? 'Full orchestration path' : 'Fast delivery path'}
+                  </div>
+                </div>
+                <PremiumTextarea
+                  value={appDescription}
+                  onChange={onSetAppDescription}
+                  maxLength={promptMaxLength}
+                />
+                <p className="mt-3 text-xs leading-6 text-[#7e97ad]">
+                  {maxPowerPromptLimitEnabled
+                    ? `Full Build with Max Power supports up to ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters.`
+                    : balancedPromptLimitEnabled
+                      ? `Full Build with Balanced supports up to ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+                      : buildMode === 'full'
+                        ? `Full Build stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters on Fast power. Switch to Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+                        : `Fast Build stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Full Build with Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`}
+                </p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                {BUILDER_LAUNCH_PRESETS.map((preset) => (
+                  <button
+                    key={preset.title}
+                    type="button"
+                    onClick={() => onSetAppDescription(preset.prompt)}
+                    className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-left transition-all hover:border-[rgba(138,223,255,0.35)] hover:bg-[rgba(47,168,255,0.08)]"
+                  >
+                    <div className="text-sm font-semibold text-white">{preset.title}</div>
+                    <p className="mt-2 text-xs leading-6 text-[#90a5bb]">{preset.body}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 text-[11px] uppercase tracking-[0.22em] text-[#6f89a3]">Visual reference</div>
+                <input
+                  ref={wireframeInputRef as React.RefObject<HTMLInputElement>}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = (ev) => {
+                      const result = ev.target?.result as string
+                      if (result) onSetWireframeImage(result)
+                    }
+                    reader.readAsDataURL(file)
+                    e.target.value = ''
+                  }}
+                />
+                {wireframeImage ? (
+                  <div className="flex items-center gap-3">
+                    <img src={wireframeImage} alt="Wireframe preview" className="h-14 w-14 rounded-xl border border-white/10 object-cover" />
+                    <div className="flex-1 text-sm text-[#b8d6e6]">Wireframe attached. The next build will include it as visual context.</div>
+                    <button
+                      type="button"
+                      onClick={onClearWireframe}
+                      className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-[#9eb3c7] hover:border-white/20 hover:text-white"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => wireframeInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-[rgba(138,223,255,0.24)] bg-[rgba(47,168,255,0.06)] px-3 py-2 text-sm font-medium text-[#c8f4ff] hover:bg-[rgba(47,168,255,0.12)]"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Attach screenshot or wireframe
+                  </button>
+                )}
+              </div>
+
+              {createdProjectId && (
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[#6f89a3]">Project files</div>
+                  <AssetUploader projectId={createdProjectId} />
+                  <p className="mt-2 text-xs text-[#7e97ad]">
+                    Uploaded files are kept in project context and can be used by the next orchestration pass.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button
+                  onClick={onStartBuild}
+                  disabled={!appDescription.trim() || !isRoleAssignmentValid || isBuilding}
+                  size="lg"
+                  className="h-14 flex-1 rounded-2xl border border-[rgba(188,239,255,0.4)] bg-gradient-to-r from-[#f4fdff] via-[#8adfff] to-[#2fa8ff] text-[#00111d] shadow-[0_0_26px_rgba(47,168,255,0.22)] hover:from-white hover:via-[#9fe6ff] hover:to-[#45b5ff]"
+                >
+                  <Rocket className="mr-2 h-5 w-5" />
+                  {isBuilding ? 'Launching orchestration…' : 'Start build'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={onImportGitHub}
+                  className="h-14 rounded-2xl border-white/10 bg-white/[0.03] px-5 text-[#c8d5e3] hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+                >
+                  <Github className="mr-2 h-4 w-4" />
+                  Import GitHub
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={onImportReplit}
+                  className="h-14 rounded-2xl border-white/10 bg-white/[0.03] px-5 text-[#c8d5e3] hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Import Replit
+                </Button>
+              </div>
+            </div>
+          </section>
+
+          <BuildHistory userId={userId} onOpenBuild={onBuildHistoryOpen} />
+        </div>
+
+        <div className="space-y-6">
+          <section className="rounded-[24px] border border-white/10 bg-[rgba(7,15,32,0.78)] p-5 backdrop-blur-xl">
+            <div className="mb-4 text-[11px] uppercase tracking-[0.22em] text-[#6f89a3]">Power mode</div>
+            <div className="space-y-3">
+              {([
+                { id: 'fast' as const, label: 'Fast', copy: 'Lowest cost, fastest routing, smaller models first.' },
+                { id: 'balanced' as const, label: 'Balanced', copy: 'Best cost / quality tradeoff for most builds.' },
+                { id: 'max' as const, label: 'Max Power', copy: 'Highest quality orchestration with premium models and deeper review.' },
+              ]).map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => onSetPowerMode(mode.id)}
+                  className={cn(
+                    'w-full rounded-2xl border px-4 py-3 text-left transition-all',
+                    powerMode === mode.id
+                      ? 'border-[rgba(138,223,255,0.45)] bg-[rgba(47,168,255,0.1)] text-white shadow-[0_0_18px_rgba(47,168,255,0.14)]'
+                      : 'border-white/10 bg-white/[0.03] text-[#9eb3c7] hover:border-white/20 hover:text-white'
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-semibold">{mode.label}</span>
+                    <span className="text-[11px] uppercase tracking-[0.18em] text-[#8adfff]">
+                      {mode.id === 'fast' ? '1.5x' : mode.id === 'balanced' ? '1.68x' : '1.88x'}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs leading-6 text-inherit/75">{mode.copy}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-[24px] border border-white/10 bg-[rgba(7,15,32,0.78)] p-5 backdrop-blur-xl">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-[#6f89a3]">Tech stack targets</div>
+              <span className="text-[11px] text-[#8adfff]">{buildTechStackSummary()}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {techStacks.map((stack) => (
+                <TechStackCard
+                  key={stack.id}
+                  stack={stack}
+                  isSelected={selectedStack.has(stack.id) || (stack.id === autoStackId && selectedStack.size === 0)}
+                  onClick={() => onToggleStack(stack.id)}
+                />
+              ))}
+            </div>
+          </section>
+
+          <ModelRoleConfig
+            mode={roleConfigMode}
+            onModeChange={onSetRoleConfigMode}
+            assignments={roleAssignments}
+            onAssignmentsChange={onSetRoleAssignments}
+            providerStatuses={providerStatuses}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ============================================================================
 // MAIN APP BUILDER COMPONENT
 // ============================================================================
 
-export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOverSignal }) => {
+export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavigateToView, startOverSignal }) => {
   // Build state
   const [buildMode, setBuildMode] = useState<BuildMode>('full')
   const [appDescription, setAppDescription] = useState('')
@@ -6343,381 +6709,45 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           </div>
         )}
 
-        {/* Header Section — hidden during active build */}
-        {!buildState && (
-          <div className="text-center mb-16 pt-8">
-            <div className="flex items-center justify-center gap-6 mb-10">
-              <AnimatedLogo />
-            </div>
-            <AnimatedTitle />
-            <div className="mt-6">
-              <TypewriterSubtitle text="Describe what you want to build, and our AI agents will create it for you" />
-            </div>
-          </div>
-        )}
-
         {/* Main Content */}
         {!buildState ? (
-          // App Description Input + Model Config (2-column layout)
-          <div className="max-w-7xl mx-auto">
-            <BuilderControlSurface
-              onImportReplit={() => setShowImportModal(true)}
-              onImportGitHub={() => setShowGitHubImport(true)}
-              onAttachImage={() => wireframeInputRef.current?.click()}
-              onOpenIDE={() => onNavigateToIDE?.({ target: 'editor', projectId: createdProjectId })}
-            />
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-6 items-start">
-            {/* Left Column: Build Configuration */}
-            <Card variant="cyberpunk" glow="intense" className="builder-main-card border border-white/[0.08] bg-[rgba(2,10,28,0.6)] backdrop-blur-xl">
-              <CardContent className="p-4 sm:p-6 md:p-8 lg:p-10">
-                {/* Build Mode Toggle */}
-                <div className="flex items-center justify-center gap-2 sm:gap-6 mb-6 md:mb-10">
-                  <button
-                    onClick={() => setBuildMode('fast')}
-                    className={cn(
-                      'build-mode-btn relative flex flex-1 items-center gap-2 sm:gap-4 px-4 sm:px-8 py-3 sm:py-4 rounded-xl transition-all duration-300 overflow-hidden group min-w-0',
-                      buildMode === 'fast' && 'is-active',
-                      buildMode === 'fast'
-                        ? 'bg-[rgba(47,168,255,0.12)] border-2 border-[rgba(188,239,255,0.5)] text-white shadow-xl shadow-[rgba(47,168,255,0.2)]'
-                        : 'bg-white/[0.03] border-2 border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white'
-                    )}
-                  >
-                    {buildMode === 'fast' && (
-                      <div className="build-mode-active-overlay absolute inset-0 bg-[rgba(47,168,255,0.06)] animate-pulse" />
-                    )}
-                    <Zap className={cn("w-5 h-5 sm:w-6 sm:h-6 relative z-10 shrink-0", buildMode === 'fast' && "text-[#8adfff]")} />
-                    <div className="relative z-10 text-left min-w-0">
-                      <span className="font-bold block text-sm sm:text-lg">Fast Build</span>
-                      <span className="text-xs sm:text-sm opacity-70">~3-5 min</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setBuildMode('full')}
-                    className={cn(
-                      'build-mode-btn relative flex flex-1 items-center gap-2 sm:gap-4 px-4 sm:px-8 py-3 sm:py-4 rounded-xl transition-all duration-300 overflow-hidden group min-w-0',
-                      buildMode === 'full' && 'is-active',
-                      buildMode === 'full'
-                        ? 'bg-[rgba(47,168,255,0.12)] border-2 border-[rgba(188,239,255,0.5)] text-white shadow-xl shadow-[rgba(47,168,255,0.2)]'
-                        : 'bg-white/[0.03] border-2 border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white'
-                    )}
-                  >
-                    {buildMode === 'full' && (
-                      <div className="build-mode-active-overlay absolute inset-0 bg-[rgba(47,168,255,0.06)] animate-pulse" />
-                    )}
-                    <Sparkles className={cn("w-5 h-5 sm:w-6 sm:h-6 relative z-10 shrink-0", buildMode === 'full' && "text-[#8adfff]")} />
-                    <div className="relative z-10 text-left min-w-0">
-                      <span className="font-bold block text-sm sm:text-lg">Full Build</span>
-                      <span className="text-xs sm:text-sm opacity-70">10+ min</span>
-                    </div>
-                  </button>
-                </div>
-
-                {/* Template Gallery */}
-                <TemplateGallery onSelect={(prompt) => setAppDescription(prompt)} />
-
-                {/* Premium Textarea */}
-                <div className="mb-6 md:mb-10">
-                  <PremiumTextarea
-                    value={appDescription}
-                    onChange={setAppDescription}
-                    maxLength={promptMaxLength}
-                  />
-                  <p className="mt-3 text-xs text-gray-500">
-                    {maxPowerPromptLimitEnabled
-                      ? `Full Build with Max Power supports up to ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters.`
-                      : balancedPromptLimitEnabled
-                        ? `Full Build with Balanced supports up to ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
-                      : buildMode === 'full'
-                        ? `Full Build stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters on Fast power. Switch to Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
-                        : `Fast Build stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Full Build with Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`}
-                  </p>
-                </div>
-
-                {/* Asset Uploader — upload files for AI agents to use */}
-                {createdProjectId && (
-                  <div className="mb-6 md:mb-10">
-                    <h3 className="builder-section-heading text-lg sm:text-xl font-bold text-gray-200 mb-3 sm:mb-5 flex items-center gap-3">
-                      <Upload className="w-6 h-6 text-red-400" />
-                      Project Files
-                    </h3>
-                    <AssetUploader projectId={createdProjectId} />
-                    <p className="mt-2 text-xs text-gray-600">
-                      Uploaded files are automatically included in AI agent context — just describe what you want.
-                    </p>
-                  </div>
-                )}
-
-                {/* Tech Stack Selection */}
-                <div className="mb-6 md:mb-10">
-                  <h3 className="builder-section-heading text-lg sm:text-xl font-bold text-gray-200 mb-3 sm:mb-5 flex items-center gap-3">
-                    <Cpu className="w-6 h-6 text-red-400" />
-                    Technology Stack
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                    {techStacks.map((stack) => (
-                      <TechStackCard
-                        key={stack.id}
-                        stack={stack}
-                        isSelected={selectedStack.has(stack.id) || (stack.id === AUTO_STACK_ID && selectedStack.size === 0)}
-                        onClick={() => toggleStack(stack.id)}
-                      />
-                    ))}
-                  </div>
-                  <p className="mt-3 text-xs text-gray-500">
-                    Selection: <span className="text-gray-300">{buildTechStackSummary()}</span>
-                  </p>
-                </div>
-
-                {/* AI Power Mode */}
-                <div className="mb-6 md:mb-10">
-                  <h3 className="builder-section-heading text-lg sm:text-xl font-bold text-gray-200 mb-3 sm:mb-5 flex items-center gap-3">
-                    <Sparkles className="w-6 h-6 text-red-400" />
-                    AI Power Mode
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {([
-                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: getPowerModeModelSummary('fast'), color: 'green', cost: '1.5x', multiplier: '1.5x', perBuild: 'Lowest cost' },
-                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: getPowerModeModelSummary('balanced'), color: 'yellow', cost: '1.68x', multiplier: '1.68x', perBuild: 'Best balance' },
-                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: getPowerModeModelSummary('max'), color: 'red', cost: '1.88x', multiplier: '1.88x', perBuild: 'Highest quality' },
-                    ]).map((mode) => (
-                      <button
-                        key={mode.id}
-                        onClick={() => setPowerMode(mode.id)}
-                        className={cn(
-                          'power-mode-card relative group p-3 sm:p-4 rounded-xl border-2 transition-all duration-200 text-left',
-                          powerMode === mode.id && 'is-active',
-                          powerMode === mode.id
-                            ? mode.color === 'green' ? 'border-green-500/60 bg-green-500/10 shadow-lg shadow-green-500/10'
-                              : mode.color === 'yellow' ? 'border-yellow-500/60 bg-yellow-500/10 shadow-lg shadow-yellow-500/10'
-                              : 'border-red-500/60 bg-red-500/10 shadow-lg shadow-red-500/10'
-                            : 'border-gray-700/50 bg-gray-900/30 hover:border-gray-600/60'
-                        )}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={cn(
-                            'shrink-0',
-                            powerMode === mode.id
-                              ? mode.color === 'green' ? 'text-green-400'
-                                : mode.color === 'yellow' ? 'text-yellow-400'
-                                : 'text-red-400'
-                              : 'text-gray-500'
-                          )}>
-                            {mode.icon}
-                          </span>
-                          <span className={cn(
-                            'font-bold text-sm leading-tight',
-                            powerMode === mode.id ? 'text-white' : 'text-gray-400'
-                          )}>
-                            {mode.label}
-                          </span>
-                          <span className={cn(
-                            'ml-auto text-xs font-mono font-bold shrink-0',
-                            mode.color === 'green' ? 'text-green-400' : mode.color === 'yellow' ? 'text-yellow-400' : 'text-red-400'
-                          )}>
-                            {mode.cost}
-                          </span>
-                        </div>
-                        <p className="text-[11px] sm:text-xs text-gray-500 leading-tight">{mode.desc}</p>
-                        <div className="mt-1.5 hidden sm:flex items-center justify-between">
-                          <span className="text-[10px] text-gray-600 font-mono">{mode.multiplier} multiplier</span>
-                          <span className="text-[10px] text-gray-600">{mode.perBuild}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-3 p-3 rounded-lg bg-gray-900/50 border border-gray-800/50">
-                    <p className="text-[11px] text-gray-500 leading-relaxed">
-                      <strong className="text-gray-400">Pricing:</strong> Cost = API cost × 50% margin × power surcharge.
-                      Higher power modes use premium models and more orchestration.
-                      {powerMode === 'max' && <span className="text-red-400/80"> Max Power models: {getPowerModeModelSummary('max')}.</span>}
-                      {powerMode === 'balanced' && <span className="text-yellow-400/80"> Balanced models: {getPowerModeModelSummary('balanced')}.</span>}
-                      {powerMode === 'fast' && <span className="text-green-400/80"> Fast models: {getPowerModeModelSummary('fast')}.</span>}
-                      <span className="text-gray-500"> BYOK uses your own keys plus a small routing fee ($0.25 per MTok).</span>
-                    </p>
-                  </div>
-                </div>
-
-                {/* Wireframe / Screenshot Attach */}
-                <div className="rounded-xl border border-gray-800 bg-gray-950/40 p-3">
-                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Visual Reference (optional)</div>
-                  <input
-                    ref={wireframeInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (!file) return
-                      const reader = new FileReader()
-                      reader.onload = (ev) => {
-                        const result = ev.target?.result as string
-                        if (result) setWireframeImage(result)
-                      }
-                      reader.readAsDataURL(file)
-                      e.target.value = ''
-                    }}
-                  />
-                  {wireframeImage ? (
-                    <div className="flex items-center gap-3">
-                      <img src={wireframeImage} alt="Wireframe preview" className="h-12 w-12 rounded object-cover border border-gray-700" />
-                      <div className="flex-1 text-xs text-gray-400">Wireframe attached — vision analysis will extract layout intent.</div>
-                      <button
-                        type="button"
-                        onClick={() => setWireframeImage('')}
-                        className="text-xs text-gray-500 hover:text-red-400 transition-colors"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => wireframeInputRef.current?.click()}
-                      className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      Attach wireframe or screenshot
-                    </button>
-                  )}
-                </div>
-
-                {/* Epic Build Button */}
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                    <div className="text-xs uppercase tracking-wide text-gray-500">Plan Policy</div>
-                    <div className="mt-2 text-sm text-gray-300">
-                      {['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user?.subscription_type || '')
-                        ? 'Your plan can continue into backend, database, auth, billing, realtime, publish, and BYOK flows when the build contract requires them.'
-                        : 'Free is for static frontend websites and UI mockups. Requests that require backend, database, auth, billing, realtime, publish, or BYOK will stop in an honest upgrade-required state instead of pretending that work happened.'}
-                    </div>
-                  </div>
-
-                  <EpicBuildButton
-                    onClick={startBuild}
-                    disabled={!appDescription.trim() || !isRoleAssignmentValid}
-                    isLoading={isBuilding}
-                  />
-
-                  <Button
-                    onClick={() => setShowImportModal(true)}
-                    variant="outline"
-                    size="lg"
-                    className="builder-secondary-btn w-full h-14 border-2 border-red-900/60 text-red-400 hover:bg-red-950/40 hover:border-red-700 transition-all duration-300 font-semibold"
-                  >
-                    <Download className="w-5 h-5 mr-3" />
-                    Migrate from Replit
-                  </Button>
-
-                  <Button
-                    onClick={() => setShowGitHubImport(true)}
-                    variant="outline"
-                    size="lg"
-                    className="builder-tertiary-btn w-full h-14 border-2 border-gray-700 text-gray-300 hover:bg-gray-800 hover:border-gray-600 transition-all duration-300 font-semibold"
-                  >
-                    <Github className="w-5 h-5 mr-3" />
-                    Import from GitHub
-                  </Button>
-                </div>
-
-                {/* Example Apps */}
-                <div className="mt-10 pt-8 border-t border-gray-800">
-                  <p className="builder-quick-examples-label text-sm text-gray-500 mb-4 font-medium">Quick examples:</p>
-                  <div className="flex flex-wrap gap-3">
-                    {[
-                      {
-                        label: '✨ Marketing Site',
-                        prompt: `Build a static marketing website for an AI product studio with:
-- Hero section with headline, product screenshot placeholder, and CTA buttons
-- Features section with three product pillars and visual cards
-- Pricing section with Free, Builder, Pro, and Team tiers
-- Customer logos, FAQ, contact form UI, and footer
-- Responsive React + TypeScript frontend with Tailwind CSS
-- No backend, no auth, no database, and no server runtime claims`
-                      },
-                      {
-                        label: '📋 Project Manager',
-                        prompt: `Build a full-stack project management app with the following features:
-- Kanban board with drag-and-drop task cards across columns (Backlog, In Progress, Review, Done)
-- Task cards with title, description, assignee, priority (low/medium/high/critical), due date, and labels
-- Team workspace with user authentication (JWT), role-based access (admin/member/viewer)
-- Project dashboard showing sprint progress, task completion charts (bar + pie), and team velocity
-- Real-time updates when teammates move cards or add comments
-- REST API backend (Node.js/Express or Go), PostgreSQL database, React + TypeScript frontend with Tailwind CSS`
-                      },
-                      {
-                        label: '💰 Finance Tracker',
-                        prompt: `Build a personal finance dashboard with these features:
-- Transaction ledger with income/expense entries, categories (Food, Transport, Housing, Entertainment, etc.), and tags
-- Auto-categorization based on transaction description keywords
-- Monthly budget goals per category with visual progress bars and over-budget alerts
-- Interactive charts: spending by category (donut), monthly trend (line), income vs expenses (bar)
-- CSV import for bank statements, and CSV/PDF export for reports
-- Recurring transaction tracking (subscriptions, rent, salary)
-- React + TypeScript frontend, Node.js API backend, SQLite or PostgreSQL database, Tailwind CSS dark theme`
-                      },
-                      {
-                        label: '💬 Team Chat',
-                        prompt: `Build a real-time team chat application with:
-- Multiple channels/rooms (public and private) with channel descriptions and member lists
-- Direct messages between users with online presence indicators (online/away/offline)
-- Message threading (reply in thread), reactions with emoji picker, and message editing/deletion
-- File and image sharing with preview thumbnails
-- Full-text message search across channels
-- User profiles with avatar upload, display name, and status message
-- JWT authentication with refresh tokens, WebSocket for real-time delivery
-- React + TypeScript frontend, Node.js backend with Socket.io, PostgreSQL, Tailwind CSS`
-                      },
-                      {
-                        label: '📊 Analytics Dashboard',
-                        prompt: `Build a SaaS analytics dashboard with the following:
-- Multi-site tracking: users can add multiple websites and view stats per site
-- Key metrics: pageviews, unique visitors, bounce rate, avg session duration, top pages, referrer sources
-- Interactive charts using Recharts or Chart.js: line chart for traffic over time, bar chart for top pages, world map for geography
-- Date range picker with presets (Today, Last 7 days, Last 30 days, Custom)
-- Real-time visitor count (WebSocket) showing who is on the site right now
-- API key management for SDK integration, and a lightweight JS tracking snippet to embed
-- React + TypeScript, Node.js/Express API, PostgreSQL with time-series aggregation, Tailwind CSS`
-                      },
-                      {
-                        label: '🛒 E-Commerce Store',
-                        prompt: `Build a full-featured e-commerce store with:
-- Product catalog with categories, tags, search/filter (price range, rating, in-stock), and sort options
-- Product pages with image gallery (multiple photos), size/color variant selectors, stock indicator, and reviews with star ratings
-- Shopping cart with persistent state, quantity controls, and promo code / discount support
-- Checkout flow: address form, shipping method selection, Stripe payment integration (test mode), and order confirmation email
-- Customer accounts: order history, saved addresses, wishlist
-- Admin dashboard: add/edit/delete products, manage orders (pending/shipped/delivered), inventory alerts
-- React + TypeScript frontend, Node.js/Express backend, PostgreSQL, Tailwind CSS, Stripe SDK`
-                      },
-                    ].map(({ label, prompt }) => (
-                      <button
-                        key={label}
-                        onClick={() => setAppDescription(prompt)}
-                        className="quick-example-btn px-5 py-2.5 text-sm bg-gray-900/80 hover:bg-gray-800 text-gray-300 rounded-lg transition-all duration-200 border border-gray-800 hover:border-red-900/60 hover:text-white hover:shadow-lg hover:shadow-red-900/20"
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Right Column: Model Role Configuration */}
-            <div className="lg:sticky lg:top-6">
-              <ModelRoleConfig
-                mode={roleConfigMode}
-                onModeChange={setRoleConfigMode}
-                assignments={roleAssignments}
-                onAssignmentsChange={setRoleAssignments}
-                providerStatuses={providerStatuses}
-              />
-            </div>
-            </div>{/* end grid */}
-
-            {/* Build History */}
-            <BuildHistory userId={user?.id ?? null} onOpenBuild={openCompletedBuild} />
-          </div>
+          <BuilderLaunchpad
+            buildMode={buildMode}
+            powerMode={powerMode}
+            appDescription={appDescription}
+            promptMaxLength={promptMaxLength}
+            isBuilding={isBuilding}
+            isRoleAssignmentValid={isRoleAssignmentValid}
+            maxPowerPromptLimitEnabled={maxPowerPromptLimitEnabled}
+            balancedPromptLimitEnabled={balancedPromptLimitEnabled}
+            wireframeImage={wireframeImage}
+            createdProjectId={createdProjectId}
+            selectedStack={selectedStack}
+            autoStackId={AUTO_STACK_ID}
+            techStacks={techStacks}
+            roleConfigMode={roleConfigMode}
+            roleAssignments={roleAssignments}
+            providerStatuses={providerStatuses}
+            userPlan={user?.subscription_type}
+            userId={user?.id ?? null}
+            wireframeInputRef={wireframeInputRef}
+            onSetBuildMode={setBuildMode}
+            onSetPowerMode={setPowerMode}
+            onSetAppDescription={setAppDescription}
+            onSetWireframeImage={setWireframeImage}
+            onClearWireframe={() => setWireframeImage('')}
+            onToggleStack={toggleStack}
+            onSetRoleConfigMode={setRoleConfigMode}
+            onSetRoleAssignments={setRoleAssignments}
+            onStartBuild={startBuild}
+            onImportReplit={() => setShowImportModal(true)}
+            onImportGitHub={() => setShowGitHubImport(true)}
+            onOpenIDE={() => onNavigateToIDE?.({ target: 'editor', projectId: createdProjectId })}
+            onOpenSettings={() => onNavigateToView?.('settings')}
+            onOpenBilling={() => onNavigateToView?.('settings')}
+            onBuildHistoryOpen={openCompletedBuild}
+            buildTechStackSummary={buildTechStackSummary}
+          />
         ) : (
           <BuildScreen
             buildState={buildState}
