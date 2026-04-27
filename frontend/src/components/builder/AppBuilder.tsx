@@ -871,8 +871,8 @@ const FloatingParticles: React.FC = () => {
             top: `${particle.y}%`,
             animation: `float ${particle.duration}s ease-in-out infinite`,
             animationDelay: `${particle.delay}s`,
-            background: 'var(--builder-particle-bg, rgba(239, 68, 68, 0.4))',
-            boxShadow: 'var(--builder-particle-shadow, 0 0 8px rgba(204, 0, 0, 0.6))',
+            background: 'var(--builder-particle-bg, rgba(47, 168, 255, 0.18))',
+            boxShadow: 'var(--builder-particle-shadow, 0 0 8px rgba(138, 223, 255, 0.25))',
           }}
         />
       ))}
@@ -893,15 +893,15 @@ const AnimatedLogo: React.FC = () => {
         <img
           src={logoSrc}
           alt="APEX"
-          className="app-builder-logo-image w-full h-full object-contain relative z-10 drop-shadow-[0_0_30px_rgba(220,38,38,0.5)]"
+          className="app-builder-logo-image w-full h-full object-contain relative z-10 drop-shadow-[0_0_30px_rgba(126,231,255,0.55)]"
         />
       </div>
 
       {/* Corner accents - HUD style brackets */}
-      <div className="app-builder-logo-corner absolute -top-4 -left-4 w-6 h-6 border-t-2 border-l-2 border-red-500/70 rounded-tl" />
-      <div className="app-builder-logo-corner absolute -top-4 -right-4 w-6 h-6 border-t-2 border-r-2 border-red-500/70 rounded-tr" />
-      <div className="app-builder-logo-corner absolute -bottom-4 -left-4 w-6 h-6 border-b-2 border-l-2 border-red-500/70 rounded-bl" />
-      <div className="app-builder-logo-corner absolute -bottom-4 -right-4 w-6 h-6 border-b-2 border-r-2 border-red-500/70 rounded-br" />
+      <div className="app-builder-logo-corner absolute -top-4 -left-4 w-6 h-6 border-t-2 border-l-2 border-[rgba(188,239,255,0.45)] rounded-tl" />
+      <div className="app-builder-logo-corner absolute -top-4 -right-4 w-6 h-6 border-t-2 border-r-2 border-[rgba(188,239,255,0.45)] rounded-tr" />
+      <div className="app-builder-logo-corner absolute -bottom-4 -left-4 w-6 h-6 border-b-2 border-l-2 border-[rgba(188,239,255,0.45)] rounded-bl" />
+      <div className="app-builder-logo-corner absolute -bottom-4 -right-4 w-6 h-6 border-b-2 border-r-2 border-[rgba(188,239,255,0.45)] rounded-br" />
     </div>
   )
 }
@@ -914,20 +914,20 @@ const AnimatedTitle: React.FC = () => {
   return (
     <h1 className="app-builder-title text-5xl md:text-6xl font-black relative tracking-tight">
       <span
-        className="bg-gradient-to-r from-red-400 via-orange-400 to-red-500 bg-clip-text text-transparent"
+        className="bg-gradient-to-r from-white via-[#8adfff] to-[#2fa8ff] bg-clip-text text-transparent"
         style={{
           backgroundSize: '200% auto',
-          animation: 'gradient-shift 3s linear infinite',
+          animation: 'gradient-shift 4s linear infinite',
         }}
       >
         Build Your App
       </span>
       {/* Glow layer */}
       <span
-        className="absolute inset-0 bg-gradient-to-r from-red-400 via-orange-400 to-red-500 bg-clip-text text-transparent blur-lg opacity-50 pointer-events-none"
+        className="absolute inset-0 bg-gradient-to-r from-white via-[#8adfff] to-[#2fa8ff] bg-clip-text text-transparent blur-xl opacity-30 pointer-events-none"
         style={{
           backgroundSize: '200% auto',
-          animation: 'gradient-shift 3s linear infinite',
+          animation: 'gradient-shift 4s linear infinite',
         }}
         aria-hidden="true"
       >
@@ -1062,10 +1062,10 @@ For example:
       </div>
 
       {/* Corner decorations */}
-      <div className="absolute top-2 left-2 w-5 h-5 border-t-2 border-l-2 border-red-600/50 rounded-tl pointer-events-none" />
-      <div className="absolute top-2 right-2 w-5 h-5 border-t-2 border-r-2 border-red-600/50 rounded-tr pointer-events-none" />
-      <div className="absolute bottom-12 left-2 w-5 h-5 border-b-2 border-l-2 border-red-600/50 rounded-bl pointer-events-none" />
-      <div className="absolute bottom-12 right-2 w-5 h-5 border-b-2 border-r-2 border-red-600/50 rounded-br pointer-events-none" />
+      <div className="absolute top-2 left-2 w-5 h-5 border-t-2 border-l-2 border-[rgba(188,239,255,0.3)] rounded-tl pointer-events-none" />
+      <div className="absolute top-2 right-2 w-5 h-5 border-t-2 border-r-2 border-[rgba(188,239,255,0.3)] rounded-tr pointer-events-none" />
+      <div className="absolute bottom-12 left-2 w-5 h-5 border-b-2 border-l-2 border-[rgba(188,239,255,0.3)] rounded-bl pointer-events-none" />
+      <div className="absolute bottom-12 right-2 w-5 h-5 border-b-2 border-r-2 border-[rgba(188,239,255,0.3)] rounded-br pointer-events-none" />
     </div>
   )
 }
@@ -1181,18 +1181,18 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
         "transition-all duration-300 transform",
         disabled
           ? "opacity-50 cursor-not-allowed"
-          : "hover:scale-[1.02] hover:shadow-2xl hover:shadow-red-900/60 active:scale-[0.98]"
+          : "hover:scale-[1.02] hover:shadow-2xl hover:shadow-[rgba(47,168,255,0.4)] active:scale-[0.98]"
       )}
     >
       {/* Animated gradient background */}
       <div className={cn(
-        "launch-build-bg absolute inset-0 bg-gradient-to-r from-red-700 via-orange-600 to-red-700",
+        "launch-build-bg absolute inset-0 bg-gradient-to-r from-[#1a6fa8] via-[#2fa8ff] to-[#1a6fa8]",
         !disabled && !isLoading && "animate-gradient-shift"
       )} style={{ backgroundSize: '200% auto' }} />
 
       {/* Pulsing glow effect */}
       {!disabled && !isLoading && (
-        <div className="launch-build-glow absolute -inset-1 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-2xl opacity-60 blur-lg animate-pulse" />
+        <div className="launch-build-glow absolute -inset-1 bg-gradient-to-r from-[#2fa8ff] via-[#8adfff] to-[#2fa8ff] rounded-2xl opacity-50 blur-lg animate-pulse" />
       )}
 
       {/* Inner shine */}
@@ -1202,10 +1202,10 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
       {isLoading && (
         <div className="absolute inset-0 rounded-2xl overflow-hidden">
           <div
-            className="absolute inset-[-100%] bg-gradient-conic from-red-500 via-transparent to-red-500"
+            className="absolute inset-[-100%] bg-gradient-conic from-[#2fa8ff] via-transparent to-[#2fa8ff]"
             style={{ animation: 'spin 1.5s linear infinite' }}
           />
-          <div className="absolute inset-[2px] bg-gradient-to-r from-red-700 via-orange-600 to-red-700 rounded-2xl" />
+          <div className="absolute inset-[2px] bg-gradient-to-r from-[#1a6fa8] via-[#2fa8ff] to-[#1a6fa8] rounded-2xl" />
         </div>
       )}
 
@@ -3725,26 +3725,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         }
         const completedBuildId = String(message.build_id || buildState?.id || '')
 
-        // Auto-apply artifacts server-side for atomic project creation
-        if (finalStatus === 'completed' && completedBuildId) {
-          void (async () => {
-            try {
-              const applied = await apiService.applyBuildArtifacts(completedBuildId)
-              if (applied.project_id) {
-                setCreatedProjectId(applied.project_id)
-              }
-            } catch (applyErr) {
-              console.warn('Auto-apply artifacts failed (non-fatal):', applyErr)
-            }
-          })()
-        }
-
-        if (finalStatus === 'completed' && !previewPreparedRef.current) {
+        if (finalStatus === 'completed' && !previewPreparedRef.current && completedBuildId) {
           previewPreparedRef.current = true
           void (async () => {
             const project = await preparePreview(true)
             if (project) {
               onNavigateToIDE?.({ target: 'preview', projectId: project.id })
+            } else {
+              previewPreparedRef.current = false
             }
           })()
         }
@@ -6293,22 +6281,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
       {/* Animated background layers */}
       <div className="app-builder-background fixed inset-0 pointer-events-none">
-        {/* Base gradient */}
-        <div className="app-builder-bg-base absolute inset-0 bg-gradient-to-b from-red-950/30 via-black to-black" />
-
-        {/* Animated background component */}
-        <AnimatedBackground variant="full" intensity="low" interactive={false} className="app-builder-animated-bg opacity-40" />
-
-        {/* Hex grid pattern */}
-        <HexGrid />
+        {/* Base gradient — dark, matches landing palette */}
+        <div className="app-builder-bg-base absolute inset-0 bg-gradient-to-b from-[rgba(2,10,28,0.9)] via-[#020408] to-[#020408]" />
 
         {/* Floating particles */}
         <FloatingParticles />
 
-        {/* Radial gradient accents */}
-        <div className="app-builder-accent app-builder-accent-a absolute top-0 left-1/4 w-[500px] h-[500px] bg-red-900/15 rounded-full blur-3xl" />
-        <div className="app-builder-accent app-builder-accent-b absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-orange-900/10 rounded-full blur-3xl" />
-        <div className="app-builder-accent app-builder-accent-c absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-red-950/10 rounded-full blur-3xl" />
+        {/* Radial gradient accents — subtle cyan */}
+        <div className="app-builder-accent app-builder-accent-a absolute top-0 left-1/4 w-[600px] h-[600px] bg-[rgba(47,168,255,0.05)] rounded-full blur-3xl" />
+        <div className="app-builder-accent app-builder-accent-b absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-[rgba(138,223,255,0.04)] rounded-full blur-3xl" />
+        <div className="app-builder-accent app-builder-accent-c absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-[rgba(15,30,60,0.5)] rounded-full blur-3xl" />
       </div>
 
       {/* Main content */}
@@ -6317,7 +6299,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         {showImportModal && (
           <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/95 p-4 backdrop-blur-md">
             <div className="flex min-h-full items-center justify-center">
-              <Card variant="cyberpunk" glow="intense" className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto border-2 border-red-600/60" style={{ animation: 'fade-in-up 0.3s ease-out' }}>
+              <Card variant="cyberpunk" glow="intense" className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto border-2 border-[rgba(188,239,255,0.2)]" style={{ animation: 'fade-in-up 0.3s ease-out' }}>
                 <CardHeader>
                   <CardTitle className="text-2xl flex items-center gap-3">
                     <Download className="w-7 h-7 text-red-500" />
@@ -6386,7 +6368,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             />
             <div className="grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-6 items-start">
             {/* Left Column: Build Configuration */}
-            <Card variant="cyberpunk" glow="intense" className="builder-main-card border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">
+            <Card variant="cyberpunk" glow="intense" className="builder-main-card border border-white/[0.08] bg-[rgba(2,10,28,0.6)] backdrop-blur-xl">
               <CardContent className="p-4 sm:p-6 md:p-8 lg:p-10">
                 {/* Build Mode Toggle */}
                 <div className="flex items-center justify-center gap-2 sm:gap-6 mb-6 md:mb-10">
@@ -6396,14 +6378,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       'build-mode-btn relative flex flex-1 items-center gap-2 sm:gap-4 px-4 sm:px-8 py-3 sm:py-4 rounded-xl transition-all duration-300 overflow-hidden group min-w-0',
                       buildMode === 'fast' && 'is-active',
                       buildMode === 'fast'
-                        ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
-                        : 'bg-gray-900/60 border-2 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
+                        ? 'bg-[rgba(47,168,255,0.12)] border-2 border-[rgba(188,239,255,0.5)] text-white shadow-xl shadow-[rgba(47,168,255,0.2)]'
+                        : 'bg-white/[0.03] border-2 border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white'
                     )}
                   >
                     {buildMode === 'fast' && (
-                      <div className="build-mode-active-overlay absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
+                      <div className="build-mode-active-overlay absolute inset-0 bg-[rgba(47,168,255,0.06)] animate-pulse" />
                     )}
-                    <Zap className={cn("w-5 h-5 sm:w-6 sm:h-6 relative z-10 shrink-0", buildMode === 'fast' && "animate-pulse")} />
+                    <Zap className={cn("w-5 h-5 sm:w-6 sm:h-6 relative z-10 shrink-0", buildMode === 'fast' && "text-[#8adfff]")} />
                     <div className="relative z-10 text-left min-w-0">
                       <span className="font-bold block text-sm sm:text-lg">Fast Build</span>
                       <span className="text-xs sm:text-sm opacity-70">~3-5 min</span>
@@ -6415,14 +6397,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       'build-mode-btn relative flex flex-1 items-center gap-2 sm:gap-4 px-4 sm:px-8 py-3 sm:py-4 rounded-xl transition-all duration-300 overflow-hidden group min-w-0',
                       buildMode === 'full' && 'is-active',
                       buildMode === 'full'
-                        ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
-                        : 'bg-gray-900/60 border-2 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
+                        ? 'bg-[rgba(47,168,255,0.12)] border-2 border-[rgba(188,239,255,0.5)] text-white shadow-xl shadow-[rgba(47,168,255,0.2)]'
+                        : 'bg-white/[0.03] border-2 border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white'
                     )}
                   >
                     {buildMode === 'full' && (
-                      <div className="build-mode-active-overlay absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
+                      <div className="build-mode-active-overlay absolute inset-0 bg-[rgba(47,168,255,0.06)] animate-pulse" />
                     )}
-                    <Sparkles className={cn("w-5 h-5 sm:w-6 sm:h-6 relative z-10 shrink-0", buildMode === 'full' && "animate-pulse")} />
+                    <Sparkles className={cn("w-5 h-5 sm:w-6 sm:h-6 relative z-10 shrink-0", buildMode === 'full' && "text-[#8adfff]")} />
                     <div className="relative z-10 text-left min-w-0">
                       <span className="font-bold block text-sm sm:text-lg">Full Build</span>
                       <span className="text-xs sm:text-sm opacity-70">10+ min</span>
