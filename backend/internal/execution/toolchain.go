@@ -337,7 +337,8 @@ func sandboxGlobalInstallCommands(language string) []string {
 		}
 	case "javascript":
 		return []string{
-			"npm install -g pnpm yarn typescript tsx vite serve prisma drizzle-kit vercel netlify-cli wrangler @railway/cli supabase",
+			// yarn is pre-installed in node:20-bookworm-slim; installing it again via npm fails with EEXIST
+			"npm install -g pnpm typescript tsx vite serve prisma drizzle-kit vercel netlify-cli wrangler @railway/cli supabase",
 		}
 	default:
 		return nil
