@@ -453,7 +453,11 @@ func findJSEntrypoint(fileMap map[string]string) string {
 		"src/index.tsx", "src/index.ts", "src/index.jsx", "src/index.js",
 		"pages/index.tsx", "pages/index.jsx",
 		"app/page.tsx", "app/page.jsx",
-		"index.tsx", "index.ts",
+		"index.tsx", "index.ts", "index.jsx", "index.js",
+		"main.tsx", "main.ts", "main.jsx", "main.js",
+		"src/App.tsx", "src/App.jsx", "src/App.ts", "src/App.js",
+		"src/app.tsx", "src/app.jsx",
+		"App.tsx", "App.jsx",
 	}
 	for _, c := range candidates {
 		if _, ok := fileMap[c]; ok {
