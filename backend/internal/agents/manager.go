@@ -6045,6 +6045,7 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	}
 	if solver == nil {
 		log.Printf("Build %s: no solver or fallback agent available for recovery task %s", buildID, recoveryTask.ID)
+		am.rollbackUnassignedRecoveryTask(build, failedTask, recoveryTask, fmt.Errorf("no solver or fallback agent available"))
 		am.broadcast(buildID, &WSMessage{
 			Type:      WSBuildProgress,
 			BuildID:   buildID,
@@ -6075,7 +6076,45 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 
 	if assignErr := am.AssignTask(solver.ID, recoveryTask); assignErr != nil {
 		log.Printf("Build %s: failed to assign recovery task %s to %s: %v", buildID, recoveryTask.ID, solver.ID, assignErr)
+		am.rollbackUnassignedRecoveryTask(build, failedTask, recoveryTask, assignErr)
 	}
+}
+
+func (am *AgentManager) markTaskAssignmentFailure(build *Build, task *Task, err error) {
+	if build == nil || task == nil || err == nil {
+		return
+	}
+
+	now := time.Now()
+	build.mu.Lock()
+	if errors.Is(err, errBuildNotActive) {
+		task.Status = TaskCancelled
+	} else {
+		task.Status = TaskFailed
+	}
+	task.Error = err.Error()
+	task.CompletedAt = &now
+	build.UpdatedAt = now
+	build.mu.Unlock()
+}
+
+func (am *AgentManager) rollbackUnassignedRecoveryTask(build *Build, failedTask *Task, recoveryTask *Task, err error) {
+	if build == nil || failedTask == nil || recoveryTask == nil || err == nil {
+		return
+	}
+
+	now := time.Now()
+	build.mu.Lock()
+	failedTask.Status = TaskFailed
+	if failedTask.Input != nil {
+		delete(failedTask.Input, "superseded_by_recovery")
+		delete(failedTask.Input, "recovery_queued")
+	}
+	recoveryTask.Status = TaskFailed
+	recoveryTask.Error = err.Error()
+	recoveryTask.CompletedAt = &now
+	build.UpdatedAt = now
+	build.mu.Unlock()
 }
 
 func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task) {
@@ -6151,10 +6190,12 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 			assignee = reviewAgent
 		}
 		if assignee == nil {
+			am.markTaskAssignmentFailure(build, task, fmt.Errorf("no assignee available for %s", task.Type))
 			continue
 		}
 		if err := am.AssignTask(assignee.ID, task); err != nil {
 			log.Printf("Build %s: failed to assign post-fix validation task %s: %v", build.ID, task.ID, err)
+			am.markTaskAssignmentFailure(build, task, err)
 		}
 	}
 
@@ -6266,9 +6307,11 @@ func (am *AgentManager) handleTestCompletion(build *Build, sourceTask *Task, out
 		if agent != nil {
 			if err := am.AssignTask(agent.ID, fixTask); err != nil {
 				log.Printf("Failed to assign test fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
+				am.markTaskAssignmentFailure(build, fixTask, err)
 			}
 		} else {
 			log.Printf("No available agent to handle test fix task %s", fixTask.ID)
+			am.markTaskAssignmentFailure(build, fixTask, fmt.Errorf("no available agent to handle test fix task"))
 		}
 	}
 
@@ -6416,9 +6459,11 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 		if agent != nil {
 			if err := am.AssignTask(agent.ID, fixTask); err != nil {
 				log.Printf("Failed to assign review fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
+				am.markTaskAssignmentFailure(build, fixTask, err)
 			}
 		} else {
 			log.Printf("No available agent to handle review fix task %s", fixTask.ID)
+			am.markTaskAssignmentFailure(build, fixTask, fmt.Errorf("no available agent to handle review fix task"))
 		}
 	}
 
@@ -14376,6 +14421,64 @@ func buildPhaseProgressWindow(currentPhase string, status BuildStatus) (int, int
 	}
 }
 
+func buildPhaseOrder(phase string) int {
+	switch strings.TrimSpace(strings.ToLower(phase)) {
+	case "request_intake", "provider_check", "contract_compilation", "contract_verification", "intent_normalization", "planning":
+		return 1
+	case "in_progress", "architecture":
+		return 2
+	case "frontend_ui":
+		return 3
+	case "parallel_core", "data_foundation", "backend_services":
+		return 4
+	case "integration", "testing":
+		return 5
+	case "review", "reviewing":
+		return 6
+	case "validation", "verification", "promotion", "readiness":
+		return 7
+	case "completed":
+		return 8
+	case "failed", "cancelled":
+		return 9
+	default:
+		return 0
+	}
+}
+
+func buildPhaseIsTerminal(phase string) bool {
+	switch strings.TrimSpace(strings.ToLower(phase)) {
+	case "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldAdvanceBuildPhase(currentPhase string, nextPhase string) bool {
+	current := strings.TrimSpace(currentPhase)
+	next := strings.TrimSpace(nextPhase)
+	if next == "" {
+		return false
+	}
+	if current == "" {
+		return true
+	}
+	if buildPhaseIsTerminal(current) {
+		return strings.EqualFold(current, next)
+	}
+	if buildPhaseIsTerminal(next) {
+		return true
+	}
+
+	currentOrder := buildPhaseOrder(current)
+	nextOrder := buildPhaseOrder(next)
+	if currentOrder > 0 && nextOrder > 0 && nextOrder < currentOrder {
+		return false
+	}
+	return true
+}
+
 type buildCompletionSnapshot struct {
 	blockedByInteraction      bool
 	allComplete               bool
@@ -17145,6 +17248,7 @@ func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, 
 
 		if err := am.AssignTask(agent.ID, task); err != nil {
 			log.Printf("Failed to assign task to agent %s: %v", agent.ID, err)
+			am.markTaskAssignmentFailure(build, task, err)
 		} else {
 			log.Printf("Assigned task %s (%s) to agent %s (%s)", task.ID, task.Type, agent.ID, agent.Role)
 		}
@@ -19107,7 +19211,9 @@ func updateBuildSnapshotStateLocked(build *Build, msg *WSMessage) bool {
 	next := copyBuildSnapshotStateLocked(build)
 
 	setCurrentPhase := func(value string) {
-		if trimmed := strings.TrimSpace(value); trimmed != "" && next.CurrentPhase != trimmed {
+		if trimmed := strings.TrimSpace(value); trimmed != "" &&
+			next.CurrentPhase != trimmed &&
+			shouldAdvanceBuildPhase(next.CurrentPhase, trimmed) {
 			next.CurrentPhase = trimmed
 		}
 	}
