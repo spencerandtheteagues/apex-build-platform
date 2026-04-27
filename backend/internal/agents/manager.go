@@ -6747,6 +6747,8 @@ func summarizeReadinessErrorClass(errors []string) string {
 		return "dependency_check"
 	case strings.Contains(joined, "missing a build script"):
 		return "missing_build_script"
+	case strings.Contains(joined, "missing runnable scripts"):
+		return "missing_runnable_scripts"
 	case strings.Contains(joined, "tsconfig.json is missing"):
 		return "missing_tsconfig"
 	case strings.Contains(joined, "preview verification build failed"):
@@ -24927,8 +24929,9 @@ func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool
 		missingScripts = append(missingScripts, "build")
 	}
 	if isNext {
-		if !hasNonEmptyScript("start") {
-			missingScripts = append(missingScripts, "start")
+		// Accept "start" or "preview" — both map to "next start" in common conventions.
+		if !(hasNonEmptyScript("start") || hasNonEmptyScript("preview")) {
+			missingScripts = append(missingScripts, "start|preview")
 		}
 	} else {
 		if !(hasNonEmptyScript("dev") || hasNonEmptyScript("preview") || hasNonEmptyScript("start")) {
