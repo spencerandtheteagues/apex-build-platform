@@ -220,8 +220,8 @@ func (h *UsageHandlers) GetLimits(c *gin.Context) {
 					"price_yearly":  23040, // $230.40
 				},
 				"pro": gin.H{
-					"price_monthly": 5900,  // $59
-					"price_yearly":  56640, // $566.40
+					"price_monthly": 7900,  // $79
+					"price_yearly":  75840, // $758.40
 				},
 				"team": gin.H{
 					"price_monthly": 14900,  // $149
