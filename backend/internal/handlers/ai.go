@@ -105,14 +105,14 @@ func (h *Handler) GenerateAI(c *gin.Context) {
 
 	// Validate capability
 	validCapabilities := map[string]ai.AICapability{
-		"code_generation":  ai.CapabilityCodeGeneration,
-		"code_review":      ai.CapabilityCodeReview,
-		"code_completion":  ai.CapabilityCodeCompletion,
-		"debugging":        ai.CapabilityDebugging,
-		"explanation":      ai.CapabilityExplanation,
-		"refactoring":      ai.CapabilityRefactoring,
-		"testing":          ai.CapabilityTesting,
-		"documentation":    ai.CapabilityDocumentation,
+		"code_generation": ai.CapabilityCodeGeneration,
+		"code_review":     ai.CapabilityCodeReview,
+		"code_completion": ai.CapabilityCodeCompletion,
+		"debugging":       ai.CapabilityDebugging,
+		"explanation":     ai.CapabilityExplanation,
+		"refactoring":     ai.CapabilityRefactoring,
+		"testing":         ai.CapabilityTesting,
+		"documentation":   ai.CapabilityDocumentation,
 	}
 
 	capability, valid := validCapabilities[req.Capability]
@@ -144,9 +144,9 @@ func (h *Handler) GenerateAI(c *gin.Context) {
 			Error:   "Monthly AI usage limit exceeded. Upgrade your subscription for more requests.",
 			Code:    "USAGE_LIMIT_EXCEEDED",
 			Data: map[string]interface{}{
-				"current_usage":  user.MonthlyAIRequests,
-				"monthly_limit":  monthlyLimit,
-				"subscription":   user.SubscriptionType,
+				"current_usage": user.MonthlyAIRequests,
+				"monthly_limit": monthlyLimit,
+				"subscription":  user.SubscriptionType,
 			},
 		})
 		return
@@ -154,15 +154,15 @@ func (h *Handler) GenerateAI(c *gin.Context) {
 
 	// Create AI request
 	aiReq := &ai.AIRequest{
-		ID:          uuid.New().String(),
-		Provider:    ai.AIProvider(req.Provider),
-		Capability:  capability,
-		Prompt:      req.Prompt,
-		Code:        req.Code,
-		Language:    req.Language,
-		Context:     req.Context,
-		UserID:      strconv.Itoa(int(userID)),
-		CreatedAt:   time.Now(),
+		ID:         uuid.New().String(),
+		Provider:   ai.AIProvider(req.Provider),
+		Capability: capability,
+		Prompt:     req.Prompt,
+		Code:       req.Code,
+		Language:   req.Language,
+		Context:    req.Context,
+		UserID:     strconv.Itoa(int(userID)),
+		CreatedAt:  time.Now(),
 	}
 
 	if req.ProjectID != nil {
@@ -226,7 +226,7 @@ func (h *Handler) GenerateAI(c *gin.Context) {
 	if h.SpendTracker != nil && aiResp.Usage != nil {
 		spendInput := spend.RecordSpendInput{
 			UserID:       userID,
-			Provider:     string(aiResp.Provider),
+			Provider:     string(ai.ActualProvider(aiResp, aiReq.Provider)),
 			Model:        aiReq.Model,
 			Capability:   string(aiReq.Capability),
 			InputTokens:  aiResp.Usage.PromptTokens,
@@ -302,17 +302,17 @@ func (h *Handler) GetAIUsage(c *gin.Context) {
 		Success: true,
 		Data: map[string]interface{}{
 			"monthly_usage": map[string]interface{}{
-				"requests":      monthlyStats.RequestCount,
-				"cost":         monthlyStats.TotalCost,
-				"tokens":       monthlyStats.TotalTokens,
-				"limit":        monthlyLimit,
-				"remaining":    monthlyLimit - int(monthlyStats.RequestCount),
-				"reset_date":   getNextMonthStart(),
+				"requests":   monthlyStats.RequestCount,
+				"cost":       monthlyStats.TotalCost,
+				"tokens":     monthlyStats.TotalTokens,
+				"limit":      monthlyLimit,
+				"remaining":  monthlyLimit - int(monthlyStats.RequestCount),
+				"reset_date": getNextMonthStart(),
 			},
 			"provider_usage": providerUsage,
 			"subscription": map[string]interface{}{
-				"type":         user.SubscriptionType,
-				"end_date":     user.SubscriptionEnd,
+				"type":     user.SubscriptionType,
+				"end_date": user.SubscriptionEnd,
 			},
 		},
 	})
@@ -437,16 +437,16 @@ func (h *Handler) RateAIResponse(c *gin.Context) {
 // logAIRequest logs AI requests to the database
 func (h *Handler) logAIRequest(userID uint, req *ai.AIRequest, resp *ai.AIResponse, err error, duration time.Duration) {
 	aiRequest := models.AIRequest{
-		RequestID:   req.ID,
-		UserID:      userID,
-		Provider:    string(req.Provider),
-		Capability:  string(req.Capability),
-		Prompt:      req.Prompt,
-		Code:        req.Code,
-		Language:    req.Language,
-		Context:     req.Context,
-		Duration:    duration.Milliseconds(),
-		Status:      "completed",
+		RequestID:  req.ID,
+		UserID:     userID,
+		Provider:   string(req.Provider),
+		Capability: string(req.Capability),
+		Prompt:     req.Prompt,
+		Code:       req.Code,
+		Language:   req.Language,
+		Context:    req.Context,
+		Duration:   duration.Milliseconds(),
+		Status:     "completed",
 	}
 
 	if req.ProjectID != "" {

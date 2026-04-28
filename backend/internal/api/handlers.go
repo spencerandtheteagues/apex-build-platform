@@ -633,12 +633,13 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	actualProvider := ai.ActualProvider(response, aiReq.Provider)
 
 	// Save request to database
 	dbRequest := &models.AIRequest{
 		RequestID:  aiReq.ID,
 		UserID:     uid,
-		Provider:   string(response.Provider),
+		Provider:   string(actualProvider),
 		Capability: string(aiReq.Capability),
 		Prompt:     aiReq.Prompt,
 		Code:       aiReq.Code,
@@ -687,12 +688,12 @@ func (s *Server) AIGenerate(c *gin.Context) {
 			if powerMode == "" {
 				powerMode = pricing.ModeFast
 			}
-			cost = s.byok.BilledCost(string(response.Provider), modelUsed, inputTokens, outputTokens, powerMode, isBYOK)
+			cost = s.byok.BilledCost(string(actualProvider), modelUsed, inputTokens, outputTokens, powerMode, isBYOK)
 			if response.Usage != nil {
 				response.Usage.Cost = cost
 			}
 			dbRequest.Cost = cost
-			s.byok.RecordUsage(uid, projectID, string(response.Provider), modelUsed, isBYOK,
+			s.byok.RecordUsage(uid, projectID, string(actualProvider), modelUsed, isBYOK,
 				inputTokens, outputTokens, cost, string(aiReq.Capability), response.Duration, "success")
 			if reservation != nil {
 				_ = s.byok.FinalizeCredits(reservation, cost)

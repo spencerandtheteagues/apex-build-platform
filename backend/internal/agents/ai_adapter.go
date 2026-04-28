@@ -447,11 +447,12 @@ For code files, use this exact format:
 			outputTokens = response.Usage.CompletionTokens
 		}
 		modelUsed := ai.GetModelUsed(response, request)
-		finalCost = a.byokManager.BilledCost(string(response.Provider), modelUsed, inputTokens, outputTokens, string(opts.PowerMode), isBYOK)
+		actualProvider := actualProviderForAIResponse(response, aiProvider)
+		finalCost = a.byokManager.BilledCost(string(actualProvider), modelUsed, inputTokens, outputTokens, string(opts.PowerMode), isBYOK)
 		if response.Usage != nil {
 			response.Usage.Cost = finalCost
 		}
-		a.byokManager.RecordUsage(opts.UserID, nil, string(response.Provider), modelUsed, isBYOK,
+		a.byokManager.RecordUsage(opts.UserID, nil, string(actualProvider), modelUsed, isBYOK,
 			inputTokens, outputTokens, finalCost, string(request.Capability), response.Duration, "success")
 		if reservation != nil {
 			_ = a.byokManager.FinalizeCredits(reservation, finalCost)

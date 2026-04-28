@@ -3678,7 +3678,7 @@ Contract:
 			BuildID:      build.ID,
 			AgentID:      "contract-critique",
 			AgentRole:    string(RoleArchitect),
-			Provider:     string(provider),
+			Provider:     string(actualProviderForAIResponse(resp, provider)),
 			Model:        ai.GetModelUsed(resp, nil),
 			Capability:   "contract_critique",
 			IsBYOK:       !am.buildUsesPlatformKeys(build),
@@ -4677,13 +4677,7 @@ func firstNonEmptyString(values ...string) string {
 }
 
 func parseAIProvider(value string) ai.AIProvider {
-	provider := ai.AIProvider(strings.TrimSpace(value))
-	switch provider {
-	case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama, ai.ProviderDeepSeek, ai.ProviderGLM:
-		return provider
-	default:
-		return ""
-	}
+	return ai.ParseProvider(value)
 }
 
 func firstNonEmptyProvider(values ...ai.AIProvider) ai.AIProvider {
@@ -4693,6 +4687,10 @@ func firstNonEmptyProvider(values ...ai.AIProvider) ai.AIProvider {
 		}
 	}
 	return ""
+}
+
+func actualProviderForAIResponse(resp *ai.AIResponse, fallback ...ai.AIProvider) ai.AIProvider {
+	return ai.ActualProvider(resp, fallback...)
 }
 
 func recordedProviderForOutput(output *TaskOutput, fallback ai.AIProvider) ai.AIProvider {
@@ -19306,7 +19304,7 @@ Rules:
 			BuildID:      agent.BuildID,
 			AgentID:      agent.ID,
 			AgentRole:    string(agent.Role),
-			Provider:     string(agent.Provider),
+			Provider:     string(actualProviderForAIResponse(response, agent.Provider)),
 			Model:        ai.GetModelUsed(response, nil),
 			Capability:   "build_intervention",
 			IsBYOK:       !am.buildUsesPlatformKeys(build),
@@ -26407,7 +26405,7 @@ func (am *AgentManager) runFailureConsensus(
 					BuildID:      build.ID,
 					AgentID:      agent.ID,
 					AgentRole:    string(agent.Role),
-					Provider:     string(provider),
+					Provider:     string(actualProviderForAIResponse(resp, provider)),
 					Model:        ai.GetModelUsed(resp, nil),
 					Capability:   "failure_consensus",
 					IsBYOK:       !am.buildUsesPlatformKeys(build),
@@ -26845,7 +26843,7 @@ func (am *AgentManager) completeTruncatedFiles(
 				BuildID:      build.ID,
 				AgentID:      string(RoleSolver),
 				AgentRole:    string(RoleSolver),
-				Provider:     string(agent.Provider),
+				Provider:     string(actualProviderForAIResponse(resp, agent.Provider)),
 				Model:        ai.GetModelUsed(resp, nil),
 				Capability:   "chunked_continuation",
 				IsBYOK:       !am.buildUsesPlatformKeys(build),

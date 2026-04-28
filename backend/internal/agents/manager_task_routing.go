@@ -617,12 +617,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	}
 
 	providerUsed := firstNonEmptyProvider(response.Provider, provider)
-	actualProviderUsed := providerUsed
-	if response != nil && response.Metadata != nil {
-		if actual := parseAIProvider(fmt.Sprintf("%v", response.Metadata["actual_provider"])); actual != "" {
-			actualProviderUsed = actual
-		}
-	}
+	actualProviderUsed := actualProviderForAIResponse(response, providerUsed, provider)
 	modelUsed := firstNonEmptyString(ai.GetModelUsed(response, nil), model)
 
 	if am.spendTracker != nil && response.Usage != nil {
@@ -635,7 +630,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 			BuildID:      agent.BuildID,
 			AgentID:      agent.ID,
 			AgentRole:    string(agent.Role),
-			Provider:     string(providerUsed),
+			Provider:     string(actualProviderUsed),
 			Model:        modelUsed,
 			Capability:   string(task.Type),
 			IsBYOK:       !usesPlatformKeys,
