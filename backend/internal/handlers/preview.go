@@ -734,7 +734,13 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		h.applyPreviewResponseHeaders(resp.Header, c.GetHeader("Origin"), strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html"))
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
-		if !strings.Contains(contentType, "text/html") {
+		isHTML := strings.Contains(contentType, "text/html")
+		responsePath := ""
+		if resp.Request != nil && resp.Request.URL != nil {
+			responsePath = resp.Request.URL.Path
+		}
+		isJavaScript := isPreviewJavaScriptResponse(contentType, responsePath)
+		if !isHTML && !isJavaScript {
 			return nil
 		}
 
@@ -744,7 +750,12 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		}
 		_ = resp.Body.Close()
 
-		rewritten := h.rewritePreviewHTMLForProxyWithBackend(string(originalBody), uint(projectID), backendProxyURL, previewToken)
+		var rewritten string
+		if isHTML {
+			rewritten = h.rewritePreviewHTMLForProxyWithBackend(string(originalBody), uint(projectID), backendProxyURL, previewToken)
+		} else {
+			rewritten = h.rewritePreviewJavaScriptForProxy(string(originalBody), uint(projectID), previewToken)
+		}
 		resp.Body = io.NopCloser(bytes.NewBufferString(rewritten))
 		resp.ContentLength = int64(len(rewritten))
 		resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
@@ -774,6 +785,7 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		query.Del("token")
 		query.Del("preview_token")
 		req.URL.RawQuery = query.Encode()
+		req.Header.Del("Accept-Encoding")
 	}
 
 	h.applyPreviewResponseHeaders(c.Writer.Header(), c.GetHeader("Origin"), false)
@@ -1165,21 +1177,71 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, proj
 	return replaced
 }
 
+func isPreviewJavaScriptResponse(contentType string, responsePath string) bool {
+	lowerContentType := strings.ToLower(contentType)
+	if strings.Contains(lowerContentType, "javascript") || strings.Contains(lowerContentType, "ecmascript") {
+		return true
+	}
+
+	lowerPath := strings.ToLower(responsePath)
+	return strings.HasSuffix(lowerPath, ".js") || strings.HasSuffix(lowerPath, ".mjs")
+}
+
+func (h *PreviewHandler) rewritePreviewJavaScriptForProxy(js string, projectID uint, previewToken string) string {
+	prefix := fmt.Sprintf("/api/v1/preview/proxy/%d", projectID)
+	assetLiteralPattern := regexp.MustCompile(`(["'])(/?assets/[^"'\s)]+)(["'])`)
+
+	return assetLiteralPattern.ReplaceAllStringFunc(js, func(match string) string {
+		parts := assetLiteralPattern.FindStringSubmatch(match)
+		if len(parts) != 4 || parts[1] != parts[3] {
+			return match
+		}
+		rewritten := rewritePreviewAssetTargetForProxy(parts[2], prefix, previewToken)
+		return parts[1] + rewritten + parts[3]
+	})
+}
+
+func rewritePreviewAssetTargetForProxy(target string, prefix string, previewToken string) string {
+	if target == "" || prefix == "" {
+		return target
+	}
+	if strings.Contains(target, "://") || strings.HasPrefix(target, "//") || strings.HasPrefix(target, "data:") || strings.HasPrefix(target, "blob:") {
+		return target
+	}
+
+	rewritten := target
+	if strings.HasPrefix(target, "/assets/") || strings.HasPrefix(target, "assets/") {
+		rewritten = prefix + "/" + strings.TrimPrefix(target, "/")
+	}
+	return appendPreviewTokenToProxyTarget(rewritten, prefix, previewToken)
+}
+
+func appendPreviewTokenToProxyTarget(target string, prefix string, previewToken string) string {
+	if previewToken == "" || prefix == "" || target == "" || strings.Contains(target, "preview_token=") || !strings.HasPrefix(target, prefix) {
+		return target
+	}
+
+	base := target
+	fragment := ""
+	if idx := strings.Index(base, "#"); idx >= 0 {
+		fragment = base[idx:]
+		base = base[:idx]
+	}
+
+	separator := "?"
+	if strings.Contains(base, "?") {
+		separator = "&"
+	}
+	return base + separator + "preview_token=" + url.QueryEscape(previewToken) + fragment
+}
+
 func appendPreviewTokenToProxyAssets(html string, prefix string, previewToken string) string {
 	if previewToken == "" || prefix == "" || html == "" {
 		return html
 	}
 
-	escapedToken := url.QueryEscape(previewToken)
 	appendToken := func(target string) string {
-		if target == "" || strings.Contains(target, "preview_token=") || !strings.HasPrefix(target, prefix) {
-			return target
-		}
-		separator := "?"
-		if strings.Contains(target, "?") {
-			separator = "&"
-		}
-		return target + separator + "preview_token=" + escapedToken
+		return appendPreviewTokenToProxyTarget(target, prefix, previewToken)
 	}
 
 	attributePattern := regexp.MustCompile(`(?i)(\b(?:src|href|action)=["'])([^"']+)(["'])`)

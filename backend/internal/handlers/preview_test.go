@@ -247,6 +247,22 @@ func TestRewritePreviewHTMLForProxyWithBackendAppendsPreviewTokenToAssets(t *tes
 	require.NotContains(t, rewritten, "history.replaceState")
 }
 
+func TestRewritePreviewJavaScriptForProxyRewritesViteDynamicAssetImports(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+	prefix := "/api/v1/preview/proxy/" + strconv.FormatUint(uint64(projectID), 10)
+
+	js := `const deps=["assets/Dashboard-CVEE8rpR.js","/assets/api-CM3qBsrA.js","https://cdn.example.com/assets/external.js","` + prefix + `/assets/existing.js?preview_token=old-token"];`
+
+	rewritten := handler.rewritePreviewJavaScriptForProxy(js, projectID, "token value")
+
+	require.Contains(t, rewritten, `"`+prefix+`/assets/Dashboard-CVEE8rpR.js?preview_token=token+value"`)
+	require.Contains(t, rewritten, `"`+prefix+`/assets/api-CM3qBsrA.js?preview_token=token+value"`)
+	require.Contains(t, rewritten, `"https://cdn.example.com/assets/external.js"`)
+	require.Contains(t, rewritten, `"`+prefix+`/assets/existing.js?preview_token=old-token"`)
+	require.NotContains(t, rewritten, `"assets/Dashboard-CVEE8rpR.js"`)
+	require.NotContains(t, rewritten, `"/assets/api-CM3qBsrA.js"`)
+}
+
 func TestApplyPreviewResponseHeadersAllowsSameOriginStorageForHTML(t *testing.T) {
 	handler, _ := newPreviewHandlerTestFixture(t, false)
 
