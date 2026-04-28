@@ -15168,13 +15168,9 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	now time.Time,
 ) bool {
 	build.mu.Lock()
-	canAttempt := build.ReadinessRecoveryAttempts < maxAutomatedRecoveryAttempts(build.PowerMode)
 	orchestration := ensureBuildOrchestrationStateLocked(build)
 	recordPatchBundles := orchestration != nil && orchestration.Flags.EnablePatchBundles
 	build.mu.Unlock()
-	if !canAttempt {
-		return false
-	}
 
 	if summary := am.clearStaleSequelizeUniqueKeysValidationError(build, readinessErrors); summary != "" {
 		am.cancelAutomatedRecoveryTasksForLoopCap(build)

@@ -2848,6 +2848,77 @@ func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder
 	}
 }
 
+func TestApplyDeterministicValidationRepairsCreatesAliasModuleAfterRecoveryCap(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:                          "build-missing-alias-module-after-cap",
+		Status:                      BuildReviewing,
+		Mode:                        ModeFull,
+		PowerMode:                   PowerBalanced,
+		ReadinessRecoveryAttempts:   maxAutomatedRecoveryAttempts(PowerBalanced),
+		RequirePreviewReady:         true,
+		PhasedPipelineComplete:      true,
+		CompileValidationAttempts:   2,
+		CompileValidationPassed:     false,
+		PreviewVerificationAttempts: 1,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": { "build": "vite build", "dev": "vite" },
+  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1", "react-router-dom": "^6.22.3" },
+  "devDependencies": { "@vitejs/plugin-react": "^4.3.1", "typescript": "^5.4.5", "vite": "^5.2.0" }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/App.tsx",
+				Content: `import React from "react";
+const Pipeline = React.lazy(() => import("@/components/pages/Pipeline"));
+export default function App(){ return <React.Suspense fallback={null}><Pipeline /></React.Suspense>; }
+`,
+				IsNew: true,
+			},
+			{
+				Path:    "components/pages/Pipeline.cjs",
+				Content: "module.exports = {};\n",
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification local import check failed: source imports local module "@/components/pages/Pipeline" from "src/App.tsx" but generated file "src/components/pages/Pipeline.tsx" is missing`},
+		"missing alias module",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected deterministic alias module repair to apply even after AI recovery cap")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+	if strings.TrimSpace(byPath["src/components/pages/Pipeline.tsx"]) == "" {
+		t.Fatalf("expected aliased src module placeholder to be created, got files %+v", files)
+	}
+	if strings.Contains(byPath["src/App.tsx"], "components/pages/Pipeline.cjs") {
+		t.Fatalf("repair must not rewrite alias import to stale root cjs placeholder, got %q", byPath["src/App.tsx"])
+	}
+}
+
 func TestApplyDeterministicValidationRepairsCreatesFrontendShellForBackendOnlyFullStackBuild(t *testing.T) {
 	t.Parallel()
 

@@ -423,14 +423,15 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
   else if (lastAgentMsg) attentionMsg = lastAgentMsg.content
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950/95">
+    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-slate-950/95">
 
       {/* Scrollable activity feed */}
       <div
         ref={feedRef}
         onScroll={handleFeedScroll}
         aria-label="Live activity feed"
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-3 overscroll-contain"
+        data-testid="agent-task-scroll-region"
+        className="min-h-0 flex-1 basis-0 overflow-y-auto px-4 py-3 overscroll-contain"
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: 'rgba(56,189,248,0.55) rgba(15,23,42,0.55)',

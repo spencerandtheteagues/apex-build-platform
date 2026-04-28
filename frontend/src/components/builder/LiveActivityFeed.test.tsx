@@ -81,6 +81,21 @@ describe('LiveActivityFeed', () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'auto' })
   })
 
+  it('renders the agent task stream as an independently scrollable region', () => {
+    render(
+      <LiveActivityFeed
+        {...defaultProps()}
+        aiThoughts={Array.from({ length: 20 }, (_, index) => (
+          makeThought(`thought-${index}`, `Agent event ${index}`)
+        ))}
+      />
+    )
+
+    const feed = screen.getByTestId('agent-task-scroll-region')
+    expect(feed.className).toContain('overflow-y-auto')
+    expect(feed.className).toContain('basis-0')
+  })
+
   it('stops auto-scrolling after the user scrolls up and resumes on demand', () => {
     const thoughts = [
       makeThought('thought-1', 'Claude started planning the scaffold.'),

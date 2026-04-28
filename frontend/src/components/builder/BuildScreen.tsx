@@ -2056,7 +2056,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     (buildState.status === "awaiting_review" ? 1 : 0);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-black text-white">
+    <div className="flex-1 h-full min-h-0 max-h-full flex flex-col overflow-hidden bg-black text-white">
       <h1 className="sr-only">Build Flow</h1>
 
       {/* Row 1: Build Header */}
@@ -2111,7 +2111,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
       />
 
       {/* Row 4: Live Activity Feed (flex-1) */}
-      <div className="relative flex-1 min-h-0 overflow-hidden border-t border-sky-500/10">
+      <div className="relative min-h-0 flex-1 basis-0 overflow-hidden border-t border-sky-500/10">
         <LiveActivityFeed
           aiThoughts={aiThoughts}
           chatMessages={chatMessages}
