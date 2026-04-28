@@ -445,6 +445,7 @@ func TestStartBuild_RejectsUnavailableProviderAssignment(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"description":      "Build me a fully functional e-commerce platform with payments",
+		"provider_mode":    "byok",
 		"role_assignments": map[string]string{"coder": "gpt4"},
 	})
 	w := httptest.NewRecorder()

@@ -292,6 +292,23 @@ func writeBuildLookupError(c *gin.Context, err error, fallbackErr error) {
 	})
 }
 
+func requestedBuildProviderMode(providerMode string) string {
+	if strings.EqualFold(strings.TrimSpace(providerMode), "byok") {
+		return "byok"
+	}
+	return "platform"
+}
+
+func providersForBuildProviderMode(router AIRouter, userID uint, providerMode string) []ai.AIProvider {
+	if router == nil {
+		return nil
+	}
+	if requestedBuildProviderMode(providerMode) == "byok" {
+		return router.GetAvailableProvidersForUser(userID)
+	}
+	return hostedPlatformProviders(router.GetAvailableProviders())
+}
+
 // PreflightCheck validates provider credentials and billing status before a build.
 // POST /api/v1/build/preflight
 func (h *BuildHandler) PreflightCheck(c *gin.Context) {
@@ -353,14 +370,23 @@ func (h *BuildHandler) PreflightCheck(c *gin.Context) {
 		return
 	}
 
-	providers := router.GetAvailableProvidersForUser(uid)
+	providerMode := requestedBuildProviderMode(req.ProviderMode)
+	providers := providersForBuildProviderMode(router, uid, providerMode)
 	if len(providers) == 0 {
-		allProviders := router.GetAvailableProviders()
+		allProviders := hostedPlatformProviders(router.GetAvailableProviders())
 		if len(allProviders) == 0 {
 			c.JSON(http.StatusServiceUnavailable, preflightResult{
 				ErrorCode:  "ALL_PROVIDERS_DOWN",
 				Error:      "All AI providers are currently unavailable",
 				Suggestion: "Check your API keys in Settings or try again shortly",
+			})
+			return
+		}
+		if providerMode == "byok" {
+			c.JSON(http.StatusPaymentRequired, preflightResult{
+				ErrorCode:  "BYOK_PROVIDER_UNAVAILABLE",
+				Error:      "No BYOK providers available for your account",
+				Suggestion: "Switch to platform routing or check your personal API keys in Settings",
 			})
 			return
 		}
@@ -379,8 +405,8 @@ func (h *BuildHandler) PreflightCheck(c *gin.Context) {
 		availSet[string(p)] = true
 	}
 
-	// Build provider status map: always include 4 platform providers,
-	// plus any BYOK-only providers (like ollama) that are actually available.
+	// Build provider status map: always include core platform providers,
+	// plus hosted or BYOK Ollama when it is actually available.
 	statuses := make(map[string]string)
 	for _, k := range []string{"claude", "gpt4", "gemini", "grok"} {
 		if availSet[k] {
@@ -574,7 +600,16 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 			})
 			return
 		}
-		if providers := router.GetAvailableProvidersForUser(uid); len(providers) == 0 {
+		providerMode := requestedBuildProviderMode(req.ProviderMode)
+		if providers := providersForBuildProviderMode(router, uid, providerMode); len(providers) == 0 {
+			if providerMode == "byok" {
+				c.JSON(http.StatusPaymentRequired, gin.H{
+					"error":      "No BYOK providers available for your account",
+					"error_code": "BYOK_PROVIDER_UNAVAILABLE",
+					"suggestion": "Switch to platform routing or check your personal API keys in Settings",
+				})
+				return
+			}
 			c.JSON(http.StatusPaymentRequired, gin.H{
 				"error":      "No AI providers available for your account",
 				"error_code": "INSUFFICIENT_CREDITS",

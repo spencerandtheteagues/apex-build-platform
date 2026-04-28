@@ -98,15 +98,15 @@ describe('ModelRoleConfig', () => {
       />
     )
 
-    // All provider cards shown with online status
+    // Hosted platform providers are online; Ollama remains visible but unavailable until advertised.
     expect(screen.getAllByText('Online').length).toBe(4)
 
     // Each provider should have clickable role chips
-    // "Architect" appears once per provider card = 4 times, plus we look for assigned state
-    expect(screen.getAllByText('Architect').length).toBe(4)
-    expect(screen.getAllByText('Coder').length).toBe(4)
-    expect(screen.getAllByText('Tester').length).toBe(4)
-    expect(screen.getAllByText('DevOps').length).toBe(4)
+    // "Architect" appears once per provider card = 5 times.
+    expect(screen.getAllByText('Architect').length).toBe(5)
+    expect(screen.getAllByText('Coder').length).toBe(5)
+    expect(screen.getAllByText('Tester').length).toBe(5)
+    expect(screen.getAllByText('DevOps').length).toBe(5)
   })
 
   it('assigns role to provider when chip is clicked', () => {
@@ -220,7 +220,7 @@ describe('ModelRoleConfig', () => {
     )
 
     expect(screen.getAllByText('Online').length).toBe(3)
-    expect(screen.getByText('Offline')).toBeTruthy()
+    expect(screen.getAllByText('Offline').length).toBe(2)
   })
 
   it('disables chips on unavailable providers', () => {
@@ -266,7 +266,7 @@ describe('ModelRoleConfig', () => {
     })
   })
 
-  it('does not show Ollama when providerStatuses has no ollama key', () => {
+  it('shows Ollama controls as offline when providerStatuses has no ollama key', () => {
     render(
       <ModelRoleConfig
         mode="manual"
@@ -277,9 +277,10 @@ describe('ModelRoleConfig', () => {
       />
     )
 
-    // 4 platform providers shown
+    // 4 platform providers online, Ollama still visible but unavailable
     expect(screen.getAllByText('Online').length).toBe(4)
-    expect(screen.queryByText('Ollama')).toBeNull()
+    expect(screen.getByText('Ollama')).toBeTruthy()
+    expect(screen.getByText('Offline')).toBeTruthy()
   })
 
   it('shows Ollama card when providerStatuses includes ollama', () => {
@@ -296,7 +297,7 @@ describe('ModelRoleConfig', () => {
     // 5 providers shown (4 platform + Ollama)
     expect(screen.getAllByText('Online').length).toBe(5)
     expect(screen.getByText('Ollama')).toBeTruthy()
-    expect(screen.getByText('Local')).toBeTruthy()
+    expect(screen.getByText('Kimi K2.6 Cloud/BYOK')).toBeTruthy()
   })
 
   it('shows Ollama as offline when ollama status is unavailable', () => {

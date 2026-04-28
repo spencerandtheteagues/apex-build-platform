@@ -71,10 +71,10 @@ const PLAN_CONFIG: Record<string, {
     features: ['Backend + API generation', 'Database-backed apps', 'Auth + deployment', 'Publish to production', 'BYOK (bring your own keys)'],
   },
   pro: {
-    color: '#ff4466',
-    glow: 'rgba(255,68,102,0.35)',
-    border: 'rgba(255,68,102,0.45)',
-    bg: 'rgba(255,68,102,0.05)',
+    color: '#38bdf8',
+    glow: 'rgba(56,189,248,0.35)',
+    border: 'rgba(56,189,248,0.45)',
+    bg: 'rgba(56,189,248,0.05)',
     badge: 'MOST POPULAR',
     icon: <ShieldCheck size={18} />,
     tagline: 'Serious shipping, every week',
@@ -82,10 +82,10 @@ const PLAN_CONFIG: Record<string, {
     features: ['Everything in Builder', 'Longer autonomous runs', 'Higher included credits', 'Max power mode access', 'Priority for heavy workflows'],
   },
   team: {
-    color: '#f59e0b',
-    glow: 'rgba(245,158,11,0.3)',
-    border: 'rgba(245,158,11,0.4)',
-    bg: 'rgba(245,158,11,0.05)',
+    color: '#67e8f9',
+    glow: 'rgba(103,232,249,0.3)',
+    border: 'rgba(103,232,249,0.4)',
+    bg: 'rgba(103,232,249,0.05)',
     badge: 'BEST VALUE',
     icon: <Users size={18} />,
     tagline: 'Shared team credit runway',
@@ -104,10 +104,10 @@ const PLAN_CONFIG: Record<string, {
     features: ['Custom credit limits', 'Dedicated support', 'Custom SLAs', 'SSO + audit logs', 'Volume pricing'],
   },
   owner: {
-    color: '#ff0033',
-    glow: 'rgba(255,0,51,0.3)',
-    border: 'rgba(255,0,51,0.4)',
-    bg: 'rgba(255,0,51,0.05)',
+    color: '#7dd3fc',
+    glow: 'rgba(125,211,252,0.3)',
+    border: 'rgba(125,211,252,0.4)',
+    bg: 'rgba(125,211,252,0.05)',
     badge: 'ADMIN',
     icon: <Crown size={18} />,
     tagline: 'Unlimited platform access',
@@ -119,8 +119,8 @@ const PLAN_CONFIG: Record<string, {
 const PACK_CONFIG = [
   { amountUsd: 10, color: '#22c55e', glow: 'rgba(34,197,94,0.3)', border: 'rgba(34,197,94,0.35)', bg: 'rgba(34,197,94,0.05)', label: 'Starter' },
   { amountUsd: 25, color: '#60a5fa', glow: 'rgba(96,165,250,0.3)', border: 'rgba(96,165,250,0.4)', bg: 'rgba(96,165,250,0.05)', label: 'Builder' },
-  { amountUsd: 50, color: '#ff4466', glow: 'rgba(255,68,102,0.35)', border: 'rgba(255,68,102,0.45)', bg: 'rgba(255,68,102,0.06)', label: 'Pro', popular: true },
-  { amountUsd: 100, color: '#f97316', glow: 'rgba(249,115,22,0.3)', border: 'rgba(249,115,22,0.4)', bg: 'rgba(249,115,22,0.05)', label: 'Power' },
+  { amountUsd: 50, color: '#38bdf8', glow: 'rgba(56,189,248,0.35)', border: 'rgba(56,189,248,0.45)', bg: 'rgba(56,189,248,0.06)', label: 'Pro', popular: true },
+  { amountUsd: 100, color: '#67e8f9', glow: 'rgba(103,232,249,0.3)', border: 'rgba(103,232,249,0.4)', bg: 'rgba(103,232,249,0.05)', label: 'Power' },
 ]
 
 const asNumber = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) ? v : 0
@@ -355,7 +355,7 @@ export function BillingSettings() {
       )}
 
       {error && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <div className="flex items-start gap-3 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-200">
           <AlertCircle size={15} className="mt-0.5 shrink-0" />
           <span className="flex-1">{error}</span>
           <button
@@ -395,7 +395,7 @@ export function BillingSettings() {
                     <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${
                       subscription.status === 'active'
                         ? 'bg-emerald-500/15 text-emerald-300'
-                        : 'bg-amber-500/15 text-amber-300'
+                        : 'bg-sky-500/15 text-sky-300'
                     }`}>
                       {subscription.status}
                     </span>
@@ -419,7 +419,7 @@ export function BillingSettings() {
                 <div
                   className="mt-2 font-mono text-3xl font-black leading-none"
                   style={{
-                    color: hasUnlimited || bypassBilling ? '#4ade80' : (creditBalance ?? 1) <= 0 ? '#f87171' : '#ffffff',
+                    color: hasUnlimited || bypassBilling ? '#4ade80' : (creditBalance ?? 1) <= 0 ? '#7dd3fc' : '#ffffff',
                     filter: `drop-shadow(0 0 12px ${hasUnlimited || bypassBilling ? 'rgba(74,222,128,0.35)' : planCfg.glow})`,
                   }}
                 >
@@ -446,7 +446,7 @@ export function BillingSettings() {
                   setBuyAmount(null)
                   setShowBuyCredits(true)
                 }}
-                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-red-500/40 bg-gradient-to-r from-red-600 to-red-800 px-4 py-2.5 text-sm font-bold text-white shadow-[0_0_24px_rgba(255,0,51,0.28)] transition hover:from-red-500 hover:to-red-700"
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-400/40 bg-gradient-to-r from-sky-600 to-blue-800 px-4 py-2.5 text-sm font-bold text-white shadow-[0_0_24px_rgba(56,189,248,0.28)] transition hover:from-sky-500 hover:to-blue-700"
               >
                 <Zap size={14} />
                 Buy Credits
@@ -504,7 +504,7 @@ export function BillingSettings() {
                 {(isCurrent || cfg.badge) && (
                   <div
                     className="absolute -top-2.5 left-5 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
-                    style={{ background: cfg.color, color: cfg.color === '#f59e0b' ? '#000' : '#fff' }}
+                    style={{ background: cfg.color, color: '#020617' }}
                   >
                     {isCurrent ? 'Current Plan' : cfg.badge}
                   </div>

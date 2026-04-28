@@ -17,21 +17,21 @@ import {
 
 // User-facing role categories (maps to backend UserRoleCategory)
 const ROLE_CATEGORIES = [
-  { id: 'architect', label: 'Architect', desc: 'Planning, design, review', icon: Brain, color: 'purple' },
+  { id: 'architect', label: 'Architect', desc: 'Planning, design, review', icon: Brain, color: 'cyan' },
   { id: 'coder', label: 'Coder', desc: 'Frontend, backend, database', icon: Code2, color: 'blue' },
   { id: 'tester', label: 'Tester', desc: 'Testing & QA', icon: TestTube, color: 'green' },
-  { id: 'devops', label: 'DevOps', desc: 'Deploy, debug, fixes', icon: Server, color: 'orange' },
+  { id: 'devops', label: 'DevOps', desc: 'Deploy, debug, fixes', icon: Server, color: 'cyan' },
 ] as const
 
-// Provider metadata — platform providers always shown; Ollama shown only when user has it configured
+// Provider metadata — all routed providers are shown so users can see and control Ollama beside the hosted models.
 const PLATFORM_PROVIDERS = [
-  { id: 'claude', label: 'Claude', subtitle: 'Anthropic', letter: 'A', borderActive: 'border-orange-500/60', bgActive: 'bg-orange-500/10', text: 'text-orange-400', shadow: 'shadow-orange-500/10' },
+  { id: 'claude', label: 'Claude', subtitle: 'Anthropic', letter: 'A', borderActive: 'border-blue-500/60', bgActive: 'bg-blue-500/10', text: 'text-blue-300', shadow: 'shadow-blue-500/10' },
   { id: 'gpt4', label: 'ChatGPT', subtitle: 'OpenAI', letter: 'G', borderActive: 'border-emerald-500/60', bgActive: 'bg-emerald-500/10', text: 'text-emerald-400', shadow: 'shadow-emerald-500/10' },
   { id: 'gemini', label: 'Gemini', subtitle: 'Google', letter: 'G', borderActive: 'border-blue-500/60', bgActive: 'bg-blue-500/10', text: 'text-blue-400', shadow: 'shadow-blue-500/10' },
-  { id: 'grok', label: 'Grok', subtitle: 'xAI', letter: 'X', borderActive: 'border-violet-500/60', bgActive: 'bg-violet-500/10', text: 'text-violet-400', shadow: 'shadow-violet-500/10' },
+  { id: 'grok', label: 'Grok', subtitle: 'xAI', letter: 'X', borderActive: 'border-sky-500/60', bgActive: 'bg-sky-500/10', text: 'text-sky-300', shadow: 'shadow-sky-500/10' },
 ] as const
 
-const OLLAMA_PROVIDER = { id: 'ollama', label: 'Ollama', subtitle: 'Local', letter: 'O', borderActive: 'border-cyan-500/60', bgActive: 'bg-cyan-500/10', text: 'text-cyan-400', shadow: 'shadow-cyan-500/10' } as const
+const OLLAMA_PROVIDER = { id: 'ollama', label: 'Ollama', subtitle: 'Kimi K2.6 Cloud/BYOK', letter: 'O', borderActive: 'border-cyan-500/60', bgActive: 'bg-cyan-500/10', text: 'text-cyan-400', shadow: 'shadow-cyan-500/10' } as const
 
 // Default assignments matching backend policy
 const DEFAULT_ASSIGNMENTS: Record<string, string> = {
@@ -43,10 +43,10 @@ const DEFAULT_ASSIGNMENTS: Record<string, string> = {
 
 // Chip color classes per role
 const CHIP_COLORS: Record<string, { active: string; ring: string }> = {
-  purple: { active: 'border-purple-500/70 bg-purple-500/20 text-purple-300', ring: 'ring-purple-500/30' },
+  purple: { active: 'border-cyan-500/70 bg-cyan-500/20 text-cyan-300', ring: 'ring-cyan-500/30' },
   blue: { active: 'border-blue-500/70 bg-blue-500/20 text-blue-300', ring: 'ring-blue-500/30' },
   green: { active: 'border-green-500/70 bg-green-500/20 text-green-300', ring: 'ring-green-500/30' },
-  orange: { active: 'border-orange-500/70 bg-orange-500/20 text-orange-300', ring: 'ring-orange-500/30' },
+  orange: { active: 'border-cyan-500/70 bg-cyan-500/20 text-cyan-300', ring: 'ring-cyan-500/30' },
   cyan: { active: 'border-cyan-500/70 bg-cyan-500/20 text-cyan-300', ring: 'ring-cyan-500/30' },
 }
 
@@ -65,10 +65,7 @@ export default function ModelRoleConfig({
   onAssignmentsChange,
   providerStatuses,
 }: ModelRoleConfigProps) {
-  // Build visible providers: always show platform providers, add Ollama only when user has it
-  const visibleProviders = 'ollama' in providerStatuses
-    ? [...PLATFORM_PROVIDERS, OLLAMA_PROVIDER]
-    : [...PLATFORM_PROVIDERS]
+  const visibleProviders = [...PLATFORM_PROVIDERS, OLLAMA_PROVIDER]
 
   const isValid = 'architect' in assignments && 'coder' in assignments
 
@@ -91,11 +88,11 @@ export default function ModelRoleConfig({
   }
 
   return (
-    <Card variant="cyberpunk" glow="intense" className="border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">
+    <Card variant="cyberpunk" glow="intense" className="border-2 border-sky-500/30 bg-black/60 backdrop-blur-xl">
       <CardContent className="p-6 md:p-8">
         {/* Header */}
         <h3 className="text-xl font-bold text-gray-200 mb-6 flex items-center gap-3">
-          <Settings className="w-6 h-6 text-red-400" />
+          <Settings className="w-6 h-6 text-sky-300" />
           Model Configuration
         </h3>
 
@@ -106,12 +103,12 @@ export default function ModelRoleConfig({
             className={cn(
               'relative flex items-center gap-3 px-6 py-3 rounded-xl transition-all duration-300 overflow-hidden',
               mode === 'auto'
-                ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
+                ? 'bg-gradient-to-r from-sky-900/55 to-cyan-900/40 border-2 border-sky-400 text-sky-200 shadow-xl shadow-sky-900/35'
                 : 'bg-gray-900/60 border-2 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
             )}
           >
             {mode === 'auto' && (
-              <div className="absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
+              <div className="absolute inset-0 bg-gradient-to-r from-sky-500/10 via-cyan-500/10 to-blue-500/10 animate-pulse" />
             )}
             <Sparkles className={cn('w-5 h-5 relative z-10', mode === 'auto' && 'animate-pulse')} />
             <span className="relative z-10 font-bold">Auto</span>
@@ -127,12 +124,12 @@ export default function ModelRoleConfig({
             className={cn(
               'relative flex items-center gap-3 px-6 py-3 rounded-xl transition-all duration-300 overflow-hidden',
               mode === 'manual'
-                ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
+                ? 'bg-gradient-to-r from-sky-900/55 to-cyan-900/40 border-2 border-sky-400 text-sky-200 shadow-xl shadow-sky-900/35'
                 : 'bg-gray-900/60 border-2 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
             )}
           >
             {mode === 'manual' && (
-              <div className="absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
+              <div className="absolute inset-0 bg-gradient-to-r from-sky-500/10 via-cyan-500/10 to-blue-500/10 animate-pulse" />
             )}
             <Settings className={cn('w-5 h-5 relative z-10', mode === 'manual' && 'animate-pulse')} />
             <span className="relative z-10 font-bold">Manual</span>
@@ -176,7 +173,7 @@ export default function ModelRoleConfig({
           /* Manual Mode: provider cards with role chips */
           <div>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-              Click a role chip to assign it to a model. Each role can only be assigned to one model. Ollama is only available for local/BYOK builds and is never used for hosted platform runs.
+              Click a role chip to assign it to a model. Each role can only be assigned to one model. Ollama appears beside the hosted providers and can route through hosted Ollama Cloud or BYOK when available.
             </p>
 
             <div className="space-y-3">
@@ -217,7 +214,7 @@ export default function ModelRoleConfig({
                           <Check className="w-3 h-3 inline mr-0.5" />Online
                         </span>
                       ) : (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/20">
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/20">
                           Offline
                         </span>
                       )}
@@ -256,8 +253,8 @@ export default function ModelRoleConfig({
 
             {/* Validation */}
             {!isValid && (
-              <div className="mt-4 p-3 rounded-lg bg-red-900/20 border border-red-800/40">
-                <p className="text-xs text-red-400 flex items-center gap-1.5">
+              <div className="mt-4 p-3 rounded-lg bg-sky-900/20 border border-sky-700/40">
+                <p className="text-xs text-sky-300 flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
                   Assign at least <strong>Architect</strong> and <strong>Coder</strong> roles to start a build.
                 </p>

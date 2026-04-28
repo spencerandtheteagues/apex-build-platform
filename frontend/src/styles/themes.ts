@@ -1,30 +1,30 @@
 // APEX-BUILD Theme System
-// Production theme is intentionally locked to Apex Dark.
+// Production theme is intentionally locked to the redesigned blue-steel workspace.
 
 import { Theme } from '@/types'
 
 export const themes: Record<string, Theme> = {
   cyberpunk: {
     id: 'cyberpunk',
-    name: 'Apex Dark',
+    name: 'Apex Blue Steel',
     colors: {
-      primary: '#ff0033',      // Apex Red
-      secondary: '#990022',    // Deep Red
-      accent: '#ff4466',       // Hot Red
+      primary: '#38bdf8',
+      secondary: '#1d4ed8',
+      accent: '#67e8f9',
       background: '#0a0a0a',   // Deep Space
-      surface: '#14070b',      // Dark Red Steel
+      surface: '#07111f',
       text: '#ffffff',         // Neon White
       textSecondary: '#e0e0e0',// Silver
-      error: '#ff4444',        // Cyber Red
-      warning: '#ffaa00',      // Electric Orange
+      error: '#7dd3fc',
+      warning: '#60a5fa',
       success: '#39ff14',      // Acid Green
-      info: '#ff4466',         // Apex Red
+      info: '#38bdf8',
     },
     effects: {
       glassMorphism: `
-        background: rgba(20, 7, 11, 0.8);
+        background: rgba(7, 17, 31, 0.8);
         backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 0, 51, 0.22);
+        border: 1px solid rgba(56, 189, 248, 0.22);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
       `,
       neonGlow: `
@@ -34,7 +34,7 @@ export const themes: Record<string, Theme> = {
           0 0 20px currentColor;
       `,
       holographic: `
-        background: linear-gradient(45deg, #ff0033, #990022, #ff4466, #cc0028);
+        background: linear-gradient(45deg, #38bdf8, #1d4ed8, #67e8f9, #2563eb);
         background-size: 300% 300%;
         animation: holographicShift 3s ease infinite;
         -webkit-background-clip: text;

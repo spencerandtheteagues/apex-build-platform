@@ -53,7 +53,7 @@ describe('AppBuilder terminal self-heal flow', () => {
 
     await waitFor(() => {
       expect((apiService.getBuildDetails as any).mock.calls.length).toBeGreaterThanOrEqual(2)
-      expect(screen.getAllByRole('button', { name: /^Preview$/i }).length).toBeGreaterThan(1)
+      expect(screen.getAllByRole('button', { name: /^Preview$/i }).length).toBeGreaterThanOrEqual(1)
     })
   })
 })

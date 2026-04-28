@@ -1,5 +1,5 @@
 // APEX-BUILD Explore / Community Page
-// Dark Demon Theme - Marketplace for projects, templates, and extensions
+// Blue-steel redesign theme - Marketplace for projects, templates, and extensions
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { cn } from '@/lib/utils'

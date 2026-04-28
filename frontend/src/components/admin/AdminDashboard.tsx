@@ -1,5 +1,5 @@
 // APEX-BUILD Admin Dashboard
-// Enterprise administration interface with dark demon theme
+// Enterprise administration interface with the blue-steel workspace theme
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { cn, formatRelativeTime, formatFileSize } from '@/lib/utils'
@@ -92,6 +92,11 @@ interface User {
   created_at: string
 }
 
+const formatAdminCurrency = (value: number | undefined): string => {
+  const amount = typeof value === 'number' && Number.isFinite(value) ? value : 0
+  return amount.toFixed(2)
+}
+
 export interface AdminDashboardProps {
   className?: string
 }
@@ -122,6 +127,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
   // Check if user is admin
   const isAdmin = user?.is_admin || user?.is_super_admin
   const isSuperAdmin = user?.is_super_admin
+  const userStats = { total: 0, active: 0, admins: 0, pro: 0, ...stats?.users }
+  const projectStats = { total: 0, active: 0, ...stats?.projects }
+  const aiStats = { total_requests: 0, total_cost: 0, ...stats?.ai }
+  const providerStats = { claude: 0, gpt4: 0, gemini: 0, ...systemStats?.ai_providers }
+  const subscriptionStats = { free: 0, pro: 0, team: 0, enterprise: 0, owner: 0, ...systemStats?.subscriptions }
+  const storageStats = { total_files: 0, total_bytes: 0, ...systemStats?.storage }
 
   // Fetch admin dashboard data
   const fetchDashboard = useCallback(async () => {
@@ -326,9 +337,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-400">Total Users</p>
-              <p className="text-3xl font-bold text-white">{stats?.users.total || 0}</p>
+              <p className="text-3xl font-bold text-white">{userStats.total}</p>
               <p className="text-xs text-green-500">
-                {stats?.users.active || 0} active
+                {userStats.active} active
               </p>
             </div>
             <Users className="w-10 h-10 text-red-500 opacity-50" />
@@ -340,9 +351,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-400">Admin Users</p>
-              <p className="text-3xl font-bold text-white">{stats?.users.admins || 0}</p>
+              <p className="text-3xl font-bold text-white">{userStats.admins}</p>
               <p className="text-xs text-purple-400">
-                {stats?.users.pro || 0} pro subscribers
+                {userStats.pro} pro subscribers
               </p>
             </div>
             <Crown className="w-10 h-10 text-purple-500 opacity-50" />
@@ -354,9 +365,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-400">Projects</p>
-              <p className="text-3xl font-bold text-white">{stats?.projects.total || 0}</p>
+              <p className="text-3xl font-bold text-white">{projectStats.total}</p>
               <p className="text-xs text-cyan-400">
-                {stats?.projects.active || 0} active
+                {projectStats.active} active
               </p>
             </div>
             <Database className="w-10 h-10 text-cyan-500 opacity-50" />
@@ -368,9 +379,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-400">AI Requests</p>
-              <p className="text-3xl font-bold text-white">{stats?.ai.total_requests || 0}</p>
+              <p className="text-3xl font-bold text-white">{aiStats.total_requests}</p>
               <p className="text-xs text-orange-400">
-                ${(stats?.ai.total_cost || 0).toFixed(2)} total cost
+                ${aiStats.total_cost.toFixed(2)} total cost
               </p>
             </div>
             <Zap className="w-10 h-10 text-orange-500 opacity-50" />
@@ -403,15 +414,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
             <div className="space-y-2 text-sm text-gray-200">
               <div className="flex items-center justify-between">
                 <span>Claude</span>
-                <span className="text-orange-400">{systemStats?.ai_providers.claude || 0}</span>
+                <span className="text-sky-300">{providerStats.claude}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>GPT-4</span>
-                <span className="text-green-400">{systemStats?.ai_providers.gpt4 || 0}</span>
+                <span className="text-green-400">{providerStats.gpt4}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Gemini</span>
-                <span className="text-blue-400">{systemStats?.ai_providers.gemini || 0}</span>
+                <span className="text-blue-400">{providerStats.gemini}</span>
               </div>
             </div>
           </Card>
@@ -421,23 +432,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
             <div className="space-y-2 text-sm text-gray-200">
               <div className="flex items-center justify-between">
                 <span>Free</span>
-                <span>{systemStats?.subscriptions.free || 0}</span>
+                <span>{subscriptionStats.free}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Pro</span>
-                <span>{systemStats?.subscriptions.pro || 0}</span>
+                <span>{subscriptionStats.pro}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Team</span>
-                <span>{systemStats?.subscriptions.team || 0}</span>
+                <span>{subscriptionStats.team}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Enterprise</span>
-                <span>{systemStats?.subscriptions.enterprise || 0}</span>
+                <span>{subscriptionStats.enterprise}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Owner</span>
-                <span>{systemStats?.subscriptions.owner || 0}</span>
+                <span>{subscriptionStats.owner}</span>
               </div>
             </div>
           </Card>
@@ -447,11 +458,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
             <div className="space-y-2 text-sm text-gray-200">
               <div className="flex items-center justify-between">
                 <span>Total Files</span>
-                <span>{systemStats?.storage.total_files || 0}</span>
+                <span>{storageStats.total_files}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Total Bytes</span>
-                <span>{formatFileSize(systemStats?.storage.total_bytes || 0)}</span>
+                <span>{formatFileSize(storageStats.total_bytes)}</span>
               </div>
             </div>
           </Card>
@@ -544,9 +555,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
                   </td>
                   <td className="py-3 px-4">
                     {u.has_unlimited_credits ? (
-                      <span className="text-yellow-500 font-medium">∞ Unlimited</span>
+                      <span className="text-sky-300 font-medium">∞ Unlimited</span>
                     ) : (
-                      <span className="text-gray-300">${u.credit_balance.toFixed(2)}</span>
+                      <span className="text-gray-300">${formatAdminCurrency(u.credit_balance)}</span>
                     )}
                   </td>
                   <td className="py-3 px-4">
@@ -929,7 +940,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
                 </div>
                 <div>
                   <p className="text-gray-500">Credits</p>
-                  <p>{detailsUser.has_unlimited_credits ? 'Unlimited' : `$${detailsUser.credit_balance.toFixed(2)}`}</p>
+                  <p>{detailsUser.has_unlimited_credits ? 'Unlimited' : `$${formatAdminCurrency(detailsUser.credit_balance)}`}</p>
                 </div>
               </div>
 

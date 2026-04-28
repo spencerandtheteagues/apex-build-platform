@@ -112,7 +112,7 @@
     0 0 5px var(--glow-cyan),
     0 0 10px var(--glow-cyan),
     0 0 20px var(--glow-cyan),
-    0 0 40px rgba(255, 0, 51, 0.5);
+    0 0 40px rgba(56, 189, 248, 0.5);
 }
 
 .text-glow-purple {
@@ -121,7 +121,7 @@
     0 0 5px var(--glow-purple),
     0 0 10px var(--glow-purple),
     0 0 20px var(--glow-purple),
-    0 0 40px rgba(180, 0, 255, 0.5);
+    0 0 40px rgba(96, 165, 250, 0.5);
 }
 
 .text-glow-red {
@@ -130,7 +130,7 @@
     0 0 5px var(--glow-red),
     0 0 10px var(--glow-red),
     0 0 20px var(--glow-red),
-    0 0 40px rgba(255, 0, 64, 0.5);
+    0 0 40px rgba(56, 189, 248, 0.5);
 }
 
 .text-glow-pink {
@@ -139,7 +139,7 @@
     0 0 5px var(--glow-pink),
     0 0 10px var(--glow-pink),
     0 0 20px var(--glow-pink),
-    0 0 40px rgba(255, 0, 160, 0.5);
+    0 0 40px rgba(34, 211, 238, 0.5);
 }
 
 /* Gradient text effects */
@@ -211,9 +211,9 @@
 .glass-gradient {
   background: linear-gradient(
     135deg,
-    rgba(255, 0, 51, 0.1) 0%,
-    rgba(180, 0, 255, 0.1) 50%,
-    rgba(255, 0, 160, 0.1) 100%
+    rgba(56, 189, 248, 0.1) 0%,
+    rgba(96, 165, 250, 0.1) 50%,
+    rgba(34, 211, 238, 0.1) 100%
   );
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -229,28 +229,28 @@
   box-shadow:
     0 0 10px var(--glow-cyan),
     0 0 20px var(--glow-cyan),
-    0 0 30px rgba(255, 0, 51, 0.5);
+    0 0 30px rgba(56, 189, 248, 0.5);
 }
 
 .glow-purple {
   box-shadow:
     0 0 10px var(--glow-purple),
     0 0 20px var(--glow-purple),
-    0 0 30px rgba(180, 0, 255, 0.5);
+    0 0 30px rgba(96, 165, 250, 0.5);
 }
 
 .glow-red {
   box-shadow:
     0 0 10px var(--glow-red),
     0 0 20px var(--glow-red),
-    0 0 30px rgba(255, 0, 64, 0.5);
+    0 0 30px rgba(56, 189, 248, 0.5);
 }
 
 .glow-pink {
   box-shadow:
     0 0 10px var(--glow-pink),
     0 0 20px var(--glow-pink),
-    0 0 30px rgba(255, 0, 160, 0.5);
+    0 0 30px rgba(34, 211, 238, 0.5);
 }
 
 .glow-green {
@@ -265,21 +265,21 @@
   border: 1px solid var(--glow-cyan);
   box-shadow:
     0 0 5px var(--glow-cyan),
-    inset 0 0 5px rgba(255, 0, 51, 0.2);
+    inset 0 0 5px rgba(56, 189, 248, 0.2);
 }
 
 .border-glow-purple {
   border: 1px solid var(--glow-purple);
   box-shadow:
     0 0 5px var(--glow-purple),
-    inset 0 0 5px rgba(180, 0, 255, 0.2);
+    inset 0 0 5px rgba(96, 165, 250, 0.2);
 }
 
 .border-glow-red {
   border: 1px solid var(--glow-red);
   box-shadow:
     0 0 5px var(--glow-red),
-    inset 0 0 5px rgba(255, 0, 64, 0.2);
+    inset 0 0 5px rgba(56, 189, 248, 0.2);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -326,7 +326,7 @@
   background: linear-gradient(
     to bottom,
     transparent,
-    rgba(255, 0, 51, 0.2),
+    rgba(56, 189, 248, 0.2),
     transparent
   );
   animation: scanline-sweep 4s linear infinite;
@@ -341,11 +341,11 @@
 .holographic {
   background: linear-gradient(
     135deg,
-    rgba(255, 0, 51, 0.3) 0%,
-    rgba(180, 0, 255, 0.3) 25%,
-    rgba(255, 0, 160, 0.3) 50%,
+    rgba(56, 189, 248, 0.3) 0%,
+    rgba(96, 165, 250, 0.3) 25%,
+    rgba(34, 211, 238, 0.3) 50%,
     rgba(255, 230, 0, 0.3) 75%,
-    rgba(255, 0, 51, 0.3) 100%
+    rgba(56, 189, 248, 0.3) 100%
   );
   background-size: 400% 400%;
   animation: holographic-shift 8s ease infinite;
@@ -378,12 +378,12 @@
 .iridescent {
   background: linear-gradient(
     90deg,
-    rgba(255, 0, 128, 0.2),
-    rgba(128, 0, 255, 0.2),
+    rgba(34, 211, 238, 0.2),
+    rgba(37, 99, 235, 0.2),
     rgba(0, 128, 255, 0.2),
     rgba(0, 255, 128, 0.2),
     rgba(255, 255, 0, 0.2),
-    rgba(255, 0, 128, 0.2)
+    rgba(34, 211, 238, 0.2)
   );
   background-size: 600% 100%;
   animation: iridescent-flow 6s linear infinite;
@@ -426,8 +426,8 @@
 .bg-circuit {
   background-color: #0a0a0f;
   background-image:
-    linear-gradient(rgba(255, 0, 51, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 0, 51, 0.03) 1px, transparent 1px),
+    linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px),
     url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10 10h80v80H10z' fill='none' stroke='%2300f0ff' stroke-opacity='0.05' stroke-width='0.5'/%3E%3Ccircle cx='10' cy='10' r='2' fill='%2300f0ff' fill-opacity='0.1'/%3E%3Ccircle cx='90' cy='10' r='2' fill='%2300f0ff' fill-opacity='0.1'/%3E%3Ccircle cx='10' cy='90' r='2' fill='%2300f0ff' fill-opacity='0.1'/%3E%3Ccircle cx='90' cy='90' r='2' fill='%2300f0ff' fill-opacity='0.1'/%3E%3Cpath d='M10 50h30M60 50h30M50 10v30M50 60v30' stroke='%2300f0ff' stroke-opacity='0.08' stroke-width='0.5'/%3E%3C/svg%3E");
   background-size: 20px 20px, 20px 20px, 100px 100px;
 }
@@ -435,20 +435,20 @@
 /* Grid perspective */
 .bg-grid-perspective {
   background:
-    linear-gradient(180deg, transparent 0%, rgba(255, 0, 51, 0.1) 100%),
+    linear-gradient(180deg, transparent 0%, rgba(56, 189, 248, 0.1) 100%),
     repeating-linear-gradient(
       90deg,
       transparent,
       transparent 49px,
-      rgba(255, 0, 51, 0.1) 49px,
-      rgba(255, 0, 51, 0.1) 50px
+      rgba(56, 189, 248, 0.1) 49px,
+      rgba(56, 189, 248, 0.1) 50px
     ),
     repeating-linear-gradient(
       0deg,
       transparent,
       transparent 49px,
-      rgba(255, 0, 51, 0.1) 49px,
-      rgba(255, 0, 51, 0.1) 50px
+      rgba(56, 189, 248, 0.1) 49px,
+      rgba(56, 189, 248, 0.1) 50px
     );
   transform: perspective(500px) rotateX(60deg);
   transform-origin: center top;
@@ -460,15 +460,15 @@
     -45deg,
     transparent,
     transparent 10px,
-    rgba(255, 0, 51, 0.03) 10px,
-    rgba(255, 0, 51, 0.03) 11px
+    rgba(56, 189, 248, 0.03) 10px,
+    rgba(56, 189, 248, 0.03) 11px
   );
 }
 
 /* Dotted grid */
 .bg-dots {
   background-image: radial-gradient(
-    rgba(255, 0, 51, 0.15) 1px,
+    rgba(56, 189, 248, 0.15) 1px,
     transparent 1px
   );
   background-size: 20px 20px;
@@ -520,7 +520,7 @@
   inset: 0;
   background: linear-gradient(
     135deg,
-    rgba(255, 0, 51, 0.2) 0%,
+    rgba(56, 189, 248, 0.2) 0%,
     transparent 50%
   );
   clip-path: inherit;
@@ -941,21 +941,21 @@ html {
   box-shadow:
     0 0 10px var(--glow-cyan),
     0 0 20px var(--glow-cyan),
-    0 0 30px rgba(255, 0, 51, 0.4);
+    0 0 30px rgba(56, 189, 248, 0.4);
 }
 
 .hover-glow-purple:hover {
   box-shadow:
     0 0 10px var(--glow-purple),
     0 0 20px var(--glow-purple),
-    0 0 30px rgba(180, 0, 255, 0.4);
+    0 0 30px rgba(96, 165, 250, 0.4);
 }
 
 .hover-glow-red:hover {
   box-shadow:
     0 0 10px var(--glow-red),
     0 0 20px var(--glow-red),
-    0 0 30px rgba(255, 0, 64, 0.4);
+    0 0 30px rgba(56, 189, 248, 0.4);
 }
 
 /* Hover lift */
@@ -1041,7 +1041,7 @@ html {
   color: #000;
   box-shadow:
     0 0 20px var(--glow-cyan),
-    inset 0 0 20px rgba(255, 0, 51, 0.2);
+    inset 0 0 20px rgba(56, 189, 248, 0.2);
 }
 
 .btn-cyber:hover::before {
@@ -1051,7 +1051,7 @@ html {
 /* Cyber input */
 .input-cyber {
   background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 0, 51, 0.3);
+  border: 1px solid rgba(56, 189, 248, 0.3);
   color: #fff;
   padding: 12px 16px;
   font-family: 'Share Tech Mono', monospace;
@@ -1063,11 +1063,11 @@ html {
   border-color: var(--glow-cyan);
   box-shadow:
     0 0 10px var(--glow-cyan),
-    inset 0 0 10px rgba(255, 0, 51, 0.1);
+    inset 0 0 10px rgba(56, 189, 248, 0.1);
 }
 
 .input-cyber::placeholder {
-  color: rgba(255, 0, 51, 0.4);
+  color: rgba(56, 189, 248, 0.4);
 }
 
 /* Status indicator */
@@ -1103,7 +1103,7 @@ html {
 .progress-cyber {
   position: relative;
   height: 4px;
-  background: rgba(255, 0, 51, 0.1);
+  background: rgba(56, 189, 248, 0.1);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -1149,14 +1149,14 @@ html {
   animation: spin-slow 1s linear infinite;
   box-shadow:
     0 0 10px var(--glow-cyan),
-    inset 0 0 10px rgba(180, 0, 255, 0.2);
+    inset 0 0 10px rgba(96, 165, 250, 0.2);
 }
 
 /* Loading bar */
 .loading-bar-cyber {
   position: relative;
   height: 2px;
-  background: rgba(255, 0, 51, 0.1);
+  background: rgba(56, 189, 248, 0.1);
   overflow: hidden;
 }
 
@@ -1184,9 +1184,9 @@ html {
 .skeleton-cyber {
   background: linear-gradient(
     90deg,
-    rgba(255, 0, 51, 0.05) 0%,
-    rgba(255, 0, 51, 0.1) 50%,
-    rgba(255, 0, 51, 0.05) 100%
+    rgba(56, 189, 248, 0.05) 0%,
+    rgba(56, 189, 248, 0.1) 50%,
+    rgba(56, 189, 248, 0.05) 100%
   );
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s infinite;

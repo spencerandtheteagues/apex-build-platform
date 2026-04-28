@@ -86,20 +86,20 @@ const PROVIDER_CONFIG: Record<SupportedProvider, {
     label: 'Claude',
     tagline: 'Anthropic',
     routeLabel: 'Cloud',
-    accent: 'bg-orange-400',
-    borderActive: 'border-orange-500/70',
-    borderIdle: 'border-orange-500/15',
-    bgActive: 'bg-gradient-to-br from-orange-950/60 via-black to-orange-950/25',
-    textActive: 'text-orange-300',
-    glowActive: 'shadow-[0_0_24px_rgba(251,146,60,0.18)]',
-    dotWorking: 'bg-orange-400',
-    dotThinking: 'bg-yellow-400',
-    badgeActive: 'bg-orange-500/20 border-orange-500/40 text-orange-300',
+    accent: 'bg-blue-300',
+    borderActive: 'border-blue-500/70',
+    borderIdle: 'border-blue-500/15',
+    bgActive: 'bg-gradient-to-br from-blue-950/60 via-black to-slate-950/35',
+    textActive: 'text-blue-200',
+    glowActive: 'shadow-[0_0_24px_rgba(96,165,250,0.18)]',
+    dotWorking: 'bg-blue-300',
+    dotThinking: 'bg-cyan-300',
+    badgeActive: 'bg-blue-500/20 border-blue-500/40 text-blue-200',
   },
   ollama: {
-    label: 'Kimi / Local',
-    tagline: 'Ollama BYOK',
-    routeLabel: 'Local',
+    label: 'Ollama',
+    tagline: 'Kimi K2.6 / Cloud',
+    routeLabel: 'Cloud',
     accent: 'bg-cyan-300',
     borderActive: 'border-cyan-500/70',
     borderIdle: 'border-cyan-500/15',
@@ -127,7 +127,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
 
   const getStatusLabel = (panel: PanelData | undefined, provider: SupportedProvider): string => {
     const status = panel?.status || 'idle'
-    if (provider === 'ollama' && !hasBYOK) return 'BYOK ONLY'
+    if (provider === 'ollama' && !hasBYOK && panel?.available === false) return 'BYOK ONLY'
     if (status === 'thinking') return 'THINKING'
     if (status === 'working') return 'WORKING'
     if (status === 'completed') return 'DONE'
@@ -146,7 +146,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
         const isCompleted = status === 'completed'
         const isError = status === 'error'
         const isLocalProvider = provider === 'ollama'
-        const localDisabled = isLocalProvider && !hasBYOK
+        const localDisabled = isLocalProvider && !hasBYOK && panel?.available === false
         const isUnavailable = status === 'unavailable' || localDisabled
 
         const dotClass = cn(
@@ -163,7 +163,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
         const selectedModel = selectedModels?.[provider] || 'auto'
         const providerModelOptions = modelOptions?.[provider] || []
         const canConfigureModel = Boolean(onModelSelect && providerModelOptions.length > 0)
-        const modelDescriptor = panel?.liveModelName || (localDisabled ? 'Add local route' : 'Awaiting route')
+        const modelDescriptor = panel?.liveModelName || (localDisabled ? 'Add Ollama route' : 'Awaiting route')
 
         return (
           <div
@@ -215,7 +215,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
                     ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
                     : 'border-gray-800 bg-gray-950/70 text-gray-600'
                 )}>
-                  {hasBYOK ? 'BYOK Ready' : 'BYOK Required'}
+                  {hasBYOK ? 'BYOK Ready' : panel?.available !== false ? 'Hosted Ready' : 'BYOK Required'}
                 </span>
               ) : null}
             </div>
@@ -253,8 +253,10 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
               <div className="text-[9px] text-gray-700">
                 {isLocalProvider
                   ? hasBYOK
-                    ? 'Local routing is enabled for this build.'
-                    : 'Connect a local/BYOK route to activate Ollama.'
+                    ? 'BYOK routing is enabled for this build.'
+                    : panel?.available !== false
+                      ? 'Hosted Ollama Cloud route is available.'
+                      : 'Connect an Ollama BYOK route to activate it.'
                   : 'Adjust model selection without restarting the workspace.'}
               </div>
             </div>

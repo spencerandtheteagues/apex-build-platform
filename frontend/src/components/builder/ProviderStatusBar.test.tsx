@@ -38,11 +38,9 @@ describe('ProviderStatusBar', () => {
     })
 
     expect(onModelSelect).toHaveBeenCalledWith('gpt4', 'gpt-5.4-pro')
-    expect((screen.getByLabelText('Kimi / Local model') as HTMLSelectElement).disabled).toBe(true)
-    expect(screen.getByText('BYOK ONLY')).toBeTruthy()
-    expect(screen.getByText('BYOK Required')).toBeTruthy()
-    expect(screen.getByText('Connect a local/BYOK route to activate Ollama.')).toBeTruthy()
-    expect(screen.getAllByText('Local').length).toBeGreaterThan(0)
+    expect((screen.getByLabelText('Ollama model') as HTMLSelectElement).disabled).toBe(false)
+    expect(screen.getByText('Hosted Ready')).toBeTruthy()
+    expect(screen.getByText('Hosted Ollama Cloud route is available.')).toBeTruthy()
     expect(screen.getAllByText('Cloud').length).toBeGreaterThan(0)
   })
 
@@ -72,14 +70,14 @@ describe('ProviderStatusBar', () => {
       />
     )
 
-    fireEvent.change(screen.getByLabelText('Kimi / Local model'), {
+    fireEvent.change(screen.getByLabelText('Ollama model'), {
       target: { value: 'kimi-k2.6' },
     })
 
     expect(onModelSelect).toHaveBeenCalledWith('ollama', 'kimi-k2.6')
-    expect((screen.getByLabelText('Kimi / Local model') as HTMLSelectElement).disabled).toBe(false)
+    expect((screen.getByLabelText('Ollama model') as HTMLSelectElement).disabled).toBe(false)
     expect(screen.getByText('BYOK Ready')).toBeTruthy()
-    expect(screen.getByText('Local routing is enabled for this build.')).toBeTruthy()
+    expect(screen.getByText('BYOK routing is enabled for this build.')).toBeTruthy()
     expect(screen.getAllByText('Kimi K2.6').length).toBeGreaterThan(0)
   })
 })

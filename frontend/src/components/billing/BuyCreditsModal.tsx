@@ -109,16 +109,16 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 12 }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-        className="w-full max-w-2xl overflow-hidden rounded-[28px] border border-red-500/20 bg-[#05070c] shadow-[0_30px_90px_rgba(0,0,0,0.65)]"
+        className="w-full max-w-2xl overflow-hidden rounded-[28px] border border-sky-500/20 bg-[#05070c] shadow-[0_30px_90px_rgba(0,0,0,0.65)]"
       >
-        <div className="border-b border-gray-800 bg-[radial-gradient(circle_at_top_left,rgba(255,0,51,0.18),transparent_36%)] px-6 py-5 sm:px-7">
+        <div className="border-b border-gray-800 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_36%)] px-6 py-5 sm:px-7">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-400">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-500/30 bg-sky-500/10 text-sky-300">
                 <Zap size={18} />
               </div>
               <div>
-                <div className="text-[11px] font-black uppercase tracking-[0.26em] text-red-300/80">
+                <div className="text-[11px] font-black uppercase tracking-[0.26em] text-sky-300/80">
                   Managed Usage
                 </div>
                 <h2 className="mt-2 text-2xl font-black text-white">Buy Credits</h2>
@@ -152,8 +152,8 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
             </div>
 
             {reason && (
-              <div className="flex items-start gap-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                <AlertCircle size={16} className="mt-0.5 shrink-0 text-red-300" />
+              <div className="flex items-start gap-3 rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">
+                <AlertCircle size={16} className="mt-0.5 shrink-0 text-sky-300" />
                 <p className="leading-6">{reason}</p>
               </div>
             )}
@@ -168,7 +168,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
                     onClick={() => setSelected(pack.amountUsd)}
                     className={`relative rounded-3xl border p-4 text-left transition ${
                       isSelected
-                        ? 'border-red-500/45 bg-red-500/10 shadow-[0_0_24px_rgba(255,0,51,0.18)]'
+                        ? 'border-sky-500/45 bg-sky-500/10 shadow-[0_0_24px_rgba(56,189,248,0.18)]'
                         : 'border-gray-800 bg-gray-950/60 hover:border-gray-700 hover:bg-gray-950/90'
                     }`}
                   >
@@ -190,7 +190,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
                       </div>
                       <div className={`flex h-7 w-7 items-center justify-center rounded-full border ${
                         isSelected
-                          ? 'border-red-400 bg-red-500 text-white'
+                          ? 'border-sky-300 bg-sky-500 text-slate-950'
                           : 'border-gray-700 bg-gray-900 text-gray-500'
                       }`}>
                         {isSelected ? <Check size={12} /> : null}
@@ -202,7 +202,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
             </div>
 
             {error && (
-              <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              <div className="rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-sm text-sky-200">
                 {error}
               </div>
             )}
@@ -237,7 +237,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
             <button
               onClick={handlePurchase}
               disabled={loading}
-              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-red-500/40 bg-gradient-to-r from-red-600 to-red-800 px-4 py-3 text-sm font-bold text-white shadow-[0_0_28px_rgba(255,0,51,0.22)] transition hover:from-red-500 hover:to-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-sky-500/40 bg-gradient-to-r from-sky-600 to-blue-800 px-4 py-3 text-sm font-bold text-white shadow-[0_0_28px_rgba(56,189,248,0.22)] transition hover:from-sky-500 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? (
                 <>

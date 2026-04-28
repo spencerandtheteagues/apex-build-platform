@@ -1,5 +1,5 @@
 // APEX-BUILD IDE Layout
-// Dark Demon Theme - Fully responsive development environment interface
+// Blue-steel redesign theme - Fully responsive development environment interface
 // Optimized with React.lazy for Monaco Editor and XTerminal
 
 import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'

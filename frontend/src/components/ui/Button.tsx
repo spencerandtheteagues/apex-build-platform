@@ -63,7 +63,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Primary - Demon red with intense glow
+        // Primary - blue-steel glow
         primary: 'bg-gradient-to-r from-red-600 to-red-900 text-white hover:from-red-500 hover:to-red-800 shadow-lg shadow-red-600/30 hover:shadow-red-500/50 hover:shadow-xl border border-red-500/30 hover:border-red-400/60 hover:scale-[1.02] active:scale-[0.98]',
 
         // Default (alias for primary)

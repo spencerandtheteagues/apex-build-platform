@@ -1,5 +1,5 @@
 // APEX-BUILD Main Application
-// Dark Demon Theme - Cloud Development Platform
+// Blue-steel redesign theme - Cloud Development Platform
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { useStore } from './hooks/useStore'
@@ -423,10 +423,10 @@ function App() {
         view: 'spending',
         label: 'Spend',
         icon: <Zap className="w-4 h-4" />,
-        color: '#ffd166',
-        glow: 'rgba(251,191,36,0.5)',
-        activeClassName: 'border-[#fbbf24] text-[#ffd166] bg-[rgba(251,191,36,0.15)] shadow-[0_0_12px_rgba(251,191,36,0.4)]',
-        inactiveClassName: 'border-[rgba(251,191,36,0.3)] text-[rgba(255,209,102,0.6)] hover:border-[#fbbf24] hover:text-[#ffd166] hover:bg-[rgba(251,191,36,0.08)]',
+        color: '#67e8f9',
+        glow: 'rgba(34,211,238,0.5)',
+        activeClassName: 'border-[#22d3ee] text-[#67e8f9] bg-[rgba(34,211,238,0.15)] shadow-[0_0_12px_rgba(34,211,238,0.4)]',
+        inactiveClassName: 'border-[rgba(34,211,238,0.3)] text-[rgba(103,232,249,0.64)] hover:border-[#22d3ee] hover:text-[#67e8f9] hover:bg-[rgba(34,211,238,0.08)]',
       },
     ]
 

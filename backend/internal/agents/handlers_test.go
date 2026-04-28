@@ -1358,7 +1358,7 @@ func TestPreflightReturnsNoProviderWhenNoneConfigured(t *testing.T) {
 	}
 }
 
-func TestPreflightReturnsInsufficientCreditsWhenUserHasNoProviders(t *testing.T) {
+func TestPreflightReturnsBYOKUnavailableWhenExplicitBYOKHasNoProviders(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubPreflight{
 			configured:    true,
@@ -1368,17 +1368,48 @@ func TestPreflightReturnsInsufficientCreditsWhenUserHasNoProviders(t *testing.T)
 	}
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/build/preflight", nil)
+	body := bytes.NewBufferString(`{"provider_mode":"byok"}`)
+	req, _ := http.NewRequest("POST", "/api/v1/build/preflight", body)
+	req.Header.Set("Content-Type", "application/json")
 	testRouter(am).ServeHTTP(w, req)
 
 	if w.Code != http.StatusPaymentRequired {
 		t.Fatalf("expected 402, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var body map[string]any
-	json.Unmarshal(w.Body.Bytes(), &body)
-	if body["error_code"] != "INSUFFICIENT_CREDITS" {
-		t.Fatalf("expected error_code=INSUFFICIENT_CREDITS, got %v", body["error_code"])
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["error_code"] != "BYOK_PROVIDER_UNAVAILABLE" {
+		t.Fatalf("expected error_code=BYOK_PROVIDER_UNAVAILABLE, got %v", resp["error_code"])
+	}
+}
+
+func TestPreflightPlatformModeIgnoresUnavailableBYOKProviders(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{}, // stale/unavailable BYOK must not block platform mode
+		},
+	}
+
+	body := bytes.NewBufferString(`{"provider_mode":"platform"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/preflight", body)
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["ready"] != true {
+		t.Fatalf("expected ready=true, got %v", resp["ready"])
+	}
+	if resp["providers_available"] != float64(1) {
+		t.Fatalf("expected one hosted provider, got %v", resp["providers_available"])
 	}
 }
 
@@ -4176,7 +4207,8 @@ func TestStartBuildRejectsWhenNoProviders(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(map[string]string{
-		"description": "Build me a marketing website with React and a pricing page",
+		"description":   "Build me a marketing website with React and a pricing page",
+		"provider_mode": "byok",
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
@@ -4189,8 +4221,8 @@ func TestStartBuildRejectsWhenNoProviders(t *testing.T) {
 
 	var respBody map[string]any
 	json.Unmarshal(w.Body.Bytes(), &respBody)
-	if respBody["error_code"] != "INSUFFICIENT_CREDITS" {
-		t.Fatalf("expected error_code=INSUFFICIENT_CREDITS, got %v", respBody["error_code"])
+	if respBody["error_code"] != "BYOK_PROVIDER_UNAVAILABLE" {
+		t.Fatalf("expected error_code=BYOK_PROVIDER_UNAVAILABLE, got %v", respBody["error_code"])
 	}
 }
 

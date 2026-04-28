@@ -1,5 +1,5 @@
 // APEX-BUILD App Builder - Command Center Interface
-// Dark Demon Theme - AI-Powered App Generation with Futuristic UI
+// Blue-steel redesign theme - AI-Powered App Generation with Futuristic UI
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { cn } from '@/lib/utils'
@@ -5752,10 +5752,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER' : powerMode === 'balanced' ? 'Balanced' : 'Fast'} (${getPowerModeModelSummary(powerMode)})`)
 
     try {
-      // Preflight: verify providers are available before starting build.
-      // Always use the fresh preflight result for provider_mode to avoid stale state
-      // (e.g. user added/removed BYOK keys in Settings since this component mounted).
-      let freshProviderMode: 'platform' | 'byok' | undefined
+      // Preflight: verify hosted platform providers before starting build.
+      // BYOK availability is displayed separately; a stale personal key must not
+      // force the launch path away from healthy platform providers.
+      let freshProviderMode: 'platform' | 'byok' | undefined = 'platform'
       let preflightCapabilityState: BuildCapabilityState | undefined
       let preflightPolicyState: BuildPolicyState | undefined
       const techStackOverride = buildTechStackOverride()
@@ -5763,6 +5763,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         const preflight = await apiService.buildPreflight({
           description: appDescription,
           prompt: appDescription,
+          provider_mode: 'platform',
           require_preview_ready: true,
           tech_stack: techStackOverride || undefined,
         })
@@ -5776,7 +5777,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         // Update state with fresh values
         const freshHasBYOK = !!preflight.has_byok
         setHasBYOK(freshHasBYOK)
-        freshProviderMode = freshHasBYOK ? 'byok' : 'platform'
+        freshProviderMode = 'platform'
         if (preflight.provider_statuses) {
           setProviderStatuses(preflight.provider_statuses)
         }
@@ -5792,7 +5793,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           return
         }
         // Non-fatal: preflight endpoint may not exist on older backends.
-        // Leave freshProviderMode undefined so backend uses its own detection.
+        // Leave the default platform mode intact so backend does not auto-detect stale BYOK state.
         console.warn('Preflight check failed (non-fatal):', preflightErr)
       }
 
