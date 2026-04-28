@@ -5,6 +5,7 @@ package preview
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -15,7 +16,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"apex-build/internal/metrics"
@@ -167,7 +167,7 @@ func (h *hostRuntime) StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, err
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.Dir
 	cmd.Env = cfg.Env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureHostProcess(cmd)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -181,8 +181,6 @@ func (h *hostRuntime) StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, err
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-
-	pgid := -cmd.Process.Pid
 
 	return &ProcessHandle{
 		Pid:        cmd.Process.Pid,
@@ -199,10 +197,10 @@ func (h *hostRuntime) StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, err
 			return 0, nil
 		},
 		SignalStop: func() {
-			syscall.Kill(pgid, syscall.SIGTERM)
+			signalHostProcess(cmd)
 		},
 		ForceKill: func() {
-			syscall.Kill(pgid, syscall.SIGKILL)
+			forceKillHostProcess(cmd)
 		},
 	}, nil
 }
@@ -273,12 +271,10 @@ func (sr *ServerRunner) DetectServer(ctx context.Context, projectID uint) (*Serv
 
 	// Check for Node.js
 	if content, ok := fileMap["package.json"]; ok {
-		if strings.Contains(content, `"start"`) || strings.Contains(content, `"serve"`) {
+		if command, ok := detectNodeServerCommand(content); ok {
 			detection.HasBackend = true
 			detection.ServerType = "node"
-			// Use "npm" command — runs `npm run start` which handles TypeScript compilation
-			// (ts-node, esbuild, tsc+node) transparently via the generated package.json scripts.
-			detection.Command = "npm"
+			detection.Command = command
 
 			// Detect framework
 			if strings.Contains(content, `"express"`) {
@@ -302,6 +298,7 @@ func (sr *ServerRunner) DetectServer(ctx context.Context, projectID uint) (*Serv
 				// TypeScript sources — started via npm run start which handles compilation
 				"server.ts", "index.ts", "app.ts", "main.ts",
 				"src/server.ts", "src/index.ts", "src/app.ts", "src/main.ts",
+				"server/index.ts", "server/app.ts",
 			}
 			for _, entry := range nodeEntries {
 				if _, exists := fileMap[entry]; exists {
@@ -491,6 +488,7 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 			// Install dependencies before starting the server — this is what makes
 			// `npm run start`, `python main.py`, and `go run .` actually work.
 			sr.installDependencies(workDir)
+			sr.prepareNodeStartArtifacts(workDir, config.Command)
 		}
 	}
 
@@ -500,9 +498,12 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 
 	switch {
 	case config.Command == "npm":
-		// Node.js backend started via npm run start — handles TypeScript, esbuild, ts-node, etc.
 		cmdName = "npm"
 		args = []string{"run", "start"}
+
+	case strings.HasPrefix(config.Command, "npm run "):
+		cmdName = "npm"
+		args = strings.Fields(strings.TrimPrefix(config.Command, "npm "))
 
 	case config.Command == "node":
 		cmdName = "node"
@@ -704,6 +705,71 @@ func (sr *ServerRunner) installDependencies(workDir string) {
 			}
 		}
 	}
+}
+
+func (sr *ServerRunner) prepareNodeStartArtifacts(workDir string, command string) {
+	if strings.TrimSpace(command) != "npm" {
+		return
+	}
+	packagePath := filepath.Join(workDir, "package.json")
+	content, err := os.ReadFile(packagePath)
+	if err != nil {
+		return
+	}
+	scripts := parsePackageScripts(string(content))
+	start := strings.TrimSpace(scripts["start"])
+	if start == "" || !strings.Contains(start, "dist/") {
+		return
+	}
+
+	buildScript := ""
+	if strings.TrimSpace(scripts["build:server"]) != "" {
+		buildScript = "build:server"
+	} else if strings.TrimSpace(scripts["build"]) != "" {
+		buildScript = "build"
+	}
+	if buildScript == "" {
+		return
+	}
+
+	if npmPath, lookErr := exec.LookPath("npm"); lookErr == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, npmPath, "run", buildScript)
+		cmd.Dir = workDir
+		if out, runErr := cmd.CombinedOutput(); runErr != nil {
+			log.Printf("[server_runner] npm run %s failed in %s: %v\n%s", buildScript, workDir, runErr, truncateInstallOutput(out))
+		} else {
+			log.Printf("[server_runner] npm run %s succeeded in %s", buildScript, workDir)
+		}
+	}
+}
+
+func detectNodeServerCommand(packageJSON string) (string, bool) {
+	scripts := parsePackageScripts(packageJSON)
+	if len(scripts) == 0 {
+		return "", false
+	}
+	if strings.TrimSpace(scripts["dev:server"]) != "" {
+		return "npm run dev:server", true
+	}
+	if strings.TrimSpace(scripts["start"]) != "" {
+		return "npm", true
+	}
+	if strings.TrimSpace(scripts["serve"]) != "" {
+		return "npm run serve", true
+	}
+	return "", false
+}
+
+func parsePackageScripts(packageJSON string) map[string]string {
+	var pkg struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal([]byte(packageJSON), &pkg); err != nil {
+		return nil
+	}
+	return pkg.Scripts
 }
 
 func truncateInstallOutput(out []byte) string {

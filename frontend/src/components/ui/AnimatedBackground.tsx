@@ -1,5 +1,5 @@
 // APEX-BUILD Animated Background
-// Cyberpunk world - Mesmerizing particle system with grid, orbs, and data streams
+// Landing-page aligned particle system with cyan glass, steel light, and data streams.
 
 import React, { useEffect, useRef, useCallback, useMemo } from 'react'
 import { cn } from '@/lib/utils'
@@ -71,10 +71,10 @@ const intensityConfig = {
 
 // APEX color palette
 const apexColors = {
-  primary: ['#ef4444', '#dc2626', '#b91c1c', '#991b1b'],
-  secondary: ['#f97316', '#ea580c', '#c2410c'],
-  accent: ['#7c3aed', '#6d28d9', '#5b21b6'],
-  glow: ['rgba(239, 68, 68, 0.6)', 'rgba(249, 115, 22, 0.4)', 'rgba(124, 58, 237, 0.3)'],
+  primary: ['#38bdf8', '#0ea5e9', '#67e8f9', '#e5f7ff'],
+  secondary: ['#22d3ee', '#06b6d4', '#0891b2'],
+  accent: ['#6ee7b7', '#2dd4bf', '#94a3b8'],
+  glow: ['rgba(56, 189, 248, 0.55)', 'rgba(34, 211, 238, 0.35)', 'rgba(110, 231, 183, 0.22)'],
 }
 
 export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
@@ -147,11 +147,11 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
   const initOrbs = useCallback((width: number, height: number) => {
     const orbs: GradientOrb[] = []
     const colors = [
-      { c1: 'rgba(139, 0, 0, 0.15)', c2: 'rgba(0, 0, 0, 0)' },
-      { c1: 'rgba(88, 28, 135, 0.12)', c2: 'rgba(0, 0, 0, 0)' },
-      { c1: 'rgba(154, 52, 18, 0.1)', c2: 'rgba(0, 0, 0, 0)' },
-      { c1: 'rgba(127, 29, 29, 0.12)', c2: 'rgba(0, 0, 0, 0)' },
-      { c1: 'rgba(30, 0, 50, 0.15)', c2: 'rgba(0, 0, 0, 0)' },
+      { c1: 'rgba(14, 165, 233, 0.16)', c2: 'rgba(0, 0, 0, 0)' },
+      { c1: 'rgba(34, 211, 238, 0.12)', c2: 'rgba(0, 0, 0, 0)' },
+      { c1: 'rgba(110, 231, 183, 0.09)', c2: 'rgba(0, 0, 0, 0)' },
+      { c1: 'rgba(148, 163, 184, 0.11)', c2: 'rgba(0, 0, 0, 0)' },
+      { c1: 'rgba(8, 47, 73, 0.2)', c2: 'rgba(0, 0, 0, 0)' },
     ]
 
     for (let i = 0; i < config.orbCount; i++) {
@@ -175,7 +175,7 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
     const horizonY = height * 0.35
     const perspectiveStrength = 0.85
 
-    ctx.strokeStyle = 'rgba(239, 68, 68, 0.08)'
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)'
     ctx.lineWidth = 1
 
     // Vertical lines with perspective
@@ -200,7 +200,7 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
 
       // Pulsing effect on grid lines
       const pulseIntensity = Math.sin(time * 0.001 + i * 0.3) * 0.02 + 0.08
-      ctx.strokeStyle = `rgba(239, 68, 68, ${pulseIntensity})`
+      ctx.strokeStyle = `rgba(56, 189, 248, ${pulseIntensity})`
 
       ctx.beginPath()
       ctx.moveTo(startX, y)
@@ -209,7 +209,7 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
     }
 
     // Intersection glow points
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.28)'
     for (let i = 0; i < 8; i++) {
       for (let j = 0; j < 5; j++) {
         const progress = (j + 1) / 6
@@ -368,11 +368,11 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
           ctx.fillStyle = '#ffffff'
           ctx.globalAlpha = stream.opacity * 0.9
         } else {
-          // Orange to red gradient for APEX theme
+          // Cyan to steel gradient for APEX-BUILD theme
           const colorRatio = i / stream.chars.length
-          const r = Math.floor(239 + (249 - 239) * colorRatio)
-          const g = Math.floor(68 + (115 - 68) * colorRatio)
-          const b = Math.floor(68 + (22 - 68) * colorRatio)
+          const r = Math.floor(56 + (229 - 56) * colorRatio)
+          const g = Math.floor(189 + (247 - 189) * colorRatio)
+          const b = Math.floor(248 + (255 - 248) * colorRatio)
           ctx.fillStyle = `rgb(${r}, ${g}, ${b})`
           ctx.globalAlpha = finalOpacity
         }
@@ -398,7 +398,7 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
     const scanY = (time * 0.1) % (height + 100) - 50
     const scanGradient = ctx.createLinearGradient(0, scanY - 20, 0, scanY + 20)
     scanGradient.addColorStop(0, 'transparent')
-    scanGradient.addColorStop(0.5, 'rgba(239, 68, 68, 0.03)')
+    scanGradient.addColorStop(0.5, 'rgba(56, 189, 248, 0.035)')
     scanGradient.addColorStop(1, 'transparent')
     ctx.fillStyle = scanGradient
     ctx.fillRect(0, scanY - 20, width, 40)
@@ -530,7 +530,7 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
   return (
     <div className={cn('absolute inset-0 overflow-hidden', className)}>
       {/* Base gradient layer */}
-      <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-950 to-red-950/20" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(14,165,233,0.16),transparent_34%),linear-gradient(135deg,#02050b_0%,#05080f_52%,#07131b_100%)]" />
 
       {/* Vignette effect */}
       <div

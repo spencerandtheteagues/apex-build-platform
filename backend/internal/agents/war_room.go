@@ -55,11 +55,11 @@ func compileWarRoomValidatedBuildSpec(buildID string, existing *ValidatedBuildSp
 // already-locked spec and applies any new advisories it produces. It is called
 // outside the build lock after the static critique has already been applied.
 // If the router is nil or the debate produces no results it is a no-op.
-func (am *AgentManager) enrichWarRoomSpecWithLLMDebate(buildID string, userID uint, usesPlatformKeys bool, spec *ValidatedBuildSpec, contract *BuildContract) {
+func (am *AgentManager) enrichWarRoomSpecWithLLMDebate(buildID string, userID uint, usesPlatformKeys bool, powerMode PowerMode, spec *ValidatedBuildSpec, contract *BuildContract) {
 	if am == nil || spec == nil || am.aiRouter == nil {
 		return
 	}
-	issues := am.runWarRoomLLMDebate(buildID, userID, usesPlatformKeys, spec, contract)
+	issues := am.runWarRoomLLMDebate(buildID, userID, usesPlatformKeys, powerMode, spec, contract)
 	if len(issues) == 0 {
 		return
 	}

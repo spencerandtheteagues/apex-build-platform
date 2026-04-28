@@ -56,7 +56,15 @@ services:
       - key: SPENCER_SEED_PASSWORD
         sync: false
       - key: EXECUTION_FORCE_CONTAINER
-        value: "true"  # Production requires container isolation; execution degrades safely if Docker is unavailable
+        value: "true"  # Production requires isolated execution; set E2B_API_KEY or remote Docker host below.
+      - key: APEX_EXECUTION_DOCKER_HOST
+        sync: false  # Optional remote Docker runner, e.g. ssh://apexrunner@<vps-ip>
+      - key: APEX_PREVIEW_DOCKER_HOST
+        sync: false  # Optional remote Docker runner for isolated previews.
+      - key: APEX_PREVIEW_CONNECT_HOST
+        sync: false  # Public IP/host browsers should use for remote preview ports.
+      - key: APEX_PREVIEW_BACKEND_RUNTIME
+        value: container
       - key: APEX_ENABLE_HOST_TERMINAL
         value: "false"
       - key: DB_MAX_OPEN_CONNS

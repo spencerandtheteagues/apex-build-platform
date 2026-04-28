@@ -3144,6 +3144,31 @@ export default function App() {
 	}
 }
 
+func TestValidateGeneratedLocalModuleImportsAcceptsTypeScriptSourceForRuntimeJSImport(t *testing.T) {
+	t.Parallel()
+
+	files := []GeneratedFile{
+		{
+			Path: "server/index.ts",
+			Content: `import apiRouter from "./routes/api.js";
+
+export default apiRouter;
+`,
+		},
+		{
+			Path: "server/routes/api.ts",
+			Content: `export default function apiRouter() {
+  return "ok";
+}
+`,
+		},
+	}
+
+	if issues := validateGeneratedLocalModuleImports(files, ""); len(issues) != 0 {
+		t.Fatalf("expected runtime .js import to resolve to TypeScript source, got %+v", issues)
+	}
+}
+
 func TestApplyDeterministicPreValidationNormalizationAddsFrontendSrcAliasSupport(t *testing.T) {
 	t.Parallel()
 

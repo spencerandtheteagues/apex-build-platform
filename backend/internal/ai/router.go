@@ -585,6 +585,11 @@ func classifyProviderError(err error) string {
 		strings.Contains(msg, "api_key") ||
 		strings.Contains(msg, "unauthorized") ||
 		strings.Contains(msg, "authentication") ||
+		strings.Contains(msg, "forbidden") ||
+		strings.Contains(msg, "access denied") ||
+		strings.Contains(msg, "key is disabled") ||
+		strings.Contains(msg, "key disabled") ||
+		strings.Contains(msg, "cannot be used") ||
 		strings.Contains(msg, "permission denied") ||
 		strings.Contains(msg, " 401") ||
 		strings.Contains(msg, " 403"):

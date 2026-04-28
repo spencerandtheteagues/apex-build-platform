@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,6 +78,7 @@ type ContainerPreviewConfig struct {
 	// Docker settings
 	DockerSocket    string
 	DockerContext   string
+	ConnectHost     string
 	ImagePrefix     string
 	BasePort        int
 	MaxContainers   int32
@@ -140,23 +143,45 @@ func DefaultContainerPreviewConfig() *ContainerPreviewConfig {
 	if dockerHost == "" {
 		dockerHost = strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_SOCKET"))
 	}
+	dockerContext := strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_CONTEXT"))
+	if dockerContext == "" {
+		dockerContext = strings.TrimSpace(os.Getenv("DOCKER_CONTEXT"))
+	}
+	if dockerHost == "" {
+		dockerHost = strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+	}
+	if dockerHost == "" {
+		activeContext, activeHost := inspectDockerContextConfig(dockerContext)
+		if dockerContext == "" {
+			dockerContext = activeContext
+		}
+		dockerHost = activeHost
+	}
+	connectHost := strings.TrimSpace(os.Getenv("APEX_PREVIEW_CONNECT_HOST"))
+	if connectHost == "" {
+		connectHost = derivePreviewConnectHost(dockerHost)
+	}
 
 	return &ContainerPreviewConfig{
 		// Leave host blank by default so Docker CLI context resolution works.
 		// Operators can force a specific endpoint via APEX_PREVIEW_DOCKER_HOST
 		// or the legacy APEX_PREVIEW_DOCKER_SOCKET.
-		DockerSocket:        dockerHost,
-		DockerContext:       strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_CONTEXT")),
-		ImagePrefix:         "apex-preview",
-		BasePort:            10000,
-		MaxContainers:       50,
-		MaxContainerAge:     30 * time.Minute,
-		CleanupInterval:     5 * time.Minute,
-		DefaultMemoryMB:     256,
-		DefaultCPUPercent:   0.5,
-		DefaultTimeout:      30 * time.Minute,
-		DefaultPidsLimit:    100,
-		EnableSeccomp:       true,
+		DockerSocket:      dockerHost,
+		DockerContext:     dockerContext,
+		ConnectHost:       connectHost,
+		ImagePrefix:       "apex-preview",
+		BasePort:          10000,
+		MaxContainers:     50,
+		MaxContainerAge:   30 * time.Minute,
+		CleanupInterval:   5 * time.Minute,
+		DefaultMemoryMB:   256,
+		DefaultCPUPercent: 0.5,
+		DefaultTimeout:    30 * time.Minute,
+		DefaultPidsLimit:  100,
+		// Docker's default seccomp profile remains active. The older custom
+		// whitelist is opt-in because modern Node/Vite preview servers use
+		// syscalls that are easy to miss and otherwise exit before readiness.
+		EnableSeccomp:       strings.EqualFold(strings.TrimSpace(os.Getenv("APEX_PREVIEW_CUSTOM_SECCOMP")), "true"),
 		EnableReadOnlyRoot:  true,
 		DropAllCapabilities: true,
 		NoNewPrivileges:     true,
@@ -164,6 +189,48 @@ func DefaultContainerPreviewConfig() *ContainerPreviewConfig {
 		EnableAuditLog:      true,
 		AuditLogPath:        "/var/log/apex-preview/audit.log",
 	}
+}
+
+func derivePreviewConnectHost(dockerHost string) string {
+	trimmed := strings.TrimSpace(dockerHost)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme != "ssh" {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
+func inspectDockerContextConfig(contextName string) (string, string) {
+	args := []string{"context", "inspect", "--format", "{{.Name}}\t{{.Endpoints.docker.Host}}"}
+	if strings.TrimSpace(contextName) != "" {
+		args = append(args, contextName)
+	}
+	output, err := osexec.Command("docker", args...).Output()
+	if err != nil {
+		return "", ""
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(output)), "\t", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+func (s *ContainerPreviewServer) previewURL(port int) string {
+	host := strings.TrimSpace(s.config.ConnectHost)
+	if host == "" {
+		host = "localhost"
+	}
+	if parsed, err := url.Parse(host); err == nil && parsed.Scheme != "" {
+		host = parsed.Hostname()
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 // NewContainerPreviewServer creates a new container-based preview server
@@ -195,12 +262,14 @@ func NewContainerPreviewServer(db *gorm.DB, config *ContainerPreviewConfig) (*Co
 		// Log warning but don't fail - we can fall back to process-based previews
 		fmt.Println("Warning: Docker not available, container sandbox mode disabled")
 	} else {
-		// Generate seccomp profile
-		seccompPath := filepath.Join(config.TempDir, "seccomp-preview.json")
-		if err := server.writeSeccompProfile(seccompPath); err != nil {
-			fmt.Printf("Warning: could not write seccomp profile: %v\n", err)
-		} else {
-			server.seccompProfile = seccompPath
+		if config.EnableSeccomp {
+			// Generate custom seccomp profile only when explicitly requested.
+			seccompPath := filepath.Join(config.TempDir, "seccomp-preview.json")
+			if err := server.writeSeccompProfile(seccompPath); err != nil {
+				fmt.Printf("Warning: could not write seccomp profile: %v\n", err)
+			} else {
+				server.seccompProfile = seccompPath
+			}
 		}
 
 		// Start cleanup goroutine
@@ -458,6 +527,16 @@ func (s *ContainerPreviewServer) StartContainerPreview(ctx context.Context, conf
 		stopChan:      make(chan struct{}),
 	}
 
+	// Wait for container to be ready
+	if err := s.waitForContainerReady(ctx, containerID, port, 60*time.Second); err != nil {
+		_ = s.dockerCommand("rm", "-f", containerID).Run()
+		_ = s.dockerCommand("rmi", "-f", imageName).Run()
+		_ = os.RemoveAll(tempDir)
+		s.releaseContainerPort(config.ProjectID)
+		atomic.AddInt64(&s.stats.FailedContainers, 1)
+		return nil, err
+	}
+
 	s.containerSessions[config.ProjectID] = session
 	atomic.AddInt32(&s.stats.ActiveContainers, 1)
 	atomic.AddInt64(&s.stats.TotalContainersCreated, 1)
@@ -469,12 +548,6 @@ func (s *ContainerPreviewServer) StartContainerPreview(ctx context.Context, conf
 		if current <= max || atomic.CompareAndSwapInt32(&s.stats.MaxConcurrentContainers, max, current) {
 			break
 		}
-	}
-
-	// Wait for container to be ready
-	if err := s.waitForContainerReady(ctx, port, 30*time.Second); err != nil {
-		// Container started but not responding - still return status
-		fmt.Printf("Warning: container may not be fully ready: %v\n", err)
 	}
 
 	return s.getContainerStatus(session), nil
@@ -625,9 +698,10 @@ func (s *ContainerPreviewServer) runContainer(ctx context.Context, imageName, co
 }
 
 // waitForContainerReady waits for the container to be ready to accept connections
-func (s *ContainerPreviewServer) waitForContainerReady(ctx context.Context, port int, timeout time.Duration) error {
+func (s *ContainerPreviewServer) waitForContainerReady(ctx context.Context, containerID string, port int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	address := fmt.Sprintf("localhost:%d", port)
+	address := s.previewDialAddress(port)
+	lastStateCheck := time.Time{}
 
 	for time.Now().Before(deadline) {
 		select {
@@ -642,10 +716,63 @@ func (s *ContainerPreviewServer) waitForContainerReady(ctx context.Context, port
 			return nil
 		}
 
+		if time.Since(lastStateCheck) >= 2*time.Second {
+			lastStateCheck = time.Now()
+			if !s.containerRunning(containerID) {
+				logs := s.containerLogs(containerID, 80)
+				if logs != "" {
+					return fmt.Errorf("container exited before readiness: %s", logs)
+				}
+				return fmt.Errorf("container exited before readiness")
+			}
+		}
+
 		time.Sleep(500 * time.Millisecond)
 	}
 
 	return fmt.Errorf("container not ready after %v", timeout)
+}
+
+func (s *ContainerPreviewServer) previewDialAddress(port int) string {
+	host := strings.TrimSpace(s.config.ConnectHost)
+	if parsed, err := url.Parse(host); err == nil && parsed.Scheme != "" {
+		host = parsed.Hostname()
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+func (s *ContainerPreviewServer) containerRunning(containerID string) bool {
+	if strings.TrimSpace(containerID) == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := s.dockerCommandContext(ctx, "inspect", "-f", "{{.State.Running}}", containerID)
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(string(output)), "true")
+}
+
+func (s *ContainerPreviewServer) containerLogs(containerID string, lines int) string {
+	if strings.TrimSpace(containerID) == "" {
+		return ""
+	}
+	if lines <= 0 {
+		lines = 80
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := s.dockerCommandContext(ctx, "logs", "--tail", strconv.Itoa(lines), containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(output))
+	}
+	return strings.TrimSpace(string(output))
 }
 
 // generateDockerfile creates a Dockerfile based on the framework
@@ -784,6 +911,12 @@ func (s *ContainerPreviewServer) detectFrameworkFromFiles(files []models.File) s
 	for _, file := range files {
 		if file.Path == "package.json" {
 			content := file.Content
+			if strings.Contains(content, `"next"`) {
+				return "next"
+			}
+			if strings.Contains(content, `"nuxt"`) {
+				return "nuxt"
+			}
 			if strings.Contains(content, `"react"`) {
 				return "react"
 			}
@@ -792,12 +925,6 @@ func (s *ContainerPreviewServer) detectFrameworkFromFiles(files []models.File) s
 			}
 			if strings.Contains(content, `"svelte"`) {
 				return "svelte"
-			}
-			if strings.Contains(content, `"next"`) {
-				return "next"
-			}
-			if strings.Contains(content, `"nuxt"`) {
-				return "nuxt"
 			}
 		}
 		if file.Path == "requirements.txt" {
@@ -871,7 +998,7 @@ func (s *ContainerPreviewServer) getContainerStatus(session *ContainerSession) *
 		ProjectID:  session.ProjectID,
 		Active:     true,
 		Port:       session.Port,
-		URL:        fmt.Sprintf("http://localhost:%d", session.Port),
+		URL:        s.previewURL(session.Port),
 		StartedAt:  session.StartedAt,
 		LastAccess: session.LastAccess,
 		Clients:    0, // Container previews don't track WebSocket clients

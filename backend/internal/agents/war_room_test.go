@@ -1,6 +1,11 @@
 package agents
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"apex-build/internal/ai"
+)
 
 func TestCompileDraftBuildSpecKeepsSpecUnlocked(t *testing.T) {
 	t.Parallel()
@@ -98,6 +103,77 @@ func TestCompileWarRoomValidatedBuildSpecLocksWithCritiqueAdvisories(t *testing.
 	}
 	if !hasBuildSpecAdvisoryCode(spec.PerformanceAdvisories, "war_room_route_plan_gap") {
 		t.Fatalf("expected route gap advisory in performance advisories, got %+v", spec.PerformanceAdvisories)
+	}
+}
+
+type warRoomProbeRouter struct {
+	stubAIRouter
+	lastProvider ai.AIProvider
+	lastOpt      GenerateOptions
+}
+
+func (r *warRoomProbeRouter) Generate(_ context.Context, provider ai.AIProvider, _ string, opts GenerateOptions) (*ai.AIResponse, error) {
+	r.lastProvider = provider
+	r.lastOpt = opts
+	return &ai.AIResponse{Content: `[]`}, nil
+}
+
+func TestEffectiveWarRoomCritiquePowerModeFollowsSelectedModeWithFastOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		build *Build
+		want  PowerMode
+	}{
+		{name: "nil defaults cheap", build: nil, want: PowerFast},
+		{name: "unset defaults cheap", build: &Build{}, want: PowerFast},
+		{name: "balanced follows selection", build: &Build{PowerMode: PowerBalanced}, want: PowerBalanced},
+		{name: "max follows selection", build: &Build{PowerMode: PowerMax}, want: PowerMax},
+		{name: "legacy fast mode overrides max", build: &Build{Mode: ModeFast, PowerMode: PowerMax}, want: PowerFast},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := effectiveWarRoomCritiquePowerMode(tt.build); got != tt.want {
+				t.Fatalf("expected %s, got %s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestRunSingleDebateRoundUsesSelectedPowerModeAndTokenCap(t *testing.T) {
+	router := &warRoomProbeRouter{}
+
+	runSingleDebateRound(
+		context.Background(),
+		router,
+		"build-war-room-power",
+		42,
+		true,
+		PowerMax,
+		0,
+		"AppType: fullstack",
+		ai.ProviderClaude,
+		"security",
+	)
+
+	if router.lastProvider != ai.ProviderClaude {
+		t.Fatalf("expected claude provider, got %s", router.lastProvider)
+	}
+	if router.lastOpt.PowerMode != PowerMax {
+		t.Fatalf("expected max power mode, got %s", router.lastOpt.PowerMode)
+	}
+	if router.lastOpt.BuildID != "build-war-room-power" {
+		t.Fatalf("expected build id to be preserved, got %q", router.lastOpt.BuildID)
+	}
+	if router.lastOpt.MaxTokens != warRoomLLMDebateMaxTokensForPowerMode(PowerMax) {
+		t.Fatalf("expected max-mode token cap, got %d", router.lastOpt.MaxTokens)
+	}
+	if !router.lastOpt.UsePlatformKeys {
+		t.Fatalf("expected platform-key routing to be preserved")
 	}
 }
 

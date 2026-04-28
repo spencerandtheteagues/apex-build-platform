@@ -1,5 +1,5 @@
 // APEX-BUILD — Buy Credits Modal
-// One-time credit top-up via Stripe Checkout
+// Unified premium purchase modal matching the current workspace UI
 
 import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
@@ -14,17 +14,15 @@ interface CreditPack {
 }
 
 const DEFAULT_PACKS: CreditPack[] = [
-  { amountUsd: 10,  creditUsd: 10,  label: '$10' },
-  { amountUsd: 25,  creditUsd: 25,  label: '$25' },
-  { amountUsd: 50,  creditUsd: 50,  label: '$50', popular: true },
+  { amountUsd: 10, creditUsd: 10, label: '$10' },
+  { amountUsd: 25, creditUsd: 25, label: '$25' },
+  { amountUsd: 50, creditUsd: 50, label: '$50', popular: true },
   { amountUsd: 100, creditUsd: 100, label: '$100' },
 ]
 
 interface Props {
   onClose: () => void
-  /** Optional: highlighted message shown above the packs (e.g. "Your credits have run out.") */
   reason?: string
-  /** Optional: pre-select a specific credit pack amount */
   defaultAmount?: number
 }
 
@@ -41,9 +39,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
       try {
         const result = await apiService.getCreditBalance()
         const rawPacks = result.data?.available_packs
-        if (!Array.isArray(rawPacks) || rawPacks.length === 0 || cancelled) {
-          return
-        }
+        if (!Array.isArray(rawPacks) || rawPacks.length === 0 || cancelled) return
 
         const normalized = rawPacks
           .map((pack) => ({
@@ -58,14 +54,16 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
             popular: index === Math.min(1, list.length - 1),
           }))
 
-        if (normalized.length === 0) {
-          return
-        }
+        if (normalized.length === 0) return
 
         setPacks(normalized)
-        setSelected((current) => normalized.some((pack) => pack.amountUsd === current) ? current : normalized[Math.min(1, normalized.length - 1)].amountUsd)
+        setSelected((current) => (
+          normalized.some((pack) => pack.amountUsd === current)
+            ? current
+            : normalized[Math.min(1, normalized.length - 1)].amountUsd
+        ))
       } catch {
-        // Fall back to the baked-in pack list if billing metadata is unavailable.
+        // Fall back to baked-in packs if billing metadata is unavailable.
       }
     }
 
@@ -97,277 +95,169 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
     }
   }
 
-  const pack = packs.find(p => p.amountUsd === selected) ?? packs[0]
+  const activePack = packs.find((p) => p.amountUsd === selected) ?? packs[0]
 
   return (
     <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '1rem',
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
       }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.94, y: 12 }}
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.94, y: 12 }}
+        exit={{ opacity: 0, scale: 0.96, y: 12 }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-        style={{
-          background: '#0a0a0a',
-          border: '1px solid rgba(255,0,51,0.22)',
-          borderRadius: 16,
-          width: '100%', maxWidth: 480,
-          boxShadow: '0 0 80px rgba(255,0,51,0.12), 0 24px 60px rgba(0,0,0,0.7)',
-          overflow: 'hidden',
-        }}
+        className="w-full max-w-2xl overflow-hidden rounded-[28px] border border-red-500/20 bg-[#05070c] shadow-[0_30px_90px_rgba(0,0,0,0.65)]"
       >
-        {/* Header */}
-        <div style={{
-          padding: '20px 24px 16px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 36, height: 36,
-              background: 'rgba(255,0,51,0.12)', border: '1px solid rgba(255,0,51,0.22)',
-              borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Zap size={17} style={{ color: '#ff0033' }} />
-            </div>
-            <div>
-              <div style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '0.95rem', color: '#f0f0f0', letterSpacing: '0.04em' }}>
-                BUY CREDITS
+        <div className="border-b border-gray-800 bg-[radial-gradient(circle_at_top_left,rgba(255,0,51,0.18),transparent_36%)] px-6 py-5 sm:px-7">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-400">
+                <Zap size={18} />
               </div>
-              <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
-                Powered by Stripe · secure checkout
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-[0.26em] text-red-300/80">
+                  Managed Usage
+                </div>
+                <h2 className="mt-2 text-2xl font-black text-white">Buy Credits</h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-gray-400">
+                  Add one-time AI usage runway to your account through Stripe without changing your plan tier.
+                </p>
               </div>
             </div>
+
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-800 bg-gray-950/70 text-gray-400 transition hover:border-gray-700 hover:text-white"
+            >
+              <X size={16} />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer',
-              padding: 8, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              minWidth: 44, minHeight: 44, transition: 'color 0.15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = '#f0f0f0' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)' }}
-          >
-            <X size={18} />
-          </button>
         </div>
 
-        <div style={{ padding: '20px 24px 24px' }}>
-          <div style={{
-            marginBottom: 18,
-            padding: '14px 16px',
-            borderRadius: 10,
-            border: '1px solid rgba(255,255,255,0.08)',
-            background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
-          }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+        <div className="grid gap-6 p-6 sm:p-7 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="space-y-5">
+            <div className="flex flex-wrap gap-2">
               {['One-time purchase', 'Secure Stripe checkout', 'Adds usage runway only'].map((item) => (
-                <div
+                <span
                   key={item}
-                  style={{
-                    padding: '4px 9px',
-                    borderRadius: 999,
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    background: 'rgba(255,255,255,0.03)',
-                    fontSize: '0.66rem',
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    color: 'rgba(255,255,255,0.55)',
-                    fontWeight: 700,
-                  }}
+                  className="rounded-full border border-gray-800 bg-gray-950/70 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-gray-500"
                 >
                   {item}
+                </span>
+              ))}
+            </div>
+
+            {reason && (
+              <div className="flex items-start gap-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                <AlertCircle size={16} className="mt-0.5 shrink-0 text-red-300" />
+                <p className="leading-6">{reason}</p>
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {packs.map((pack) => {
+                const isSelected = pack.amountUsd === selected
+                return (
+                  <button
+                    key={pack.amountUsd}
+                    type="button"
+                    onClick={() => setSelected(pack.amountUsd)}
+                    className={`relative rounded-3xl border p-4 text-left transition ${
+                      isSelected
+                        ? 'border-red-500/45 bg-red-500/10 shadow-[0_0_24px_rgba(255,0,51,0.18)]'
+                        : 'border-gray-800 bg-gray-950/60 hover:border-gray-700 hover:bg-gray-950/90'
+                    }`}
+                  >
+                    {pack.popular && (
+                      <div className="absolute -top-2.5 right-4 rounded-full bg-emerald-400 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-black">
+                        Popular
+                      </div>
+                    )}
+
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-500">
+                          Credit Pack
+                        </div>
+                        <div className="mt-3 font-mono text-3xl font-black text-white">{pack.label}</div>
+                        <div className="mt-2 text-sm text-gray-400">
+                          Adds ${pack.creditUsd.toFixed(0)} in managed AI usage
+                        </div>
+                      </div>
+                      <div className={`flex h-7 w-7 items-center justify-center rounded-full border ${
+                        isSelected
+                          ? 'border-red-400 bg-red-500 text-white'
+                          : 'border-gray-700 bg-gray-900 text-gray-500'
+                      }`}>
+                        {isSelected ? <Check size={12} /> : null}
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+
+            {error && (
+              <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4 rounded-3xl border border-gray-800 bg-gray-950/70 p-5">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-500">Order Summary</div>
+              <div className="mt-3 text-3xl font-black text-white">${selected}.00</div>
+              <div className="mt-1 text-sm text-emerald-300">
+                ${activePack.creditUsd.toFixed(2)} credits added after payment
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              {[
+                { label: 'Unlocks plan features', value: 'No' },
+                { label: 'Renews automatically', value: 'No' },
+                { label: 'Best use', value: 'Usage overages' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl border border-gray-800 bg-black/40 p-4">
+                  <div className="text-[11px] font-black uppercase tracking-[0.18em] text-gray-500">{item.label}</div>
+                  <div className="mt-2 text-sm font-semibold text-gray-200">{item.value}</div>
                 </div>
               ))}
             </div>
-            <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.72)', lineHeight: 1.65 }}>
+
+            <p className="text-sm leading-6 text-gray-400">
               Credit packs extend managed AI usage on your account. They do not unlock backend, publish, or BYOK access without an active paid plan.
             </p>
+
+            <button
+              onClick={handlePurchase}
+              disabled={loading}
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-red-500/40 bg-gradient-to-r from-red-600 to-red-800 px-4 py-3 text-sm font-bold text-white shadow-[0_0_28px_rgba(255,0,51,0.22)] transition hover:from-red-500 hover:to-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Redirecting to Stripe…
+                </>
+              ) : (
+                <>
+                  <CreditCard size={16} />
+                  Pay ${selected}.00
+                </>
+              )}
+            </button>
+
+            <p className="text-xs leading-5 text-gray-500">
+              Credits are added after payment confirmation. Credit packs are non-refundable and cover usage only.
+            </p>
           </div>
-
-          {/* Reason banner */}
-          {reason && (
-            <div style={{
-              marginBottom: 18,
-              padding: '10px 14px',
-              background: 'rgba(255,0,51,0.08)', border: '1px solid rgba(255,0,51,0.2)',
-              borderRadius: 8, display: 'flex', gap: 10, alignItems: 'flex-start',
-            }}>
-              <AlertCircle size={15} style={{ color: '#ff0033', flexShrink: 0, marginTop: 1 }} />
-              <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.55 }}>
-                {reason}
-              </p>
-            </div>
-          )}
-
-          {/* Pack selector */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
-            {packs.map(p => {
-              const isSelected = p.amountUsd === selected
-              return (
-                <button
-                  key={p.amountUsd}
-                  onClick={() => setSelected(p.amountUsd)}
-                  style={{
-                    position: 'relative',
-                    background: isSelected ? 'rgba(255,0,51,0.1)' : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${isSelected ? 'rgba(255,0,51,0.45)' : 'rgba(255,255,255,0.08)'}`,
-                    borderRadius: 10, padding: '14px 16px',
-                    cursor: 'pointer', textAlign: 'left',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  {p.popular && (
-                    <div style={{
-                      position: 'absolute', top: -9, right: 10,
-                      background: 'linear-gradient(135deg,#34d399,#059669)',
-                      color: '#000', fontSize: '0.6rem', fontWeight: 800,
-                      padding: '2px 8px', borderRadius: 100,
-                      letterSpacing: '0.06em', textTransform: 'uppercase',
-                    }}>
-                      Popular
-                    </div>
-                  )}
-                  <div style={{
-                    fontFamily: '"Orbitron", sans-serif', fontWeight: 900,
-                    fontSize: '1.3rem', color: isSelected ? '#ff0033' : '#f0f0f0',
-                    marginBottom: 4,
-                  }}>
-                    {p.label}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>
-                    ${p.creditUsd.toFixed(0)} in AI credits
-                  </div>
-                  {isSelected && (
-                    <div style={{
-                      position: 'absolute', top: 10, right: 10,
-                      width: 16, height: 16,
-                      background: '#ff0033', borderRadius: '50%',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <Check size={9} style={{ color: '#fff' }} />
-                    </div>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Summary */}
-          <div style={{
-            padding: '12px 16px',
-            background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
-            borderRadius: 8, marginBottom: 16,
-            display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '0.83rem', color: 'rgba(255,255,255,0.5)' }}>Total</span>
-              <span style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '1.3rem', color: '#f0f0f0' }}>
-                ${selected}.00
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '0.83rem', color: 'rgba(255,255,255,0.5)' }}>Added to balance</span>
-              <span style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '1.3rem', color: '#34d399' }}>
-                ${pack.creditUsd.toFixed(0)}
-              </span>
-            </div>
-          </div>
-
-          <div style={{
-            marginBottom: 16,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 10,
-          }}>
-            {[
-              { label: 'Unlocks plan features', value: 'No' },
-              { label: 'Renews automatically', value: 'No' },
-              { label: 'Best use', value: 'Overages' },
-            ].map((item) => (
-              <div
-                key={item.label}
-                style={{
-                  borderRadius: 8,
-                  border: '1px solid rgba(255,255,255,0.07)',
-                  background: 'rgba(255,255,255,0.025)',
-                  padding: '10px 12px',
-                }}
-              >
-                <div style={{ fontSize: '0.64rem', color: 'rgba(255,255,255,0.34)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  {item.label}
-                </div>
-                <div style={{ marginTop: 6, fontSize: '0.8rem', color: '#f0f0f0', fontWeight: 600 }}>
-                  {item.value}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Error */}
-          {error && (
-            <div style={{
-              marginBottom: 14, padding: '8px 12px',
-              background: 'rgba(255,0,51,0.07)', border: '1px solid rgba(255,0,51,0.2)',
-              borderRadius: 7, fontSize: '0.8rem', color: '#f87171',
-            }}>
-              {error}
-            </div>
-          )}
-
-          {/* CTA */}
-          <button
-            onClick={handlePurchase}
-            disabled={loading}
-            style={{
-              width: '100%',
-              background: loading ? 'rgba(255,0,51,0.4)' : 'linear-gradient(135deg,#ff0033,#cc0029)',
-              border: 'none', color: '#fff',
-              padding: '14px 20px', borderRadius: 9,
-              cursor: loading ? 'not-allowed' : 'pointer',
-              fontSize: '0.95rem', fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 700,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              boxShadow: loading ? 'none' : '0 0 30px rgba(255,0,51,0.35)',
-              transition: 'all 0.2s',
-              minHeight: 48,
-            }}
-            onMouseEnter={e => {
-              if (!loading) {
-                e.currentTarget.style.boxShadow = '0 0 48px rgba(255,0,51,0.5)'
-                e.currentTarget.style.transform = 'translateY(-1px)'
-              }
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.boxShadow = loading ? 'none' : '0 0 30px rgba(255,0,51,0.35)'
-              e.currentTarget.style.transform = 'translateY(0)'
-            }}
-          >
-            {loading ? (
-              <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Redirecting to Stripe…</>
-            ) : (
-              <><CreditCard size={16} /> Pay ${selected}.00 · Get ${pack.creditUsd.toFixed(2)} Credits</>
-            )}
-          </button>
-
-          <p style={{
-            marginTop: 12, textAlign: 'center',
-            fontSize: '0.7rem', color: 'rgba(255,255,255,0.25)', lineHeight: 1.55,
-          }}>
-            Credits are added instantly after payment. Non-refundable. Credit packs extend usage but do not unlock backend or full-stack generation without a paid plan.
-          </p>
         </div>
       </motion.div>
-
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

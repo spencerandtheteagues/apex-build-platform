@@ -80,6 +80,9 @@ func TestPlannerAndFrontendSystemPromptsIncludeVisualPlanningRequirements(t *tes
 	if !strings.Contains(frontendPrompt, "@/components/ui") {
 		t.Fatalf("expected frontend prompt to reference scaffolded ui primitives, got %q", frontendPrompt)
 	}
+	if !strings.Contains(frontendPrompt, "per-resource loading/error/data state") {
+		t.Fatalf("expected frontend prompt to require per-resource API state, got %q", frontendPrompt)
+	}
 	if !strings.Contains(frontendPrompt, "components.json") {
 		t.Fatalf("expected frontend prompt to require the shadcn registry scaffold, got %q", frontendPrompt)
 	}

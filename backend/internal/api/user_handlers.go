@@ -75,7 +75,6 @@ func (s *Server) UpdateUserProfile(c *gin.Context) {
 		"matrix":    true,
 		"synthwave": true,
 		"neonCity":  true,
-		"steampunk": true,
 	}
 
 	if req.PreferredTheme != "" && !validThemes[req.PreferredTheme] {

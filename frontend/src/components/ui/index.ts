@@ -41,7 +41,7 @@ export {
 } from './Loading'
 export type { LoadingProps, SkeletonProps, LoadingOverlayProps } from './Loading'
 
-// Steampunk components
+// Workspace effects
 export { NeonButton } from './NeonButton'
 export type { NeonButtonProps } from './NeonButton'
 

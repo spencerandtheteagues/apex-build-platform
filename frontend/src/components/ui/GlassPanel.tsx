@@ -1,5 +1,5 @@
 // APEX-BUILD Glass Panel Component
-// Frosted glass morphism with steampunk accents
+// Frosted glass morphism for the Apex workspace
 
 import React from 'react'
 import { cn } from '@/lib/utils'
@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 export interface GlassPanelProps extends React.HTMLAttributes<HTMLDivElement> {
   variant?: 'default' | 'dark' | 'light'
   blur?: 'none' | 'sm' | 'md' | 'lg' | 'xl'
-  border?: 'none' | 'subtle' | 'glow' | 'brass'
+  border?: 'none' | 'subtle' | 'glow' | 'accent'
   glow?: 'none' | 'cyan' | 'pink' | 'purple' | 'green'
   rounded?: 'none' | 'sm' | 'md' | 'lg' | 'xl' | 'full'
   padding?: 'none' | 'sm' | 'md' | 'lg' | 'xl'
@@ -32,13 +32,13 @@ const blurStyles = {
 const borderStyles = {
   none: '',
   subtle: 'border border-gray-700/50',
-  glow: 'border border-cyan-500/30 shadow-lg shadow-cyan-500/10',
-  brass: 'border-2 border-amber-600/50 shadow-lg shadow-amber-500/20',
+  glow: 'border border-red-500/30 shadow-lg shadow-red-500/10',
+  accent: 'border-2 border-red-600/50 shadow-lg shadow-red-500/20',
 }
 
 const glowStyles = {
   none: '',
-  cyan: 'shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30',
+  cyan: 'shadow-lg shadow-red-500/20 hover:shadow-red-500/30',
   pink: 'shadow-lg shadow-pink-500/20 hover:shadow-pink-500/30',
   purple: 'shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30',
   green: 'shadow-lg shadow-green-500/20 hover:shadow-green-500/30',
@@ -117,13 +117,13 @@ export const GlassPanel = React.forwardRef<HTMLDivElement, GlassPanelProps>(
         {/* Inner reflection/highlight */}
         <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
 
-        {/* Brass corner accents for steampunk effect */}
-        {border === 'brass' && (
+        {/* Accent corner caps */}
+        {border === 'accent' && (
           <>
-            <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-amber-500/70 rounded-tl-lg" />
-            <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-amber-500/70 rounded-tr-lg" />
-            <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-amber-500/70 rounded-bl-lg" />
-            <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-amber-500/70 rounded-br-lg" />
+            <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-red-500/70 rounded-tl-lg" />
+            <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-red-500/70 rounded-tr-lg" />
+            <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-red-500/70 rounded-bl-lg" />
+            <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-red-500/70 rounded-br-lg" />
           </>
         )}
 

@@ -37,22 +37,22 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
       {
         heading: 'Platform Contract',
         paragraphs: [
-          'APEX.BUILD is a hosted software platform for code generation, collaboration, deployment tooling, and related AI-assisted workflows. By creating an account, signing in, or using the service, you agree to these terms and all policies referenced alongside them.',
+          'APEX-BUILD is a hosted software platform for code generation, collaboration, deployment tooling, and related AI-assisted workflows. By creating an account, signing in, or using the service, you agree to these terms and all policies referenced alongside them.',
           'You must be legally able to enter a binding contract, use the service only for lawful business or personal purposes, and keep your account credentials secure. You are responsible for all activity that occurs under your account.',
         ],
       },
       {
         heading: 'Ownership and Responsibility',
         paragraphs: [
-          'You retain ownership of content, prompts, code, files, and project materials you submit, subject to the rights needed for APEX.BUILD to host, process, secure, analyze, and transmit that material while operating the service.',
-          'You are responsible for reviewing all generated output before use in production. APEX.BUILD does not guarantee that generated code, deployments, suggestions, or automations are accurate, secure, lawful, merchantable, or fit for any particular purpose.',
+          'You retain ownership of content, prompts, code, files, and project materials you submit, subject to the rights needed for APEX-BUILD to host, process, secure, analyze, and transmit that material while operating the service.',
+          'You are responsible for reviewing all generated output before use in production. APEX-BUILD does not guarantee that generated code, deployments, suggestions, or automations are accurate, secure, lawful, merchantable, or fit for any particular purpose.',
         ],
       },
       {
         heading: 'Risk Allocation',
         paragraphs: [
-          'The service is provided on an as-is and as-available basis. To the maximum extent permitted by law, APEX.BUILD disclaims warranties of any kind, whether express, implied, statutory, or otherwise.',
-          'To the maximum extent permitted by law, APEX.BUILD, its operators, contractors, and affiliates will not be liable for indirect, incidental, special, consequential, exemplary, or punitive damages, or for lost profits, revenue, goodwill, data, business interruption, security incidents caused by user actions, or downstream third-party claims arising from user content or generated output.',
+          'The service is provided on an as-is and as-available basis. To the maximum extent permitted by law, APEX-BUILD disclaims warranties of any kind, whether express, implied, statutory, or otherwise.',
+          'To the maximum extent permitted by law, APEX-BUILD, its operators, contractors, and affiliates will not be liable for indirect, incidental, special, consequential, exemplary, or punitive damages, or for lost profits, revenue, goodwill, data, business interruption, security incidents caused by user actions, or downstream third-party claims arising from user content or generated output.',
           'Any claim relating to the service must be brought on an individual basis, not as a class, consolidated, or representative action, and unresolved disputes should be submitted to binding arbitration unless non-waivable law requires otherwise.',
         ],
       },
@@ -67,7 +67,7 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
       {
         heading: 'Information We Process',
         paragraphs: [
-          'APEX.BUILD processes account details, authentication data, billing records, project files, prompts, generated output, logs, usage metadata, device/browser information, and support communications as needed to deliver the service.',
+          'APEX-BUILD processes account details, authentication data, billing records, project files, prompts, generated output, logs, usage metadata, device/browser information, and support communications as needed to deliver the service.',
           'Sensitive integrations such as API keys, environment variables, and deployment credentials may be encrypted or masked where supported, but you should only provide credentials you are authorized to use.',
         ],
       },
@@ -82,7 +82,7 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
         heading: 'Retention, Sharing, and Requests',
         paragraphs: [
           'Data may be shared with processors and infrastructure providers that support hosting, payments, logging, analytics, AI inference, customer support, and security monitoring, but only to the extent needed to operate the service.',
-          'Users can contact support@apex.build for privacy requests, subject to identity verification, security requirements, and lawful retention duties.',
+          'Users can contact support@apex-build.dev for privacy requests, subject to identity verification, security requirements, and lawful retention duties.',
         ],
       },
     ],
@@ -96,14 +96,14 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
       {
         heading: 'Prohibited Conduct',
         paragraphs: [
-          'You may not use APEX.BUILD to violate laws, infringe intellectual property, deploy malware, phish credentials, exfiltrate data, evade security controls, abuse third-party services, conduct unauthorized penetration testing, generate exploit payloads for unlawful use, or store or process unlawful content.',
+          'You may not use APEX-BUILD to violate laws, infringe intellectual property, deploy malware, phish credentials, exfiltrate data, evade security controls, abuse third-party services, conduct unauthorized penetration testing, generate exploit payloads for unlawful use, or store or process unlawful content.',
           'You may not interfere with service availability, bypass quotas, scrape the platform without permission, resell access without authorization, or use the product in a way that creates disproportionate legal, regulatory, or infrastructure risk.',
         ],
       },
       {
         heading: 'Enforcement',
         paragraphs: [
-          'APEX.BUILD may monitor for abuse indicators, rate-limit or suspend accounts, restrict features, remove content, preserve evidence, and cooperate with payment processors, hosting providers, or law enforcement where required.',
+          'APEX-BUILD may monitor for abuse indicators, rate-limit or suspend accounts, restrict features, remove content, preserve evidence, and cooperate with payment processors, hosting providers, or law enforcement where required.',
           'Violations may result in immediate suspension or termination without notice, credit forfeiture where permitted, and referral of claims or losses back to the responsible user.',
         ],
       },
@@ -118,7 +118,7 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
       {
         heading: 'Charges and Renewals',
         paragraphs: [
-          'Paid plans, usage-based charges, prepaid credits, and add-on services may renew automatically until canceled. You authorize APEX.BUILD and its payment providers to charge the payment method on file for subscriptions, metered usage, taxes, and overdue balances.',
+          'Paid plans, usage-based charges, prepaid credits, and add-on services may renew automatically until canceled. You authorize APEX-BUILD and its payment providers to charge the payment method on file for subscriptions, metered usage, taxes, and overdue balances.',
           'Credits, promotional balances, and included usage allotments have no cash value unless non-waivable law requires otherwise and may expire or reset under the applicable plan rules.',
         ],
       },
@@ -140,15 +140,15 @@ export const LEGAL_DOCUMENTS: LegalDocument[] = [
       {
         heading: 'Generated Output',
         paragraphs: [
-          'APEX.BUILD may produce code, architecture suggestions, deployment plans, copy, and other machine-generated output. Generated output can be incomplete, insecure, biased, inaccurate, or legally problematic, and must be reviewed by a qualified human before use.',
+          'APEX-BUILD may produce code, architecture suggestions, deployment plans, copy, and other machine-generated output. Generated output can be incomplete, insecure, biased, inaccurate, or legally problematic, and must be reviewed by a qualified human before use.',
           'You are solely responsible for testing, licensing review, dependency review, security review, privacy review, export-control review, and production approvals related to generated output or uploaded materials.',
         ],
       },
       {
         heading: 'Content Review and Takedowns',
         paragraphs: [
-          'APEX.BUILD may restrict content, prompts, or generated outputs that create legal, safety, abuse, or platform-integrity risk. We may remove or disable access to content in response to rights-holder complaints, safety concerns, or processor and provider requirements.',
-          'Questions, notices, and legal complaints should be sent to support@apex.build with enough detail to identify the account, project, affected material, and requested action.',
+          'APEX-BUILD may restrict content, prompts, or generated outputs that create legal, safety, abuse, or platform-integrity risk. We may remove or disable access to content in response to rights-holder complaints, safety concerns, or processor and provider requirements.',
+          'Questions, notices, and legal complaints should be sent to support@apex-build.dev with enough detail to identify the account, project, affected material, and requested action.',
         ],
       },
     ],

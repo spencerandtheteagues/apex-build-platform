@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -799,6 +800,9 @@ func seedIntentAPIContract(contract *BuildAPIContract, intent *IntentBrief) *Bui
 	}
 
 	addEndpoint("GET", "/api/health", "Health check", false, `{ status: "ok" }`)
+	for _, endpoint := range inferExplicitAPIEndpointsFromIntent(intent) {
+		addEndpoint(endpoint.Method, endpoint.Path, endpoint.Description, endpoint.Auth, endpoint.Output)
+	}
 
 	if capabilityRequired(intent, CapabilityAuth) {
 		addEndpoint("POST", "/api/auth/login", "Authenticate a user and start a session", false, `{ token: string, user: object }`)
@@ -809,6 +813,71 @@ func seedIntentAPIContract(contract *BuildAPIContract, intent *IntentBrief) *Bui
 	}
 
 	return contract
+}
+
+func inferExplicitAPIEndpointsFromIntent(intent *IntentBrief) []APIEndpoint {
+	if intent == nil {
+		return nil
+	}
+	text := strings.TrimSpace(intent.NormalizedRequest)
+	if text == "" {
+		return nil
+	}
+
+	endpoints := []APIEndpoint{}
+	add := func(method, path string) {
+		method = strings.ToUpper(strings.TrimSpace(method))
+		if method == "" {
+			method = "GET"
+		}
+		path = sanitizeExplicitAPIPath(path)
+		if path == "" {
+			return
+		}
+		endpoints = append(endpoints, APIEndpoint{
+			Method:      method,
+			Path:        path,
+			Description: "Explicit user-requested API endpoint",
+			Auth:        false,
+			Output:      `{}`,
+		})
+	}
+
+	methodPathRe := regexp.MustCompile(`(?i)\b(GET|POST|PUT|PATCH|DELETE)\s+(/api/[a-z0-9_./:-]+)`)
+	for _, match := range methodPathRe.FindAllStringSubmatch(text, -1) {
+		if len(match) == 3 {
+			add(match[1], match[2])
+		}
+	}
+
+	routePathRe := regexp.MustCompile(`(?i)\b(?:endpoint|route|routes|api)\s+(/api/[a-z0-9_./:-]+)`)
+	for _, match := range routePathRe.FindAllStringSubmatch(text, -1) {
+		if len(match) == 2 {
+			add("GET", match[1])
+		}
+	}
+
+	seen := map[string]bool{}
+	unique := make([]APIEndpoint, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		key := strings.ToUpper(endpoint.Method) + " " + endpoint.Path
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, endpoint)
+	}
+	return unique
+}
+
+func sanitizeExplicitAPIPath(path string) string {
+	path = strings.TrimSpace(path)
+	path = strings.Trim(path, "`'\"")
+	path = strings.TrimRight(path, ".,;:)]}")
+	if !strings.HasPrefix(path, "/api/") && path != "/api" {
+		return ""
+	}
+	return path
 }
 
 func intentSuggestsAccountRegistration(intent *IntentBrief) bool {
@@ -872,6 +941,10 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 	if mergedAcceptance, changed := mergeAcceptanceContracts(corrected.AcceptanceBySurface, deriveAcceptanceBySurfaceFromAppType(corrected.AppType)); changed {
 		corrected.AcceptanceBySurface = mergedAcceptance
 		report.Warnings = append(report.Warnings, "generated fallback acceptance criteria by surface")
+	}
+	if mergedAcceptance, changed := mergeAcceptanceContracts(corrected.AcceptanceBySurface, deriveAcceptanceBySurfaceFromContract(corrected)); changed {
+		corrected.AcceptanceBySurface = mergedAcceptance
+		report.Warnings = append(report.Warnings, "generated fallback acceptance criteria from declared contract surfaces")
 	}
 	if mergedGates, changed := mergeVerificationGates(corrected.VerificationGates, deriveVerificationGatesFromAppType(corrected.AppType)); changed {
 		corrected.VerificationGates = mergedGates
@@ -1228,6 +1301,7 @@ func defaultProviderScorecards(providerMode string) []ProviderScorecard {
 	scorecards := []ProviderScorecard{
 		{Provider: ai.ProviderClaude, TaskShape: TaskShapeContract, CompilePassRate: 0.92, FirstPassVerificationRate: 0.89, RepairSuccessRate: 0.84, TruncationRate: 0.04, AverageAcceptedTokens: 9500, AverageCostPerSuccess: 0.11, AverageLatencySeconds: 8.0, FailureClassRecurrence: 0.15, PromotionRate: 0.83, HostedEligible: true},
 		{Provider: ai.ProviderClaude, TaskShape: TaskShapeDiagnosis, CompilePassRate: 0.90, FirstPassVerificationRate: 0.91, RepairSuccessRate: 0.88, TruncationRate: 0.03, AverageAcceptedTokens: 8200, AverageCostPerSuccess: 0.10, AverageLatencySeconds: 7.8, FailureClassRecurrence: 0.13, PromotionRate: 0.85, HostedEligible: true},
+		{Provider: ai.ProviderClaude, TaskShape: TaskShapeFrontendPatch, CompilePassRate: 0.92, FirstPassVerificationRate: 0.89, RepairSuccessRate: 0.87, TruncationRate: 0.04, AverageAcceptedTokens: 8200, AverageCostPerSuccess: 0.08, AverageLatencySeconds: 7.6, FailureClassRecurrence: 0.14, PromotionRate: 0.85, HostedEligible: true},
 		{Provider: ai.ProviderGPT4, TaskShape: TaskShapeFrontendPatch, CompilePassRate: 0.91, FirstPassVerificationRate: 0.87, RepairSuccessRate: 0.86, TruncationRate: 0.05, AverageAcceptedTokens: 7600, AverageCostPerSuccess: 0.12, AverageLatencySeconds: 7.2, FailureClassRecurrence: 0.16, PromotionRate: 0.82, HostedEligible: true},
 		{Provider: ai.ProviderGPT4, TaskShape: TaskShapeBackendPatch, CompilePassRate: 0.92, FirstPassVerificationRate: 0.88, RepairSuccessRate: 0.87, TruncationRate: 0.04, AverageAcceptedTokens: 7300, AverageCostPerSuccess: 0.12, AverageLatencySeconds: 7.0, FailureClassRecurrence: 0.15, PromotionRate: 0.84, HostedEligible: true},
 		{Provider: ai.ProviderGPT4, TaskShape: TaskShapeRepair, CompilePassRate: 0.89, FirstPassVerificationRate: 0.83, RepairSuccessRate: 0.88, TruncationRate: 0.06, AverageAcceptedTokens: 6100, AverageCostPerSuccess: 0.09, AverageLatencySeconds: 6.9, FailureClassRecurrence: 0.17, PromotionRate: 0.80, HostedEligible: true},
@@ -2003,6 +2077,26 @@ func deriveAcceptanceBySurfaceFromAppType(appType string) []SurfaceAcceptanceCon
 	return out
 }
 
+func deriveAcceptanceBySurfaceFromContract(contract BuildContract) []SurfaceAcceptanceContract {
+	out := []SurfaceAcceptanceContract{
+		{Surface: SurfaceDeployment, Checks: []string{"preview/build command contract is declared"}, Required: true},
+	}
+	frontendPreviewOnly := strings.EqualFold(strings.TrimSpace(contract.DeliveryMode), "frontend_preview_only")
+	if len(contract.RoutePageMap) > 0 {
+		out = append(out, SurfaceAcceptanceContract{Surface: SurfaceFrontend, Checks: []string{"frontend routes render from declared route map"}, Required: true})
+	}
+	if !frontendPreviewOnly && contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0 {
+		out = append(out, SurfaceAcceptanceContract{Surface: SurfaceBackend, Checks: []string{"backend endpoints compile and mount"}, Required: true})
+	}
+	if !frontendPreviewOnly && contractRequiresPersistentDataSurface(contract) {
+		out = append(out, SurfaceAcceptanceContract{Surface: SurfaceData, Checks: []string{"persistent schema and migrations cover declared data models"}, Required: true})
+	}
+	if !frontendPreviewOnly && len(contract.RoutePageMap) > 0 && contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0 {
+		out = append(out, SurfaceAcceptanceContract{Surface: SurfaceIntegration, Checks: []string{"frontend/backend API contract aligns"}, Required: true})
+	}
+	return out
+}
+
 func deriveVerificationGates(plan *BuildPlan) []SurfaceVerificationGate {
 	return deriveVerificationGatesFromAppType(plan.AppType)
 }
@@ -2710,6 +2804,31 @@ func requiresIntegrationSurface(contract BuildContract) bool {
 		(len(contract.RoutePageMap) > 0 && contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0)
 }
 
+func contractRequiresPersistentDataSurface(contract BuildContract) bool {
+	if len(contract.DBSchemaContract) == 0 {
+		return false
+	}
+	if tags := contract.TruthBySurface[string(SurfaceData)]; len(tags) > 0 {
+		return true
+	}
+	for _, env := range contract.EnvVarContract {
+		if !env.Required {
+			continue
+		}
+		name := strings.ToUpper(strings.TrimSpace(env.Name))
+		if name == "DATABASE_URL" ||
+			strings.Contains(name, "POSTGRES") ||
+			strings.Contains(name, "MYSQL") ||
+			strings.Contains(name, "SQLITE") ||
+			strings.Contains(name, "MONGO") ||
+			strings.HasPrefix(name, "DB_") ||
+			strings.HasSuffix(name, "_DB_URL") {
+			return true
+		}
+	}
+	return false
+}
+
 func missingAcceptanceSurfaces(acceptance []SurfaceAcceptanceContract, contract BuildContract) bool {
 	if len(acceptance) == 0 {
 		return true
@@ -2722,7 +2841,7 @@ func missingAcceptanceSurfaces(acceptance []SurfaceAcceptanceContract, contract 
 	if !frontendPreviewOnly && contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0 {
 		required = append(required, SurfaceBackend)
 	}
-	if !frontendPreviewOnly && len(contract.DBSchemaContract) > 0 {
+	if !frontendPreviewOnly && contractRequiresPersistentDataSurface(contract) {
 		required = append(required, SurfaceData)
 	}
 	if !frontendPreviewOnly && requiresIntegrationSurface(contract) {

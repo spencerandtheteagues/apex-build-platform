@@ -364,8 +364,15 @@ func main() {
 	// Initialize Spend Tracker (S2: Real-Time Spend Dashboard)
 	spendTracker := spend.NewSpendTracker(database.GetDB())
 	spendHandler := handlers.NewSpendHandler(spendTracker)
+	if err := database.GetDB().AutoMigrate(&spend.SpendEvent{}, &budget.BudgetCap{}); err != nil {
+		log.Printf("WARNING: Spend/budget migrations completed with warnings: %v", err)
+		startupRegistry.MarkDegraded("spend_tracking", startup.TierOptional, "Spend tracking migrations completed with warnings", map[string]any{
+			"error": err.Error(),
+		})
+	} else {
+		startupRegistry.MarkReady("spend_tracking", startup.TierOptional, "Spend tracking schema initialized", nil)
+	}
 	log.Println("Spend Tracker initialized (real-time cost tracking, per-agent attribution)")
-	startupRegistry.MarkReady("spend_tracking", startup.TierOptional, "Spend tracking dashboard initialized", nil)
 
 	// Initialize Budget Enforcer (S1: Hard Budget Caps)
 	budgetEnforcer := budget.NewBudgetEnforcer(database.GetDB(), spendTracker)
@@ -474,6 +481,15 @@ func main() {
 	// Runtime Vite boot proof defaults on in production when Chrome is available.
 	// Operators can still force it on/off with APEX_PREVIEW_RUNTIME_VERIFY.
 	chromePath := preview.FindChrome()
+	chromeLaunchOK := false
+	if chromePath != "" {
+		if err := preview.SmokeTestChrome(context.Background(), chromePath); err != nil {
+			log.Printf("WARNING: Chrome/Chromium found at %s but failed headless smoke test: %v", chromePath, err)
+			chromePath = ""
+		} else {
+			chromeLaunchOK = true
+		}
+	}
 	runtimeVerifyEnabled, runtimeVerifyMode := resolvePreviewRuntimeVerify(chromePath)
 	var pvVerifier *preview.Verifier
 	if runtimeVerifyEnabled {
@@ -491,6 +507,7 @@ func main() {
 		"browser_proof":    runtimeVerifyEnabled && chromePath != "",
 		"canary_probes":    runtimeVerifyEnabled && chromePath != "" && preview.CanaryProbesEnabled(),
 		"chrome_available": chromePath != "",
+		"chrome_launch_ok": chromeLaunchOK,
 		"mode":             runtimeVerifyMode,
 	}
 	if runtimeVerifyEnabled {
@@ -1218,6 +1235,87 @@ func resolvePreviewRuntimeVerify(chromePath string) (bool, string) {
 	return false, "non_production_default"
 }
 
+func configureTrustedClientIP(router *gin.Engine) {
+	if router == nil {
+		return
+	}
+
+	router.ForwardedByClientIP = true
+	router.RemoteIPHeaders = []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"}
+	if platform := strings.TrimSpace(os.Getenv("GIN_TRUSTED_PLATFORM")); platform != "" {
+		router.TrustedPlatform = platform
+	} else {
+		router.TrustedPlatform = "CF-Connecting-IP"
+	}
+
+	raw := strings.TrimSpace(firstNonEmpty(
+		os.Getenv("GIN_TRUSTED_PROXIES"),
+		os.Getenv("TRUSTED_PROXIES"),
+	))
+	proxies := splitCSV(raw)
+	if len(proxies) == 0 && config.IsProductionEnvironment() {
+		proxies = defaultProductionTrustedProxies()
+	}
+	if len(proxies) == 0 {
+		return
+	}
+	if err := router.SetTrustedProxies(proxies); err != nil {
+		log.Printf("WARNING: invalid trusted proxy configuration: %v", err)
+	}
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func defaultProductionTrustedProxies() []string {
+	return []string{
+		"127.0.0.1",
+		"::1",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"173.245.48.0/20",
+		"103.21.244.0/22",
+		"103.22.200.0/22",
+		"103.31.4.0/22",
+		"141.101.64.0/18",
+		"108.162.192.0/18",
+		"190.93.240.0/20",
+		"188.114.96.0/20",
+		"197.234.240.0/22",
+		"198.41.128.0/17",
+		"162.158.0.0/15",
+		"104.16.0.0/13",
+		"104.24.0.0/14",
+		"172.64.0.0/13",
+		"131.0.72.0/22",
+		"2400:cb00::/32",
+		"2606:4700::/32",
+		"2803:f800::/32",
+		"2405:b500::/32",
+		"2405:8100::/32",
+		"2a06:98c0::/29",
+		"2c0f:f248::/32",
+	}
+}
+
 // parseDatabaseURL parses a DATABASE_URL into a db.Config
 // Format: postgres://user:password@host:port/dbname?sslmode=disable
 func parseDatabaseURL(databaseURL string) *db.Config {
@@ -1304,6 +1402,7 @@ func setupRoutes(
 	}
 
 	router := gin.Default()
+	configureTrustedClientIP(router)
 
 	// Add middleware
 	router.Use(server.CORSMiddleware())

@@ -1,31 +1,30 @@
-// APEX-BUILD Cyberpunk Theme System
-// Beautiful, futuristic themes that make Replit look ancient
+// APEX-BUILD Theme System
+// Production theme is intentionally locked to Apex Dark.
 
 import { Theme } from '@/types'
-import { steampunkTheme, steampunkMonacoTheme, steampunkAnimations } from './steampunk'
 
 export const themes: Record<string, Theme> = {
   cyberpunk: {
     id: 'cyberpunk',
-    name: 'Neon Cyberpunk',
+    name: 'Apex Dark',
     colors: {
-      primary: '#00f5ff',      // Electric Cyan
-      secondary: '#ff0080',    // Hot Pink
-      accent: '#39ff14',       // Acid Green
+      primary: '#ff0033',      // Apex Red
+      secondary: '#990022',    // Deep Red
+      accent: '#ff4466',       // Hot Red
       background: '#0a0a0a',   // Deep Space
-      surface: '#1a1a2e',      // Dark Steel
+      surface: '#14070b',      // Dark Red Steel
       text: '#ffffff',         // Neon White
       textSecondary: '#e0e0e0',// Silver
       error: '#ff4444',        // Cyber Red
       warning: '#ffaa00',      // Electric Orange
       success: '#39ff14',      // Acid Green
-      info: '#00f5ff',         // Electric Cyan
+      info: '#ff4466',         // Apex Red
     },
     effects: {
       glassMorphism: `
-        background: rgba(26, 26, 46, 0.8);
+        background: rgba(20, 7, 11, 0.8);
         backdrop-filter: blur(10px);
-        border: 1px solid rgba(0, 245, 255, 0.2);
+        border: 1px solid rgba(255, 0, 51, 0.22);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
       `,
       neonGlow: `
@@ -35,7 +34,7 @@ export const themes: Record<string, Theme> = {
           0 0 20px currentColor;
       `,
       holographic: `
-        background: linear-gradient(45deg, #00f5ff, #ff0080, #39ff14, #8a2be2);
+        background: linear-gradient(45deg, #ff0033, #990022, #ff4466, #cc0028);
         background-size: 300% 300%;
         animation: holographicShift 3s ease infinite;
         -webkit-background-clip: text;
@@ -121,8 +120,6 @@ export const themes: Record<string, Theme> = {
       `,
     },
   },
-
-  steampunk: steampunkTheme,
 
   neonCity: {
     id: 'neonCity',
@@ -273,8 +270,6 @@ export const globalAnimations = `
     animation: scaleIn 0.3s ease-out;
   }
 
-  /* Steampunk animations */
-  ${steampunkAnimations}
 `
 
 // Monaco Editor themes for each variant
@@ -284,10 +279,10 @@ export const monacoThemes = {
     inherit: true,
     rules: [
       { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
-      { token: 'keyword', foreground: '00F5FF', fontStyle: 'bold' },
+      { token: 'keyword', foreground: 'FF4466', fontStyle: 'bold' },
       { token: 'string', foreground: '39FF14' },
       { token: 'number', foreground: 'FF0080' },
-      { token: 'function', foreground: '00F5FF' },
+      { token: 'function', foreground: 'FF4466' },
       { token: 'variable', foreground: 'FFFFFF' },
       { token: 'type', foreground: '8A2BE2' },
       { token: 'constant', foreground: 'FF0080' },
@@ -296,12 +291,12 @@ export const monacoThemes = {
     colors: {
       'editor.background': '#0A0A0A',
       'editor.foreground': '#FFFFFF',
-      'editor.lineHighlightBackground': '#1A1A2E33',
-      'editor.selectionBackground': '#00F5FF33',
-      'editor.inactiveSelectionBackground': '#00F5FF1A',
-      'editorCursor.foreground': '#00F5FF',
-      'editorLineNumber.foreground': '#00F5FF66',
-      'editorLineNumber.activeForeground': '#00F5FF',
+      'editor.lineHighlightBackground': '#22071166',
+      'editor.selectionBackground': '#FF446633',
+      'editor.inactiveSelectionBackground': '#FF44661A',
+      'editorCursor.foreground': '#FF4466',
+      'editorLineNumber.foreground': '#FF446666',
+      'editorLineNumber.activeForeground': '#FF4466',
       'editor.selectionHighlightBackground': '#FF008033',
     },
   },
@@ -386,8 +381,6 @@ export const monacoThemes = {
       'editor.selectionHighlightBackground': '#FF008033',
     },
   },
-
-  steampunk: steampunkMonacoTheme,
 }
 
 // Language-specific configurations
@@ -597,7 +590,8 @@ fn main() {
 }
 
 export const getTheme = (themeId: string): Theme => {
-  return themes[themeId] || themes.cyberpunk
+  void themeId
+  return themes.cyberpunk
 }
 
 export const getLanguageConfig = (language: string) => {

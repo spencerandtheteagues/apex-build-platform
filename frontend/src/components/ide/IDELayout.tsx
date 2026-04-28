@@ -26,6 +26,9 @@ import {
   LoadingOverlay
 } from '@/components/ui'
 import { AIAssistant } from '@/components/ai/AIAssistant'
+import { AIChatPanel } from '@/components/ai/AIChatPanel'
+import { ExternalDeploymentPanel } from '@/components/deployment'
+import CodeSearch from '@/components/search/CodeSearch'
 import { FileTree } from '@/components/explorer/FileTree'
 import { ProjectDashboard } from '@/components/project/ProjectDashboard'
 import { ProjectList } from '@/components/project/ProjectList'
@@ -38,6 +41,12 @@ import { SearchPanel } from '@/components/ide/SearchPanel'
 import { GitPanel } from '@/components/ide/GitPanel'
 import { SplitPaneEditor, SplitPaneEditorRef } from '@/components/ide/SplitPaneEditor'
 import { usePaneManager } from '@/hooks/usePaneManager'
+import APIKeySettings from '@/components/settings/APIKeySettings'
+import MCPManager from '@/components/mcp/MCPManager'
+import SecretsManager from '@/components/secrets/SecretsManager'
+import { BudgetSettings } from '@/components/budget/BudgetSettings'
+import ProtectedPathsEditor from '@/components/project/ProtectedPathsEditor'
+import { EnvironmentPanel } from '@/components/ide/panels/EnvironmentPanel'
 
 // Lazy load heavy components for better initial load performance
 // Monaco Editor is ~800KB-1.2MB, XTerminal is ~200KB
@@ -79,6 +88,11 @@ import {
   Bot,
   MessageSquare,
   AlertCircle,
+  KeyRound,
+  PlugZap,
+  LockKeyhole,
+  CreditCard,
+  Globe,
 } from 'lucide-react'
 
 // Loading fallback for lazy-loaded components
@@ -143,11 +157,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
   const [rightPanelState, setRightPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [bottomPanelState, setBottomPanelState] = useState<PanelState>('collapsed')
   const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git' | 'history'>('explorer')
-  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'deploy' | 'settings'>('ai')
+  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'deploy' | 'external_deploy' | 'chat' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
   const [showPreview, setShowPreview] = useState(false)
   const [previewAutoRefresh, setPreviewAutoRefresh] = useState(true)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [showCodeSearch, setShowCodeSearch] = useState(false)
 
   // Mobile-specific state
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('editor')
@@ -204,7 +219,6 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
     files,
     isLoading,
     currentTheme: theme,
-    setTheme,
     createFile: createFileAction,
     deleteFile: deleteFileAction,
     fetchFiles,
@@ -321,6 +335,21 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
       }
     },
   })
+
+  // Keyboard shortcut for CodeSearch overlay
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setShowCodeSearch(prev => !prev)
+      }
+      if (e.key === 'Escape' && showCodeSearch) {
+        setShowCodeSearch(false)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [showCodeSearch])
 
   // Handle file selection
   const handleFileSelect = useCallback(async (file: File) => {
@@ -474,9 +503,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
   }, [currentProject, openPreviewWorkspace])
 
   const handleDashboardSettings = useCallback(() => {
+    if (viewMode === 'dashboard') {
+      openEditorWorkspace()
+    }
     setRightPanelState('normal')
     setActiveRightTab('settings')
-  }, [])
+  }, [openEditorWorkspace, viewMode])
 
   // Handle file creation
   const handleFileCreate = useCallback(async (parentPath: string, name: string, type: 'file' | 'directory') => {
@@ -753,26 +785,84 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
             />
           </div>
         ) : null
+      case 'external_deploy':
+        return currentProject ? (
+          <div className="h-full overflow-auto">
+            <ExternalDeploymentPanel
+              projectId={currentProject.id}
+              projectName={currentProject.name}
+              className="min-h-full"
+            />
+          </div>
+        ) : null
+      case 'chat':
+        return currentProject ? (
+          <div className="h-full overflow-auto">
+            <AIChatPanel
+              projectId={currentProject.id}
+              className="min-h-full"
+            />
+          </div>
+        ) : null
       case 'settings':
         return (
-          <Card variant="cyberpunk" padding="md" className="h-full border-0">
-            <h3 className="text-lg font-semibold text-white mb-4">Settings</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-300">Theme</label>
-                <select
-                  value={theme.id}
-                  onChange={(e) => setTheme(e.target.value)}
-                  className="w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:border-red-500 focus:outline-none touch-target"
-                >
-                  <option value="cyberpunk">Cyberpunk</option>
-                  <option value="matrix">Matrix</option>
-                  <option value="synthwave">Synthwave</option>
-                  <option value="neonCity">Neon City</option>
-                </select>
-              </div>
+          <div className="ide-control-surface h-full overflow-auto bg-black/40 p-3">
+            <div className="mb-3 rounded-xl border border-red-900/40 bg-red-950/10 p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-red-300">Workspace controls</div>
+              <h3 className="mt-1 text-lg font-semibold text-white">Keys, connectors, secrets, billing, and UI</h3>
+              <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                These are the real production surfaces behind Apex builds. Configure provider keys, local model routes,
+                MCP tools, encrypted project secrets, budget visibility, and the IDE theme without leaving the workspace.
+              </p>
             </div>
-          </Card>
+
+            <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
+              {[
+                { icon: <KeyRound className="h-4 w-4" />, label: 'BYOK models' },
+                { icon: <PlugZap className="h-4 w-4" />, label: 'MCP tools' },
+                { icon: <LockKeyhole className="h-4 w-4" />, label: 'Secrets vault' },
+                { icon: <CreditCard className="h-4 w-4" />, label: 'Spend controls' },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/70 px-3 py-2 text-gray-300">
+                  <span className="text-red-300">{item.icon}</span>
+                  {item.label}
+                </div>
+              ))}
+            </div>
+
+            <div className="mb-4 rounded-xl border border-red-900/40 bg-red-950/10 p-4">
+              <div className="text-sm font-semibold text-red-200">Workspace theme locked</div>
+              <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                The redesigned Apex dark workspace is enforced across builder, IDE, settings, and project pages.
+                Legacy theme switching is disabled so the old UI cannot reappear inside the workspace.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <section className="ide-control-surface__section">
+                <APIKeySettings />
+              </section>
+              <section className="ide-control-surface__section">
+                <SecretsManager projectId={currentProject?.id} />
+              </section>
+              <section className="ide-control-surface__section">
+                <MCPManager projectId={currentProject?.id} />
+              </section>
+              {currentProject && (
+                <section className="ide-control-surface__section">
+                  <EnvironmentPanel projectId={currentProject.id} />
+                </section>
+              )}
+              <section className="ide-control-surface__section">
+                <BudgetSettings />
+              </section>
+              {currentProject && (
+                <section className="ide-control-surface__section">
+                  <ProtectedPathsEditor projectId={currentProject.id} />
+                </section>
+              )}
+            </div>
+          </div>
         )
       default:
         return null
@@ -1096,14 +1186,14 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded overflow-hidden flex items-center justify-center">
               <img
-                src="/apex-build-logo-transparent.png"
+                src="/apex-build-mark-metal.png"
                 alt="APEX"
-                className="w-6 h-6 object-contain drop-shadow-[0_0_6px_rgba(239,68,68,0.6)]"
+                className="w-6 h-6 object-contain drop-shadow-[0_0_8px_rgba(125,231,255,0.62)]"
                 onError={(e) => {
                   const img = e.currentTarget
                   img.style.display = 'none'
                   const fallback = document.createElement('div')
-                  fallback.className = 'w-6 h-6 bg-gradient-to-br from-red-500 to-red-900 rounded'
+                  fallback.className = 'w-6 h-6 bg-gradient-to-br from-cyan-300 to-sky-700 rounded'
                   img.parentElement?.appendChild(fallback)
                 }}
               />
@@ -1281,7 +1371,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
       {/* Main content area */}
       <div ref={mainContentRef} className="flex-1 flex overflow-hidden min-h-0 min-w-0">
         {/* Left sidebar */}
-        {(viewMode === 'dashboard' || viewMode === 'editor') && currentProject && (
+        {viewMode === 'editor' && currentProject && (
           <div className={cn(
             'bg-gray-900/80 border-r border-gray-800 flex flex-col',
             reducedMotion ? '' : 'transition-all duration-300',
@@ -1376,7 +1466,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
           </div>
 
           {/* Bottom panel */}
-          {(viewMode === 'dashboard' || viewMode === 'editor') && bottomPanelState !== 'collapsed' && (
+          {viewMode === 'editor' && bottomPanelState !== 'collapsed' && (
             <div className={cn(
               'bg-gray-900/80 border-t border-gray-800',
               reducedMotion ? '' : 'transition-all duration-300',
@@ -1436,7 +1526,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
         </div>
 
         {/* Right sidebar */}
-        {(viewMode === 'dashboard' || viewMode === 'editor') && currentProject && (
+        {viewMode === 'editor' && currentProject && (
           <div className={cn(
             'bg-gray-900/80 border-l border-gray-800 flex flex-col',
             reducedMotion ? '' : 'transition-all duration-300',
@@ -1524,6 +1614,26 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
                     </Button>
                     <Button
                       size="sm"
+                      variant={activeRightTab === 'external_deploy' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('external_deploy')}
+                      icon={<Globe size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'external_deploy')}
+                      title="External Deploy"
+                    >
+                      Ext
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'chat' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('chat')}
+                      icon={<MessageSquare size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'chat')}
+                      title="AI Chat"
+                    >
+                      Chat
+                    </Button>
+                    <Button
+                      size="sm"
                       variant={activeRightTab === 'settings' ? 'primary' : 'ghost'}
                       onClick={() => setActiveRightTab('settings')}
                       icon={<Settings size={14} />}
@@ -1548,20 +1658,26 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
       {/* Footer for panels toggle */}
       <div className="h-7 bg-gray-900/95 border-t border-gray-800/60 flex items-center justify-between px-3 shrink-0">
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => setBottomPanelState(bottomPanelState === 'collapsed' ? 'normal' : 'collapsed')}
-            title={bottomPanelState === 'collapsed' ? 'Open Terminal' : 'Close Terminal'}
-            aria-label={bottomPanelState === 'collapsed' ? 'Open Terminal' : 'Close Terminal'}
-            className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors duration-150',
-              bottomPanelState !== 'collapsed'
-                ? 'text-white bg-red-500/15 hover:bg-red-500/20'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'
-            )}
-          >
-            <Terminal size={11} />
-            <span>Terminal</span>
-          </button>
+          {viewMode === 'editor' ? (
+            <button
+              onClick={() => setBottomPanelState(bottomPanelState === 'collapsed' ? 'normal' : 'collapsed')}
+              title={bottomPanelState === 'collapsed' ? 'Open Terminal' : 'Close Terminal'}
+              aria-label={bottomPanelState === 'collapsed' ? 'Open Terminal' : 'Close Terminal'}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors duration-150',
+                bottomPanelState !== 'collapsed'
+                  ? 'text-white bg-red-500/15 hover:bg-red-500/20'
+                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'
+              )}
+            >
+              <Terminal size={11} />
+              <span>Terminal</span>
+            </button>
+          ) : (
+            <div className="px-2.5 py-1 text-[11px] font-medium text-gray-500">
+              Dashboard workspace
+            </div>
+          )}
         </div>
         <div className="text-[10px] text-gray-600 font-mono select-none">APEX-BUILD</div>
       </div>
@@ -1577,6 +1693,28 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
           <span className="absolute -top-1 -right-1 w-4 h-4 bg-green-400 rounded-full border-2 border-gray-950 animate-pulse" />
           <span className="absolute inset-0 rounded-full bg-cyan-400/20 animate-ping" />
         </button>
+      )}
+
+      {/* CodeSearch Overlay */}
+      {showCodeSearch && currentProject && (
+        <div className="fixed inset-0 z-[60] flex items-start justify-center pt-24 bg-black/60 backdrop-blur-sm" onClick={() => setShowCodeSearch(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-2xl mx-4">
+            <CodeSearch
+              projectId={currentProject.id}
+              onFileSelect={(fileId: number) => {
+                setShowCodeSearch(false)
+                // Open file in editor via file lookup
+                apiService.getFile(fileId).then(file => {
+                  handleFileSelect(file)
+                }).catch(() => {
+                  // File not found — ignore
+                })
+              }}
+              isOpen={true}
+              onClose={() => setShowCodeSearch(false)}
+            />
+          </div>
+        </div>
       )}
     </div>
   )

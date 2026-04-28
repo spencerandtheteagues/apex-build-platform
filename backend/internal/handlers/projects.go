@@ -673,7 +673,7 @@ body {
 }
 
 h1 {
-    color: #00f5ff;
+    color: #ff4466;
     text-align: center;
 }`
 	default:

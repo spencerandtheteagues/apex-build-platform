@@ -250,6 +250,18 @@ func (s *Service) projectTitle(ctx context.Context, projectID uint) string {
 func (s *Service) detectEntryPoint(files *ProjectFiles) string {
 	// Priority order for entry points
 	entryPoints := []string{
+		"app/page.tsx",
+		"app/page.ts",
+		"app/page.jsx",
+		"app/page.js",
+		"src/app/page.tsx",
+		"src/app/page.ts",
+		"src/app/page.jsx",
+		"src/app/page.js",
+		"pages/index.tsx",
+		"pages/index.ts",
+		"pages/index.jsx",
+		"pages/index.js",
 		"src/index.tsx",
 		"src/index.ts",
 		"src/index.jsx",
@@ -316,6 +328,12 @@ func (s *Service) detectFramework(files *ProjectFiles) string {
 	}
 
 	// Check in priority order
+	if deps["next"] {
+		return "next"
+	}
+	if deps["nuxt"] {
+		return "nuxt"
+	}
 	if deps["react"] || deps["react-dom"] {
 		return "react"
 	}

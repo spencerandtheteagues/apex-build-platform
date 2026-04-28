@@ -221,7 +221,12 @@ export function usePreviewRuntime({
           continue
         }
 
-        setError(err.response?.data?.error || 'Failed to start preview')
+        const responseData = err.response?.data
+        const details = [responseData?.details, responseData?.diagnostics?.backend_error]
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .join(' | ')
+        const message = responseData?.error || 'Failed to start preview'
+        setError(details ? `${message}: ${details}` : message)
         break
       }
     }

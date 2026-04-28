@@ -51,7 +51,7 @@ const FALLBACK_MODELS: Record<string, ModelInfo[]> = {
     { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],
   gpt4: [
-    { id: 'gpt-5.4', name: 'ChatGPT 5.4', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest frontier OpenAI model' },
+    { id: 'gpt-5.4-pro', name: 'ChatGPT 5.4 Pro', speed: 'slow', cost_tier: 'high', description: 'Max tier - latest frontier OpenAI model' },
     { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — best current mid-tier coder' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],
@@ -67,9 +67,11 @@ const FALLBACK_MODELS: Record<string, ModelInfo[]> = {
     { id: 'grok-3-mini', name: 'Grok 3 Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],
   ollama: [
-    { id: 'deepseek-r1:18b', name: 'DeepSeek-R1 (18b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },
-    { id: 'deepseek-r1:8b', name: 'DeepSeek-R1 (8b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },
-    { id: 'llama3.3-70b', name: 'Llama 3.3 70B', speed: 'variable', cost_tier: 'free', description: '405B performance (local)' },
+    { id: 'kimi-k2.6', name: 'Kimi K2.6', speed: 'variable', cost_tier: 'free', description: 'Default conductor/local max model' },
+    { id: 'glm-5.1', name: 'GLM-5.1', speed: 'variable', cost_tier: 'free', description: 'Fast local/open-weight coding model' },
+    { id: 'qwen-3.6-27b', name: 'Qwen 3.6 27B', speed: 'variable', cost_tier: 'free', description: 'Efficient local coding model' },
+    { id: 'devstral-small-24b', name: 'Devstral Small 24B', speed: 'variable', cost_tier: 'free', description: 'Agentic coding model' },
+    { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', speed: 'variable', cost_tier: 'free', description: 'Budget local/cloud model' },
   ],
 }
 

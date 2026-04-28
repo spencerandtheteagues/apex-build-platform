@@ -44,9 +44,6 @@ const BACKEND_TO_FRONTEND_EVENT: Record<string, CollaborationEvent> = {
   'file_change': 'file-changed',
   'cursor_update': 'cursor-moved',
   'chat': 'chat-message',
-  'file_locked': 'file-locked',
-  'file_unlocked': 'file-unlocked',
-  'project_updated': 'project-updated',
 }
 
 const FRONTEND_TO_BACKEND_TYPE: Record<string, string> = {
@@ -97,7 +94,7 @@ export class WebSocketService {
   private getWsUrl(): string {
     const configuredWsUrl = getConfiguredWsUrl()
     if (configuredWsUrl) {
-      return configuredWsUrl.replace(/\/ws(\/collab)?$/, '') + '/ws/collab'
+      return configuredWsUrl.replace(/\/ws$/, '') + '/ws/collab'
     }
 
     const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
@@ -156,7 +153,6 @@ export class WebSocketService {
         clearTimeout(timeout)
         this.isConnecting = false
         console.error('❌ WebSocket error:', error)
-        reject(new Error('WebSocket connection failed'))
       }
 
       this.ws.onclose = (event) => {
@@ -210,8 +206,8 @@ export class WebSocketService {
       return
     }
 
-    // Handle join-room response (backend sends 'room_joined', not 'join_room')
-    if (msgType === 'room_joined' && this.pendingJoinRoom) {
+    // Handle join-room response
+    if (msgType === 'join_room' && this.pendingJoinRoom) {
       if (data?.success) {
         this.pendingJoinRoom.resolve()
       } else {
@@ -348,14 +344,19 @@ export class WebSocketService {
     })
   }
 
-  leaveRoom(): void {
+  async leaveRoom(): Promise<void> {
     if (!this.currentRoom || this.ws?.readyState !== WebSocket.OPEN) {
       this.currentRoom = null
       return
     }
-    this.send('leave_room', { room_id: this.currentRoom })
-    this.currentRoom = null
-    this.log('🚪 Left room')
+
+    return new Promise((resolve) => {
+      this.send('leave_room', { room_id: this.currentRoom })
+      this.currentRoom = null
+      this.log('🚪 Left room')
+      // No acknowledgment from backend, just resolve
+      setTimeout(resolve, 500)
+    })
   }
 
   // File operations

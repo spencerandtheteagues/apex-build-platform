@@ -71,7 +71,7 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 
 	features := convertPlannedFeatures(bundle)
 	models := convertPlannedModels(bundle)
-	if appType == "web" && strings.TrimSpace(stack.Database) == "" {
+	if !shouldRetainPlannerDataModels(description, stack) {
 		models = nil
 	}
 	files := mergePlannedFiles(scaffold.Required, planDerivedFiles(scaffold, bundle)...)
@@ -189,6 +189,9 @@ func applyStaticFrontendFallbackPolicyToPlan(build *Build, plan *BuildPlan) *Bui
 
 func shouldStageFrontendApprovalCheckpoint(build *Build, plan *BuildPlan) bool {
 	if build == nil || plan == nil {
+		return false
+	}
+	if !build.DiffMode && !envBool("APEX_FRONTEND_APPROVAL_CHECKPOINT", false) {
 		return false
 	}
 	if !isPaidBuildPlan(buildSubscriptionPlan(build)) {
@@ -647,6 +650,17 @@ func resolveBuildAppType(description string, requested *TechStack, bundle *auton
 		return "web"
 	}
 
+	if requested != nil {
+		hasFrontend := strings.TrimSpace(requested.Frontend) != ""
+		hasBackend := strings.TrimSpace(requested.Backend) != ""
+		switch {
+		case hasFrontend && hasBackend:
+			return "fullstack"
+		case hasBackend:
+			return "api"
+		}
+	}
+
 	if bundle != nil && bundle.Analysis != nil {
 		appType := strings.TrimSpace(strings.ToLower(bundle.Analysis.AppType))
 		switch appType {
@@ -662,14 +676,7 @@ func resolveBuildAppType(description string, requested *TechStack, bundle *auton
 	}
 
 	if requested != nil {
-		hasFrontend := strings.TrimSpace(requested.Frontend) != ""
-		hasBackend := strings.TrimSpace(requested.Backend) != ""
-		switch {
-		case hasFrontend && hasBackend:
-			return "fullstack"
-		case hasBackend:
-			return "api"
-		case hasFrontend:
+		if strings.TrimSpace(requested.Frontend) != "" {
 			return "web"
 		}
 	}
@@ -701,7 +708,7 @@ func explicitStaticWebIntent(description string) bool {
 		return true
 	}
 
-	for _, marker := range []string{" no backend ", " without backend ", " no database ", " without database "} {
+	for _, marker := range []string{" no backend ", " without backend "} {
 		if strings.Contains(normalized, marker) {
 			return true
 		}
@@ -752,6 +759,14 @@ func convertPlannedModels(bundle *autonomous.PlanningBundle) []DataModel {
 		})
 	}
 	return out
+}
+
+func shouldRetainPlannerDataModels(description string, stack TechStack) bool {
+	if strings.TrimSpace(stack.Database) != "" {
+		return true
+	}
+	caps := detectRequiredCapabilities(description, &stack)
+	return capabilityRequired(&IntentBrief{RequiredCapabilities: caps}, CapabilityDatabase)
 }
 
 func normalizeDataModels(models []DataModel) []DataModel {
@@ -1301,7 +1316,7 @@ func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ow
 		if role == RoleBackend && strings.TrimSpace(stack.Backend) == "" && len(order.AcceptanceChecks) == 0 {
 			continue
 		}
-		if role == RoleDatabase && strings.TrimSpace(stack.Database) == "" && len(order.OwnedFiles) == 0 && len(order.RequiredFiles) == 0 && len(order.AcceptanceChecks) == 0 {
+		if role == RoleDatabase && strings.TrimSpace(stack.Database) == "" {
 			continue
 		}
 		out = append(out, order)
@@ -1585,7 +1600,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			EnvVars: []BuildEnvVar{
 				{Name: "PORT", Example: "3001", Purpose: "Backend listen port", Required: true},
 				{Name: "VITE_API_URL", Example: "http://localhost:3001", Purpose: "Frontend API base URL", Required: false},
-				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Backend database connection", Required: backend != ""},
+				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Backend database connection", Required: stack.Database != ""},
 			},
 			Acceptance: []BuildAcceptanceCheck{
 				{ID: "fullstack-root-manifest", Description: "Scaffold root manifest must include runnable dev/build scripts for frontend and backend", Owner: RoleBackend, Required: true},
@@ -1923,7 +1938,11 @@ func scaffoldBootstrapFiles(scaffold buildScaffold, description string, stack Te
 
 	switch scaffold.ID {
 	case "fullstack/react-vite-express-ts":
-		add(".env.example", "PORT=3001\nVITE_API_URL=http://localhost:3001\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		envLines := []string{"PORT=3001", "VITE_API_URL=http://localhost:3001"}
+		if strings.TrimSpace(stack.Database) != "" {
+			envLines = append(envLines, "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		}
+		add(".env.example", strings.Join(envLines, "\n"))
 		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this project with a deterministic React + Vite + Express scaffold.\n\n## Run\n\n1. Install dependencies with `npm install`\n2. Start the frontend and backend with `npm run dev`\n3. Open `http://localhost:5173`\n\n## Environment\n\nCopy `.env.example` and provide real values before production use.\n", displayName))
 		add("package.json", fmt.Sprintf(`{
   "name": "%s",

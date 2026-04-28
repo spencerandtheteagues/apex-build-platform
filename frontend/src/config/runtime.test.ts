@@ -61,6 +61,22 @@ describe('getConfiguredApiUrl', () => {
 
     expect(getConfiguredApiUrl()).toBe('http://127.0.0.1:8080/api/v1')
   })
+
+  it('ignores baked production runtime API config on localhost so the dev proxy can be used', () => {
+    window.__APEX_CONFIG__ = {
+      API_URL: 'https://api.apex-build.dev/api/v1',
+    }
+
+    expect(getConfiguredApiUrl()).toBe('')
+  })
+
+  it('allows explicit non-production runtime API config on localhost', () => {
+    window.__APEX_CONFIG__ = {
+      API_URL: 'http://127.0.0.1:8080/api/v1',
+    }
+
+    expect(getConfiguredApiUrl()).toBe('http://127.0.0.1:8080/api/v1')
+  })
 })
 
 describe('getConfiguredWsUrl', () => {
@@ -71,5 +87,13 @@ describe('getConfiguredWsUrl', () => {
     }
 
     expect(getConfiguredWsUrl()).toBe('ws://127.0.0.1:8080/ws')
+  })
+
+  it('ignores baked production runtime websocket config on localhost', () => {
+    window.__APEX_CONFIG__ = {
+      WS_URL: 'wss://api.apex-build.dev/ws',
+    }
+
+    expect(getConfiguredWsUrl()).toBe('')
   })
 })

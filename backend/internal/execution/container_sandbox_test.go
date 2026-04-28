@@ -26,6 +26,124 @@ func skipIfNoDocker(t *testing.T) {
 	}
 }
 
+func TestDefaultContainerSandboxConfigUsesRemoteDockerEnv(t *testing.T) {
+	t.Setenv("APEX_EXECUTION_DOCKER_HOST", "ssh://apex-hostinger-runner")
+	t.Setenv("APEX_EXECUTION_DOCKER_CONTEXT", "apex-hostinger")
+	t.Setenv("APEX_PREVIEW_DOCKER_HOST", "")
+	t.Setenv("APEX_PREVIEW_DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+
+	config := DefaultContainerSandboxConfig()
+	if config.DockerHost != "ssh://apex-hostinger-runner" {
+		t.Fatalf("DockerHost = %q, want ssh://apex-hostinger-runner", config.DockerHost)
+	}
+	if config.DockerContext != "apex-hostinger" {
+		t.Fatalf("DockerContext = %q, want apex-hostinger", config.DockerContext)
+	}
+}
+
+func TestContainerSandboxDockerEnvUsesConfiguredRemoteHost(t *testing.T) {
+	sandbox := &ContainerSandbox{
+		config: &ContainerSandboxConfig{
+			DockerHost:    "ssh://apex-hostinger-runner",
+			DockerContext: "apex-hostinger",
+		},
+	}
+
+	env := sandbox.dockerEnv()
+	if got := executionEnvValue(env, "DOCKER_HOST"); got != "ssh://apex-hostinger-runner" {
+		t.Fatalf("DOCKER_HOST = %q, want ssh://apex-hostinger-runner", got)
+	}
+	if got := executionEnvValue(env, "DOCKER_CONTEXT"); got != "apex-hostinger" {
+		t.Fatalf("DOCKER_CONTEXT = %q, want apex-hostinger", got)
+	}
+}
+
+func TestContainerSandboxDetectsRemoteDockerHost(t *testing.T) {
+	sandbox := &ContainerSandbox{
+		config: &ContainerSandboxConfig{
+			DockerHost: "ssh://apex-hostinger-runner",
+		},
+	}
+
+	if !sandbox.usesRemoteDocker() {
+		t.Fatal("expected ssh docker host to be treated as remote")
+	}
+}
+
+func TestBuildDockerArgsUsesNamedVolumeForRemoteWorkspace(t *testing.T) {
+	sandbox := &ContainerSandbox{config: DefaultContainerSandboxConfig()}
+	exec := &containerExecution{ID: "abcdef1234567890", Language: "javascript"}
+	limits := &LanguageResourceLimits{
+		MemoryLimit: 128 * 1024 * 1024,
+		CPULimit:    0.5,
+		PidsLimit:   64,
+		TmpfsSize:   "32m",
+	}
+
+	args := sandbox.buildDockerArgs(exec, limits, "apex-sandbox-javascript:latest", containerRunOptions{
+		MountVolume:   "apex-work-abcdef123456",
+		MountReadOnly: true,
+		WorkDir:       "/work",
+		Command:       []string{"node", "main.js"},
+	})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "type=volume,source=apex-work-abcdef123456,target=/work,readonly") {
+		t.Fatalf("expected docker args to use readonly named volume, got %v", args)
+	}
+	if strings.Contains(joined, ":/work:") {
+		t.Fatalf("expected docker args to avoid local bind mount for named volume, got %v", args)
+	}
+}
+
+func TestBuildDockerArgsSkipsPackageCacheForRemoteDocker(t *testing.T) {
+	sandbox := &ContainerSandbox{
+		config: &ContainerSandboxConfig{
+			DockerHost:          "ssh://apex-hostinger-runner",
+			EnableReadOnlyRoot:  true,
+			EnablePackageCache:  true,
+			DisableNetwork:      true,
+			DefaultMemoryLimit:  128 * 1024 * 1024,
+			DefaultCPULimit:     0.5,
+			DefaultPidsLimit:    64,
+			TmpfsSize:           "32m",
+			MaxConcurrentExecs:  1,
+			LanguageLimits:      map[string]*LanguageResourceLimits{},
+			EnableAuditLog:      false,
+			ImagePrefix:         "apex-sandbox",
+			DefaultTimeout:      30 * time.Second,
+			DropAllCapabilities: true,
+			NoNewPrivileges:     true,
+		},
+		pkgCache: NewPackageCacheManager(t.TempDir(), true),
+	}
+	exec := &containerExecution{ID: "abcdef1234567890", Language: "go"}
+	limits := &LanguageResourceLimits{
+		MemoryLimit: 128 * 1024 * 1024,
+		CPULimit:    0.5,
+		PidsLimit:   64,
+		TmpfsSize:   "32m",
+	}
+
+	args := sandbox.buildDockerArgs(exec, limits, "apex-sandbox-go:latest", containerRunOptions{
+		MountVolume: "apex-work-abcdef123456",
+		WorkDir:     "/work",
+		Command:     []string{"go", "run", "main.go"},
+	})
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "/cache/go-build") || strings.Contains(joined, "GOCACHE=/cache/go-build") {
+		t.Fatalf("expected remote docker args to skip host package cache mounts, got %v", args)
+	}
+}
+
+func TestRemoteWorkspaceVolumeNameSanitizesExecutionID(t *testing.T) {
+	got := remoteWorkspaceVolumeName("Exec ID With Spaces/And Symbols!")
+	if got != "apex-work-exec-id-with-spaces-and-symbols" {
+		t.Fatalf("volume name = %q", got)
+	}
+}
+
 func TestNewContainerSandbox(t *testing.T) {
 	skipIfNoDocker(t)
 

@@ -210,8 +210,8 @@ jobs:
       - name: Build production bundle
         working-directory: frontend
         env:
-          VITE_API_URL: https://api.apex.build/api/v1
-          VITE_WS_URL: wss://api.apex.build/ws
+          VITE_API_URL: https://api.apex-build.dev/api/v1
+          VITE_WS_URL: wss://api.apex-build.dev/ws
           NODE_ENV: production
         run: npm run build
 
@@ -347,8 +347,8 @@ jobs:
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
           build-args: |
-            VITE_API_URL=https://api.apex.build/api/v1
-            VITE_WS_URL=wss://api.apex.build/ws
+            VITE_API_URL=https://api.apex-build.dev/api/v1
+            VITE_WS_URL=wss://api.apex-build.dev/ws
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

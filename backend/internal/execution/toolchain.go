@@ -313,6 +313,7 @@ func sandboxAptPackages(language string) []string {
 		"redis-tools",
 		"ripgrep",
 		"sqlite3",
+		"tar",
 		"unzip",
 		"wget",
 		"xz-utils",

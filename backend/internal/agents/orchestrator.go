@@ -813,7 +813,7 @@ func (o *BuildOrchestrator) attemptAutoFix(build *Build, state *OrchestrationSta
 	}
 
 	// Wait for fix task
-	if err := o.waitForTasksOfType(build, state, TaskReview, 10*time.Minute); err != nil {
+	if err := o.waitForTasksOfType(build, state, TaskReview, 3*time.Minute); err != nil {
 		log.Printf("Orchestrator: Fix task failed: %v", err)
 		return false
 	}
@@ -874,7 +874,7 @@ func (o *BuildOrchestrator) executeReviewPhase(build *Build, state *Orchestratio
 	state.PhaseStarted = time.Now()
 	o.broadcastPhase(build.ID, state.Phase, "Reviewing generated code...")
 
-	return o.waitForTasksOfType(build, state, TaskReview, 15*time.Minute)
+	return o.waitForTasksOfType(build, state, TaskReview, 5*time.Minute)
 }
 
 // waitForTasksOfType waits for all tasks of a specific type to complete

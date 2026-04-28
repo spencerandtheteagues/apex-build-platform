@@ -250,6 +250,9 @@ func (g *GrokClient) makeRequest(ctx context.Context, req *grokRequest) (*grokRe
 		case 429:
 			return nil, fmt.Errorf("RATE_LIMIT: Grok API rate limit exceeded")
 		case 403:
+			if grokErrorBodyIndicatesDisabledKey(body) {
+				return nil, fmt.Errorf("FORBIDDEN: Grok API key is disabled - enable or regenerate the key in the xAI console")
+			}
 			return nil, fmt.Errorf("FORBIDDEN: Grok API access denied - check API key permissions")
 		case 401:
 			return nil, fmt.Errorf("UNAUTHORIZED: Invalid Grok API key")
@@ -272,6 +275,13 @@ func (g *GrokClient) makeRequest(ctx context.Context, req *grokRequest) (*grokRe
 	}
 
 	return &grokResp, nil
+}
+
+func grokErrorBodyIndicatesDisabledKey(body []byte) bool {
+	lower := bytes.ToLower(body)
+	return bytes.Contains(lower, []byte("api key")) &&
+		bytes.Contains(lower, []byte("disabled")) &&
+		bytes.Contains(lower, []byte("cannot be used"))
 }
 
 // GetCapabilities returns capabilities Grok excels at

@@ -75,7 +75,12 @@ import {
   Globe,
   Layers,
   Github,
-  Upload
+  Upload,
+  KeyRound,
+  PlugZap,
+  LockKeyhole,
+  CreditCard,
+  MonitorUp
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
@@ -96,6 +101,7 @@ import {
 import { buildAuthenticatedWebSocketUrl } from '@/services/authSession'
 import { AssetUploader } from '@/components/project/AssetUploader'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
+import SpendToast from '@/components/spend/SpendToast'
 import OrchestrationOverview from './OrchestrationOverview'
 import BuildPieProgress from './BuildPieProgress'
 import BuildScreen from './BuildScreen'
@@ -127,6 +133,7 @@ interface Task {
   output?: {
     files?: Array<{ path: string; language: string }>
     messages?: string[]
+    metrics?: Record<string, any>
   }
 }
 
@@ -181,6 +188,19 @@ interface BuildPlatformIssueContext {
   maintenanceWindow?: boolean
 }
 
+interface BuildGuaranteeState {
+  status: 'validating' | 'retrying' | 'rolling_back' | 'passed' | 'failed'
+  verdict?: 'pass' | 'soft_fail' | 'hard_fail'
+  attempts: number
+  score?: number
+  rolledBack: boolean
+  durationMs?: number
+  error?: string
+  taskId?: string
+  taskType?: string
+  updatedAt: string
+}
+
 interface BuildState {
   id: string
   status: 'idle' | 'pending' | 'planning' | 'in_progress' | 'testing' | 'reviewing' | 'awaiting_review' | 'completed' | 'failed' | 'cancelled'
@@ -220,6 +240,8 @@ interface BuildState {
   truthBySurface?: Record<string, string[]>
   interaction?: ApiBuildInteractionState
   platformIssue?: BuildPlatformIssueContext
+  guarantee?: BuildGuaranteeState
+  previewUrl?: string
 }
 
 interface UpgradePromptState {
@@ -288,6 +310,83 @@ const extractPlatformIssue = (source: any): BuildPlatformIssueContext | undefine
   }
 }
 
+const asFiniteNumber = (value: unknown): number | undefined => {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : undefined
+}
+
+const normalizeGuaranteeVerdict = (value: unknown): BuildGuaranteeState['verdict'] | undefined => {
+  const verdict = String(value || '').trim().toLowerCase()
+  if (verdict === 'pass' || verdict === 'soft_fail' || verdict === 'hard_fail') {
+    return verdict
+  }
+  return undefined
+}
+
+const extractGuaranteeState = (source: any): BuildGuaranteeState | undefined => {
+  const payload = source?.output?.metrics ?? source?.metrics ?? source
+  if (!payload || typeof payload !== 'object') return undefined
+
+  const attempts = asFiniteNumber(payload.guarantee_attempts ?? payload.attempts)
+  const score = asFiniteNumber(payload.guarantee_score ?? payload.score)
+  const durationMs = asFiniteNumber(payload.guarantee_duration_ms ?? payload.duration_ms)
+  const verdict = normalizeGuaranteeVerdict(payload.guarantee_verdict ?? payload.verdict)
+  const rolledBack = payload.guarantee_rolled_back === true || payload.rolled_back === true
+  const error = typeof payload.error === 'string' ? payload.error : undefined
+  const taskId = typeof payload.task_id === 'string' ? payload.task_id : undefined
+  const taskType = typeof payload.task_type === 'string' ? payload.task_type : undefined
+
+  if (
+    attempts === undefined &&
+    score === undefined &&
+    durationMs === undefined &&
+    verdict === undefined &&
+    !rolledBack &&
+    !error
+  ) {
+    return undefined
+  }
+
+  let status: BuildGuaranteeState['status']
+  if (rolledBack) {
+    status = 'failed'
+  } else if (verdict === 'hard_fail') {
+    status = 'failed'
+  } else if (verdict === 'soft_fail') {
+    status = 'retrying'
+  } else if (verdict === 'pass') {
+    status = 'passed'
+  } else {
+    status = 'validating'
+  }
+
+  return {
+    status,
+    verdict,
+    attempts: attempts ?? 1,
+    score,
+    rolledBack,
+    durationMs,
+    error,
+    taskId,
+    taskType,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+const extractLatestGuaranteeStateFromTasks = (tasks: Task[]): BuildGuaranteeState | undefined => {
+  for (let index = tasks.length - 1; index >= 0; index -= 1) {
+    const task = tasks[index]
+    const guarantee = extractGuaranteeState({
+      metrics: task.output?.metrics,
+      task_id: task.id,
+      task_type: task.type,
+    })
+    if (guarantee) return guarantee
+  }
+  return undefined
+}
+
 const BUILD_WORKFLOW_STAGE_DEFS = [
   {
     key: 'scaffold',
@@ -324,7 +423,7 @@ const isActiveBuildStatus = (status?: string) =>
   status === 'reviewing' ||
   status === 'awaiting_review'
 
-type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok'
+type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
 
 type ProviderModelTier = {
   id: string
@@ -349,7 +448,7 @@ type ProviderPanelState = {
   multipleLiveModels: boolean
 }
 
-const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini', 'grok']
+const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini', 'grok', 'ollama']
 const MAX_AI_THOUGHTS = 240
 const MAX_PROVIDER_THOUGHTS = 36
 
@@ -359,18 +458,21 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gpt4: { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
     gemini: { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
     grok: { id: 'grok-3-mini', name: 'Grok 3 Mini' },
+    ollama: { id: 'glm-5.1', name: 'GLM-5.1' },
   },
   balanced: {
     claude: { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
     gpt4: { id: 'gpt-4.1', name: 'GPT-4.1' },
     gemini: { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
     grok: { id: 'grok-3', name: 'Grok 3' },
+    ollama: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
   },
   max: {
-    claude: { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
-    gpt4: { id: 'gpt-5.4', name: 'ChatGPT 5.4' },
-    gemini: { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+    claude: { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
+    gpt4: { id: 'gpt-codex-5.5', name: 'ChatGPT Codex 5.5' },
+    gemini: { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
     grok: { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' },
+    ollama: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
   },
 }
 
@@ -414,11 +516,20 @@ const PROVIDER_UI: Record<SupportedBuildProvider, {
     titleClass: 'text-fuchsia-200',
     dotClass: 'bg-fuchsia-400',
   },
+  ollama: {
+    label: 'Local',
+    badgeClass: 'border-cyan-500/60 text-cyan-200 bg-cyan-500/10',
+    cardClass: 'border-cyan-500/35 bg-gradient-to-br from-cyan-950/45 via-black to-slate-950/35',
+    activeClass: 'shadow-[0_0_28px_rgba(34,211,238,0.18)]',
+    titleClass: 'text-cyan-100',
+    dotClass: 'bg-cyan-300',
+  },
 }
 
 const normalizeProviderKey = (provider?: string): SupportedBuildProvider | null => {
   const value = String(provider || '').toLowerCase()
   if (value === 'gpt' || value === 'gpt4' || value === 'openai') return 'gpt4'
+  if (value === 'ollama' || value === 'local' || value === 'kimi' || value === 'kimi-k2.6') return 'ollama'
   if (value === 'claude' || value === 'gemini' || value === 'grok') return value
   return null
 }
@@ -433,6 +544,7 @@ const DEFAULT_PROVIDER_MODEL_SELECTIONS: Record<SupportedBuildProvider, string> 
   gpt4: 'auto',
   gemini: 'auto',
   grok: 'auto',
+  ollama: 'auto',
 }
 
 const canonicalizeModelId = (model?: string) => {
@@ -440,11 +552,14 @@ const canonicalizeModelId = (model?: string) => {
   if (!value) return ''
   if (value.toLowerCase() === 'auto') return 'auto'
 
-  if (value.startsWith('gpt-5.4')) return 'gpt-5.4'
+  if (value.startsWith('gpt-codex-5.5')) return 'gpt-codex-5.5'
+  if (value.startsWith('gpt-5.4-pro')) return 'gpt-5.4-pro'
+  if (value.startsWith('gpt-5.4')) return value
   if (value.startsWith('gpt-4.1')) return 'gpt-4.1'
   if (value.startsWith('gpt-4o-mini')) return 'gpt-4o-mini'
   if (value.startsWith('gpt-4o')) return 'gpt-4o'
 
+  if (value.startsWith('claude-opus-4-7')) return 'claude-opus-4-7'
   if (value.startsWith('claude-opus-4-6')) return 'claude-opus-4-6'
   if (value.startsWith('claude-sonnet-4-6')) return 'claude-sonnet-4-6'
   if (value.startsWith('claude-haiku-4-5')) return 'claude-haiku-4-5-20251001'
@@ -458,6 +573,12 @@ const canonicalizeModelId = (model?: string) => {
   if (value.startsWith('grok-4.20')) return 'grok-4.20-0309-reasoning'
   if (value.startsWith('grok-3-mini')) return 'grok-3-mini'
   if (value.startsWith('grok-3')) return 'grok-3'
+
+  if (value.startsWith('kimi-k2.6') || value.startsWith('kimi-k2')) return 'kimi-k2.6'
+  if (value.startsWith('glm-5.1')) return 'glm-5.1'
+  if (value.startsWith('qwen-3.6-27b')) return 'qwen-3.6-27b'
+  if (value.startsWith('devstral-small-24b') || value.startsWith('devstral-24b')) return 'devstral-small-24b'
+  if (value.startsWith('deepseek-v4-flash')) return 'deepseek-v4-flash'
 
   return value
 }
@@ -475,11 +596,22 @@ const providerForModelId = (model?: string): SupportedBuildProvider | null => {
   ) return 'gpt4'
   if (canonicalModel.startsWith('gemini-')) return 'gemini'
   if (canonicalModel.startsWith('grok-')) return 'grok'
+  if (
+    canonicalModel.startsWith('kimi-') ||
+    canonicalModel.startsWith('glm-') ||
+    canonicalModel.startsWith('qwen-') ||
+    canonicalModel.startsWith('devstral') ||
+    canonicalModel.startsWith('deepseek') ||
+    canonicalModel.startsWith('llama') ||
+    canonicalModel.startsWith('mistral')
+  ) return 'ollama'
   return null
 }
 
 const modelBelongsToProvider = (provider: SupportedBuildProvider, model?: string) =>
-  providerForModelId(model) === provider
+  provider === 'ollama'
+    ? Boolean(canonicalizeModelId(model)) && canonicalizeModelId(model) !== 'auto'
+    : providerForModelId(model) === provider
 
 const getModelDisplayName = (model?: string, fallbackMode: 'fast' | 'balanced' | 'max' = 'fast') => {
   const canonicalModel = canonicalizeModelId(model)
@@ -551,6 +683,8 @@ const humanizeIdentifier = (value?: string) => {
 
 const getThoughtEventLabel = (thought: AIThought) => {
   switch (thought.eventType) {
+    case 'agent:spawned':
+      return 'Agent Joined'
     case 'agent:working':
       return 'Task Started'
     case 'agent:thinking':
@@ -559,6 +693,10 @@ const getThoughtEventLabel = (thought: AIThought) => {
       return 'Generating'
     case 'agent:retrying':
       return 'Retrying'
+    case 'agent:verification_failed':
+      return 'Verification Retry'
+    case 'agent:coordination_failed':
+      return 'Coordination Retry'
     case 'agent:provider_switched':
       return 'Provider Switch'
     case 'agent:message':
@@ -1664,6 +1802,126 @@ const TerminalOutput: React.FC<{ messages: ChatMessage[]; isBuilding: boolean }>
   )
 }
 
+const BuilderControlSurface: React.FC<{
+  onImportReplit: () => void
+  onImportGitHub: () => void
+  onAttachImage: () => void
+  onOpenIDE: () => void
+}> = ({ onImportReplit, onImportGitHub, onAttachImage, onOpenIDE }) => {
+  const controls: Array<{
+    title: string
+    body: string
+    icon: React.ReactNode
+    actionLabel: string
+    onClick?: () => void
+    href?: string
+  }> = [
+    {
+      title: 'GitHub import/export',
+      body: 'Bring in a repo now; push or download generated code after the build.',
+      icon: <Github className="w-5 h-5" />,
+      actionLabel: 'Import GitHub',
+      onClick: onImportGitHub,
+    },
+    {
+      title: 'Replit migration',
+      body: 'Analyze an existing Replit app and rebuild it with Apex contracts.',
+      icon: <Download className="w-5 h-5" />,
+      actionLabel: 'Import Replit',
+      onClick: onImportReplit,
+    },
+    {
+      title: 'Files and images',
+      body: 'Attach wireframes, screenshots, ZIPs, and assets as agent context.',
+      icon: <Upload className="w-5 h-5" />,
+      actionLabel: 'Attach image',
+      onClick: onAttachImage,
+    },
+    {
+      title: 'BYOK model roles',
+      body: 'OpenAI, Claude, Gemini, Grok, Kimi, and Ollama keys stay configurable.',
+      icon: <KeyRound className="w-5 h-5" />,
+      actionLabel: 'Open settings',
+      href: '/settings',
+    },
+    {
+      title: 'MCP connectors',
+      body: 'Connect external tools and APIs through the project integration surface.',
+      icon: <PlugZap className="w-5 h-5" />,
+      actionLabel: 'Open IDE',
+      onClick: onOpenIDE,
+    },
+    {
+      title: 'Secrets vault',
+      body: 'Store API keys, OAuth values, DB URLs, SSH credentials, and env vars.',
+      icon: <LockKeyhole className="w-5 h-5" />,
+      actionLabel: 'Open IDE',
+      onClick: onOpenIDE,
+    },
+    {
+      title: 'Deploy and preview',
+      body: 'Preview, verify, export, and deploy from the workspace after generation.',
+      icon: <MonitorUp className="w-5 h-5" />,
+      actionLabel: 'Open IDE',
+      onClick: onOpenIDE,
+    },
+    {
+      title: 'Billing controls',
+      body: 'Budget caps, credits, trials, and live spend stay visible before runs.',
+      icon: <CreditCard className="w-5 h-5" />,
+      actionLabel: 'Billing',
+      href: '/settings/billing',
+    },
+  ]
+
+  return (
+    <section className="builder-control-surface mb-6 md:mb-8">
+      <div className="builder-control-surface__header">
+        <div>
+          <div className="builder-control-surface__kicker">Production control surface</div>
+          <h2>Everything around the prompt is configurable.</h2>
+        </div>
+        <div className="builder-control-surface__badges" aria-label="Included surfaces">
+          <span>Monaco IDE</span>
+          <span>Terminal</span>
+          <span>Git</span>
+          <span>Deploy</span>
+          <span>BYOK</span>
+        </div>
+      </div>
+
+      <div className="builder-control-surface__grid">
+        {controls.map((control) => {
+          const content = (
+            <>
+              <div className="builder-control-surface__icon">{control.icon}</div>
+              <div className="min-w-0">
+                <h3>{control.title}</h3>
+                <p>{control.body}</p>
+                <span>{control.actionLabel}</span>
+              </div>
+            </>
+          )
+
+          if (control.href) {
+            return (
+              <a key={control.title} className="builder-control-surface__card" href={control.href}>
+                {content}
+              </a>
+            )
+          }
+
+          return (
+            <button key={control.title} type="button" className="builder-control-surface__card" onClick={control.onClick}>
+              {content}
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 // ============================================================================
 // MAIN APP BUILDER COMPONENT
 // ============================================================================
@@ -1710,6 +1968,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [platformReadiness, setPlatformReadiness] = useState<FeatureReadinessSummary | null>(null)
   const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
   const [showDiffReview, setShowDiffReview] = useState(true)
+  const [spendToasts, setSpendToasts] = useState<Array<{ id: string; agentRole: string; cost: number }>>([])
+
+  const addSpendToast = useCallback((agentRole: string, cost: number) => {
+    const id = `${Date.now()}-${Math.random()}`
+    setSpendToasts(prev => [...prev.slice(-4), { id, agentRole, cost }])
+  }, [])
+
+  const dismissSpendToast = useCallback((id: string) => {
+    setSpendToasts(prev => prev.filter(t => t.id !== id))
+  }, [])
   const [patchBundleActionId, setPatchBundleActionId] = useState<string | null>(null)
   const [promptProposalActionId, setPromptProposalActionId] = useState<string | null>(null)
 
@@ -1720,6 +1988,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     gpt4: null,
     gemini: null,
     grok: null,
+    ollama: null,
   })
   const previewPreparedRef = useRef(false)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
@@ -2143,18 +2412,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       const latestTaskType = latestThought?.taskType || providerAgents
         .map((agent) => agent.currentTask?.type)
         .find(Boolean)
+      const hasActiveProviderError = providerAgents.some((agent) => agent.status === 'error') ||
+        (providerAgents.length > 0 && latestThought?.type === 'error')
 
       let status: ProviderPanelState['status'] = 'idle'
       if (!available) {
         status = 'unavailable'
-      } else if (latestThought?.type === 'error' || providerAgents.some((agent) => agent.status === 'error')) {
+      } else if (providerAgents.some((agent) => agent.status === 'working')) {
+        status = latestThought?.type === 'thinking' && latestThought.isInternal ? 'thinking' : 'working'
+      } else if (providerAgents.some((agent) => agent.status === 'completed')) {
+        status = 'completed'
+      } else if (hasActiveProviderError) {
         status = 'error'
       } else if (isBuildActive && latestThought?.type === 'thinking' && latestThought.isInternal) {
         status = 'thinking'
-      } else if (providerAgents.some((agent) => agent.status === 'working')) {
-        status = latestThought?.eventType === 'agent:generating' ? 'working' : 'working'
-      } else if (providerAgents.some((agent) => agent.status === 'completed')) {
-        status = 'completed'
       }
 
       const statusLabel = status === 'unavailable'
@@ -2913,9 +3184,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   }, [])
 
-  // Auto-resume last active build on mount (covers mobile browser memory reclaim / page reload)
-  const mountResumeAttempted = useRef(false)
-
   const clampPercent = (value: number) => {
     if (!Number.isFinite(value)) return 0
     return Math.max(0, Math.min(100, Math.round(value)))
@@ -3080,6 +3348,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         setBuildState(prev => {
           const nextStatus = mergeBuildStatusWithTerminalPrecedence(prev?.status, data.status)
           const nextErrorMessage = extractBuildFailureReason(data)
+          const nextGuarantee = Array.isArray(data.tasks)
+            ? extractLatestGuaranteeStateFromTasks(data.tasks)
+            : extractGuaranteeState(data)
           return ({
             ...prev,
             ...data,
@@ -3132,6 +3403,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   : prev?.qualityGateStatus,
             errorMessage: nextErrorMessage || prev?.errorMessage,
             interaction: normalizeInteraction(data.interaction, data.messages) || prev?.interaction,
+            guarantee: nextGuarantee || prev?.guarantee,
           })
         })
         syncInteractionState(data.interaction, data.messages)
@@ -3283,6 +3555,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           }
           return { ...prev, agents: [...prev.agents, newAgent] }
         })
+        addAiThought(
+          message.agent_id,
+          data.role,
+          data.provider,
+          data.model,
+          'action',
+          `${formatRole(data.role)} agent joined with ${humanizeIdentifier(data.provider) || 'configured provider'}${data.model ? ` / ${getModelDisplayName(data.model, activePowerMode) || data.model}` : ''}`,
+          { eventType: 'agent:spawned' }
+        )
         break
 
       case 'agent:working':
@@ -3321,6 +3602,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         break
 
       case 'agent:completed':
+        {
+          const guarantee = extractGuaranteeState(data)
+          if (guarantee) {
+            setBuildState(prev => prev ? { ...prev, guarantee } : prev)
+          }
+        }
         setBuildState(prev => {
           if (!prev) return null
           const nextAgents: Agent[] = prev.agents.map((a): Agent =>
@@ -3401,6 +3688,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               language: data.language || 'text'
             }]
           })
+        }
+        break
+
+      case 'file:updated':
+        if (data.path && data.content !== undefined) {
+          setGeneratedFiles(prev => prev.map(f =>
+            f.path === data.path
+              ? { ...f, content: data.content, language: data.language || f.language }
+              : f
+          ))
+        }
+        break
+
+      case 'terminal:output':
+        if (data.output) {
+          addSystemMessage(data.output)
         }
         break
 
@@ -3579,7 +3882,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ...prev,
             agents: prev.agents.map(a =>
               a.id === message.agent_id
-                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                ? {
+                  ...a,
+                  status: 'working' as Agent['status'],
+                  provider: data.provider ?? a.provider,
+                  model: data.model ?? a.model,
+                  currentTask: data.task_type
+                    ? {
+                      type: data.task_type,
+                      description: a.currentTask?.description || humanizeIdentifier(data.task_type),
+                    }
+                    : a.currentTask,
+                }
                 : a
             ),
           }
@@ -3750,7 +4064,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ...prev,
             agents: prev.agents.map(a =>
               a.id === message.agent_id
-                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                ? {
+                  ...a,
+                  status: 'working' as Agent['status'],
+                  provider: data.provider ?? a.provider,
+                  model: data.model ?? a.model,
+                  currentTask: data.task_type
+                    ? {
+                      type: data.task_type,
+                      description: data.content || a.currentTask?.description || humanizeIdentifier(data.task_type),
+                    }
+                    : a.currentTask,
+                }
                 : a
             ),
           }
@@ -3809,6 +4134,54 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           }
         }
         break
+
+      case 'agent:verification_failed':
+      case 'agent:coordination_failed': {
+        const knownAgent = buildStateRef.current?.agents.find(a => a.id === message.agent_id)
+        const errors = Array.isArray(data.errors)
+          ? data.errors.map((entry: unknown) => String(entry)).filter(Boolean)
+          : []
+        const isVerificationFailure = type === 'agent:verification_failed'
+        const content = [
+          data.message || (isVerificationFailure
+            ? 'Build verification failed; retrying with error context.'
+            : 'Coordination contract failed; retrying with work-order context.'),
+          errors.length > 0 ? errors.slice(0, 3).join('; ') : '',
+        ].filter(Boolean).join(' ')
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? {
+                  ...a,
+                  status: 'working' as Agent['status'],
+                  provider: data.provider ?? a.provider,
+                  model: data.model ?? a.model,
+                }
+                : a
+            ),
+          }
+        })
+        addSystemMessage(`${knownAgent?.role || data.agent_role || 'Agent'} ${isVerificationFailure ? 'verification' : 'coordination'} retry: ${errors[0] || data.message || 'repairing failed output'}`)
+        addAiThought(
+          message.agent_id,
+          data.agent_role || knownAgent?.role || 'agent',
+          data.provider || knownAgent?.provider || '',
+          data.model || knownAgent?.model,
+          'error',
+          content,
+          {
+            eventType: type,
+            taskId: data.task_id,
+            taskType: data.task_type,
+            retryCount: Number.isFinite(Number(data.retry_count ?? data.attempt)) ? Number(data.retry_count ?? data.attempt) : undefined,
+            maxRetries: Number.isFinite(Number(data.max_retries)) ? Number(data.max_retries) : undefined,
+          }
+        )
+        break
+      }
 
       case 'code:generated':
         setBuildState(prev => {
@@ -3874,6 +4247,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               a.id === message.agent_id
                 ? {
                   ...a,
+                  status: 'working' as Agent['status'],
                   progress: typeof data.progress === 'number' ? clampPercent(data.progress) : a.progress,
                   provider: data.provider ?? a.provider,
                   model: data.model ?? a.model,
@@ -3892,7 +4266,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ...prev,
             agents: prev.agents.map(a =>
               a.id === message.agent_id
-                ? { ...a, provider: data.new_provider ?? a.provider, model: data.model ?? a.model }
+                ? {
+                  ...a,
+                  status: 'working' as Agent['status'],
+                  provider: data.new_provider ?? a.provider,
+                  model: data.model ?? a.model,
+                }
                 : a
             )
           }
@@ -3912,7 +4291,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
       case 'spend:update':
         if (data.billed_cost) {
-          addSystemMessage(`Agent ${data.agent_role || 'unknown'} spent $${Number(data.billed_cost).toFixed(4)}`)
+          addSpendToast(data.agent_role || 'agent', Number(data.billed_cost))
           addAiThought(
             message.agent_id,
             data.agent_role || 'agent',
@@ -4022,13 +4401,26 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ...prev,
             status: 'in_progress',
             progress: typeof data.progress === 'number' ? data.progress : prev.progress,
+            guarantee: {
+              status: 'retrying',
+              verdict: prev.guarantee?.verdict || 'soft_fail',
+              attempts: prev.guarantee?.attempts || 1,
+              score: prev.guarantee?.score,
+              rolledBack: true,
+              durationMs: prev.guarantee?.durationMs,
+              error: prev.guarantee?.error,
+              taskId: prev.guarantee?.taskId,
+              taskType: prev.guarantee?.taskType,
+              updatedAt: new Date().toISOString(),
+            },
           }
         })
         break
 
       case 'preview:ready':
         if (data.url) {
-          addSystemMessage('Preview ready')
+          addSystemMessage(`Preview ready: ${data.url}`)
+          setBuildState(prev => prev ? { ...prev, previewUrl: data.url } : null)
         }
         break
 
@@ -4054,32 +4446,137 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
       case 'build:fsm:all_steps_complete':
         addSystemMessage(`All build steps complete — validating`)
-        setBuildState(prev => prev ? { ...prev, status: 'reviewing', progress: 95 } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          status: 'reviewing',
+          progress: 95,
+          qualityGateStatus: 'running',
+          guarantee: prev.guarantee || {
+            status: 'validating',
+            attempts: 1,
+            rolledBack: false,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:validation_pass':
         addSystemMessage(`Build validated successfully`)
-        setBuildState(prev => prev ? { ...prev, qualityGateStatus: 'passed', progress: 100 } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          qualityGateStatus: 'passed',
+          progress: 100,
+          guarantee: {
+            status: 'passed',
+            verdict: 'pass',
+            attempts: prev.guarantee?.attempts || 1,
+            score: prev.guarantee?.score ?? 100,
+            rolledBack: false,
+            durationMs: prev.guarantee?.durationMs,
+            error: undefined,
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:validation_fail':
         addSystemMessage(`Validation failed — retrying (attempt ${(data.retry_count ?? 0) + 1})`)
-        setBuildState(prev => prev ? { ...prev, qualityGateStatus: 'failed' } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          qualityGateStatus: 'failed',
+          guarantee: {
+            status: 'retrying',
+            verdict: 'soft_fail',
+            attempts: Number.isFinite(Number(data.retry_count)) ? Number(data.retry_count) + 1 : (prev.guarantee?.attempts || 1),
+            score: prev.guarantee?.score,
+            rolledBack: false,
+            durationMs: prev.guarantee?.durationMs,
+            error: typeof data.error === 'string' ? data.error : prev.guarantee?.error,
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:retry_exhausted':
         addSystemMessage(`All retry attempts exhausted — initiating rollback`)
+        setBuildState(prev => prev ? {
+          ...prev,
+          guarantee: {
+            status: 'rolling_back',
+            verdict: prev.guarantee?.verdict || 'hard_fail',
+            attempts: prev.guarantee?.attempts || 1,
+            score: prev.guarantee?.score,
+            rolledBack: false,
+            durationMs: prev.guarantee?.durationMs,
+            error: prev.guarantee?.error,
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:rollback_complete':
         addSystemMessage(`Rollback complete — build failed after exhausting retries`)
-        setBuildState(prev => prev ? { ...prev, status: 'failed', errorMessage: 'Build failed after exhausting all retry attempts' } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          status: 'failed',
+          errorMessage: 'Build failed after exhausting all retry attempts',
+          guarantee: {
+            status: 'failed',
+            verdict: 'hard_fail',
+            attempts: prev.guarantee?.attempts || 1,
+            score: prev.guarantee?.score,
+            rolledBack: true,
+            durationMs: prev.guarantee?.durationMs,
+            error: 'Build failed after exhausting all retry attempts',
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:rollback_failed':
         addSystemMessage(`Rollback failed: ${data.error || 'unknown error'}`)
-        setBuildState(prev => prev ? { ...prev, status: 'failed', errorMessage: data.error || 'Rollback failed' } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          status: 'failed',
+          errorMessage: data.error || 'Rollback failed',
+          guarantee: {
+            status: 'failed',
+            verdict: 'hard_fail',
+            attempts: prev.guarantee?.attempts || 1,
+            score: prev.guarantee?.score,
+            rolledBack: true,
+            durationMs: prev.guarantee?.durationMs,
+            error: data.error || 'Rollback failed',
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
+
+      case 'build:guarantee:result': {
+        const guarantee = extractGuaranteeState(data)
+        if (guarantee) {
+          const summary = guarantee.status === 'passed'
+            ? `Guarantee check passed at ${Math.round(guarantee.score ?? 100)}% confidence`
+            : guarantee.status === 'retrying'
+              ? `Guarantee loop requested retry ${guarantee.attempts}`
+              : guarantee.rolledBack
+                ? 'Guarantee loop rolled the build back'
+                : 'Guarantee check reported a failure'
+          addSystemMessage(summary)
+          setBuildState(prev => prev ? { ...prev, guarantee } : prev)
+        }
+        break
+      }
 
       case 'build:fsm:paused':
         addSystemMessage(`Build paused`)
@@ -4131,7 +4628,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     content: string,
     metadata: Partial<Omit<AIThought, 'id' | 'agentId' | 'agentRole' | 'provider' | 'model' | 'type' | 'content' | 'timestamp'>> = {}
   ) => {
-    const knownAgent = buildState?.agents.find(a => a.id === agentId)
+    const knownAgent = buildStateRef.current?.agents.find(a => a.id === agentId)
     const thought: AIThought = {
       id: Date.now().toString() + Math.random(),
       agentId,
@@ -4848,6 +5345,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         output: task.output,
       }))
       : []
+    const guarantee = extractLatestGuaranteeStateFromTasks(tasks)
 
     const checkpoints: Checkpoint[] = Array.isArray(payload.checkpoints)
       ? payload.checkpoints.map((checkpoint: any, index: number) => ({
@@ -4916,6 +5414,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       truthBySurface: payload.truth_by_surface || payload.promotion_decision?.truth_by_surface || payload.build_contract?.truth_by_surface,
       errorMessage: extractBuildFailureReason(payload),
       platformIssue: extractPlatformIssue(payload) || loadPlatformIssue,
+      guarantee,
       websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : undefined,
       liveSession: liveSessionAvailable,
       artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : undefined,
@@ -5004,24 +5503,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     return false
   }, [hydrateBuildContext])
 
-  useEffect(() => {
-    if (mountResumeAttempted.current) return
-    if (!user?.id) return
-    mountResumeAttempted.current = true
-
-    const storedActiveId = readStoredValue(ACTIVE_BUILD_STORAGE_KEY)
-    const storedLastId = readStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
-    const resumeId = storedActiveId || storedLastId
-    if (!resumeId) return
-    // Don't resume if we already have a build loaded
-    if (buildStateRef.current?.id) return
-
-    void hydrateBuildContext(resumeId, { reconnectLive: true, notify: true }).catch(() => {
-      // Build no longer accessible — clear stored IDs to prevent crash loop on next load
-      clearActiveBuildId()
-      clearLastWorkflowBuildId()
-    })
-  }, [user?.id, readStoredValue, hydrateBuildContext, clearActiveBuildId, clearLastWorkflowBuildId])
 
   useEffect(() => {
     if (!buildState?.id || !isBuildActive) {
@@ -5788,6 +6269,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   return (
     <div ref={builderRootRef} className={cn("app-builder-root h-full min-h-0 bg-black text-white relative", buildState ? "overflow-hidden flex flex-col" : "overflow-y-auto overscroll-contain")}>
+      {/* Spend toasts */}
+      {spendToasts.length > 0 && (
+        <div className="fixed bottom-20 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+          {spendToasts.map(t => (
+            <SpendToast key={t.id} agentRole={t.agentRole} cost={t.cost} onDismiss={() => dismissSpendToast(t.id)} />
+          ))}
+        </div>
+      )}
       {/* Buy Credits Modal */}
       {showBuyCredits && (
         <BuyCreditsModal
@@ -5949,6 +6438,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         {!buildState ? (
           // App Description Input + Model Config (2-column layout)
           <div className="max-w-7xl mx-auto">
+            <BuilderControlSurface
+              onImportReplit={() => setShowImportModal(true)}
+              onImportGitHub={() => setShowGitHubImport(true)}
+              onAttachImage={() => wireframeInputRef.current?.click()}
+              onOpenIDE={() => onNavigateToIDE?.({ target: 'editor', projectId: createdProjectId })}
+            />
             <div className="grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-6 items-start">
             {/* Left Column: Build Configuration */}
             <Card variant="cyberpunk" glow="intense" className="builder-main-card border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">

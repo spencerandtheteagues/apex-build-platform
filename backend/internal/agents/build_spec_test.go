@@ -148,6 +148,50 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundleDoesNotInventDatabaseSurfaceForResponseModels(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a minimal full-stack uptime monitor with React and Express. The backend must expose GET /api/health and GET /api/metrics returning JSON response models. No database, no auth, no external APIs."
+	plan := createBuildPlanFromPlanningBundle("build-no-db-response-models", description, &TechStack{
+		Frontend: "React",
+		Backend:  "Express",
+		Styling:  "Tailwind",
+	}, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node",
+				Styling:  "Tailwind",
+			},
+			DataModels: []autonomous.DataModel{
+				{Name: "HealthResponse", Fields: map[string]string{"status": "string", "serverTime": "string", "uptimeSeconds": "number"}},
+				{Name: "MetricsResponse", Fields: map[string]string{"requestCount": "number", "uptimeSeconds": "number"}},
+			},
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if len(plan.DataModels) != 0 {
+		t.Fatalf("expected API response models not to become persistent data models without database intent, got %+v", plan.DataModels)
+	}
+	if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
+		t.Fatalf("expected no database work order for explicit no-database build, got %+v", wo)
+	}
+	for _, env := range plan.EnvVars {
+		if strings.EqualFold(strings.TrimSpace(env.Name), "DATABASE_URL") && env.Required {
+			t.Fatalf("expected DATABASE_URL not to be required for no-database full-stack build, got %+v", plan.EnvVars)
+		}
+	}
+	for _, file := range plan.ScaffoldFiles {
+		if file.Path == ".env.example" && strings.Contains(file.Content, "DATABASE_URL") {
+			t.Fatalf("expected deterministic .env.example to omit DATABASE_URL for no-database build, got %q", file.Content)
+		}
+	}
+}
+
 func TestNormalizeModelFieldsPromotesTypeQualifiersToFlags(t *testing.T) {
 	t.Parallel()
 
@@ -349,7 +393,7 @@ func TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview
 	}
 }
 
-func TestApplyBuildAssurancePolicyToPlanStagesPaidFullStackBehindFrontendApproval(t *testing.T) {
+func TestApplyBuildAssurancePolicyToPlanRunsPaidFullStackWithoutFrontendApprovalByDefault(t *testing.T) {
 	t.Parallel()
 
 	for _, mode := range []PowerMode{PowerBalanced, PowerMax} {
@@ -386,25 +430,68 @@ func TestApplyBuildAssurancePolicyToPlanStagesPaidFullStackBehindFrontendApprova
 			if plan == nil {
 				t.Fatal("expected plan")
 			}
-			if plan.DeliveryMode != "frontend_preview_only" {
-				t.Fatalf("expected paid full-stack build to stage a frontend approval checkpoint, got %q", plan.DeliveryMode)
+			if plan.DeliveryMode != "full_stack_preview" {
+				t.Fatalf("expected paid full-stack build to continue through backend runtime by default, got %q", plan.DeliveryMode)
 			}
 			if plan.TechStack.Backend == "" || plan.TechStack.Database == "" {
 				t.Fatalf("expected paid build to retain backend/database contract, got %+v", plan.TechStack)
 			}
 			if plan.APIContract == nil {
-				t.Fatalf("expected API contract to remain available for later backend continuation")
+				t.Fatalf("expected API contract to remain available for full-stack execution")
 			}
-			if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
-				t.Fatalf("expected backend work order to be deferred until frontend approval, got %+v", wo)
+			if wo := getBuildWorkOrder(plan, RoleBackend); wo == nil {
+				t.Fatalf("expected backend work order to run by default, got %+v", plan.WorkOrders)
 			}
-			if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
-				t.Fatalf("expected database work order to be deferred until frontend approval, got %+v", wo)
+			if wo := getBuildWorkOrder(plan, RoleDatabase); wo == nil {
+				t.Fatalf("expected database work order to run by default, got %+v", plan.WorkOrders)
 			}
 			if wo := getBuildWorkOrder(plan, RoleFrontend); wo == nil {
 				t.Fatalf("expected frontend work order to remain active, got %+v", plan.WorkOrders)
 			}
 		})
+	}
+}
+
+func TestApplyBuildAssurancePolicyToPlanCanStagePaidFullStackBehindFrontendApproval(t *testing.T) {
+	t.Setenv("APEX_FRONTEND_APPROVAL_CHECKPOINT", "true")
+
+	build := &Build{
+		ID:               "paid-build-frontstage-opt-in",
+		UserID:           22,
+		SubscriptionPlan: "builder",
+		Description:      "Build a full-stack CRM with auth, database-backed clients, projects, and reporting dashboards",
+		PowerMode:        PowerBalanced,
+	}
+
+	plan := createBuildPlanFromPlanningBundle("build-paid-frontstage-opt-in", build.Description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-paid-frontstage-opt-in",
+			EstimatedTime: 25 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	plan = applyBuildAssurancePolicyToPlan(build, plan)
+	if plan == nil {
+		t.Fatal("expected plan")
+	}
+	if plan.DeliveryMode != "frontend_preview_only" {
+		t.Fatalf("expected opt-in frontend approval checkpoint, got %q", plan.DeliveryMode)
+	}
+	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+		t.Fatalf("expected backend work order to be deferred until frontend approval, got %+v", wo)
+	}
+	if wo := getBuildWorkOrder(plan, RoleFrontend); wo == nil {
+		t.Fatalf("expected frontend work order to remain active, got %+v", plan.WorkOrders)
 	}
 }
 
@@ -1481,6 +1568,31 @@ func TestResolveBuildAppType(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("resolveBuildAppType(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestResolveBuildAppTypePreservesBackendWithoutDatabase(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a full-stack uptime monitor with a React frontend and Express backend API. No database, no auth, no external APIs."
+	requested := &TechStack{Frontend: "React + Vite + TypeScript", Backend: "Node.js + Express", Styling: "Tailwind CSS"}
+	bundle := &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{AppType: "web"},
+	}
+
+	if explicitStaticWebIntent(description) {
+		t.Fatal("no database must not imply frontend-only/static intent")
+	}
+	if got := resolveBuildAppType(description, requested, bundle); got != "fullstack" {
+		t.Fatalf("resolveBuildAppType() = %q, want fullstack", got)
+	}
+
+	stack := resolveBuildTechStack(description, requested, "fullstack", bundle)
+	if stack.Backend != "Express" {
+		t.Fatalf("backend = %q, want Express", stack.Backend)
+	}
+	if stack.Database != "" {
+		t.Fatalf("database = %q, want empty for explicit no-database backend app", stack.Database)
 	}
 }
 

@@ -82,6 +82,7 @@ func (v *Verifier) VerifyFiles(ctx context.Context, files []VerifiableFile, isFu
 	res := &VerificationResult{Passed: true}
 
 	fileMap := buildFileMap(files)
+	nextProject := isNextProject(fileMap)
 
 	// ── 1. Entrypoint discovery ─────────────────────────────────────────
 	htmlEntry := findHTMLEntrypoint(fileMap)
@@ -158,35 +159,66 @@ func (v *Verifier) VerifyFiles(ctx context.Context, files []VerifiableFile, isFu
 	// ── 5. JS/TS entrypoint render/mount call ───────────────────────────
 	if jsEntry != "" {
 		jsContent := fileMap[jsEntry]
-		if !hasRenderCall(jsContent) {
-			return res.fail("missing_entrypoint",
-				fmt.Sprintf("%q does not contain a recognized render or mount call.", jsEntry),
-				fmt.Sprintf("Add a ReactDOM.createRoot/render, createApp, or mount call to %q to attach the app to the DOM.", jsEntry),
-				check("render_call_present", false, "no createRoot/render/mount/createApp found"),
-			)
+		if nextProject && isNextPageEntrypoint(jsEntry) {
+			if !hasDefaultExport(jsContent) {
+				return res.fail("missing_entrypoint",
+					fmt.Sprintf("%q is missing a default-exported page component.", jsEntry),
+					fmt.Sprintf("Export a default page component from %q so Next.js can render the route.", jsEntry),
+					check("next_page_default_export", false, "no export default found"),
+				)
+			}
+			res.addCheck(check("next_page_default_export", true, jsEntry))
+		} else {
+			if !hasRenderCall(jsContent) {
+				return res.fail("missing_entrypoint",
+					fmt.Sprintf("%q does not contain a recognized render or mount call.", jsEntry),
+					fmt.Sprintf("Add a ReactDOM.createRoot/render, createApp, or mount call to %q to attach the app to the DOM.", jsEntry),
+					check("render_call_present", false, "no createRoot/render/mount/createApp found"),
+				)
+			}
+			res.addCheck(check("render_call_present", true, ""))
 		}
-		res.addCheck(check("render_call_present", true, ""))
 	}
 
 	// ── 6. Root component existence (SPA) ───────────────────────────────
 	if jsEntry != "" {
-		rootComponent := findRootComponent(fileMap)
-		if rootComponent == "" {
-			return res.fail("missing_entrypoint",
-				"No root App component found (App.tsx, App.jsx, App.vue, App.svelte).",
-				"Create the root App component (e.g. src/App.tsx) and export it as the default export.",
-				check("root_component_exists", false, "no App.{tsx,jsx,vue,svelte} found"),
-			)
+		if nextProject && isNextAppRouterEntrypoint(jsEntry) {
+			layoutPath := findNextLayout(fileMap)
+			if layoutPath == "" {
+				return res.fail("missing_entrypoint",
+					"No Next.js app router layout found (app/layout.tsx or src/app/layout.tsx).",
+					"Create app/layout.tsx so the Next.js app router has a root layout around the page.",
+					check("next_layout_exists", false, "no app/layout.{tsx,jsx,ts,js} found"),
+				)
+			}
+			layoutContent := fileMap[layoutPath]
+			if len(strings.TrimSpace(layoutContent)) < 30 {
+				return res.fail("blank_screen",
+					fmt.Sprintf("Next.js layout %q is effectively empty.", layoutPath),
+					fmt.Sprintf("Complete %q so the app router can render the page inside a real root layout.", layoutPath),
+					check("next_layout_non_blank", false, "layout < 30 bytes"),
+				)
+			}
+			res.addCheck(check("next_layout_exists", true, layoutPath))
+		} else if !(nextProject && isNextPageEntrypoint(jsEntry)) {
+			rootComponent := findRootComponent(fileMap)
+			if rootComponent == "" {
+				return res.fail("missing_entrypoint",
+					"No root App component found (App.tsx, App.jsx, App.vue, App.svelte).",
+					"Create the root App component (e.g. src/App.tsx) and export it as the default export.",
+					check("root_component_exists", false, "no App.{tsx,jsx,vue,svelte} found"),
+				)
+			}
+			appContent := fileMap[rootComponent]
+			if len(strings.TrimSpace(appContent)) < 30 {
+				return res.fail("blank_screen",
+					fmt.Sprintf("Root component %q is effectively empty.", rootComponent),
+					fmt.Sprintf("Complete %q — it must export a valid React/Vue component with renderable JSX/template content.", rootComponent),
+					check("root_component_non_blank", false, "component < 30 bytes"),
+				)
+			}
+			res.addCheck(check("root_component_exists", true, rootComponent))
 		}
-		appContent := fileMap[rootComponent]
-		if len(strings.TrimSpace(appContent)) < 30 {
-			return res.fail("blank_screen",
-				fmt.Sprintf("Root component %q is effectively empty.", rootComponent),
-				fmt.Sprintf("Complete %q — it must export a valid React/Vue component with renderable JSX/template content.", rootComponent),
-				check("root_component_non_blank", false, "component < 30 bytes"),
-			)
-		}
-		res.addCheck(check("root_component_exists", true, rootComponent))
 	}
 
 	// ── 7. package.json sanity (if present) ─────────────────────────────
@@ -291,6 +323,27 @@ func (v *Verifier) VerifyFiles(ctx context.Context, files []VerifiableFile, isFu
 
 // verifyBackendStatic performs static checks on the backend entry file.
 func (v *Verifier) verifyBackendStatic(fileMap map[string]string) *VerificationResult {
+	if nextRoute := findNextAPIRoute(fileMap); nextRoute != "" {
+		content := fileMap[nextRoute]
+		if len(strings.TrimSpace(content)) < 20 {
+			res := &VerificationResult{Passed: false}
+			return res.fail("blank_screen",
+				fmt.Sprintf("Next.js API route %q is effectively empty.", nextRoute),
+				fmt.Sprintf("Complete %q so the Next.js backend surface exposes a real route handler.", nextRoute),
+				check("backend_entry_non_blank", false, "< 20 bytes"),
+			)
+		}
+		if !hasNextRouteHandler(content) {
+			res := &VerificationResult{Passed: false}
+			return res.fail("backend_no_routes",
+				fmt.Sprintf("Next.js API route %q does not export a request handler.", nextRoute),
+				fmt.Sprintf("Export at least one GET/POST/etc handler from %q so the /api surface is reachable.", nextRoute),
+				check("backend_has_routes", false, "no Next.js route handler export found"),
+			)
+		}
+		return nil
+	}
+
 	beEntry := findBackendEntry(fileMap)
 	if beEntry == "" {
 		res := &VerificationResult{Passed: false}
@@ -451,8 +504,9 @@ func findJSEntrypoint(fileMap map[string]string) string {
 	candidates := []string{
 		"src/main.tsx", "src/main.ts", "src/main.jsx", "src/main.js",
 		"src/index.tsx", "src/index.ts", "src/index.jsx", "src/index.js",
-		"pages/index.tsx", "pages/index.jsx",
-		"app/page.tsx", "app/page.jsx",
+		"pages/index.tsx", "pages/index.ts", "pages/index.jsx", "pages/index.js",
+		"app/page.tsx", "app/page.ts", "app/page.jsx", "app/page.js",
+		"src/app/page.tsx", "src/app/page.ts", "src/app/page.jsx", "src/app/page.js",
 		"index.tsx", "index.ts",
 	}
 	for _, c := range candidates {
@@ -468,6 +522,19 @@ func findRootComponent(fileMap map[string]string) string {
 		"src/App.tsx", "src/App.jsx", "src/App.vue", "src/App.svelte",
 		"src/app.tsx", "src/app.jsx",
 		"App.tsx", "App.jsx",
+	}
+	for _, c := range candidates {
+		if _, ok := fileMap[c]; ok {
+			return c
+		}
+	}
+	return ""
+}
+
+func findNextLayout(fileMap map[string]string) string {
+	candidates := []string{
+		"app/layout.tsx", "app/layout.ts", "app/layout.jsx", "app/layout.js",
+		"src/app/layout.tsx", "src/app/layout.ts", "src/app/layout.jsx", "src/app/layout.js",
 	}
 	for _, c := range candidates {
 		if _, ok := fileMap[c]; ok {
@@ -518,6 +585,86 @@ func hasRenderCall(content string) bool {
 	}
 	for _, p := range patterns {
 		if strings.Contains(content, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDefaultExport(content string) bool {
+	return strings.Contains(content, "export default")
+}
+
+func isNextProject(fileMap map[string]string) bool {
+	for path, content := range fileMap {
+		normalized := strings.ToLower(strings.TrimSpace(path))
+		switch {
+		case normalized == "next.config.js", normalized == "next.config.ts", normalized == "next.config.mjs":
+			return true
+		case normalized == "package.json" && strings.Contains(strings.ToLower(content), `"next"`):
+			return true
+		case normalized == "app/page.tsx", normalized == "app/page.ts", normalized == "app/page.jsx", normalized == "app/page.js":
+			return true
+		case normalized == "src/app/page.tsx", normalized == "src/app/page.ts", normalized == "src/app/page.jsx", normalized == "src/app/page.js":
+			return true
+		case strings.HasPrefix(normalized, "app/api/") && strings.Contains(normalized, "/route."):
+			return true
+		case strings.HasPrefix(normalized, "pages/api/"):
+			return true
+		}
+	}
+	return false
+}
+
+func isNextPageEntrypoint(path string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(path))
+	switch normalized {
+	case "app/page.tsx", "app/page.ts", "app/page.jsx", "app/page.js",
+		"src/app/page.tsx", "src/app/page.ts", "src/app/page.jsx", "src/app/page.js",
+		"pages/index.tsx", "pages/index.ts", "pages/index.jsx", "pages/index.js":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNextAppRouterEntrypoint(path string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(path))
+	switch normalized {
+	case "app/page.tsx", "app/page.ts", "app/page.jsx", "app/page.js",
+		"src/app/page.tsx", "src/app/page.ts", "src/app/page.jsx", "src/app/page.js":
+		return true
+	default:
+		return false
+	}
+}
+
+func findNextAPIRoute(fileMap map[string]string) string {
+	for path := range fileMap {
+		normalized := strings.ToLower(strings.TrimSpace(path))
+		switch {
+		case strings.HasPrefix(normalized, "app/api/") && strings.HasSuffix(normalized, "/route.ts"):
+			return path
+		case strings.HasPrefix(normalized, "app/api/") && strings.HasSuffix(normalized, "/route.js"):
+			return path
+		case strings.HasPrefix(normalized, "pages/api/") && (strings.HasSuffix(normalized, ".ts") || strings.HasSuffix(normalized, ".js")):
+			return path
+		}
+	}
+	return ""
+}
+
+func hasNextRouteHandler(content string) bool {
+	patterns := []string{
+		"export function GET", "export async function GET",
+		"export function POST", "export async function POST",
+		"export function PUT", "export async function PUT",
+		"export function PATCH", "export async function PATCH",
+		"export function DELETE", "export async function DELETE",
+		"export default function handler", "export default async function handler",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(content, pattern) {
 			return true
 		}
 	}

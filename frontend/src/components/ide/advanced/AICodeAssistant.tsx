@@ -78,7 +78,7 @@ export const AICodeAssistant: React.FC<AICodeAssistantProps> = ({
       id: 'gpt4',
       name: 'OpenAI',
       icon: '⚡',
-      capabilities: ['ChatGPT 5.4', 'GPT-4.1', 'GPT-4o Mini'],
+      capabilities: ['ChatGPT 5.4 Pro', 'GPT-4.1', 'GPT-4o Mini'],
       performance: 92
     },
     {
@@ -92,8 +92,15 @@ export const AICodeAssistant: React.FC<AICodeAssistantProps> = ({
       id: 'grok',
       name: 'Grok',
       icon: '✦',
-      capabilities: ['Code Fast 1', 'Grok 3', 'Grok 3 Mini'],
+      capabilities: ['Grok 4.20', 'Grok 3', 'Grok 3 Mini'],
       performance: 89
+    },
+    {
+      id: 'ollama',
+      name: 'Kimi / Local',
+      icon: 'O',
+      capabilities: ['Kimi K2.6', 'GLM-5.1', 'Qwen 3.6'],
+      performance: 88
     }
   ];
 

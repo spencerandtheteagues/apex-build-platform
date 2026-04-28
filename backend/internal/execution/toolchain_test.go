@@ -26,16 +26,16 @@ func TestGenerateDockerfileIncludesExpandedCLIInstalls(t *testing.T) {
 	sandbox := &ContainerSandbox{config: DefaultContainerSandboxConfig()}
 
 	jsDockerfile := sandbox.generateDockerfile("javascript")
-	for _, snippet := range []string{"postgresql-client", "default-mysql-client", "redis-tools", "netlify-cli", "@railway/cli", "wrangler"} {
+	for _, snippet := range []string{"postgresql-client", "default-mysql-client", "redis-tools", "netlify-cli", "@railway/cli", "wrangler", "supabase_linux_amd64.tar.gz"} {
 		if !strings.Contains(jsDockerfile, snippet) {
 			t.Fatalf("expected javascript dockerfile to contain %q, got %q", snippet, jsDockerfile)
 		}
 	}
-	if strings.Contains(jsDockerfile, "npm install -g pnpm yarn ") {
-		t.Fatalf("expected javascript dockerfile to avoid reinstalling yarn, got %q", jsDockerfile)
+	if strings.Contains(jsDockerfile, "pnpm yarn") || strings.Contains(jsDockerfile, " yarn ") {
+		t.Fatalf("expected javascript dockerfile to avoid reinstalling preinstalled yarn, got %q", jsDockerfile)
 	}
-	if strings.Contains(jsDockerfile, "supabase") {
-		t.Fatalf("expected javascript dockerfile to avoid unsupported Supabase global install, got %q", jsDockerfile)
+	if strings.Contains(jsDockerfile, "npm install -g supabase") {
+		t.Fatalf("expected javascript dockerfile to install supabase from release binary, got %q", jsDockerfile)
 	}
 	if !strings.Contains(jsDockerfile, "npm install -g pnpm typescript tsx vite serve prisma drizzle-kit vercel netlify-cli wrangler @railway/cli") {
 		t.Fatalf("expected javascript dockerfile to retain enhanced CLI installs, got %q", jsDockerfile)

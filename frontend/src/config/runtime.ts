@@ -10,6 +10,8 @@ const PRIMARY_PRODUCTION_API_URL = 'https://api.apex-build.dev/api/v1'
 const PRIMARY_PRODUCTION_WS_URL = 'wss://api.apex-build.dev/ws'
 const BROKEN_PRODUCTION_API_HOSTS = new Set(['api.apex.build'])
 const BROKEN_PRODUCTION_WS_HOSTS = new Set(['api.apex.build'])
+const PRODUCTION_API_HOSTS = new Set(['api.apex-build.dev'])
+const PRODUCTION_WS_HOSTS = new Set(['api.apex-build.dev'])
 
 const readRuntimeConfig = (): RuntimeConfig => {
   if (typeof window === 'undefined' || !window.__APEX_CONFIG__) {
@@ -88,6 +90,22 @@ const isLocalDevelopmentHost = (): boolean => {
   return private172Match
 }
 
+const isProductionApiUrl = (value: string): boolean => {
+  try {
+    return PRODUCTION_API_HOSTS.has(new URL(value).host)
+  } catch {
+    return false
+  }
+}
+
+const isProductionWsUrl = (value: string): boolean => {
+  try {
+    return PRODUCTION_WS_HOSTS.has(new URL(value).host)
+  } catch {
+    return false
+  }
+}
+
 export const getConfiguredApiUrl = (): string => {
   const importedValue = normalizeConfiguredApiUrl(getImportedApiUrl())
   if (isLocalDevelopmentHost() && importedValue) {
@@ -95,6 +113,10 @@ export const getConfiguredApiUrl = (): string => {
   }
 
   const runtimeValue = normalizeConfiguredApiUrl(readRuntimeConfig().API_URL)
+  if (isLocalDevelopmentHost() && isProductionApiUrl(runtimeValue)) {
+    return ''
+  }
+
   if (runtimeValue) {
     return runtimeValue
   }
@@ -109,6 +131,10 @@ export const getConfiguredWsUrl = (): string => {
   }
 
   const runtimeValue = normalizeConfiguredWsUrl(readRuntimeConfig().WS_URL)
+  if (isLocalDevelopmentHost() && isProductionWsUrl(runtimeValue)) {
+    return ''
+  }
+
   if (runtimeValue) {
     return runtimeValue
   }

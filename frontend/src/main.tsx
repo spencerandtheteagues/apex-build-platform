@@ -1,34 +1,22 @@
-// APEX-BUILD Frontend Entry Point
-// Cyberpunk cloud development platform initialization
+// APEX-BUILD frontend entry point
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import './styles/globals.css'
 
-// Console welcome message
 console.log(`
-🚀 APEX-BUILD v1.0.0
-⚡ Cyberpunk Cloud Development Platform (rebuilt)
+APEX-BUILD v1.0.0
+Multi-agent AI app builder
 
-🔥 Features:
-   • Multi-AI Integration (Claude + OpenAI + Gemini + Grok)
-   • Real-time Collaboration
-   • Intelligent Code Editor
-   • Cloud Execution Environment
-   • Beautiful Cyberpunk UI
+Core surfaces:
+   - 9 specialized agents across flagship and open-weight models
+   - BYOK routing, live cost tracking, and MCP connectors
+   - Monaco editor, cloud execution, GitHub export, and deploy controls
+   - Production-grade review, testing, secrets, and collaboration workflows
 
-💻 Built with cutting-edge tech:
-   • React 18 + TypeScript
-   • Monaco Editor
-   • WebSocket Collaboration
-   • Go Backend with PostgreSQL
-   • Docker Containerization
-
-🌐 Website: https://apex-build.dev
-📧 Support: support@apex.build
-
-Welcome to the future of development! 🌌
+Website: https://apex-build.dev
+Support: support@apex-build.dev
 `)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -393,3 +393,81 @@ func TestVerifier_HTTPBootCheck_VanillaHTML(t *testing.T) {
 		t.Log("http_boot check did not run (vanilla detection may have been skipped)")
 	}
 }
+
+func TestVerifier_PassesNextAppRouterProject(t *testing.T) {
+	files := []VerifiableFile{
+		{
+			Path: "package.json",
+			Content: `{
+  "name": "crypto-tracker",
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "dependencies": { "next": "^15.3.2", "react": "^18.3.0", "react-dom": "^18.3.0" }
+}`,
+		},
+		{
+			Path:    "next.config.js",
+			Content: `const nextConfig = {}; module.exports = nextConfig;`,
+		},
+		{
+			Path: "app/layout.tsx",
+			Content: `export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return <html lang="en"><body>{children}</body></html>
+}`,
+		},
+		{
+			Path: "app/page.tsx",
+			Content: `export default function Page() {
+  return <main>Crypto tracker</main>
+}`,
+		},
+	}
+
+	v := NewVerifier(nil)
+	result := v.VerifyFiles(context.Background(), files, false)
+
+	if !result.Passed {
+		t.Fatalf("expected Next.js app router project to pass, got kind=%s details=%s", result.FailureKind, result.Details)
+	}
+}
+
+func TestVerifier_FullStack_PassesNextAppRouterWithAPIRoute(t *testing.T) {
+	files := []VerifiableFile{
+		{
+			Path: "package.json",
+			Content: `{
+  "name": "crypto-tracker",
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "dependencies": { "next": "^15.3.2", "react": "^18.3.0", "react-dom": "^18.3.0" }
+}`,
+		},
+		{
+			Path:    "next.config.js",
+			Content: `const nextConfig = {}; module.exports = nextConfig;`,
+		},
+		{
+			Path: "app/layout.tsx",
+			Content: `export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return <html lang="en"><body>{children}</body></html>
+}`,
+		},
+		{
+			Path: "app/page.tsx",
+			Content: `export default function Page() {
+  return <main>Crypto tracker</main>
+}`,
+		},
+		{
+			Path: "app/api/health/route.ts",
+			Content: `export async function GET() {
+  return Response.json({ status: "ok" })
+}`,
+		},
+	}
+
+	v := NewVerifier(nil)
+	result := v.VerifyFiles(context.Background(), files, true)
+
+	if !result.Passed {
+		t.Fatalf("expected Next.js full-stack project to pass, got kind=%s details=%s", result.FailureKind, result.Details)
+	}
+}

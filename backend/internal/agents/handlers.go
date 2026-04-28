@@ -524,7 +524,7 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	// Validate role_assignments if provided
 	if req.RoleAssignments != nil {
 		validCats := map[string]bool{"architect": true, "coder": true, "tester": true, "devops": true}
-		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true, "deepseek": true, "glm": true}
+		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true}
 		for cat, prov := range req.RoleAssignments {
 			if !validCats[cat] {
 				c.JSON(http.StatusBadRequest, gin.H{
@@ -544,7 +544,7 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	}
 
 	if req.ProviderModelOverrides != nil {
-		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true, "deepseek": true, "glm": true}
+		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true}
 		for provider, model := range req.ProviderModelOverrides {
 			if !validProvs[provider] {
 				c.JSON(http.StatusBadRequest, gin.H{

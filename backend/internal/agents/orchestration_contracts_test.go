@@ -491,6 +491,142 @@ func TestVerifyAndNormalizeBuildContractAcceptsNextFullstackScaffoldContract(t *
 	}
 }
 
+func TestCompileBuildContractSeedsExplicitAPIEndpoints(t *testing.T) {
+	t.Parallel()
+
+	intent := &IntentBrief{
+		NormalizedRequest:    "The backend must expose GET /api/health and GET /api/metrics with real JSON responses.",
+		AppType:              "fullstack",
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAPI},
+	}
+	plan := &BuildPlan{
+		ID:        "plan-explicit-api",
+		BuildID:   "build-explicit-api",
+		AppType:   "fullstack",
+		TechStack: TechStack{Frontend: "React", Backend: "Express"},
+	}
+
+	contract := compileBuildContractFromPlan("build-explicit-api", intent, plan)
+	if contract == nil || contract.APIContract == nil {
+		t.Fatal("expected API contract")
+	}
+	if !apiContractHasEndpoint(contract.APIContract, "GET", "/api/metrics") {
+		t.Fatalf("expected explicit /api/metrics endpoint, got %+v", contract.APIContract.Endpoints)
+	}
+
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected verified contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected explicit endpoint contract to pass, got blockers %v", report.Blockers)
+	}
+}
+
+func TestVerifyAndNormalizeBuildContractDoesNotRequireDataSurfaceForResponseModels(t *testing.T) {
+	t.Parallel()
+
+	intent := &IntentBrief{
+		AppType:              "fullstack",
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAPI},
+	}
+	contract := &BuildContract{
+		ID:           "contract-response-models",
+		BuildID:      "build-response-models",
+		AppType:      "fullstack",
+		DeliveryMode: "full_stack_preview",
+		RoutePageMap: []ContractRoute{{Path: "/", File: "src/App.tsx", Surface: SurfaceFrontend}},
+		APIContract: &BuildAPIContract{
+			BackendPort: 3001,
+			Endpoints: []APIEndpoint{
+				{Method: "GET", Path: "/api/health"},
+				{Method: "GET", Path: "/api/metrics"},
+			},
+		},
+		DBSchemaContract: []DataModel{
+			{Name: "HealthResponse", Fields: []ModelField{{Name: "status", Type: "string", Required: true}}},
+			{Name: "MetricsResponse", Fields: []ModelField{{Name: "requestCount", Type: "number", Required: true}}},
+		},
+		EnvVarContract: []BuildEnvVar{
+			{Name: "PORT", Required: true},
+			{Name: "DATABASE_URL", Required: false},
+		},
+		RuntimeContract:     deriveRuntimeContractFromAppType("fullstack"),
+		AcceptanceBySurface: deriveAcceptanceBySurfaceFromAppType("fullstack"),
+		VerificationGates:   deriveVerificationGatesFromAppType("fullstack"),
+		TruthBySurface: map[string][]TruthTag{
+			string(SurfaceFrontend):    {TruthScaffolded},
+			string(SurfaceBackend):     {TruthScaffolded, TruthNeedsBackendRuntime},
+			string(SurfaceIntegration): {TruthPartiallyWired},
+			string(SurfaceDeployment):  {TruthScaffolded},
+		},
+	}
+
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected corrected contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected response-model contract to pass without data surface, got blockers %v", report.Blockers)
+	}
+	if hasSurface(verified.AcceptanceBySurface, SurfaceData) {
+		t.Fatalf("expected no data acceptance for non-persistent response models, got %+v", verified.AcceptanceBySurface)
+	}
+}
+
+func TestVerifyAndNormalizeBuildContractFillsPersistentDataAcceptance(t *testing.T) {
+	t.Parallel()
+
+	intent := &IntentBrief{
+		AppType:              "fullstack",
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAPI, CapabilityDatabase},
+	}
+	contract := &BuildContract{
+		ID:           "contract-persistent-data",
+		BuildID:      "build-persistent-data",
+		AppType:      "fullstack",
+		DeliveryMode: "full_stack_preview",
+		RoutePageMap: []ContractRoute{{Path: "/", File: "src/App.tsx", Surface: SurfaceFrontend}},
+		APIContract: &BuildAPIContract{
+			BackendPort: 3001,
+			Endpoints:   []APIEndpoint{{Method: "GET", Path: "/api/projects"}},
+		},
+		DBSchemaContract: []DataModel{
+			{Name: "Project", Fields: []ModelField{{Name: "id", Type: "uuid", Required: true}}},
+		},
+		EnvVarContract:      []BuildEnvVar{{Name: "DATABASE_URL", Required: true}},
+		RuntimeContract:     deriveRuntimeContractFromAppType("fullstack"),
+		AcceptanceBySurface: deriveAcceptanceBySurfaceFromAppType("fullstack"),
+		VerificationGates:   deriveVerificationGatesFromAppType("fullstack"),
+		TruthBySurface: map[string][]TruthTag{
+			string(SurfaceData): {TruthScaffolded},
+		},
+	}
+
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected corrected contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected persistent data contract to pass after data acceptance fallback, got blockers %v", report.Blockers)
+	}
+	if !hasSurface(verified.AcceptanceBySurface, SurfaceData) {
+		t.Fatalf("expected data acceptance fallback for persistent schema, got %+v", verified.AcceptanceBySurface)
+	}
+}
+
+func apiContractHasEndpoint(contract *BuildAPIContract, method string, path string) bool {
+	if contract == nil {
+		return false
+	}
+	for _, endpoint := range contract.Endpoints {
+		if strings.EqualFold(strings.TrimSpace(endpoint.Method), method) && strings.TrimSpace(endpoint.Path) == path {
+			return true
+		}
+	}
+	return false
+}
+
 func TestVerifyAndNormalizeBuildContractFillsPartialFrontendPreviewDefaults(t *testing.T) {
 	t.Parallel()
 

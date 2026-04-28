@@ -457,7 +457,7 @@ func TestDefaultModel(t *testing.T) {
 		{"claude", "max", "claude-opus-4-6"},
 		{"gpt4", "fast", "gpt-4o-mini"},
 		{"gpt4", "balanced", "gpt-4.1"},
-		{"gpt4", "max", "gpt-5.4"},
+		{"gpt4", "max", "gpt-5.4-pro"},
 		{"gemini", "fast", "gemini-2.5-flash-lite"},
 		{"gemini", "balanced", "gemini-3-flash-preview"},
 		{"gemini", "max", "gemini-3.1-pro"},

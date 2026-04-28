@@ -1,14 +1,16 @@
 #!/bin/sh
 
-# APEX.BUILD Frontend Docker Entrypoint
+# APEX-BUILD Frontend Docker Entrypoint
 # Handles runtime configuration and starts nginx
 
 set -e
 
-echo "🚀 APEX.BUILD Frontend starting..."
+echo "🚀 APEX-BUILD Frontend starting..."
 PORT="${PORT:-3000}"
 API_URL="${VITE_API_URL:-${VITE_API_BASE_URL:-}}"
 WS_URL="${VITE_WS_URL:-}"
+BROWSER_API_URL="${APEX_BROWSER_API_URL:-/api/v1}"
+BROWSER_WS_URL="${APEX_BROWSER_WS_URL:-/ws}"
 
 trim() {
     printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
@@ -77,14 +79,15 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 # Runtime environment variable substitution
-if [ -n "$API_URL" ] || [ -n "$VITE_WS_URL" ]; then
-    echo "📝 Updating runtime configuration..."
+echo "📝 Updating runtime configuration..."
 
-    # Create a config file that can be loaded by the app
-    cat > /usr/share/nginx/html/config.js << EOF
+# The Docker frontend already proxies /api/v1 and /ws through nginx.
+# Keep browser-facing runtime config same-origin so auth and websocket traffic
+# do not depend on a separate cross-origin API host being reachable.
+cat > /usr/share/nginx/html/config.js << EOF
 window.__APEX_CONFIG__ = {
-  API_URL: "${API_URL}",
-  WS_URL: "${WS_URL}",
+  API_URL: "${BROWSER_API_URL}",
+  WS_URL: "${BROWSER_WS_URL}",
   VERSION: "${APP_VERSION:-1.0.0}",
   ENVIRONMENT: "${NODE_ENV:-production}",
   FEATURES: {
@@ -96,8 +99,7 @@ window.__APEX_CONFIG__ = {
 };
 EOF
 
-    echo "✅ Configuration updated"
-fi
+echo "✅ Configuration updated"
 
 # Ensure proper permissions
 echo "🔐 Setting up permissions..."
@@ -107,9 +109,9 @@ chown -R nginx:nginx /usr/share/nginx/html 2>/dev/null || true
 echo "🔧 Testing nginx configuration..."
 nginx -t
 
-echo "🌐 Starting APEX.BUILD Frontend on port ${PORT}..."
-echo "📡 API URL: ${API_URL:-<auto>}"
-echo "🔌 WebSocket URL: ${WS_URL:-<auto>}"
+echo "🌐 Starting APEX-BUILD Frontend on port ${PORT}..."
+echo "📡 Browser API URL: ${BROWSER_API_URL}"
+echo "🔌 Browser WebSocket URL: ${BROWSER_WS_URL}"
 echo "↪️ API proxy target: ${API_PROXY_PASS}"
 echo "↪️ WS proxy target: ${WS_PROXY_PASS}"
 

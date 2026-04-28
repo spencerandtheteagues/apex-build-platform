@@ -18,7 +18,7 @@ export interface User {
   subscription_end?: string
   monthly_ai_requests: number
   monthly_ai_cost: number
-  preferred_theme: 'cyberpunk' | 'matrix' | 'synthwave' | 'neonCity' | 'steampunk'
+  preferred_theme: 'cyberpunk' | 'matrix' | 'synthwave' | 'neonCity'
   preferred_ai: 'auto' | 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
   created_at: string
   updated_at: string
@@ -102,7 +102,7 @@ export type AICapability =
   | 'testing'
   | 'documentation'
 
-export type AIProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'deepseek' | 'glm'
+export type AIProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
 
 export interface AIUsage {
   total_requests: number
@@ -1025,4 +1025,126 @@ export interface ProjectAsset {
   file_type: 'image' | 'video' | 'csv' | 'pdf' | 'text' | 'other'
   content_preview?: string
   storage_path: string
+}
+
+// ─── Enterprise Types ──────────────────────────────────────────────
+
+export interface Organization {
+  id: number
+  created_at: string
+  updated_at: string
+  name: string
+  slug: string
+  description?: string
+  website?: string
+  logo_url?: string
+  billing_email?: string
+  stripe_customer_id?: string
+  subscription_id?: string
+  subscription_type: string
+  subscription_status: string
+  subscription_end?: string
+  max_members: number
+  max_projects: number
+  max_storage_gb: number
+  max_ai_requests: number
+  used_storage_bytes: number
+  sso_enabled: boolean
+  saml_entity_id?: string
+  saml_sso_url?: string
+  saml_certificate?: string
+  scim_enabled: boolean
+  audit_logs_enabled: boolean
+  advanced_rbac_enabled: boolean
+  data_export_enabled: boolean
+  custom_branding_enabled: boolean
+  audit_log_retention_days: number
+  data_retention_days: number
+  members?: OrganizationMember[]
+  roles?: Role[]
+  audit_logs?: AuditLog[]
+}
+
+export interface OrganizationMember {
+  id: number
+  created_at: string
+  updated_at: string
+  organization_id: number
+  user_id: number
+  role_id: number
+  saml_name_id?: string
+  saml_attributes?: Record<string, any>
+  provisioned_by: string
+  status: 'active' | 'suspended' | 'pending'
+  invited_by?: number
+  invited_at?: string
+  joined_at?: string
+  last_active_at?: string
+  user?: User
+  role?: Role
+}
+
+export interface Role {
+  id: number
+  created_at: string
+  updated_at: string
+  organization_id?: number
+  name: string
+  description?: string
+  is_system: boolean
+  is_default: boolean
+  permissions?: Permission[]
+}
+
+export interface Permission {
+  id: number
+  created_at: string
+  updated_at: string
+  resource: string
+  action: string
+  scope: string
+  name: string
+  description?: string
+  category?: string
+}
+
+export interface AuditLog {
+  id: number
+  created_at: string
+  organization_id?: number
+  user_id?: number
+  username: string
+  email: string
+  ip_address: string
+  user_agent: string
+  action: string
+  resource_type: string
+  resource_id?: string
+  resource_name?: string
+  description?: string
+  old_value?: Record<string, any>
+  new_value?: Record<string, any>
+  metadata?: Record<string, any>
+  request_id?: string
+  session_id?: string
+  environment?: string
+  severity: 'info' | 'warning' | 'error' | 'critical'
+  category?: string
+  outcome: 'success' | 'failure' | 'error'
+  retain_until?: string
+  exported: boolean
+}
+
+export interface SSOConfigRequest {
+  saml_entity_id: string
+  saml_sso_url: string
+  saml_certificate: string
+  scim_enabled?: boolean
+}
+
+export interface PaginatedAuditLogs {
+  audit_logs: AuditLog[]
+  total: number
+  page: number
+  page_size: number
 }

@@ -13,7 +13,7 @@ func defaultGenerateTimeout(provider ai.AIProvider, mode PowerMode) time.Duratio
 		mode = PowerFast
 	}
 
-	if provider == ai.ProviderOllama || provider == ai.ProviderDeepSeek || provider == ai.ProviderGLM {
+	if provider == ai.ProviderOllama {
 		switch mode {
 		case PowerMax:
 			return 6 * time.Minute

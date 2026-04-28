@@ -32,7 +32,7 @@ func TestOpenAIGenerateDoesNotSilentlyDowngradeExplicitGPT5Model(t *testing.T) {
 	_, err := client.Generate(context.Background(), &AIRequest{
 		ID:          "explicit-gpt5",
 		Provider:    ProviderGPT4,
-		Model:       "gpt-5.4",
+		Model:       "gpt-5.4-pro",
 		Capability:  CapabilityCodeGeneration,
 		Prompt:      "Build a product page",
 		Temperature: 0.3,

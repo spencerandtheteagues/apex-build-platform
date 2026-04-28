@@ -55,11 +55,31 @@ type e2bPreviewHelperResponse struct {
 }
 
 func newRuntimeBackendFromEnv() (RuntimeBackend, error) {
+	if shouldUseDockerPreviewBackendRuntime() {
+		return newDockerPreviewBackendRuntimeFromEnv()
+	}
+
 	apiKey := strings.TrimSpace(os.Getenv("E2B_API_KEY"))
 	if apiKey == "" {
 		return nil, nil
 	}
 	return newE2BPreviewRuntime(apiKey)
+}
+
+func shouldUseDockerPreviewBackendRuntime() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("APEX_PREVIEW_BACKEND_RUNTIME"))) {
+	case "container", "docker":
+		return true
+	case "host", "process", "e2b":
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("PREVIEW_FORCE_CONTAINER")), "true") {
+		return strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_HOST")) != "" ||
+			strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_CONTEXT")) != "" ||
+			strings.TrimSpace(os.Getenv("DOCKER_HOST")) != "" ||
+			strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")) != ""
+	}
+	return false
 }
 
 func newE2BPreviewRuntime(apiKey string) (*e2bPreviewRuntime, error) {

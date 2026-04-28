@@ -29,7 +29,7 @@ const avatarVariants = cva(
         // Synthwave pink/purple theme
         synthwave: 'border-pink-400/60 bg-gradient-to-br from-pink-500/20 to-purple-600/20 shadow-lg shadow-pink-500/20',
 
-        // Neon city blue theme
+        // Provider/status blue accent.
         neonCity: 'border-blue-400/60 bg-gradient-to-br from-blue-500/20 to-indigo-600/20 shadow-lg shadow-blue-500/20',
 
         // Neutral gray

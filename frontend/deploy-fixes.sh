@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🔧 Deploying APEX.BUILD Frontend UX Fixes"
+echo "🔧 Deploying APEX-BUILD Frontend UX Fixes"
 echo "========================================"
 
 # Backup original files

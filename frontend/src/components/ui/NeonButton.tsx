@@ -1,5 +1,5 @@
 // APEX-BUILD Neon Button Component
-// 22nd Century Steampunk design with multi-layer glow effects
+// Multi-layer glow button for the Apex workspace
 
 import React from 'react'
 import { cn } from '@/lib/utils'
@@ -16,12 +16,12 @@ export interface NeonButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEl
 
 const variantStyles = {
   cyan: {
-    base: 'from-cyan-500 to-blue-600',
-    glow: 'shadow-cyan-500/50',
-    glowIntense: 'shadow-cyan-400/70',
-    text: 'text-cyan-100',
-    border: 'border-cyan-400/50',
-    hoverBorder: 'hover:border-cyan-300',
+    base: 'from-red-500 to-rose-700',
+    glow: 'shadow-red-500/50',
+    glowIntense: 'shadow-red-400/70',
+    text: 'text-red-50',
+    border: 'border-red-400/50',
+    hoverBorder: 'hover:border-red-300',
   },
   pink: {
     base: 'from-pink-500 to-purple-600',

@@ -714,7 +714,7 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		return
 	}
 
-	targetURL, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", status.Port))
+	targetURL, err := previewProxyTargetURL(status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build preview proxy"})
 		return
@@ -1042,6 +1042,17 @@ func backendProxyTargetURL(serverStatus *preview.ServerStatus) (*url.URL, error)
 	return url.Parse(target)
 }
 
+func previewProxyTargetURL(status *preview.PreviewStatus) (*url.URL, error) {
+	if status == nil || !status.Active {
+		return nil, fmt.Errorf("preview not running")
+	}
+	target := strings.TrimSpace(status.URL)
+	if target == "" {
+		target = fmt.Sprintf("http://127.0.0.1:%d", status.Port)
+	}
+	return url.Parse(target)
+}
+
 func (h *PreviewHandler) rewritePreviewHTMLForProxy(html string, projectID uint) string {
 	return h.rewritePreviewHTMLForProxyWithBackend(html, projectID, "", "")
 }
@@ -1350,6 +1361,18 @@ func (h *PreviewHandler) ensureBackendPreviewAvailable(c *gin.Context) bool {
 func (h *PreviewHandler) detectEntryPoint(projectID uint) string {
 	// Check for common entry points
 	entryPoints := []string{
+		"app/page.tsx",
+		"app/page.ts",
+		"app/page.jsx",
+		"app/page.js",
+		"src/app/page.tsx",
+		"src/app/page.ts",
+		"src/app/page.jsx",
+		"src/app/page.js",
+		"pages/index.tsx",
+		"pages/index.ts",
+		"pages/index.jsx",
+		"pages/index.js",
 		"index.html",
 		"public/index.html",
 		"src/index.html",
@@ -1376,20 +1399,23 @@ func (h *PreviewHandler) detectFramework(projectID uint) string {
 	if err := h.db.Where("project_id = ? AND path = ?", projectID, "package.json").First(&file).Error; err == nil {
 		content := file.Content
 
-		// Check for common frameworks
-		frameworks := map[string][]string{
-			"react":   {"react", "react-dom"},
-			"vue":     {"vue"},
-			"svelte":  {"svelte"},
-			"next":    {"next"},
-			"nuxt":    {"nuxt"},
-			"angular": {"@angular/core"},
+		// Prefer meta-frameworks before their underlying UI libraries.
+		frameworks := []struct {
+			name string
+			deps []string
+		}{
+			{name: "next", deps: []string{"next"}},
+			{name: "nuxt", deps: []string{"nuxt"}},
+			{name: "react", deps: []string{"react", "react-dom"}},
+			{name: "vue", deps: []string{"vue"}},
+			{name: "svelte", deps: []string{"svelte"}},
+			{name: "angular", deps: []string{"@angular/core"}},
 		}
 
-		for framework, deps := range frameworks {
-			for _, dep := range deps {
+		for _, framework := range frameworks {
+			for _, dep := range framework.deps {
 				if contains(content, `"`+dep+`"`) {
-					return framework
+					return framework.name
 				}
 			}
 		}
@@ -1572,6 +1598,18 @@ func (h *PreviewHandler) InvalidateBundleCache(c *gin.Context) {
 func (h *PreviewHandler) detectBundleEntryPoint(projectID uint) string {
 	// Priority order for entry points
 	entryPoints := []string{
+		"app/page.tsx",
+		"app/page.ts",
+		"app/page.jsx",
+		"app/page.js",
+		"src/app/page.tsx",
+		"src/app/page.ts",
+		"src/app/page.jsx",
+		"src/app/page.js",
+		"pages/index.tsx",
+		"pages/index.ts",
+		"pages/index.jsx",
+		"pages/index.js",
 		"src/index.tsx",
 		"src/index.ts",
 		"src/index.jsx",

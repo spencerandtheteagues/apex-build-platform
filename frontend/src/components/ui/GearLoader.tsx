@@ -1,5 +1,5 @@
 // APEX-BUILD Gear Loader Component
-// Animated steampunk gears for loading states
+// Animated workspace gears for loading states
 
 import React from 'react'
 import { cn } from '@/lib/utils'
@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 export interface GearLoaderProps {
   className?: string
   size?: 'sm' | 'md' | 'lg' | 'xl'
-  variant?: 'cyan' | 'pink' | 'gold' | 'green'
+  variant?: 'primary' | 'pink' | 'gold' | 'green'
   text?: string
   showText?: boolean
 }
@@ -20,7 +20,7 @@ const sizeStyles = {
 }
 
 const variantColors = {
-  cyan: { primary: '#00FFFF', secondary: '#00CED1', glow: 'rgba(0, 255, 255, 0.3)' },
+  primary: { primary: '#FF4466', secondary: '#CC0028', glow: 'rgba(255, 68, 102, 0.3)' },
   pink: { primary: '#FF00FF', secondary: '#C71585', glow: 'rgba(255, 0, 255, 0.3)' },
   gold: { primary: '#CD7F32', secondary: '#B87333', glow: 'rgba(205, 127, 50, 0.3)' },
   green: { primary: '#00FF00', secondary: '#32CD32', glow: 'rgba(0, 255, 0, 0.3)' },
@@ -56,7 +56,7 @@ const GearSVG: React.FC<{ color: string; glow: string; className?: string; rever
 export const GearLoader: React.FC<GearLoaderProps> = ({
   className,
   size = 'md',
-  variant = 'cyan',
+  variant = 'primary',
   text = 'Loading...',
   showText = true,
 }) => {
@@ -134,7 +134,7 @@ export const GearLoader: React.FC<GearLoaderProps> = ({
 // Simple inline gear animation for buttons etc
 export const InlineGear: React.FC<{ className?: string; color?: string }> = ({
   className,
-  color = '#00FFFF'
+  color = '#FF4466'
 }) => (
   <svg
     viewBox="0 0 100 100"

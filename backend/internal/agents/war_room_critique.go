@@ -156,19 +156,80 @@ func buildSpecHasAdvisoryCode(values []BuildSpecAdvisory, code string) bool {
 // llmWarRoomIssue is the JSON shape each provider returns for a single finding.
 type llmWarRoomIssue struct {
 	Code           string `json:"code"`
-	Category       string `json:"category"`   // "security" | "performance"
-	Surface        string `json:"surface"`    // ContractSurface value
+	Category       string `json:"category"` // "security" | "performance"
+	Surface        string `json:"surface"`  // ContractSurface value
 	Summary        string `json:"summary"`
 	Recommendation string `json:"recommendation"`
 }
 
 const warRoomLLMDebateTimeout = 8 * time.Second
 
+func effectiveWarRoomCritiquePowerMode(build *Build) PowerMode {
+	if build == nil {
+		return PowerFast
+	}
+	if build.Mode == ModeFast || build.PowerMode == PowerFast {
+		return PowerFast
+	}
+	switch build.PowerMode {
+	case PowerMax:
+		return PowerMax
+	case PowerBalanced:
+		return PowerBalanced
+	default:
+		return PowerFast
+	}
+}
+
+func warRoomLLMDebateTimeoutForPowerMode(mode PowerMode) time.Duration {
+	switch mode {
+	case PowerMax:
+		return 12 * time.Second
+	case PowerBalanced:
+		return 10 * time.Second
+	default:
+		return warRoomLLMDebateTimeout
+	}
+}
+
+func warRoomLLMDebateMaxTokensForPowerMode(mode PowerMode) int {
+	switch mode {
+	case PowerMax:
+		return 900
+	case PowerBalanced:
+		return 700
+	default:
+		return 512
+	}
+}
+
+func contractCritiqueTimeoutForPowerMode(mode PowerMode) time.Duration {
+	switch mode {
+	case PowerMax:
+		return 30 * time.Second
+	case PowerBalanced:
+		return 25 * time.Second
+	default:
+		return 20 * time.Second
+	}
+}
+
+func contractCritiqueMaxTokensForPowerMode(mode PowerMode) int {
+	switch mode {
+	case PowerMax:
+		return 1000
+	case PowerBalanced:
+		return 750
+	default:
+		return 600
+	}
+}
+
 // runWarRoomLLMDebate sends the frozen ValidatedBuildSpec to two providers
 // concurrently (Claude for security focus, GPT-5 for architecture focus) and
 // merges their findings into the spec's advisory lists. It is best-effort: any
 // provider error is silently skipped so the build is never blocked.
-func (am *AgentManager) runWarRoomLLMDebate(buildID string, userID uint, usesPlatformKeys bool, spec *ValidatedBuildSpec, contract *BuildContract) []buildSpecCritiqueIssue {
+func (am *AgentManager) runWarRoomLLMDebate(buildID string, userID uint, usesPlatformKeys bool, powerMode PowerMode, spec *ValidatedBuildSpec, contract *BuildContract) []buildSpecCritiqueIssue {
 	if am == nil || am.aiRouter == nil || spec == nil {
 		return nil
 	}
@@ -184,8 +245,13 @@ func (am *AgentManager) runWarRoomLLMDebate(buildID string, userID uint, usesPla
 		{ai.ProviderGPT4, "architectural bottlenecks, scalability risks, and missing integration surfaces"},
 	}
 
-	ctx, cancel := context.WithTimeout(am.ctx, warRoomLLMDebateTimeout)
+	ctx := am.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, warRoomLLMDebateTimeoutForPowerMode(powerMode))
 	defer cancel()
+	maxTokens := warRoomLLMDebateMaxTokensForPowerMode(powerMode)
 
 	type roundResult struct {
 		issues []buildSpecCritiqueIssue
@@ -197,7 +263,7 @@ func (am *AgentManager) runWarRoomLLMDebate(buildID string, userID uint, usesPla
 		wg.Add(1)
 		go func(idx int, r debateRound) {
 			defer wg.Done()
-			issues := runSingleDebateRound(ctx, am.aiRouter, buildID, userID, usesPlatformKeys, summary, r.provider, r.focus)
+			issues := runSingleDebateRound(ctx, am.aiRouter, buildID, userID, usesPlatformKeys, powerMode, maxTokens, summary, r.provider, r.focus)
 			results[idx] = roundResult{issues: issues}
 		}(i, round)
 	}
@@ -210,7 +276,10 @@ func (am *AgentManager) runWarRoomLLMDebate(buildID string, userID uint, usesPla
 	return dedupeBuildSpecCritiqueIssues(all)
 }
 
-func runSingleDebateRound(ctx context.Context, router AIRouter, buildID string, userID uint, usesPlatformKeys bool, summary string, provider ai.AIProvider, focus string) []buildSpecCritiqueIssue {
+func runSingleDebateRound(ctx context.Context, router AIRouter, buildID string, userID uint, usesPlatformKeys bool, powerMode PowerMode, maxTokens int, summary string, provider ai.AIProvider, focus string) []buildSpecCritiqueIssue {
+	if maxTokens <= 0 {
+		maxTokens = warRoomLLMDebateMaxTokensForPowerMode(powerMode)
+	}
 	prompt := fmt.Sprintf(`You are a senior software architect in a pre-generation War Room review.
 Analyze this build specification and identify concrete issues in the area of: %s.
 
@@ -230,11 +299,12 @@ Return [] if no issues found. Maximum 4 issues. Only flag real problems.`, focus
 
 	resp, err := router.Generate(ctx, provider, prompt, GenerateOptions{
 		UserID:          userID,
-		MaxTokens:       512,
+		BuildID:         buildID,
+		MaxTokens:       maxTokens,
 		Temperature:     0.15,
 		SystemPrompt:    "You are a strict build spec reviewer. Return a JSON array only.",
 		RoleHint:        string(RoleReviewer),
-		PowerMode:       PowerFast,
+		PowerMode:       powerMode,
 		UsePlatformKeys: usesPlatformKeys,
 	})
 	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {

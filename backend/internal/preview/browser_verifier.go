@@ -72,6 +72,43 @@ func findChrome() string {
 	return ""
 }
 
+// SmokeTestChrome verifies that the discovered Chrome/Chromium binary can
+// actually launch headless. Some container images expose a chromium binary that
+// exists on PATH but cannot start because shared libraries or sandbox support
+// are missing.
+func SmokeTestChrome(ctx context.Context, chromePath string) error {
+	chromePath = strings.TrimSpace(chromePath)
+	if chromePath == "" {
+		return fmt.Errorf("chrome path is empty")
+	}
+
+	smokeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(
+		smokeCtx,
+		chromePath,
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--dump-dom",
+		"data:text/html,<html><body>apex-chrome-smoke</body></html>",
+	)
+	out, err := cmd.CombinedOutput()
+	if smokeCtx.Err() != nil {
+		return fmt.Errorf("chrome smoke timed out: %w", smokeCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("chrome smoke failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if !strings.Contains(string(out), "apex-chrome-smoke") {
+		return fmt.Errorf("chrome smoke returned unexpected output")
+	}
+	return nil
+}
+
 // BrowserVerifier loads a URL in a sandboxed headless Chrome and checks that
 // the app actually rendered. It is stateless and safe for concurrent use.
 type BrowserVerifier struct {

@@ -119,6 +119,28 @@ func TestFindChromePrefersConfiguredPath(t *testing.T) {
 	}
 }
 
+func TestSmokeTestChromeRejectsEmptyPath(t *testing.T) {
+	if err := SmokeTestChrome(context.Background(), ""); err == nil {
+		t.Fatal("expected empty chrome path to fail smoke test")
+	}
+}
+
+func TestSmokeTestChromeFailsWhenBinaryCannotLaunch(t *testing.T) {
+	tmpDir := t.TempDir()
+	fakeChrome := filepath.Join(tmpDir, "chromium-browser")
+	if err := os.WriteFile(fakeChrome, []byte("#!/bin/sh\necho missing-lib >&2\nexit 127\n"), 0o755); err != nil {
+		t.Fatalf("write fake chrome: %v", err)
+	}
+
+	err := SmokeTestChrome(context.Background(), fakeChrome)
+	if err == nil {
+		t.Fatal("expected fake failing chrome to fail smoke test")
+	}
+	if !strings.Contains(err.Error(), "missing-lib") {
+		t.Fatalf("expected smoke failure to include stderr, got %v", err)
+	}
+}
+
 // ── clampMax ─────────────────────────────────────────────────────────────────
 
 func TestClampMax(t *testing.T) {

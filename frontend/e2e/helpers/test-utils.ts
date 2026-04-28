@@ -1,7 +1,7 @@
 import { Page, expect, Locator } from '@playwright/test';
 
 /**
- * APEX.BUILD E2E Test Utilities
+ * APEX-BUILD E2E Test Utilities
  * Common helper functions for testing
  */
 

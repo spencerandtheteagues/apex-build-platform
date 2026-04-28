@@ -278,3 +278,57 @@ func TestBackendProxyTargetURLFallsBackToLocalhostPort(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "http://127.0.0.1:9100", target.String())
 }
+
+func TestPreviewProxyTargetURLPrefersRemoteContainerURL(t *testing.T) {
+	target, err := previewProxyTargetURL(&preview.PreviewStatus{
+		Active: true,
+		Port:   10000,
+		URL:    "http://177.7.36.223:10000",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "http://177.7.36.223:10000", target.String())
+}
+
+func TestPreviewProxyTargetURLFallsBackToLocalhostPort(t *testing.T) {
+	target, err := previewProxyTargetURL(&preview.PreviewStatus{
+		Active: true,
+		Port:   10000,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "http://127.0.0.1:10000", target.String())
+}
+
+func TestPreviewHandlerDetectFrameworkPrefersNextOverReact(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+
+	require.NoError(t, handler.db.Create(&models.File{
+		ProjectID: projectID,
+		Path:      "package.json",
+		Type:      "file",
+		Content: `{
+  "dependencies": {
+    "next": "^15.3.2",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  }
+}`,
+	}).Error)
+
+	require.Equal(t, "next", handler.detectFramework(projectID))
+}
+
+func TestPreviewHandlerDetectEntryPointFindsNextAppRouterPage(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+
+	require.NoError(t, handler.db.Create(&models.File{
+		ProjectID: projectID,
+		Path:      "app/page.tsx",
+		Type:      "file",
+		Content:   `export default function Page() { return <main>Hello</main> }`,
+	}).Error)
+
+	require.Equal(t, "app/page.tsx", handler.detectEntryPoint(projectID))
+	require.Equal(t, "app/page.tsx", handler.detectBundleEntryPoint(projectID))
+}

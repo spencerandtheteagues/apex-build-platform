@@ -14,10 +14,12 @@ type contractCritiqueRouter struct {
 	content string
 	err     error
 	calls   int
+	lastOpt GenerateOptions
 }
 
-func (r *contractCritiqueRouter) Generate(_ context.Context, _ ai.AIProvider, _ string, _ GenerateOptions) (*ai.AIResponse, error) {
+func (r *contractCritiqueRouter) Generate(_ context.Context, _ ai.AIProvider, _ string, opts GenerateOptions) (*ai.AIResponse, error) {
 	r.calls++
+	r.lastOpt = opts
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -106,6 +108,42 @@ func TestProviderAssistedContractCritiqueTimesOutAndReturnsNil(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 25*time.Second {
 		t.Fatalf("expected critique timeout to stop within 25s, took %s", elapsed)
+	}
+}
+
+func TestProviderAssistedContractCritiqueUsesSelectedPowerMode(t *testing.T) {
+	router := &contractCritiqueRouter{
+		stubAIRouter: stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderClaude},
+			hasConfiguredProvider: true,
+		},
+		content: `{"summary":"contract needs one explicit route note","warnings":["confirm preview route ownership before generation"],"blockers":[],"confidence":0.93}`,
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		ctx:      context.Background(),
+	}
+
+	build := &Build{
+		ID:           "build-contract-critique-power",
+		UserID:       17,
+		ProviderMode: "platform",
+		PowerMode:    PowerMax,
+	}
+	contract := &BuildContract{
+		ID:      "contract-critique-power",
+		BuildID: build.ID,
+		AppType: "fullstack",
+	}
+
+	if report := am.providerAssistedContractCritique(build, contract); report == nil {
+		t.Fatal("expected provider critique report")
+	}
+	if router.lastOpt.PowerMode != PowerMax {
+		t.Fatalf("expected contract critique to use max power mode, got %s", router.lastOpt.PowerMode)
+	}
+	if router.lastOpt.MaxTokens != contractCritiqueMaxTokensForPowerMode(PowerMax) {
+		t.Fatalf("expected max-mode critique token cap, got %d", router.lastOpt.MaxTokens)
 	}
 }
 
@@ -377,6 +415,17 @@ func TestShouldRunFailureConsensusKeepsFastCriticalProviderEscalations(t *testin
 
 	if !am.shouldRunFailureConsensus(build, task, "verification failed", "switch_provider") {
 		t.Fatalf("expected fast critical provider escalation to retain consensus")
+	}
+}
+
+func TestShouldRunFailureConsensusSkipsProviderOutageFailures(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{PowerMode: PowerBalanced}
+	task := &Task{Type: TaskGenerateUI, RetryCount: 1}
+
+	err := `AI generation failed: ALL_PROVIDERS_FAILED: gpt4: context deadline exceeded; claude: context deadline exceeded; gemini: context deadline exceeded`
+	if am.shouldRunFailureConsensus(build, task, err, "switch_provider") {
+		t.Fatalf("expected provider outage failure to use deterministic provider retry, not incident consensus")
 	}
 }
 

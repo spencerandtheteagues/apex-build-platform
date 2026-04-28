@@ -51,32 +51,6 @@ const (
 
 var agentActivityHeartbeatInterval = 10 * time.Second
 
-// shadcnNamespaceRE holds pre-compiled open/close tag regexes for each shadcn
-// component that LLMs commonly mis-generate with dot-notation (e.g. <Dialog.Content>).
-type shadcnComponentRE struct {
-	comp    string
-	reOpen  *regexp.Regexp
-	reClose *regexp.Regexp
-}
-
-var shadcnNamespaceREs = func() []shadcnComponentRE {
-	comps := []string{
-		"Dialog", "Sheet", "Alert", "AlertDialog", "Card",
-		"DropdownMenu", "Select", "Popover", "Tooltip", "HoverCard",
-		"NavigationMenu", "ContextMenu", "Menubar", "Accordion",
-		"Collapsible", "Command", "Drawer", "Tabs",
-	}
-	out := make([]shadcnComponentRE, len(comps))
-	for i, c := range comps {
-		out[i] = shadcnComponentRE{
-			comp:    c,
-			reOpen:  regexp.MustCompile(`<` + regexp.QuoteMeta(c) + `\.([A-Z][A-Za-z]*)`),
-			reClose: regexp.MustCompile(`</` + regexp.QuoteMeta(c) + `\.([A-Z][A-Za-z]*)`),
-		}
-	}
-	return out
-}()
-
 type consensusDecision string
 
 const (
@@ -983,10 +957,10 @@ func (am *AgentManager) buildTimeoutHandler(buildID string) {
 }
 
 func (am *AgentManager) buildTimeoutForMode(mode BuildMode) time.Duration {
-	defaultSeconds := 900 // fast: 15 minutes (cloud providers + preview verification)
+	defaultSeconds := 240 // fast: 4 minutes
 	envKey := "BUILD_TIMEOUT_FAST_SECONDS"
 	if mode == ModeFull {
-		defaultSeconds = 2400 // full: 40 minutes (complex builds with review + preview)
+		defaultSeconds = 600 // full: 10 minutes
 		envKey = "BUILD_TIMEOUT_FULL_SECONDS"
 	}
 
@@ -994,9 +968,9 @@ func (am *AgentManager) buildTimeoutForMode(mode BuildMode) time.Duration {
 	// Raise the default timeout only when the operator has not already set an explicit timeout.
 	if _, explicitlySet := os.LookupEnv(envKey); !explicitlySet && am.isLocalDevSingleOllamaProfile() {
 		if mode == ModeFull {
-			defaultSeconds = 3600 // 60 minutes for local full builds
+			defaultSeconds = 1800 // 30 minutes for local full builds
 		} else {
-			defaultSeconds = 1800 // 30 minutes for local fast builds
+			defaultSeconds = 900 // 15 minutes for local fast builds
 		}
 	}
 
@@ -1398,6 +1372,11 @@ func (am *AgentManager) buildStallTimeoutForBuild(build *Build) time.Duration {
 	if build != nil && build.Mode == ModeFull {
 		defaultTimeout = 15 * time.Minute
 		envKey = "BUILD_STALL_TIMEOUT_FULL_SECONDS"
+		if build.PowerMode == PowerFast {
+			defaultTimeout = 8 * time.Minute
+		} else if build.PowerMode == PowerMax {
+			defaultTimeout = 20 * time.Minute
+		}
 	}
 	if _, explicitlySet := os.LookupEnv(envKey); !explicitlySet && am.isLocalDevSingleOllamaProfile() {
 		defaultTimeout = 25 * time.Minute
@@ -1599,10 +1578,8 @@ func computeTaskExecutionTimeout(build *Build, task *Task, agent *Agent, localSi
 	}
 	if task != nil {
 		switch task.Type {
-		case TaskFix, TaskTest:
+		case TaskFix, TaskTest, TaskReview:
 			timeout += 30 * time.Second
-		case TaskReview:
-			timeout += 5 * time.Minute
 		}
 		if task.RetryCount > 0 {
 			timeout += 15 * time.Second
@@ -2317,7 +2294,7 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	for _, role := range roles {
 		switch role {
 		case RolePlanner, RoleArchitect, RoleReviewer:
-			assignments[role] = pick(role, ai.ProviderDeepSeek, ai.ProviderClaude, ai.ProviderGrok, ai.ProviderGPT4)
+			assignments[role] = pick(role, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok)
 		case RoleBackend, RoleSolver:
 			// Grok-4.20-reasoning excels at complex backend logic and repair
 			assignments[role] = pick(role, ai.ProviderGrok, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini)
@@ -2363,9 +2340,7 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 			if !assigned {
 				switch role {
 				case RolePlanner, RoleArchitect, RoleReviewer:
-					if available[ai.ProviderDeepSeek] {
-						assignments[role] = ai.ProviderDeepSeek
-					} else if available[ai.ProviderClaude] {
+					if available[ai.ProviderClaude] {
 						assignments[role] = ai.ProviderClaude
 					}
 				case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
@@ -2373,9 +2348,7 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 						assignments[role] = ai.ProviderGPT4
 					}
 				case RoleTesting:
-					if available[ai.ProviderGLM] {
-						assignments[role] = ai.ProviderGLM
-					} else if available[ai.ProviderGemini] {
+					if available[ai.ProviderGemini] {
 						assignments[role] = ai.ProviderGemini
 					}
 				}
@@ -3480,7 +3453,8 @@ Contract:
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	critiqueCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	critiquePowerMode := effectiveWarRoomCritiquePowerMode(build)
+	critiqueCtx, cancel := context.WithTimeout(ctx, contractCritiqueTimeoutForPowerMode(critiquePowerMode))
 	defer cancel()
 
 	if am.budgetEnforcer != nil {
@@ -3504,11 +3478,11 @@ Contract:
 	resp, err := am.aiRouter.Generate(critiqueCtx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		BuildID:         build.ID,
-		MaxTokens:       600,
+		MaxTokens:       contractCritiqueMaxTokensForPowerMode(critiquePowerMode),
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict contract verifier. Output JSON only.",
 		RoleHint:        string(RoleArchitect),
-		PowerMode:       PowerFast,
+		PowerMode:       critiquePowerMode,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
 	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {
@@ -3529,7 +3503,7 @@ Contract:
 			IsBYOK:       !am.buildUsesPlatformKeys(build),
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
-			PowerMode:    string(build.PowerMode),
+			PowerMode:    string(critiquePowerMode),
 			Status:       "success",
 		}); spendErr != nil {
 			log.Printf("spend: failed to record contract critique spend for build %s: %v", build.ID, spendErr)
@@ -5584,6 +5558,8 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					task.Error = ""
 					taskInput := ensureTaskInputMap(task)
 					taskInput["verification_errors"] = verifyErrors
+					taskInput["previous_errors"] = task.ErrorHistory
+					taskInput["retry_strategy"] = retryStrategy
 					taskInput["retry_guidance"] = "Previous code failed build verification. Fix the following errors:"
 					taskInput["previous_errors"] = task.ErrorHistory
 					taskInput["retry_strategy"] = retryStrategy
@@ -5668,6 +5644,33 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					"verified": true,
 				},
 			})
+
+			if result.Output != nil && len(result.Output.Metrics) > 0 {
+				if attempts, ok := result.Output.Metrics["guarantee_attempts"]; ok {
+					taskType := ""
+					if task != nil {
+						taskType = string(task.Type)
+					}
+					am.broadcast(agent.BuildID, &WSMessage{
+						Type:      WSBuildGuaranteeResult,
+						BuildID:   agent.BuildID,
+						AgentID:   agent.ID,
+						Timestamp: time.Now(),
+						Data: map[string]any{
+							"task_id":     result.TaskID,
+							"task_type":   taskType,
+							"agent_role":  agent.Role,
+							"provider":    agent.Provider,
+							"model":       agent.Model,
+							"attempts":    attempts,
+							"score":       result.Output.Metrics["guarantee_score"],
+							"verdict":     result.Output.Metrics["guarantee_verdict"],
+							"rolled_back": result.Output.Metrics["guarantee_rolled_back"],
+							"duration_ms": result.Output.Metrics["guarantee_duration_ms"],
+						},
+					})
+				}
+			}
 
 			// Handle task completion - may trigger next tasks
 			if task != nil {
@@ -5990,7 +5993,7 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 			// ── LLM Debate: run 2-provider async critique outside the build lock ──
 			if warRoomSpec != nil && am.aiRouter != nil {
 				usesPlatformKeys := am.buildUsesPlatformKeys(build)
-				am.enrichWarRoomSpecWithLLMDebate(build.ID, build.UserID, usesPlatformKeys, warRoomSpec, warRoomContract)
+				am.enrichWarRoomSpecWithLLMDebate(build.ID, build.UserID, usesPlatformKeys, effectiveWarRoomCritiquePowerMode(build), warRoomSpec, warRoomContract)
 				warRoomIssueCount = countWarRoomBuildSpecAdvisories(warRoomSpec)
 			}
 
@@ -6405,8 +6408,7 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
 
-	if assignErr := am.AssignTask(solver.ID, recoveryTask); assignErr != nil {
-		log.Printf("Build %s: failed to assign recovery task %s to %s: %v", buildID, recoveryTask.ID, solver.ID, assignErr)
+	rollbackRecoveryTask := func(reason string) {
 		build.mu.Lock()
 		if failedTask.Input != nil {
 			delete(failedTask.Input, "recovery_queued")
@@ -6421,6 +6423,14 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 		build.Tasks = removeBuildTaskByID(build.Tasks, recoveryTask.ID)
 		build.UpdatedAt = time.Now()
 		build.mu.Unlock()
+		if strings.TrimSpace(reason) != "" {
+			log.Printf("Build %s: rolled back recovery task %s: %s", buildID, recoveryTask.ID, reason)
+		}
+	}
+
+	if assignErr := am.AssignTask(solver.ID, recoveryTask); assignErr != nil {
+		log.Printf("Build %s: failed to assign recovery task %s to %s: %v", buildID, recoveryTask.ID, solver.ID, assignErr)
+		rollbackRecoveryTask(assignErr.Error())
 		am.broadcast(buildID, &WSMessage{
 			Type:      WSBuildProgress,
 			BuildID:   buildID,
@@ -6523,6 +6533,8 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 			assignee = reviewAgent
 		}
 		if assignee == nil {
+			task.Status = TaskFailed
+			task.Error = "post-fix validation task could not be assigned: no available agent"
 			continue
 		}
 		if err := am.AssignTask(assignee.ID, task); err != nil {
@@ -9948,57 +9960,29 @@ func parseMissingLocalModuleRepairTargets(errors []string) []missingLocalModuleR
 		return nil
 	}
 
-	// Pattern 1: from validateGeneratedLocalModuleImports pre-build static check
-	reStatic := regexp.MustCompile(`source imports local module "([^"]+)" from "([^"]+)" but generated file "([^"]+)" is missing`)
-	// Pattern 2: TypeScript compiler TS2307 errors from npm run build output
-	// e.g. src/App.tsx(5,1): error TS2307: Cannot find module './components/Foo' or its corresponding type declarations.
-	reTS2307 := regexp.MustCompile(`([^\s(:\n]+)\(\d+,\d+\): error TS2307: Cannot find module ['"]([^'"]+)['"]`)
-
+	re := regexp.MustCompile(`source imports local module "([^"]+)" from "([^"]+)" but generated file "([^"]+)" is missing`)
 	seen := map[string]bool{}
 	targets := make([]missingLocalModuleRepairTarget, 0)
-
-	addTarget := func(specifier, sourcePath, targetPath string) {
-		specifier = strings.TrimSpace(specifier)
-		sourcePath = sanitizeFilePath(strings.TrimSpace(sourcePath))
-		targetPath = sanitizeFilePath(strings.TrimSpace(targetPath))
-		if sourcePath == "" || targetPath == "" || specifier == "" {
-			return
-		}
-		key := sourcePath + "|" + specifier + "|" + targetPath
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		targets = append(targets, missingLocalModuleRepairTarget{
-			Specifier:  specifier,
-			SourcePath: sourcePath,
-			TargetPath: targetPath,
-		})
-	}
-
 	for _, msg := range errors {
-		// Static pre-build checker format (3 capture groups: specifier, source, target)
-		for _, match := range reStatic.FindAllStringSubmatch(msg, -1) {
-			if len(match) == 4 {
-				addTarget(match[1], match[2], match[3])
-			}
-		}
-		// TypeScript compiler TS2307 format (2 capture groups: source, specifier)
-		// Only handle relative and @/ imports — npm package 404s are handled separately.
-		for _, match := range reTS2307.FindAllStringSubmatch(msg, -1) {
-			if len(match) != 3 {
+		matches := re.FindAllStringSubmatch(msg, -1)
+		for _, match := range matches {
+			if len(match) != 4 {
 				continue
 			}
-			sourcePath := strings.TrimSpace(match[1])
-			specifier := strings.TrimSpace(match[2])
-			if !strings.HasPrefix(specifier, ".") && !strings.HasPrefix(specifier, "@/") && !strings.HasPrefix(specifier, "~/") {
+			target := missingLocalModuleRepairTarget{
+				Specifier:  strings.TrimSpace(match[1]),
+				SourcePath: sanitizeFilePath(strings.TrimSpace(match[2])),
+				TargetPath: sanitizeFilePath(strings.TrimSpace(match[3])),
+			}
+			if target.SourcePath == "" || target.TargetPath == "" || target.Specifier == "" {
 				continue
 			}
-			candidates := localImportResolutionCandidates(sourcePath, specifier)
-			if len(candidates) == 0 {
+			key := target.SourcePath + "|" + target.Specifier + "|" + target.TargetPath
+			if seen[key] {
 				continue
 			}
-			addTarget(specifier, sourcePath, candidates[0])
+			seen[key] = true
+			targets = append(targets, target)
 		}
 	}
 	sort.Slice(targets, func(i, j int) bool {
@@ -11313,74 +11297,6 @@ func (am *AgentManager) applyDeterministicSequelizeTypescriptTableRepair(build *
 
 	summary := "sequelize table option normalization on " + strings.Join(applied, ", ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_typescript_table_repair: "+summary), summary
-}
-
-// applyDeterministicShadcnNamespaceRepair rewrites incorrect dot-notation shadcn component
-// usage (e.g. <Dialog.Content>, <Sheet.Overlay>) to the correct named exports
-// (e.g. <DialogContent>, <SheetOverlay>). LLMs frequently generate this pattern because
-// they confuse shadcn/ui's named-export API with Radix's namespace-object API.
-func (am *AgentManager) applyDeterministicShadcnNamespaceRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
-	if build == nil {
-		return nil, ""
-	}
-
-	files, plan := am.buildGeneratedFilePatchPlan(build)
-	if len(files) == 0 {
-		return nil, ""
-	}
-
-	applied := make([]string, 0)
-	for _, f := range files {
-		ext := strings.ToLower(filepath.Ext(f.Path))
-		if ext != ".tsx" && ext != ".jsx" {
-			continue
-		}
-		content := plan.content(f.Path)
-		if strings.TrimSpace(content) == "" {
-			continue
-		}
-
-		rewritten := content
-		changed := false
-		for _, cre := range shadcnNamespaceREs {
-			comp := cre.comp
-			if cre.reOpen.MatchString(rewritten) {
-				rewritten = cre.reOpen.ReplaceAllStringFunc(rewritten, func(m string) string {
-					sub := cre.reOpen.FindStringSubmatch(m)
-					if len(sub) == 2 {
-						return "<" + comp + sub[1]
-					}
-					return m
-				})
-				changed = true
-			}
-			if cre.reClose.MatchString(rewritten) {
-				rewritten = cre.reClose.ReplaceAllStringFunc(rewritten, func(m string) string {
-					sub := cre.reClose.FindStringSubmatch(m)
-					if len(sub) == 2 {
-						return "</" + comp + sub[1]
-					}
-					return m
-				})
-				changed = true
-			}
-		}
-
-		if !changed {
-			continue
-		}
-		if !plan.patchFile(f.Path, rewritten, am.detectLanguage(f.Path)) {
-			continue
-		}
-		applied = append(applied, f.Path)
-	}
-
-	if len(applied) == 0 {
-		return nil, ""
-	}
-
-	summary := "shadcn namespace-to-named-export rewrite on " + strings.Join(applied, ", ")
-	return am.bundleFromPatchPlan(build.ID, files, plan, "shadcn_namespace_repair: "+summary), summary
 }
 
 func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
@@ -15138,12 +15054,6 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied missing local module repair: %s)",
 			message:     "Applied deterministic local module repair for missing generated frontend files. Re-running final validation before solver recovery.",
 			summaryKey:  "missing_local_module_repair",
-		},
-		{
-			apply:       am.applyDeterministicShadcnNamespaceRepair,
-			errorFormat: "Final output validation failed: %s (applied shadcn namespace repair: %s)",
-			message:     "Applied deterministic shadcn dot-notation repair (rewrote Dialog.Content → DialogContent etc.). Re-running final validation before solver recovery.",
-			summaryKey:  "shadcn_namespace_repair",
 		},
 		{
 			apply:       am.applyDeterministicExportMismatchRepair,
@@ -21710,6 +21620,7 @@ FRONTEND CONTRACT RULE:
 - Build the visible product shell first, but do not invent backend behavior outside that contract.
 - Only call API routes that exist in the frozen API contract or in already-implemented backend-owned files.
 - If a backend endpoint is not part of the contract yet, keep the UI truthful with local state or optimistic UI.
+- When a screen depends on multiple API routes, fetch and validate each route independently. Store per-resource loading/error/data state, show which endpoint failed, and keep healthy cards visible when only one endpoint fails. Do not collapse independent calls into one generic Promise.all error.
 
 MANDATORY FILES — always generate ALL of these for every React app:
 1. index.html — Vite entry HTML at project root (NOT inside src/)
@@ -21762,14 +21673,6 @@ IMPORT PATH RULES — CRITICAL FOR COMPILATION:
 - The "@/" alias resolves to "src/" — so "@/components/Foo" requires src/components/Foo.tsx in your output
 - Add the "@" alias to vite.config.ts resolve.alias map pointing to path.resolve(__dirname, './src')
 - NEVER include file extensions in import paths for TypeScript files: write './App' not './App.tsx'
-
-SHADCN COMPONENT RULES — CRITICAL. Violations cause build-breaking TypeScript errors:
-- shadcn/ui components use NAMED imports ONLY. Example: import { Dialog, DialogContent, DialogHeader, DialogOverlay } from '@/components/ui/dialog'
-- NEVER use dot-notation sub-components: Dialog.Overlay, Dialog.Content, Dialog.Title DO NOT EXIST in shadcn
-- Dot-notation is a Radix UI pattern, NOT a shadcn pattern. shadcn exports individual named components.
-- Same rule for ALL shadcn components: Sheet, Alert, AlertDialog, Card, DropdownMenu, Select, Popover, Tooltip, HoverCard, NavigationMenu, ContextMenu, Menubar, Accordion, Collapsible, Command, Drawer, Tabs
-- Every component referenced in JSX must be in the named import list
-- If you need DialogOverlay, it must be: import { DialogOverlay } from '@/components/ui/dialog' and used as <DialogOverlay> (NOT <Dialog.Overlay>)
 
 PRE-OUTPUT SELF-CHECK (run mentally before returning your files):
 □ Does every local import correspond to a file I actually generated?
@@ -22726,9 +22629,8 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 				}
 			}
 			if !matched {
-				// For Ollama builds: warn only, don't fail. The preview will render
-				// with some features non-functional, which is acceptable for demos.
-				log.Printf("Build %s: frontend calls %s but backend has no matching route — warning only", build.ID, fePath)
+				log.Printf("Build %s: frontend calls %s but backend has no matching route", build.ID, fePath)
+				issues = append(issues, fmt.Sprintf("integration: frontend calls %s but backend has no matching route", fePath))
 			}
 		}
 	}
@@ -23498,14 +23400,29 @@ func localImportResolutionCandidates(importerPath string, spec string) []string 
 	}
 
 	if ext := strings.ToLower(filepath.Ext(base)); ext != "" {
-		candidates := make([]string, 0, len(bases))
+		sourceExts := []string{ext}
+		switch ext {
+		case ".js":
+			sourceExts = append(sourceExts, ".ts", ".tsx")
+		case ".jsx":
+			sourceExts = append(sourceExts, ".tsx")
+		case ".mjs":
+			sourceExts = append(sourceExts, ".mts")
+		case ".cjs":
+			sourceExts = append(sourceExts, ".cts")
+		}
+
+		candidates := make([]string, 0, len(bases)*len(sourceExts))
 		for _, candidate := range bases {
 			candidate = strings.TrimPrefix(filepath.ToSlash(candidate), "./")
 			candidate = strings.TrimPrefix(candidate, "/")
 			if candidate == "" || strings.HasPrefix(candidate, "../") {
 				continue
 			}
-			candidates = append(candidates, candidate)
+			withoutExt := strings.TrimSuffix(candidate, filepath.Ext(candidate))
+			for _, sourceExt := range sourceExts {
+				candidates = append(candidates, withoutExt+sourceExt)
+			}
 		}
 		return dedupeStrings(candidates)
 	}
@@ -26050,7 +25967,11 @@ func isProviderLevelFailure(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
+	return isProviderLevelFailureMessage(err.Error())
+}
+
+func isProviderLevelFailureMessage(errorMsg string) bool {
+	msg := strings.ToLower(errorMsg)
 	// Build-level non-retriable errors — switching provider won't help
 	if strings.Contains(msg, "build not active") ||
 		strings.Contains(msg, "budget cap exceeded") ||
@@ -26164,7 +26085,10 @@ func (am *AgentManager) determineRetryStrategy(errorMsg string, task *Task) stri
 
 	// Context/token issues - simplify request
 	if strings.Contains(errorLower, "context length") || strings.Contains(errorLower, "too long") ||
-		strings.Contains(errorLower, "max tokens") {
+		strings.Contains(errorLower, "max tokens") ||
+		strings.Contains(errorLower, "truncat") ||
+		strings.Contains(errorLower, "unterminated code block") ||
+		strings.Contains(errorLower, "abrupt eof") {
 		return "reduce_context"
 	}
 
@@ -26397,8 +26321,12 @@ func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, erro
 	if build == nil || task == nil {
 		return false
 	}
-	if strings.Contains(strings.ToLower(errorMsg), "all_providers_failed") {
-		return true
+	errorLower := strings.ToLower(errorMsg)
+	if strings.Contains(errorLower, "all_providers_failed") || isProviderLevelFailureMessage(errorMsg) {
+		// Provider outages/timeouts already have a deterministic recovery path:
+		// backoff or switch providers. Running incident consensus here asks the
+		// same unhealthy providers for votes and can block the result processor.
+		return false
 	}
 
 	normalizedStrategy := strings.ToLower(strings.TrimSpace(retryStrategy))

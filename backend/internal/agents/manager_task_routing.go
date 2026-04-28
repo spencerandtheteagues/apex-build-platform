@@ -140,6 +140,11 @@ func (am *AgentManager) providerAssistedTaskVerification(build *Build, task *Tas
 	if am == nil || am.aiRouter == nil || build == nil || task == nil || candidate == nil || candidate.Output == nil {
 		return nil
 	}
+
+	if skip, reason := skipRecursiveProviderCritiqueForTask(task, candidate.Output); skip {
+		return skippedTaskProviderVerificationReport(build, task, reason)
+	}
+
 	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
 	if len(availableProviders) == 0 {
 		return nil
@@ -313,6 +318,45 @@ Return JSON only:
 	}
 	if report.DeterministicStatus == "" {
 		report.DeterministicStatus = verificationReasonDeterministicPassed
+	}
+	return report
+}
+
+func skipRecursiveProviderCritiqueForTask(task *Task, output *TaskOutput) (bool, string) {
+	if task == nil || output == nil {
+		return false, ""
+	}
+	switch task.Type {
+	case TaskReview:
+		if len(output.Files) > 0 || len(output.DeletedFiles) > 0 {
+			return false, ""
+		}
+		return true, "review_task_recursive_critique_skipped"
+	default:
+		return false, ""
+	}
+}
+
+func skippedTaskProviderVerificationReport(build *Build, task *Task, reason string) *VerificationReport {
+	report := &VerificationReport{
+		ID:                     uuid.New().String(),
+		BuildID:                build.ID,
+		Phase:                  "task_provider_verification",
+		Surface:                SurfaceGlobal,
+		Status:                 VerificationPassed,
+		Deterministic:          false,
+		DeterministicStatus:    verificationReasonDeterministicPassed,
+		ProviderCritiqueStatus: verificationReasonProviderCritiqueSkip,
+		ChecksRun:              dedupeStrings([]string{"provider_adversarial_review_skipped", verificationReasonProviderCritiqueSkip, reason}),
+		ConfidenceScore:        1,
+		GeneratedAt:            time.Now().UTC(),
+	}
+	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
+		report.WorkOrderID = artifact.ID
+		if artifact.ContractSlice.Surface != "" {
+			report.Surface = artifact.ContractSlice.Surface
+		}
+		report.TruthTags = append([]TruthTag(nil), artifact.ContractSlice.TruthTags...)
 	}
 	return report
 }

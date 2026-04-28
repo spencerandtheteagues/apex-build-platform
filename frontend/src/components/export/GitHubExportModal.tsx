@@ -177,7 +177,7 @@ export default function GitHubExportModal({
                 <p className="mt-1 text-[11px] text-gray-500">
                   Requires <code className="px-1 py-0.5 bg-gray-800 rounded text-gray-400">repo</code> scope.{' '}
                   <a
-                    href="https://github.com/settings/tokens/new?scopes=repo&description=APEX.BUILD+Export"
+                    href="https://github.com/settings/tokens/new?scopes=repo&description=APEX-BUILD+Export"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-red-400 hover:underline"

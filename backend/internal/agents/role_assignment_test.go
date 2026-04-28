@@ -236,7 +236,7 @@ func TestBuildRequest_ProviderModelOverrides_MarshalRoundTrip(t *testing.T) {
 	original := BuildRequest{
 		Description:            "Build a news app",
 		Mode:                   ModeFull,
-		ProviderModelOverrides: map[string]string{"gpt4": "gpt-5.4", "grok": "grok-4.20-0309-reasoning"},
+		ProviderModelOverrides: map[string]string{"gpt4": "gpt-5.4-pro", "grok": "grok-4.20-0309-reasoning"},
 	}
 
 	data, err := json.Marshal(original)
@@ -252,7 +252,7 @@ func TestBuildRequest_ProviderModelOverrides_MarshalRoundTrip(t *testing.T) {
 	if len(decoded.ProviderModelOverrides) != 2 {
 		t.Fatalf("expected 2 provider model overrides, got %d", len(decoded.ProviderModelOverrides))
 	}
-	if decoded.ProviderModelOverrides["gpt4"] != "gpt-5.4" {
+	if decoded.ProviderModelOverrides["gpt4"] != "gpt-5.4-pro" {
 		t.Fatalf("expected gpt4 override to survive roundtrip, got %+v", decoded.ProviderModelOverrides)
 	}
 }
@@ -381,7 +381,7 @@ func TestStartBuild_RejectsCrossProviderModelOverride(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"description":              "Build me a fully functional e-commerce platform with payments",
-		"provider_model_overrides": map[string]string{"grok": "gpt-5.4"},
+		"provider_model_overrides": map[string]string{"grok": "gpt-5.4-pro"},
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
@@ -398,7 +398,7 @@ func TestStartBuild_AcceptsProviderModelOverrides(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"description":              "Build me a fully functional e-commerce platform with payments",
-		"provider_model_overrides": map[string]string{"gpt4": "gpt-5.4", "grok": "grok-4.20-0309-reasoning"},
+		"provider_model_overrides": map[string]string{"gpt4": "gpt-5.4-pro", "grok": "grok-4.20-0309-reasoning"},
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))

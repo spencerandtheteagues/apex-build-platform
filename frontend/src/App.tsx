@@ -10,7 +10,7 @@ import { LEGAL_POLICY_VERSION, type LegalDocumentId } from './components/setting
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard, FileText, X } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard, FileText, X, Building, Activity } from 'lucide-react'
 import { getApiErrorMessage } from './lib/errors'
 import './styles/globals.css'
 import './styles/auth-animations.css'
@@ -29,7 +29,6 @@ const AuthParticle: React.FC<{ delay: number; startX: number; startY: number }> 
 );
 
 type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'settings' | 'spending'
-type UIColorScheme = 'red-dark' | 'blue-light'
 type IDELaunchTarget = 'dashboard' | 'editor' | 'preview'
 
 const AppBuilder = lazy(() =>
@@ -52,6 +51,8 @@ const ModelSelector = lazy(() => import('./components/ai/ModelSelector'))
 const SpendDashboard = lazy(() => import('./components/spend/SpendDashboard'))
 const BudgetSettings = lazy(() => import('./components/budget/BudgetSettings'))
 const BillingSettings = lazy(() => import('./components/billing/BillingSettings'))
+const OrganizationSettings = lazy(() => import('./components/enterprise/OrganizationSettings').then(m => ({ default: m.OrganizationSettings })))
+const ProtectedPathsEditor = lazy(() => import('./components/project/ProtectedPathsEditor').then(m => ({ default: m.ProtectedPathsEditor })))
 const LandingPage = lazy(() => import('./pages/Landing').then(m => ({ default: m.LandingPage })))
 const HelpButton = lazy(() =>
   import('./components/help/HelpCenter').then((m) => ({ default: m.HelpButton }))
@@ -59,6 +60,10 @@ const HelpButton = lazy(() =>
 const HelpCenterModal = lazy(() =>
   import('./components/help/HelpCenter').then((m) => ({ default: m.HelpCenter }))
 )
+const UsageDashboard = lazy(() => import('./components/usage/UsageDashboard'))
+const ExternalDeploymentPanel = lazy(() => import('./components/deployment/ExternalDeploymentPanel'))
+const CodeSearch = lazy(() => import('./components/search/CodeSearch'))
+const AgentPanel = lazy(() => import('./components/agent/AgentPanel'))
 
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
   <div className="h-full flex items-center justify-center bg-black/40">
@@ -270,15 +275,6 @@ function App() {
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentId | null>(() => getRequestedLegalDocument())
   const [showHelpCenter, setShowHelpCenter] = useState<boolean>(() => shouldOpenHelpCenterFromLocation())
-  const [uiColorScheme, setUIColorScheme] = useState<UIColorScheme>(() => {
-    if (typeof window === 'undefined') return 'red-dark'
-    try {
-      const saved = localStorage.getItem('apex_ui_color_scheme')
-      return saved === 'blue-light' ? 'blue-light' : 'red-dark'
-    } catch {
-      return 'red-dark'
-    }
-  })
   const [defaultModel, setDefaultModel] = useState(() => {
     if (typeof window === 'undefined') return 'auto'
     try {
@@ -287,7 +283,7 @@ function App() {
       return 'auto'
     }
   })
-  const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/apex-build-logo-transparent.png'
+  const logoSrc = '/apex-build-mark-metal.png'
 
   const {
     user,
@@ -740,8 +736,7 @@ function App() {
   }
 
   // Switch between login and register
-  const switchAuthMode = () => {
-    setIsAuthMode(isAuthMode === 'login' ? 'register' : 'login')
+  const resetAuthForm = () => {
     setAuthErrors({})
     setAuthData({
       username: '',
@@ -750,6 +745,17 @@ function App() {
       confirmPassword: '',
       acceptLegalTerms: false,
     })
+  }
+
+  const selectAuthMode = (mode: 'login' | 'register') => {
+    if (isAuthMode === mode) return
+    setIsAuthMode(mode)
+    resetAuthForm()
+  }
+
+  const switchAuthMode = () => {
+    setIsAuthMode(isAuthMode === 'login' ? 'register' : 'login')
+    resetAuthForm()
   }
 
   // Resend cooldown countdown
@@ -835,12 +841,16 @@ function App() {
     }
   }, [currentProject?.id, currentView])
 
-  // Persist UI color scheme and apply to the whole app.
+  // Force the current production theme so legacy light-mode overrides cannot restyle the app.
   useEffect(() => {
     if (typeof window === 'undefined') return
-    localStorage.setItem('apex_ui_color_scheme', uiColorScheme)
-    document.documentElement.setAttribute('data-ui-theme', uiColorScheme === 'blue-light' ? 'blue' : 'red')
-  }, [uiColorScheme])
+    try {
+      localStorage.setItem('apex_ui_color_scheme', 'red-dark')
+    } catch {
+      // Ignore localStorage failures.
+    }
+    document.documentElement.setAttribute('data-ui-theme', 'red')
+  }, [])
 
   // Loading screen
   if (isLoading || !sessionBootstrapComplete) {
@@ -907,7 +917,7 @@ function App() {
               <div className="flex flex-col items-center gap-4">
                 <img src={logoSrc} alt="APEX Logo" className="auth-logo" style={{ height: '7rem', width: 'auto' }} />
                 <div>
-                  <h1 className="auth-title text-3xl font-black tracking-wider">APEX<span style={{ color: '#6366f1' }}>.BUILD</span></h1>
+                  <h1 className="auth-title text-3xl font-black tracking-wider">APEX<span style={{ color: '#6366f1' }}>-BUILD</span></h1>
                 </div>
               </div>
             </div>
@@ -1010,8 +1020,8 @@ function App() {
   if (!isAuthenticated) {
     return (
       <>
-        <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-          {/* Animated cyberpunk background with full effects */}
+        <div className="min-h-screen flex items-center justify-center px-4 py-10 relative overflow-hidden bg-[#02050b]">
+          {/* Animated landing-page background with full effects */}
           <AnimatedBackground variant="full" intensity="high" interactive={true} />
 
           {/* Premium glassmorphism card */}
@@ -1033,23 +1043,50 @@ function App() {
                   <h1 className="auth-title text-3xl font-black tracking-wider">
                     APEX-BUILD
                   </h1>
-                  <p className="auth-tagline text-sm text-red-400/80 mt-1 flex items-center justify-center gap-2">
-                    <Sparkles size={14} className="text-red-500" />
+                  <p className="auth-tagline text-sm text-cyan-200/85 mt-1 flex items-center justify-center gap-2">
+                    <Sparkles size={14} className="text-cyan-300" />
                     Cloud Development Platform
-                    <Sparkles size={14} className="text-red-500" />
+                    <Sparkles size={14} className="text-cyan-300" />
                   </p>
                 </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-2 gap-2 rounded-xl border border-slate-700/50 bg-black/50 p-1 shadow-inner shadow-black/50">
+                <button
+                  type="button"
+                  onClick={() => selectAuthMode('login')}
+                  className={`rounded-lg px-3 py-2.5 text-sm font-bold tracking-wide transition-all ${
+                    isAuthMode === 'login'
+                      ? 'bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-400/20'
+                      : 'text-slate-400 hover:bg-slate-900/80 hover:text-white'
+                  }`}
+                  aria-pressed={isAuthMode === 'login'}
+                >
+                  Log in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectAuthMode('register')}
+                  className={`rounded-lg px-3 py-2.5 text-sm font-bold tracking-wide transition-all ${
+                    isAuthMode === 'register'
+                      ? 'bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-400/20'
+                      : 'text-slate-400 hover:bg-slate-900/80 hover:text-white'
+                  }`}
+                  aria-pressed={isAuthMode === 'register'}
+                >
+                  Create account
+                </button>
               </div>
 
               {/* Welcome text with mode transition */}
               <div className="mt-6 auth-mode-transition">
                 <h2 className="text-xl font-bold text-white mb-2">
-                  {isAuthMode === 'login' ? 'Welcome Back' : 'Join the Future'}
+                  {isAuthMode === 'login' ? 'Welcome Back' : 'Create Your Workspace'}
                 </h2>
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-slate-400">
                   {isAuthMode === 'login'
-                    ? 'Sign in to continue your development journey'
-                    : 'Create an account to start building tomorrow'}
+                    ? 'Log in to an existing APEX-BUILD account.'
+                    : 'Start a card-backed trial and build with the full platform.'}
                 </p>
               </div>
             </div>
@@ -1068,7 +1105,7 @@ function App() {
                     onChange={(e) => setAuthData(prev => ({ ...prev, username: e.target.value }))}
                     onFocus={(e) => e.target.closest('.auth-input-wrapper')?.classList.add('focused')}
                     onBlur={(e) => e.target.closest('.auth-input-wrapper')?.classList.remove('focused')}
-                    className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-red-600/60 transition-all duration-300"
+                    className="w-full bg-black/50 border border-slate-700/60 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-cyan-400/70 transition-all duration-300"
                     placeholder="Username"
                     required
                   />
@@ -1094,7 +1131,7 @@ function App() {
                       onChange={(e) => setAuthData(prev => ({ ...prev, email: e.target.value }))}
                       onFocus={(e) => e.target.closest('.auth-input-wrapper')?.classList.add('focused')}
                       onBlur={(e) => e.target.closest('.auth-input-wrapper')?.classList.remove('focused')}
-                      className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-red-600/60 transition-all duration-300"
+                      className="w-full bg-black/50 border border-slate-700/60 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-cyan-400/70 transition-all duration-300"
                       placeholder="Email"
                       required
                     />
@@ -1120,7 +1157,7 @@ function App() {
                     onChange={(e) => setAuthData(prev => ({ ...prev, password: e.target.value }))}
                     onFocus={(e) => e.target.closest('.auth-input-wrapper')?.classList.add('focused')}
                     onBlur={(e) => e.target.closest('.auth-input-wrapper')?.classList.remove('focused')}
-                    className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-12 text-white placeholder-transparent focus:outline-none focus:border-red-600/60 transition-all duration-300"
+                    className="w-full bg-black/50 border border-slate-700/60 rounded-xl py-3.5 pl-11 pr-12 text-white placeholder-transparent focus:outline-none focus:border-cyan-400/70 transition-all duration-300"
                     placeholder="Password"
                     required
                   />
@@ -1130,7 +1167,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-red-400 transition-colors duration-200 p-1"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-cyan-300 transition-colors duration-200 p-1"
                   >
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
@@ -1153,7 +1190,7 @@ function App() {
                       onChange={(e) => setAuthData(prev => ({ ...prev, confirmPassword: e.target.value }))}
                       onFocus={(e) => e.target.closest('.auth-input-wrapper')?.classList.add('focused')}
                       onBlur={(e) => e.target.closest('.auth-input-wrapper')?.classList.remove('focused')}
-                      className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-red-600/60 transition-all duration-300"
+                      className="w-full bg-black/50 border border-slate-700/60 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-cyan-400/70 transition-all duration-300"
                       placeholder="Confirm Password"
                       required
                     />
@@ -1168,13 +1205,13 @@ function App() {
               )}
 
               {isAuthMode === 'register' && (
-                <div className="rounded-xl border border-red-900/40 bg-red-950/20 p-4">
+                <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] p-4 shadow-inner shadow-cyan-950/20">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={authData.acceptLegalTerms}
                       onChange={(e) => setAuthData(prev => ({ ...prev, acceptLegalTerms: e.target.checked }))}
-                      className="mt-1 h-5 w-5 flex-shrink-0 rounded border border-red-500/40 bg-black text-red-500 focus:ring-red-500 cursor-pointer relative z-10"
+                      className="mt-1 h-5 w-5 flex-shrink-0 rounded border border-cyan-300/40 bg-black text-cyan-300 focus:ring-cyan-300 cursor-pointer relative z-10"
                     />
                     <span className="text-sm leading-6 text-gray-300">
                       I agree to the Terms of Service, Privacy Policy, Acceptable Use Policy, Billing and Refund Policy, and AI and Content Policy version {LEGAL_POLICY_VERSION}.
@@ -1233,7 +1270,7 @@ function App() {
                   <button
                     type="button"
                     onClick={switchAuthMode}
-                    className="auth-link text-red-400 font-medium transition-colors duration-200"
+                    className="auth-link text-cyan-300 font-medium transition-colors duration-200"
                   >
                     {isAuthMode === 'login' ? 'Sign up' : 'Sign in'}
                   </button>
@@ -1249,11 +1286,11 @@ function App() {
           {/* Premium Footer */}
           <div className="auth-footer absolute bottom-6 left-1/2 transform -translate-x-1/2 text-center">
             <p className="text-xs text-gray-600 flex items-center gap-2">
-              <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-red-900/50 to-transparent" />
+              <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent" />
               <span className="text-gray-500">
-                <span className="text-red-500/70">2026</span> APEX-BUILD - The Future of Development
+                <span className="text-cyan-300/80">2026</span> APEX-BUILD - The Future of Development
               </span>
-              <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-red-900/50 to-transparent" />
+              <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent" />
             </p>
           </div>
         </div>
@@ -1423,6 +1460,7 @@ function App() {
                   key={currentProject?.id ?? 'no-project'}
                   launchTarget={ideLaunchTarget}
                   launchRequestId={ideLaunchRequestId}
+                  onNavigateToAgent={() => setCurrentView('builder')}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -1472,50 +1510,17 @@ function App() {
                       <p className="text-gray-400">Configure your AI providers and API keys</p>
                     </div>
 
-                    {/* UI Color Scheme Section */}
-                    <ErrorBoundary fallback={renderSettingsSectionFallback('UI Color Scheme', 'Theme controls hit an unexpected error. The rest of Settings is still available.')}>
+                    {/* Workspace Theme Section */}
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('Workspace Theme', 'Theme status hit an unexpected error. The rest of Settings is still available.')}>
                       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
                         <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
                           <Palette className="w-5 h-5 text-red-400" />
-                          UI Color Scheme
+                          Workspace Theme
                         </h2>
-                        <p className="text-gray-400 text-sm mb-4">
-                          Choose between the default red/black cyberpunk mode and a friendlier blue/white mode.
+                        <p className="text-sm leading-relaxed text-gray-300">
+                          The latest Apex UI is now fixed to the red-and-black workspace theme across every page.
+                          Legacy light-theme switching is disabled so older builder and shell styling cannot reappear.
                         </p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setUIColorScheme('red-dark')}
-                            aria-pressed={uiColorScheme === 'red-dark'}
-                            className={`rounded-lg border p-4 text-left transition-all duration-200 ${
-                              uiColorScheme === 'red-dark'
-                                ? 'bg-red-900/20 border-red-700 text-red-300 shadow-sm shadow-red-900/30'
-                                : 'bg-black/40 border-gray-700 text-gray-300 hover:border-red-600/60'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">Red & Black</span>
-                              {uiColorScheme === 'red-dark' && <Check className="w-4 h-4" />}
-                            </div>
-                            <p className="text-xs mt-2 opacity-80">Default cyberpunk look</p>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setUIColorScheme('blue-light')}
-                            aria-pressed={uiColorScheme === 'blue-light'}
-                            className={`rounded-lg border p-4 text-left transition-all duration-200 ${
-                              uiColorScheme === 'blue-light'
-                                ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-sm shadow-blue-200'
-                                : 'bg-black/40 border-gray-700 text-gray-300 hover:border-blue-500/70'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">Blue & White</span>
-                              {uiColorScheme === 'blue-light' && <Check className="w-4 h-4" />}
-                            </div>
-                            <p className="text-xs mt-2 opacity-80">Friendly light interface</p>
-                          </button>
-                        </div>
                       </div>
                     </ErrorBoundary>
 
@@ -1572,6 +1577,24 @@ function App() {
                       </div>
                     </ErrorBoundary>
 
+                    {/* Protected Paths Section */}
+                    {currentProject && (
+                      <ErrorBoundary fallback={renderSettingsSectionFallback('Protected Paths', 'Protected paths editor failed to render.')}>
+                        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                            <Shield className="w-5 h-5 text-red-400" />
+                            Protected Paths
+                          </h2>
+                          <p className="text-gray-400 text-sm mb-6">
+                            Define glob patterns for files the AI cannot modify without explicit approval.
+                          </p>
+                          <Suspense fallback={<div className="text-sm text-gray-500">Loading path controls…</div>}>
+                            <ProtectedPathsEditor projectId={currentProject.id} />
+                          </Suspense>
+                        </div>
+                      </ErrorBoundary>
+                    )}
+
                     {/* Billing & Credits Section */}
                     <ErrorBoundary fallback={renderSettingsSectionFallback('Billing & Credits', 'Billing controls failed to render. The rest of the settings page is still usable.')}>
                       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
@@ -1584,6 +1607,21 @@ function App() {
                         </p>
                         <Suspense fallback={<div className="text-sm text-gray-500">Loading billing controls…</div>}>
                           <BillingSettings />
+                        </Suspense>
+                      </div>
+                    </ErrorBoundary>
+
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('Usage & Quotas', 'Usage dashboard failed to render. Other settings are still available.')}>
+                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <Activity className="w-5 h-5 text-red-400" />
+                          Usage & Quotas
+                        </h2>
+                        <p className="text-gray-400 text-sm mb-6">
+                          Track your plan quotas, token consumption, and platform usage against your current tier.
+                        </p>
+                        <Suspense fallback={<div className="text-sm text-gray-500">Loading usage dashboard…</div>}>
+                          <UsageDashboard />
                         </Suspense>
                       </div>
                     </ErrorBoundary>
@@ -1619,6 +1657,23 @@ function App() {
                         </button>
                       </div>
                     </div>
+
+                    {user != null && ['team', 'enterprise', 'owner'].includes(user.subscription_type) && (
+                      <ErrorBoundary fallback={renderSettingsSectionFallback('Enterprise Workspace', 'Organization settings failed to render. Other settings are still available.')}>
+                        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                            <Building className="w-5 h-5 text-red-400" />
+                            Enterprise Workspace
+                          </h2>
+                          <p className="text-gray-400 text-sm mb-6">
+                            Manage your organization, team members, roles & permissions, SSO/SAML configuration, and audit logs.
+                          </p>
+                          <Suspense fallback={<div className="text-sm text-gray-500">Loading enterprise settings…</div>}>
+                            <OrganizationSettings />
+                          </Suspense>
+                        </div>
+                      </ErrorBoundary>
+                    )}
 
                     <ErrorBoundary fallback={renderSettingsSectionFallback('Legal & Policies', 'The legal documentation center failed to render. Billing and platform settings are still available.')}>
                       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">

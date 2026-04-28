@@ -1,32 +1,33 @@
 /* @vitest-environment jsdom */
 
-import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import React from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import BuildScreen from './BuildScreen'
+import BuildScreen from "./BuildScreen";
 
 const baseProps = () => ({
   buildState: {
-    id: 'build-1',
-    status: 'in_progress' as const,
+    id: "build-1",
+    status: "in_progress" as const,
     progress: 42,
-    description: 'Build a premium project importer that audits uploaded apps, shows a polished React UI first, and keeps the full prompt accessible.',
+    description:
+      "Build a premium project importer that audits uploaded apps, shows a polished React UI first, and keeps the full prompt accessible.",
     agents: [],
     tasks: [],
     checkpoints: [],
     interaction: undefined,
-    currentPhase: 'planning',
+    currentPhase: "planning",
     blockers: [],
     patchBundles: [] as any[],
     historicalLearning: undefined as any,
     promptPackActivationRequests: undefined as any,
     promptPackVersions: undefined as any,
     promptPackActivationEvents: undefined as any,
-    powerMode: 'balanced' as const,
+    powerMode: "balanced" as const,
   },
-  providerPanels: [],
-  aiThoughts: [],
+  providerPanels: [] as any[],
+  aiThoughts: [] as any[],
   chatMessages: [],
   generatedFiles: [],
   proposedEdits: [],
@@ -37,7 +38,7 @@ const baseProps = () => ({
   pendingRevisionRequests: [],
   buildActionPending: null,
   hasBYOK: false,
-  phaseLabel: 'Planning',
+  phaseLabel: "Planning",
   visibleBlockers: [],
   platformReadinessNotice: null,
   buildFailureAttribution: null,
@@ -50,22 +51,24 @@ const baseProps = () => ({
   permissionActionId: null,
   rollbackCheckpointId: null,
   patchBundleActionId: null,
-  chatInput: '',
+  chatInput: "",
   setChatInput: vi.fn(),
-  plannerSendMode: 'lead' as const,
+  plannerSendMode: "lead" as const,
   setPlannerSendMode: vi.fn(),
   plannerMessagePending: false,
   providerModelOverrides: {
-    claude: 'auto',
-    gpt4: 'auto',
-    gemini: 'auto',
-    grok: 'auto',
+    claude: "auto",
+    gpt4: "auto",
+    gemini: "auto",
+    grok: "auto",
+    ollama: "auto",
   },
   providerModelOptions: {
-    claude: [{ id: 'claude-opus-4-6', name: 'Claude Opus 4.6' }],
-    gpt4: [{ id: 'gpt-5.4', name: 'ChatGPT 5.4' }],
-    gemini: [{ id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' }],
-    grok: [{ id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' }],
+    claude: [{ id: "claude-opus-4-6", name: "Claude Opus 4.6" }],
+    gpt4: [{ id: "gpt-5.4-pro", name: "ChatGPT 5.4 Pro" }],
+    gemini: [{ id: "gemini-3.1-pro", name: "Gemini 3.1 Pro" }],
+    grok: [{ id: "grok-4.20-0309-reasoning", name: "Grok 4.20" }],
+    ollama: [{ id: "kimi-k2.6", name: "Kimi K2.6" }],
   },
   providerModelPendingProvider: null,
   agentMessageDrafts: {},
@@ -94,444 +97,554 @@ const baseProps = () => ({
   onSetShowDiffReview: vi.fn(),
   onLoadProposedEdits: vi.fn(),
   onOpenCompletedBuild: vi.fn(),
-})
+});
 
-describe('BuildScreen header prompt actions', () => {
-  const writeText = vi.fn()
+describe("BuildScreen header prompt actions", () => {
+  const writeText = vi.fn();
 
   beforeEach(() => {
-    writeText.mockReset()
-    Object.defineProperty(globalThis.navigator, 'clipboard', {
+    writeText.mockReset();
+    Object.defineProperty(globalThis.navigator, "clipboard", {
       configurable: true,
       value: {
         writeText,
       },
-    })
-  })
+    });
+  });
 
-  it('copies the full build prompt from the header action', async () => {
-    const props = baseProps()
-    writeText.mockResolvedValue(undefined)
+  it("copies the full build prompt from the header action", async () => {
+    const props = baseProps();
+    writeText.mockResolvedValue(undefined);
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /copy build prompt/i }))
+    fireEvent.click(screen.getByRole("button", { name: /copy build prompt/i }));
 
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(props.buildState.description)
-    })
+      expect(writeText).toHaveBeenCalledWith(props.buildState.description);
+    });
 
-    expect(await screen.findByText('Copied')).toBeTruthy()
-  })
+    expect(await screen.findByText("Copied")).toBeTruthy();
+  });
 
-  it('surfaces the frontend preview before the full-stack build is complete once files exist', async () => {
-    const props = baseProps()
-    ;(props.buildState as any).status = 'reviewing'
-    props.buildState.progress = 96
-    ;(props as any).generatedFiles = [
+  it("shows provider, model, agent, event, retry, and file metadata in the live stream", () => {
+    const props = baseProps();
+    props.aiThoughts = [
       {
-        path: 'src/App.tsx',
-        content: 'export default function App(){return <main>Preview ready</main>}',
-        language: 'typescript',
+        id: "thought-1",
+        agentId: "agent-kimi",
+        agentRole: "orchestrator",
+        provider: "ollama",
+        model: "kimi-k2.6",
+        type: "error",
+        content: "Build verification failed, retrying with error context...",
+        timestamp: new Date("2026-04-25T12:00:00Z"),
+        eventType: "agent:verification_failed",
+        taskType: "code_generation",
+        files: ["src/App.tsx", "server/api.ts"],
+        filesCount: 2,
+        retryCount: 2,
+        maxRetries: 3,
       },
-    ]
+    ];
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    expect(screen.getByText(/Frontend preview is ready/i)).toBeTruthy()
+    expect(screen.getByText("Kimi")).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Orchestrator \/ kimi-k2\.6 \/ verification retry \/ Code Generation \/ 2 files \/ try 2\/3/i
+      )
+    ).toBeTruthy();
+    expect(screen.getByText(/src\/App\.tsx, server\/api\.ts/i)).toBeTruthy();
+  });
 
-    const previewButtons = screen.getAllByRole('button', { name: /open frontend preview/i })
-    expect(previewButtons.length).toBeGreaterThan(0)
+  it("surfaces the frontend preview before the full-stack build is complete once files exist", async () => {
+    const props = baseProps();
+    (props.buildState as any).status = "reviewing";
+    props.buildState.progress = 96;
+    (props as any).generatedFiles = [
+      {
+        path: "src/App.tsx",
+        content:
+          "export default function App(){return <main>Preview ready</main>}",
+        language: "typescript",
+      },
+    ];
 
-    fireEvent.click(previewButtons[0])
-    expect(props.onPreviewWorkspace).toHaveBeenCalled()
-  })
+    render(<BuildScreen {...props} />);
 
-  it('shows an honest preview-building state for free-plan frontend fallback before files exist', async () => {
-    const props = baseProps()
-    ;(props.buildState as any).status = 'reviewing'
-    props.buildState.progress = 92
-    ;(props as any).createdProjectId = null
-    ;(props.buildState as any).policyState = {
-      plan_type: 'free',
-      classification: 'upgrade_required',
+    expect(screen.getByText(/Frontend preview is ready/i)).toBeTruthy();
+
+    const previewButtons = screen.getAllByRole("button", {
+      name: /open frontend preview/i,
+    });
+    expect(previewButtons.length).toBeGreaterThan(0);
+
+    fireEvent.click(previewButtons[0]);
+    expect(props.onPreviewWorkspace).toHaveBeenCalled();
+  });
+
+  it("shows an honest preview-building state for free-plan frontend fallback before files exist", async () => {
+    const props = baseProps();
+    (props.buildState as any).status = "reviewing";
+    props.buildState.progress = 92;
+    (props as any).createdProjectId = null;
+    (props.buildState as any).policyState = {
+      plan_type: "free",
+      classification: "upgrade_required",
       upgrade_required: true,
       static_frontend_only: true,
-      required_plan: 'builder',
-    }
+      required_plan: "builder",
+    };
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    expect(screen.getByText(/Frontend preview is still building/i)).toBeTruthy()
-    expect((screen.getAllByRole('button', { name: /preview is still building/i })[0] as HTMLButtonElement).disabled).toBe(true)
-  })
+    expect(
+      screen.getByText(/Frontend preview is still building/i)
+    ).toBeTruthy();
+    expect(
+      (
+        screen.getAllByRole("button", {
+          name: /preview is still building/i,
+        })[0] as HTMLButtonElement
+      ).disabled
+    ).toBe(true);
+  });
 
-  it('surfaces review-required patch bundles in the issues overlay', async () => {
-    const props = baseProps()
+  it("surfaces review-required patch bundles in the issues overlay", async () => {
+    const props = baseProps();
     props.buildState.patchBundles = [
       {
-        id: 'patch-1',
-        justification: 'Compile validator Hydra winner (strict_ast_syntax_repair)',
-        provider: 'gpt4',
-        merge_policy: 'review_required',
+        id: "patch-1",
+        justification:
+          "Compile validator Hydra winner (strict_ast_syntax_repair)",
+        provider: "gpt4",
+        merge_policy: "review_required",
         review_required: true,
-        review_branch: 'ai-repair/20260412-compile-validator-bundle-1',
-        suggested_commit_title: 'AI repair: Compile validator Hydra winner (strict_ast_syntax_repair)',
-        risk_reasons: ['dependency_changes_require_review'],
+        review_branch: "ai-repair/20260412-compile-validator-bundle-1",
+        suggested_commit_title:
+          "AI repair: Compile validator Hydra winner (strict_ast_syntax_repair)",
+        risk_reasons: ["dependency_changes_require_review"],
       },
-    ]
+    ];
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Issues(?:\s*\d+)?$/i })
+    );
 
-    expect(await screen.findByText(/Repair Patch Review/i)).toBeTruthy()
-    expect(screen.getAllByText(/Compile validator Hydra winner/i).length).toBeGreaterThan(0)
-    expect(screen.getByText(/merge policy: review required/i)).toBeTruthy()
-    expect(screen.getByText(/review branch: ai-repair\/20260412-compile-validator-bundle-1/i)).toBeTruthy()
-    expect(screen.getByText(/suggested commit: AI repair:/i)).toBeTruthy()
-    expect(screen.getByText(/no proposed-edit diff is attached yet/i)).toBeTruthy()
-    expect(screen.getByText(/dependency changes require review/i)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /approve/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /reject/i })).toBeTruthy()
-  })
+    expect(await screen.findByText(/Repair Patch Review/i)).toBeTruthy();
+    expect(
+      screen.getAllByText(/Compile validator Hydra winner/i).length
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/merge policy: review required/i)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /review branch: ai-repair\/20260412-compile-validator-bundle-1/i
+      )
+    ).toBeTruthy();
+    expect(screen.getByText(/suggested commit: AI repair:/i)).toBeTruthy();
+    expect(
+      screen.getByText(/no proposed-edit diff is attached yet/i)
+    ).toBeTruthy();
+    expect(screen.getByText(/dependency changes require review/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /approve/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /reject/i })).toBeTruthy();
+  });
 
-  it('approves and rejects review-required patch bundles from the issues overlay', async () => {
-    const props = baseProps()
+  it("approves and rejects review-required patch bundles from the issues overlay", async () => {
+    const props = baseProps();
     props.buildState.patchBundles = [
       {
-        id: 'patch-1',
-        justification: 'Compile validator Hydra winner (strict_ast_syntax_repair)',
-        provider: 'gpt4',
-        merge_policy: 'review_required',
+        id: "patch-1",
+        justification:
+          "Compile validator Hydra winner (strict_ast_syntax_repair)",
+        provider: "gpt4",
+        merge_policy: "review_required",
         review_required: true,
-        risk_reasons: ['dependency_changes_require_review'],
+        risk_reasons: ["dependency_changes_require_review"],
       },
-    ]
+    ];
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
-    fireEvent.click(await screen.findByRole('button', { name: /approve/i }))
-    expect(props.onApprovePatchBundle).toHaveBeenCalledWith('patch-1')
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Issues(?:\s*\d+)?$/i })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /approve/i }));
+    expect(props.onApprovePatchBundle).toHaveBeenCalledWith("patch-1");
 
-    fireEvent.click(screen.getByRole('button', { name: /reject/i }))
-    expect(props.onRejectPatchBundle).toHaveBeenCalledWith('patch-1')
-  })
+    fireEvent.click(screen.getByRole("button", { name: /reject/i }));
+    expect(props.onRejectPatchBundle).toHaveBeenCalledWith("patch-1");
+  });
 
-  it('does not show approved patch bundles as pending review work', async () => {
-    const props = baseProps()
+  it("does not show approved patch bundles as pending review work", async () => {
+    const props = baseProps();
     props.buildState.patchBundles = [
       {
-        id: 'patch-1',
-        justification: 'Already approved repair',
-        merge_policy: 'review_required',
+        id: "patch-1",
+        justification: "Already approved repair",
+        merge_policy: "review_required",
         review_required: true,
-        review_status: 'approved',
+        review_status: "approved",
       },
-    ]
+    ];
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Issues(?:\s*\d+)?$/i })
+    );
 
-    expect(screen.queryByText(/Repair Patch Review/i)).toBeNull()
-    expect(screen.queryByText(/Already approved repair/i)).toBeNull()
-  })
+    expect(screen.queryByText(/Repair Patch Review/i)).toBeNull();
+    expect(screen.queryByText(/Already approved repair/i)).toBeNull();
+  });
 
-  it('reviews benchmark-gated prompt proposals from the AI detail overlay', async () => {
-    const props = baseProps()
+  it("reviews benchmark-gated prompt proposals from the AI detail overlay", async () => {
+    const props = baseProps();
     props.buildState.historicalLearning = {
-      scope: 'stack:react+go',
+      scope: "stack:react+go",
       observed_builds: 2,
       prompt_improvement_proposals: [
         {
-          id: 'prompt-preview',
-          scope: 'stack:react+go',
-          target_prompt: 'preview_repair',
-          failure_cluster: 'preview_verification',
-          proposal: 'Emphasize deterministic preview checks before visual polish.',
-          evidence: ['failure_class=preview_verification count=2'],
-          benchmark_gate: 'Run generated preview smoke benchmarks.',
+          id: "prompt-preview",
+          scope: "stack:react+go",
+          target_prompt: "preview_repair",
+          failure_cluster: "preview_verification",
+          proposal:
+            "Emphasize deterministic preview checks before visual polish.",
+          evidence: ["failure_class=preview_verification count=2"],
+          benchmark_gate: "Run generated preview smoke benchmarks.",
           requires_approval: true,
-          review_state: 'proposed',
-          benchmark_status: 'not_started',
+          review_state: "proposed",
+          benchmark_status: "not_started",
         },
       ],
-    }
+    };
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /AI Detail/i }))
+    fireEvent.click(screen.getByRole("button", { name: /AI Detail/i }));
 
-    expect(await screen.findByText('Prompt Proposals')).toBeTruthy()
-    expect(screen.getByText(/Run generated preview smoke benchmarks/i)).toBeTruthy()
+    expect(await screen.findByText("Prompt Proposals")).toBeTruthy();
+    expect(
+      screen.getByText(/Run generated preview smoke benchmarks/i)
+    ).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /^Approve$/i }))
-    expect(props.onReviewPromptProposal).toHaveBeenCalledWith('prompt-preview', 'approve')
+    fireEvent.click(screen.getByRole("button", { name: /^Approve$/i }));
+    expect(props.onReviewPromptProposal).toHaveBeenCalledWith(
+      "prompt-preview",
+      "approve"
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: /^Reject$/i }))
-    expect(props.onReviewPromptProposal).toHaveBeenCalledWith('prompt-preview', 'reject')
-  })
+    fireEvent.click(screen.getByRole("button", { name: /^Reject$/i }));
+    expect(props.onReviewPromptProposal).toHaveBeenCalledWith(
+      "prompt-preview",
+      "reject"
+    );
+  });
 
-  it('runs benchmark gates for approved prompt proposals from the AI detail overlay', async () => {
-    const props = baseProps()
+  it("runs benchmark gates for approved prompt proposals from the AI detail overlay", async () => {
+    const props = baseProps();
     props.buildState.historicalLearning = {
-      scope: 'stack:react+go',
+      scope: "stack:react+go",
       observed_builds: 2,
       prompt_improvement_proposals: [
         {
-          id: 'prompt-approved',
-          scope: 'stack:react+go',
-          target_prompt: 'preview_repair',
-          failure_cluster: 'preview_verification',
-          proposal: 'Emphasize deterministic preview checks before visual polish.',
-          evidence: ['failure_class=preview_verification count=2'],
-          benchmark_gate: 'Run generated preview smoke benchmarks.',
+          id: "prompt-approved",
+          scope: "stack:react+go",
+          target_prompt: "preview_repair",
+          failure_cluster: "preview_verification",
+          proposal:
+            "Emphasize deterministic preview checks before visual polish.",
+          evidence: ["failure_class=preview_verification count=2"],
+          benchmark_gate: "Run generated preview smoke benchmarks.",
           requires_approval: true,
-          review_state: 'approved',
-          benchmark_status: 'not_started',
+          review_state: "approved",
+          benchmark_status: "not_started",
         },
       ],
       prompt_adoption_candidates: [
         {
-          id: 'adoption-prompt-approved',
-          proposal_id: 'prompt-approved',
-          scope: 'stack:react+go',
-          target_prompt: 'preview_repair',
-          failure_cluster: 'preview_verification',
-          proposal: 'Emphasize deterministic preview checks before visual polish.',
-          benchmark_gate: 'Run generated preview smoke benchmarks.',
-          benchmark_status: 'passed',
-          status: 'ready_for_adoption',
+          id: "adoption-prompt-approved",
+          proposal_id: "prompt-approved",
+          scope: "stack:react+go",
+          target_prompt: "preview_repair",
+          failure_cluster: "preview_verification",
+          proposal:
+            "Emphasize deterministic preview checks before visual polish.",
+          benchmark_gate: "Run generated preview smoke benchmarks.",
+          benchmark_status: "passed",
+          status: "ready_for_adoption",
           prompt_mutated: false,
         },
       ],
       prompt_pack_drafts: [
         {
-          id: 'prompt-pack-draft-1',
-          version: 'draft-001',
-          scope: 'stack:react+go',
-          source_candidate_ids: ['adoption-prompt-approved'],
+          id: "prompt-pack-draft-1",
+          version: "draft-001",
+          scope: "stack:react+go",
+          source_candidate_ids: ["adoption-prompt-approved"],
           changes: [
             {
-              candidate_id: 'adoption-prompt-approved',
-              proposal_id: 'prompt-approved',
-              target_prompt: 'preview_repair',
-              failure_cluster: 'preview_verification',
-              proposal: 'Emphasize deterministic preview checks before visual polish.',
-              benchmark_gate: 'Run generated preview smoke benchmarks.',
+              candidate_id: "adoption-prompt-approved",
+              proposal_id: "prompt-approved",
+              target_prompt: "preview_repair",
+              failure_cluster: "preview_verification",
+              proposal:
+                "Emphasize deterministic preview checks before visual polish.",
+              benchmark_gate: "Run generated preview smoke benchmarks.",
             },
           ],
-          status: 'inactive_draft',
+          status: "inactive_draft",
           prompt_mutated: false,
           activation_ready: false,
         },
       ],
-    }
+    };
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /AI Detail/i }))
+    fireEvent.click(screen.getByRole("button", { name: /AI Detail/i }));
 
-    expect(await screen.findByText(/Benchmark: Not Started/i)).toBeTruthy()
-    expect(screen.getByText('Adoption Registry')).toBeTruthy()
-    expect(screen.getByText(/live prompt generation has not changed/i)).toBeTruthy()
-    expect(screen.getByText('Prompt-Pack Drafts')).toBeTruthy()
-    expect(screen.getByText('draft-001')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /run benchmark/i }))
-    expect(props.onBenchmarkPromptProposal).toHaveBeenCalledWith('prompt-approved')
-    fireEvent.click(screen.getByRole('button', { name: /create prompt-pack draft/i }))
-    expect(props.onCreatePromptPackDraft).toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: /request admin activation/i }))
-    expect(props.onRequestPromptPackActivation).toHaveBeenCalledWith('prompt-pack-draft-1')
-  })
+    expect(await screen.findByText(/Benchmark: Not Started/i)).toBeTruthy();
+    expect(screen.getByText("Adoption Registry")).toBeTruthy();
+    expect(
+      screen.getByText(/live prompt generation has not changed/i)
+    ).toBeTruthy();
+    expect(screen.getByText("Prompt-Pack Drafts")).toBeTruthy();
+    expect(screen.getByText("draft-001")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /run benchmark/i }));
+    expect(props.onBenchmarkPromptProposal).toHaveBeenCalledWith(
+      "prompt-approved"
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /create prompt-pack draft/i })
+    );
+    expect(props.onCreatePromptPackDraft).toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: /request admin activation/i })
+    );
+    expect(props.onRequestPromptPackActivation).toHaveBeenCalledWith(
+      "prompt-pack-draft-1"
+    );
+  });
 
-  it('activates pending prompt-pack requests into the registry from the AI detail overlay', async () => {
-    const props = baseProps()
+  it("activates pending prompt-pack requests into the registry from the AI detail overlay", async () => {
+    const props = baseProps();
     props.buildState.historicalLearning = {
-      scope: 'stack:react+go',
+      scope: "stack:react+go",
       observed_builds: 2,
       prompt_pack_drafts: [
         {
-          id: 'prompt-pack-draft-1',
-          version: 'draft-001',
-          scope: 'stack:react+go',
-          source_candidate_ids: ['adoption-prompt-approved'],
+          id: "prompt-pack-draft-1",
+          version: "draft-001",
+          scope: "stack:react+go",
+          source_candidate_ids: ["adoption-prompt-approved"],
           changes: [
             {
-              candidate_id: 'adoption-prompt-approved',
-              proposal_id: 'prompt-approved',
-              target_prompt: 'preview_repair',
-              failure_cluster: 'preview_verification',
-              proposal: 'Emphasize deterministic preview checks before visual polish.',
-              benchmark_gate: 'Run generated preview smoke benchmarks.',
+              candidate_id: "adoption-prompt-approved",
+              proposal_id: "prompt-approved",
+              target_prompt: "preview_repair",
+              failure_cluster: "preview_verification",
+              proposal:
+                "Emphasize deterministic preview checks before visual polish.",
+              benchmark_gate: "Run generated preview smoke benchmarks.",
             },
           ],
-          status: 'inactive_draft',
+          status: "inactive_draft",
           prompt_mutated: false,
           activation_ready: false,
         },
       ],
-    }
+    };
     props.buildState.promptPackActivationRequests = [
       {
-        id: 'prompt-pack-activation-request-1',
-        build_id: 'build-1',
-        draft_id: 'prompt-pack-draft-1',
-        draft_version: 'draft-001',
-        scope: 'stack:react+go',
-        status: 'pending_admin_activation',
+        id: "prompt-pack-activation-request-1",
+        build_id: "build-1",
+        draft_id: "prompt-pack-draft-1",
+        draft_version: "draft-001",
+        scope: "stack:react+go",
+        status: "pending_admin_activation",
         requested_by_id: 7,
-        feature_flag: 'APEX_PROMPT_PACK_ACTIVATION_REQUESTS',
+        feature_flag: "APEX_PROMPT_PACK_ACTIVATION_REQUESTS",
         prompt_mutated: false,
       },
-    ]
+    ];
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /AI Detail/i }))
+    fireEvent.click(screen.getByRole("button", { name: /AI Detail/i }));
 
-    expect(await screen.findByText(/Pending Admin Activation/i)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /activate registry version/i }))
-    expect(props.onActivatePromptPackRequest).toHaveBeenCalledWith('prompt-pack-activation-request-1')
-  })
+    expect(await screen.findByText(/Pending Admin Activation/i)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: /activate registry version/i })
+    );
+    expect(props.onActivatePromptPackRequest).toHaveBeenCalledWith(
+      "prompt-pack-activation-request-1"
+    );
+  });
 
-  it('rolls back an active registry version from the AI detail overlay', async () => {
-    const props = baseProps()
+  it("rolls back an active registry version from the AI detail overlay", async () => {
+    const props = baseProps();
     props.buildState.historicalLearning = {
-      scope: 'stack:react+go',
+      scope: "stack:react+go",
       observed_builds: 2,
       prompt_pack_drafts: [
         {
-          id: 'prompt-pack-draft-1',
-          version: 'draft-001',
-          scope: 'stack:react+go',
-          source_candidate_ids: ['adoption-prompt-approved'],
+          id: "prompt-pack-draft-1",
+          version: "draft-001",
+          scope: "stack:react+go",
+          source_candidate_ids: ["adoption-prompt-approved"],
           changes: [],
-          status: 'inactive_draft',
+          status: "inactive_draft",
           prompt_mutated: false,
           activation_ready: false,
         },
       ],
-    }
+    };
     props.buildState.promptPackActivationRequests = [
       {
-        id: 'prompt-pack-activation-request-1',
-        build_id: 'build-1',
-        draft_id: 'prompt-pack-draft-1',
-        draft_version: 'draft-001',
-        scope: 'stack:react+go',
-        status: 'activated_in_registry',
+        id: "prompt-pack-activation-request-1",
+        build_id: "build-1",
+        draft_id: "prompt-pack-draft-1",
+        draft_version: "draft-001",
+        scope: "stack:react+go",
+        status: "activated_in_registry",
         requested_by_id: 7,
-        feature_flag: 'APEX_PROMPT_PACK_ACTIVATION_REQUESTS',
+        feature_flag: "APEX_PROMPT_PACK_ACTIVATION_REQUESTS",
         prompt_mutated: false,
       },
-    ]
+    ];
     props.buildState.promptPackVersions = [
       {
-        id: 'prompt-pack-version-active-1',
-        scope: 'stack:react+go',
-        version: 'draft-001',
-        status: 'active_registry_version',
-        source_build_id: 'build-1',
-        source_draft_id: 'prompt-pack-draft-1',
-        source_request_id: 'prompt-pack-activation-request-1',
+        id: "prompt-pack-version-active-1",
+        scope: "stack:react+go",
+        version: "draft-001",
+        status: "active_registry_version",
+        source_build_id: "build-1",
+        source_draft_id: "prompt-pack-draft-1",
+        source_request_id: "prompt-pack-activation-request-1",
         activated_by_id: 7,
         prompt_mutated: false,
         live_prompt_read_enabled: false,
       },
-    ]
+    ];
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /AI Detail/i }))
+    fireEvent.click(screen.getByRole("button", { name: /AI Detail/i }));
 
-    expect(await screen.findByText(/Active Registry Version/i)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /rollback registry version/i }))
-    expect(props.onRollbackPromptPackVersion).toHaveBeenCalledWith('prompt-pack-version-active-1')
-  })
+    expect(await screen.findByText(/Active Registry Version/i)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: /rollback registry version/i })
+    );
+    expect(props.onRollbackPromptPackVersion).toHaveBeenCalledWith(
+      "prompt-pack-version-active-1"
+    );
+  });
 
-  it('opens proposed edit review from review-required repair bundles', async () => {
-    const baseline = baseProps()
+  it("opens proposed edit review from review-required repair bundles", async () => {
+    const baseline = baseProps();
     const props = {
       ...baseline,
       buildState: {
         ...baseline.buildState,
-        status: 'awaiting_review' as const,
+        status: "awaiting_review" as const,
         patchBundles: [
           {
-            id: 'patch-1',
-            justification: 'Compile validator Hydra winner (strict_ast_syntax_repair)',
-            provider: 'gpt4',
-            merge_policy: 'review_required' as const,
+            id: "patch-1",
+            justification:
+              "Compile validator Hydra winner (strict_ast_syntax_repair)",
+            provider: "gpt4",
+            merge_policy: "review_required" as const,
             review_required: true,
-            review_branch: 'ai-repair/20260412-compile-validator-bundle-1',
-            suggested_commit_title: 'AI repair: Compile validator Hydra winner (strict_ast_syntax_repair)',
-            risk_reasons: ['dependency_changes_require_review'],
+            review_branch: "ai-repair/20260412-compile-validator-bundle-1",
+            suggested_commit_title:
+              "AI repair: Compile validator Hydra winner (strict_ast_syntax_repair)",
+            risk_reasons: ["dependency_changes_require_review"],
           },
         ],
       },
       proposedEdits: [
         {
-          id: 'edit-1',
-          build_id: 'build-1',
-          agent_id: 'agent-1',
-          agent_role: 'frontend',
-          file_path: 'src/App.tsx',
-          original_content: 'export default function App() { return null }',
-          proposed_content: 'export default function App() { return <main /> }',
-          language: 'tsx',
-          status: 'pending' as const,
+          id: "edit-1",
+          build_id: "build-1",
+          agent_id: "agent-1",
+          agent_role: "frontend",
+          file_path: "src/App.tsx",
+          original_content: "export default function App() { return null }",
+          proposed_content: "export default function App() { return <main /> }",
+          language: "tsx",
+          status: "pending" as const,
         },
       ],
-    }
+    };
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
-    fireEvent.click(await screen.findByRole('button', { name: /open diff review/i }))
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Issues(?:\s*\d+)?$/i })
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /open diff review/i })
+    );
 
-    expect(props.onSetShowDiffReview).toHaveBeenCalledWith(true)
-  })
+    expect(props.onSetShowDiffReview).toHaveBeenCalledWith(true);
+  });
 
-  it('keeps platform and failed-build notices visible after switching overlays', async () => {
-    const baseline = baseProps()
+  it("keeps platform and failed-build notices visible after switching overlays", async () => {
+    const baseline = baseProps();
     const props = {
       ...baseline,
       buildState: {
         ...baseline.buildState,
-        status: 'failed' as const,
+        status: "failed" as const,
       },
       platformReadinessNotice: {
-        title: 'Redis cache is misconfigured',
-        body: 'Redis is using an external allowlisted endpoint.',
-        detail: 'Update REDIS_URL to the apex-redis internal connection string and redeploy.',
+        title: "Redis cache is misconfigured",
+        body: "Redis is using an external allowlisted endpoint.",
+        detail:
+          "Update REDIS_URL to the apex-redis internal connection string and redeploy.",
         isCritical: false,
       },
       buildFailureAttribution: {
-        title: 'This failure may be platform-related',
-        body: 'Primary database connectivity dropped while the build was running.',
-        detail: 'Retry after database connectivity returns.',
-        capturedError: 'Build session unavailable',
+        title: "This failure may be platform-related",
+        body: "Primary database connectivity dropped while the build was running.",
+        detail: "Retry after database connectivity returns.",
+        capturedError: "Build session unavailable",
       },
-    }
+    };
 
-    render(<BuildScreen {...props} />)
+    render(<BuildScreen {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Issues(?:\s*\d+)?$/i })
+    );
 
-    expect(await screen.findByText(/Redis cache is misconfigured/i)).toBeTruthy()
-    expect(screen.getByText(/This failure may be platform-related/i)).toBeTruthy()
-    expect(screen.getByText(/Build session unavailable/i)).toBeTruthy()
+    expect(
+      await screen.findByText(/Redis cache is misconfigured/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/This failure may be platform-related/i)
+    ).toBeTruthy();
+    expect(screen.getByText(/Build session unavailable/i)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /^Console$/i }))
-    await screen.findByText(/Planner Console/i)
+    fireEvent.click(screen.getByRole("button", { name: /^Console$/i }));
+    await screen.findByText(/Planner Console/i);
 
-    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Issues(?:\s*\d+)?$/i })
+    );
 
-    expect(await screen.findByText(/Redis cache is misconfigured/i)).toBeTruthy()
-    expect(screen.getByText(/This failure may be platform-related/i)).toBeTruthy()
-    expect(screen.getByText(/Build session unavailable/i)).toBeTruthy()
-  })
-})
+    expect(
+      await screen.findByText(/Redis cache is misconfigured/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/This failure may be platform-related/i)
+    ).toBeTruthy();
+    expect(screen.getByText(/Build session unavailable/i)).toBeTruthy();
+  });
+});

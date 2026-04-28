@@ -552,10 +552,10 @@ describe('AppBuilder control surface', () => {
 
     await openMockedBuild()
 
-    expect(await screen.findByText('Claude Opus 4.6')).toBeTruthy()
-    expect(screen.queryByText('GPT-4o Mini')).toBeNull()
-    expect(screen.getByText('ChatGPT 5.4')).toBeTruthy()
-    expect(screen.getByText('Gemini 3.1 Pro')).toBeTruthy()
+    expect((await screen.findAllByText('Claude Opus 4.7')).length).toBeGreaterThan(0)
+    expect(screen.queryAllByText('GPT-4o Mini').filter((el) => el.tagName !== 'OPTION')).toHaveLength(0)
+    expect(screen.getAllByText('ChatGPT Codex 5.5').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Gemini 3.1 Pro Preview').length).toBeGreaterThan(0)
   })
 
   it('does not display a Gemini model under the Grok provider panel', async () => {
@@ -587,9 +587,9 @@ describe('AppBuilder control surface', () => {
 
     await openMockedBuild()
 
-    expect(await screen.findByText('Grok 4.20')).toBeTruthy()
-    expect(screen.queryByText('gemini-2.5-flash')).toBeNull()
-    expect(screen.getByText('Gemini 3.1 Pro')).toBeTruthy()
+    expect((await screen.findAllByText('Grok 4.20')).length).toBeGreaterThan(0)
+    expect(screen.queryAllByText('gemini-2.5-flash').filter((el) => el.tagName !== 'OPTION')).toHaveLength(0)
+    expect(screen.getAllByText('Gemini 3.1 Pro Preview').length).toBeGreaterThan(0)
   })
 
   it('issues a restart command for failed builds', async () => {
@@ -664,7 +664,7 @@ describe('AppBuilder control surface', () => {
 
     await clickOverlayNav('Files')
     await screen.findByText(/Generated Files/i)
-    await screen.findByText('App.tsx')
+    await screen.findByText('src/App.tsx')
 
     await clickOverlayNav('Console')
     await screen.findByText(/Planner Console/i)

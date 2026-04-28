@@ -27,7 +27,7 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "gpt-4o-mini",
 	},
 	ai.ProviderGemini: {
-		PowerMax:      "gemini-3.1-pro-preview",
+		PowerMax:      "gemini-3.1-pro",
 		PowerBalanced: "gemini-3-flash-preview",
 		PowerFast:     "gemini-2.5-flash-lite",
 	},
@@ -40,16 +40,6 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerMax:      "kimi-k2.6",
 		PowerBalanced: "kimi-k2.6",
 		PowerFast:     "kimi-k2.6",
-	},
-	ai.ProviderDeepSeek: {
-		PowerMax:      "deepseek-r1:14b",
-		PowerBalanced: "deepseek-r1:14b",
-		PowerFast:     "deepseek-coder:6.7b",
-	},
-	ai.ProviderGLM: {
-		PowerMax:      "glm-5.1",
-		PowerBalanced: "glm-5.1",
-		PowerFast:     "glm-4.5",
 	},
 }
 
@@ -91,10 +81,6 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 		return strings.HasPrefix(normalized, "gemini-")
 	case ai.ProviderGrok:
 		return strings.HasPrefix(normalized, "grok-")
-	case ai.ProviderDeepSeek:
-		return strings.HasPrefix(normalized, "deepseek-")
-	case ai.ProviderGLM:
-		return strings.HasPrefix(normalized, "glm-")
 	case ai.ProviderOllama:
 		for _, foreignPrefix := range []string{
 			"claude-",
@@ -868,10 +854,6 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 				allowedBYOKProviders[ai.ProviderGemini] = true
 			case "ollama":
 				allowedBYOKProviders[ai.ProviderOllama] = true
-			case "deepseek":
-				allowedBYOKProviders[ai.ProviderDeepSeek] = true
-			case "glm":
-				allowedBYOKProviders[ai.ProviderGLM] = true
 			case "grok", "xai", "x.ai":
 				allowedBYOKProviders[ai.ProviderGrok] = true
 			}
@@ -887,13 +869,11 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 
 	// Map AI router providers to agent providers and check health
 	providerMappings := map[ai.AIProvider]ai.AIProvider{
-		ai.ProviderClaude:   ai.ProviderClaude,
-		ai.ProviderGPT4:     ai.ProviderGPT4,
-		ai.ProviderGemini:   ai.ProviderGemini,
-		ai.ProviderGrok:     ai.ProviderGrok,
-		ai.ProviderOllama:   ai.ProviderOllama,
-		ai.ProviderDeepSeek: ai.ProviderDeepSeek,
-		ai.ProviderGLM:      ai.ProviderGLM,
+		ai.ProviderClaude: ai.ProviderClaude,
+		ai.ProviderGPT4:   ai.ProviderGPT4,
+		ai.ProviderGemini: ai.ProviderGemini,
+		ai.ProviderGrok:   ai.ProviderGrok,
+		ai.ProviderOllama: ai.ProviderOllama,
 	}
 
 	// Startup grace period: 30 seconds after adapter creation

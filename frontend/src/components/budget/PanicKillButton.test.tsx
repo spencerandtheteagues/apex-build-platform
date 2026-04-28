@@ -47,7 +47,7 @@ describe('PanicKillButton', () => {
     fireEvent.click(screen.getByText('CONFIRM KILL'))
 
     await waitFor(() => {
-      expect(apiService.post).toHaveBeenCalledWith('/budget/kill-all')
+      expect(apiService.post).toHaveBeenCalledWith('/build/kill-all')
     })
   })
 

@@ -64,3 +64,33 @@ func TestResolvePreviewRuntimeVerify(t *testing.T) {
 		}
 	})
 }
+
+func TestDefaultProductionTrustedProxiesIncludesCloudflareAndPrivateRanges(t *testing.T) {
+	proxies := defaultProductionTrustedProxies()
+	want := []string{"173.245.48.0/20", "2606:4700::/32", "10.0.0.0/8", "127.0.0.1"}
+	for _, expected := range want {
+		found := false
+		for _, proxy := range proxies {
+			if proxy == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected default trusted proxies to include %s", expected)
+		}
+	}
+}
+
+func TestSplitCSVTrimsEmptyValues(t *testing.T) {
+	got := splitCSV(" 127.0.0.1, , 10.0.0.0/8 ")
+	want := []string{"127.0.0.1", "10.0.0.0/8"}
+	if len(got) != len(want) {
+		t.Fatalf("splitCSV length = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("splitCSV[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

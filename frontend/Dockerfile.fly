@@ -1,4 +1,4 @@
-# Fly.io Dockerfile for APEX.BUILD Frontend
+# Fly.io Dockerfile for APEX-BUILD Frontend
 # Optimized multi-stage build
 
 # Stage 1: Build

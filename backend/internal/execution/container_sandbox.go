@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -37,8 +38,10 @@ type ContainerSandbox struct {
 
 // ContainerSandboxConfig holds container sandbox configuration
 type ContainerSandboxConfig struct {
-	// Docker socket path (default: /var/run/docker.sock)
-	DockerSocket string
+	// Docker socket path. Leave empty to use Docker CLI context resolution.
+	DockerSocket  string
+	DockerHost    string
+	DockerContext string
 
 	// Base image prefix for language containers
 	ImagePrefix string
@@ -106,6 +109,7 @@ type containerExecution struct {
 
 type containerRunOptions struct {
 	MountSource   string
+	MountVolume   string
 	MountReadOnly bool
 	WorkDir       string
 	Command       []string
@@ -148,8 +152,36 @@ type SandboxStats struct {
 
 // DefaultContainerSandboxConfig returns production-ready default configuration
 func DefaultContainerSandboxConfig() *ContainerSandboxConfig {
+	dockerHost := strings.TrimSpace(os.Getenv("APEX_EXECUTION_DOCKER_HOST"))
+	if dockerHost == "" {
+		dockerHost = strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_HOST"))
+	}
+	if dockerHost == "" {
+		dockerHost = strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+	}
+	dockerContext := strings.TrimSpace(os.Getenv("APEX_EXECUTION_DOCKER_CONTEXT"))
+	if dockerContext == "" {
+		dockerContext = strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_CONTEXT"))
+	}
+	if dockerContext == "" {
+		dockerContext = strings.TrimSpace(os.Getenv("DOCKER_CONTEXT"))
+	}
+	if dockerHost == "" {
+		activeContext, activeHost := inspectDockerContext(dockerContext)
+		if dockerContext == "" {
+			dockerContext = activeContext
+		}
+		dockerHost = activeHost
+	}
+	dockerSocket := strings.TrimSpace(os.Getenv("APEX_EXECUTION_DOCKER_SOCKET"))
+	if dockerSocket == "" {
+		dockerSocket = strings.TrimSpace(os.Getenv("EXECUTION_DOCKER_SOCKET"))
+	}
+
 	return &ContainerSandboxConfig{
-		DockerSocket:        "/var/run/docker.sock",
+		DockerSocket:        dockerSocket,
+		DockerHost:          dockerHost,
+		DockerContext:       dockerContext,
 		ImagePrefix:         "apex-sandbox",
 		DefaultMemoryLimit:  256 * 1024 * 1024, // 256MB
 		DefaultCPULimit:     0.5,
@@ -293,9 +325,77 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 
 // checkDockerAvailable verifies Docker daemon is accessible
 func (s *ContainerSandbox) checkDockerAvailable() bool {
-	cmd := osexec.Command("docker", "info")
-	cmd.Env = append(os.Environ(), "DOCKER_HOST=unix://"+s.config.DockerSocket)
+	cmd := s.dockerCommand("info")
 	return cmd.Run() == nil
+}
+
+func executionEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for _, value := range env {
+		if strings.HasPrefix(value, prefix) {
+			return strings.TrimPrefix(value, prefix)
+		}
+	}
+	return ""
+}
+
+func (s *ContainerSandbox) dockerEnv() []string {
+	env := append([]string(nil), os.Environ()...)
+	if configuredContext := strings.TrimSpace(s.config.DockerContext); configuredContext != "" && executionEnvValue(env, "DOCKER_CONTEXT") == "" {
+		env = append(env, "DOCKER_CONTEXT="+configuredContext)
+	}
+
+	host := strings.TrimSpace(s.config.DockerHost)
+	if host == "" {
+		socket := strings.TrimSpace(s.config.DockerSocket)
+		if socket != "" {
+			if strings.Contains(socket, "://") {
+				host = socket
+			} else {
+				host = "unix://" + socket
+			}
+		}
+	}
+	if host != "" {
+		env = append(env, "DOCKER_HOST="+host)
+	}
+	return env
+}
+
+func inspectDockerContext(contextName string) (string, string) {
+	args := []string{"context", "inspect", "--format", "{{.Name}}\t{{.Endpoints.docker.Host}}"}
+	if strings.TrimSpace(contextName) != "" {
+		args = append(args, contextName)
+	}
+	output, err := osexec.Command("docker", args...).Output()
+	if err != nil {
+		return "", ""
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(output)), "\t", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+func (s *ContainerSandbox) dockerCommand(args ...string) *osexec.Cmd {
+	cmd := osexec.Command("docker", args...)
+	cmd.Env = s.dockerEnv()
+	return cmd
+}
+
+func (s *ContainerSandbox) dockerCommandContext(ctx context.Context, args ...string) *osexec.Cmd {
+	cmd := osexec.CommandContext(ctx, "docker", args...)
+	cmd.Env = s.dockerEnv()
+	return cmd
+}
+
+func (s *ContainerSandbox) usesRemoteDocker() bool {
+	host := strings.TrimSpace(s.config.DockerHost)
+	if host == "" {
+		host = strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+	}
+	return strings.HasPrefix(strings.ToLower(host), "ssh://")
 }
 
 // writeSeccompProfile creates a restrictive seccomp profile
@@ -575,7 +675,7 @@ func (s *ContainerSandbox) buildImage(language, dockerfile string) error {
 	}
 
 	// Build image
-	cmd := osexec.Command("docker", "build", "-t", imageName, "-f", dockerfilePath, tmpDir)
+	cmd := s.dockerCommand("build", "-t", imageName, "-f", dockerfilePath, tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker build failed: %s", string(output))
@@ -901,6 +1001,10 @@ func (s *ContainerSandbox) runContainer(
 	opts containerRunOptions,
 	stdin string,
 ) *ExecutionResult {
+	if s.usesRemoteDocker() && strings.TrimSpace(opts.MountSource) != "" {
+		return s.runContainerWithRemoteWorkspace(ctx, exec, limits, opts, stdin)
+	}
+
 	result := &ExecutionResult{
 		ID:        exec.ID,
 		Language:  exec.Language,
@@ -918,7 +1022,7 @@ func (s *ContainerSandbox) runContainer(
 	}
 
 	// Create docker command
-	cmd := osexec.CommandContext(ctx, "docker", args...)
+	cmd := s.dockerCommandContext(ctx, args...)
 
 	// Setup stdio
 	var stdout, stderr bytes.Buffer
@@ -966,6 +1070,152 @@ func (s *ContainerSandbox) runContainer(
 	}
 
 	return result
+}
+
+func (s *ContainerSandbox) runContainerWithRemoteWorkspace(
+	ctx context.Context,
+	exec *containerExecution,
+	limits *LanguageResourceLimits,
+	opts containerRunOptions,
+	stdin string,
+) *ExecutionResult {
+	imageName := s.getImageName(exec.Language)
+	volumeName := remoteWorkspaceVolumeName(exec.ID)
+
+	if output, err := s.dockerCommandContext(ctx, "volume", "create", volumeName).CombinedOutput(); err != nil {
+		return s.failedContainerResult(exec, fmt.Sprintf("Failed to create remote workspace volume: %s", strings.TrimSpace(string(output))))
+	}
+	defer s.removeRemoteWorkspaceVolume(volumeName)
+
+	if err := s.copyWorkspaceToRemoteVolume(ctx, imageName, opts.MountSource, volumeName); err != nil {
+		return s.failedContainerResult(exec, fmt.Sprintf("Failed to stage remote workspace: %v", err))
+	}
+
+	remoteOpts := opts
+	remoteOpts.MountSource = ""
+	remoteOpts.MountVolume = volumeName
+
+	result := s.runContainer(ctx, exec, limits, remoteOpts, stdin)
+	if result.Status == "completed" && !opts.MountReadOnly {
+		if err := s.copyWorkspaceFromRemoteVolume(ctx, imageName, volumeName, opts.MountSource); err != nil {
+			result.Status = "failed"
+			result.ExitCode = 1
+			if result.ErrorOutput != "" {
+				result.ErrorOutput += "\n"
+			}
+			result.ErrorOutput += fmt.Sprintf("Failed to sync remote workspace: %v", err)
+		}
+	}
+
+	return result
+}
+
+func (s *ContainerSandbox) failedContainerResult(exec *containerExecution, message string) *ExecutionResult {
+	completedAt := time.Now()
+	return &ExecutionResult{
+		ID:          exec.ID,
+		Language:    exec.Language,
+		StartedAt:   exec.StartTime,
+		CompletedAt: &completedAt,
+		Duration:    time.Since(exec.StartTime),
+		DurationMs:  time.Since(exec.StartTime).Milliseconds(),
+		Status:      "failed",
+		ExitCode:    1,
+		ErrorOutput: message,
+	}
+}
+
+func remoteWorkspaceVolumeName(execID string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(execID) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-_.")
+	if name == "" {
+		name = "workspace"
+	}
+	if len(name) > 48 {
+		name = name[:48]
+	}
+	return "apex-work-" + name
+}
+
+func (s *ContainerSandbox) copyWorkspaceToRemoteVolume(ctx context.Context, imageName, sourceDir, volumeName string) error {
+	tarCmd := osexec.CommandContext(ctx, "tar", "-C", sourceDir, "-cf", "-", ".")
+	dockerCmd := s.dockerCommandContext(
+		ctx,
+		"run", "--rm", "-i",
+		"-v", volumeName+":/work",
+		"--user", "root",
+		imageName,
+		"sh", "-lc", "tar -C /work -xf - && chown -R sandbox:sandbox /work",
+	)
+	return pipeCommands(tarCmd, dockerCmd, "pack workspace", "stage workspace")
+}
+
+func (s *ContainerSandbox) copyWorkspaceFromRemoteVolume(ctx context.Context, imageName, volumeName, targetDir string) error {
+	dockerCmd := s.dockerCommandContext(
+		ctx,
+		"run", "--rm",
+		"-v", volumeName+":/work:ro",
+		"--user", "root",
+		imageName,
+		"sh", "-lc", "tar -C /work -cf - .",
+	)
+	tarCmd := osexec.CommandContext(ctx, "tar", "-C", targetDir, "-xf", "-")
+	return pipeCommands(dockerCmd, tarCmd, "export workspace", "unpack workspace")
+}
+
+func pipeCommands(producer, consumer *osexec.Cmd, producerLabel, consumerLabel string) error {
+	reader, writer := io.Pipe()
+	var producerErr bytes.Buffer
+	var consumerErr bytes.Buffer
+
+	producer.Stdout = writer
+	producer.Stderr = &producerErr
+	consumer.Stdin = reader
+	consumer.Stdout = io.Discard
+	consumer.Stderr = &consumerErr
+
+	if err := consumer.Start(); err != nil {
+		_ = reader.Close()
+		_ = writer.Close()
+		return fmt.Errorf("%s failed to start: %w", consumerLabel, err)
+	}
+	if err := producer.Start(); err != nil {
+		_ = writer.CloseWithError(err)
+		_ = reader.Close()
+		_ = consumer.Wait()
+		return fmt.Errorf("%s failed to start: %w", producerLabel, err)
+	}
+
+	producerWaitErr := producer.Wait()
+	if producerWaitErr != nil {
+		_ = writer.CloseWithError(producerWaitErr)
+	} else {
+		_ = writer.Close()
+	}
+
+	consumerWaitErr := consumer.Wait()
+	_ = reader.Close()
+
+	if producerWaitErr != nil {
+		return fmt.Errorf("%s failed: %w: %s", producerLabel, producerWaitErr, strings.TrimSpace(producerErr.String()))
+	}
+	if consumerWaitErr != nil {
+		return fmt.Errorf("%s failed: %w: %s", consumerLabel, consumerWaitErr, strings.TrimSpace(consumerErr.String()))
+	}
+	return nil
+}
+
+func (s *ContainerSandbox) removeRemoteWorkspaceVolume(volumeName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = s.dockerCommandContext(ctx, "volume", "rm", "-f", volumeName).Run()
 }
 
 // buildDockerArgs constructs the docker run command arguments
@@ -1022,19 +1272,31 @@ func (s *ContainerSandbox) buildDockerArgs(
 		args = append(args, "--network="+s.config.NetworkMode)
 	}
 
-	// Mount the execution workspace.
-	// The ",z" suffix relabels the mount for SELinux-enabled hosts (e.g. Fedora/RHEL)
-	// so the container process can read the files without a permission-denied error.
-	mountMode := "rw,z"
-	if opts.MountReadOnly {
-		mountMode = "ro,z"
+	// Mount the execution workspace. Remote Docker runners cannot bind-mount
+	// local temp paths, so those executions stage files into a named volume first.
+	if opts.MountVolume != "" {
+		mount := fmt.Sprintf("type=volume,source=%s,target=/work", opts.MountVolume)
+		if opts.MountReadOnly {
+			mount += ",readonly"
+		}
+		args = append(args, "--mount", mount)
+	} else if opts.MountSource != "" {
+		// The ",z" suffix relabels the mount for SELinux-enabled hosts
+		// (e.g. Fedora/RHEL) so the container process can read the files.
+		mountMode := "rw,z"
+		if opts.MountReadOnly {
+			mountMode = "ro,z"
+		}
+		args = append(args,
+			"-v", fmt.Sprintf("%s:/work:%s", opts.MountSource, mountMode),
+		)
 	}
-	args = append(args,
-		"-v", fmt.Sprintf("%s:/work:%s", opts.MountSource, mountMode),
-	)
 
-	// Shared package caches for faster warm starts (Replit-parity behavior)
-	if s.pkgCache != nil && s.pkgCache.Enabled() {
+	// Shared package caches for faster warm starts (Replit-parity behavior).
+	// Remote Docker daemons cannot use local cache directories, and Docker will
+	// create remote bind paths as root-owned directories. Skip cache mounts there
+	// so sandbox users keep writable image-local cache paths.
+	if s.pkgCache != nil && s.pkgCache.Enabled() && !s.usesRemoteDocker() {
 		for _, cacheMount := range s.pkgCache.MountsForLanguage(exec.Language) {
 			mode := "rw"
 			if cacheMount.ReadOnly {
@@ -1146,11 +1408,11 @@ func (s *ContainerSandbox) forceKillContainer(containerID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	stopCmd := osexec.CommandContext(ctx, "docker", "stop", "-t", "2", containerID)
+	stopCmd := s.dockerCommandContext(ctx, "stop", "-t", "2", containerID)
 	stopCmd.Run()
 
 	// Then force remove
-	rmCmd := osexec.Command("docker", "rm", "-f", containerID)
+	rmCmd := s.dockerCommand("rm", "-f", containerID)
 	rmCmd.Run()
 }
 
@@ -1199,7 +1461,7 @@ func (s *ContainerSandbox) cleanupLoop() {
 
 // cleanupOrphanedContainers removes any orphaned sandbox containers
 func (s *ContainerSandbox) cleanupOrphanedContainers() {
-	cmd := osexec.Command("docker", "ps", "-a", "--filter", "name=apex-sandbox-", "--format", "{{.Names}}\t{{.Status}}")
+	cmd := s.dockerCommand("ps", "-a", "--filter", "name=apex-sandbox-", "--format", "{{.Names}}\t{{.Status}}")
 	output, err := cmd.Output()
 	if err != nil {
 		return
@@ -1221,7 +1483,7 @@ func (s *ContainerSandbox) cleanupOrphanedContainers() {
 
 		// Remove exited or created containers
 		if strings.Contains(status, "Exited") || strings.Contains(status, "Created") {
-			osexec.Command("docker", "rm", "-f", containerName).Run()
+			s.dockerCommand("rm", "-f", containerName).Run()
 		}
 	}
 }
