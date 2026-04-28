@@ -74,3 +74,37 @@ func TestNodeDockerfileInstallsDevDependenciesForPreviewBuilds(t *testing.T) {
 		}
 	}
 }
+
+func TestPreviewContainerNamesAreDeterministic(t *testing.T) {
+	t.Parallel()
+
+	server := &ContainerPreviewServer{
+		config: &ContainerPreviewConfig{ImagePrefix: "custom-preview"},
+	}
+
+	if got := server.previewContainerName(53); got != "apex-preview-53" {
+		t.Fatalf("container name = %q, want apex-preview-53", got)
+	}
+	if got := server.previewImageName(53); got != "custom-preview-53:latest" {
+		t.Fatalf("image name = %q, want custom-preview-53:latest", got)
+	}
+}
+
+func TestDockerMissingResourceOutputClassifiesIdempotentCleanup(t *testing.T) {
+	t.Parallel()
+
+	missingMessages := []string{
+		"Error response from daemon: No such container: apex-preview-53",
+		"Error response from daemon: No such image: apex-preview-53:latest",
+		"Error: No such object: apex-preview-53",
+	}
+	for _, message := range missingMessages {
+		if !dockerMissingResourceOutput([]byte(message)) {
+			t.Fatalf("expected missing resource output to be ignored: %q", message)
+		}
+	}
+
+	if dockerMissingResourceOutput([]byte("permission denied while trying to connect to the Docker daemon socket")) {
+		t.Fatal("permission errors must not be treated as idempotent cleanup")
+	}
+}

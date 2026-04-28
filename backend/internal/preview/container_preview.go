@@ -486,8 +486,13 @@ func (s *ContainerPreviewServer) StartContainerPreview(ctx context.Context, conf
 	port := s.assignContainerPort(config.ProjectID)
 
 	// Build container name and image name
-	containerName := fmt.Sprintf("apex-preview-%d", config.ProjectID)
-	imageName := fmt.Sprintf("%s-%d:latest", s.config.ImagePrefix, config.ProjectID)
+	containerName := s.previewContainerName(config.ProjectID)
+	imageName := s.previewImageName(config.ProjectID)
+	if err := s.removeStaleProjectContainer(ctx, config.ProjectID); err != nil {
+		os.RemoveAll(tempDir)
+		s.releaseContainerPort(config.ProjectID)
+		return nil, err
+	}
 
 	// Build Docker image
 	startBuild := time.Now()
@@ -559,7 +564,8 @@ func (s *ContainerPreviewServer) StopContainerPreview(ctx context.Context, proje
 	session, exists := s.containerSessions[projectID]
 	if !exists {
 		s.containerMu.Unlock()
-		return nil // Already stopped
+		s.releaseContainerPort(projectID)
+		return s.removeStaleProjectContainer(ctx, projectID)
 	}
 	delete(s.containerSessions, projectID)
 	s.containerMu.Unlock()
@@ -579,10 +585,12 @@ func (s *ContainerPreviewServer) StopContainerPreview(ctx context.Context, proje
 	cmd.Run() // Ignore errors - container might already be stopped
 
 	// Remove container
-	s.dockerCommand("rm", "-f", session.ContainerID).Run()
+	if err := s.removeContainer(ctx, session.ContainerID); err != nil {
+		_ = s.removeContainer(ctx, session.ContainerName)
+	}
 
 	// Remove image
-	s.dockerCommand("rmi", "-f", session.ImageName).Run()
+	_ = s.removeImage(ctx, session.ImageName)
 
 	// Clean up temp directory
 	if session.TempDir != "" && strings.HasPrefix(session.TempDir, s.baseTempDir) {
@@ -593,6 +601,62 @@ func (s *ContainerPreviewServer) StopContainerPreview(ctx context.Context, proje
 	s.releaseContainerPort(projectID)
 
 	return nil
+}
+
+func (s *ContainerPreviewServer) previewContainerName(projectID uint) string {
+	return fmt.Sprintf("apex-preview-%d", projectID)
+}
+
+func (s *ContainerPreviewServer) previewImageName(projectID uint) string {
+	imagePrefix := "apex-preview"
+	if s.config != nil && strings.TrimSpace(s.config.ImagePrefix) != "" {
+		imagePrefix = strings.TrimSpace(s.config.ImagePrefix)
+	}
+	return fmt.Sprintf("%s-%d:latest", imagePrefix, projectID)
+}
+
+func (s *ContainerPreviewServer) removeStaleProjectContainer(ctx context.Context, projectID uint) error {
+	containerName := s.previewContainerName(projectID)
+	if err := s.removeContainer(ctx, containerName); err != nil {
+		return fmt.Errorf("failed to remove stale preview container %s: %w", containerName, err)
+	}
+	_ = s.removeImage(ctx, s.previewImageName(projectID))
+	return nil
+}
+
+func (s *ContainerPreviewServer) removeContainer(ctx context.Context, container string) error {
+	if strings.TrimSpace(container) == "" {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	output, err := s.dockerCommandContext(cleanupCtx, "rm", "-f", container).CombinedOutput()
+	if err != nil && !dockerMissingResourceOutput(output) {
+		return fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (s *ContainerPreviewServer) removeImage(ctx context.Context, image string) error {
+	if strings.TrimSpace(image) == "" {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	output, err := s.dockerCommandContext(cleanupCtx, "rmi", "-f", image).CombinedOutput()
+	if err != nil && !dockerMissingResourceOutput(output) {
+		return fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func dockerMissingResourceOutput(output []byte) bool {
+	lowerOutput := strings.ToLower(string(output))
+	return strings.Contains(lowerOutput, "no such container") ||
+		strings.Contains(lowerOutput, "no such image") ||
+		strings.Contains(lowerOutput, "no such object")
 }
 
 // GetContainerPreviewStatus returns the status of a container preview
