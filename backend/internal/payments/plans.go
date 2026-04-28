@@ -203,14 +203,14 @@ func GetAllPlans() []Plan {
 			TrialDays:    0,
 		},
 
-		// Pro Plan - $59/month — best value
+		// Pro Plan - $79/month — best value
 		{
 			Type:              PlanPro,
 			Name:              "Pro",
-			Description:       "For active builders shipping production apps regularly",
-			MonthlyPriceCents: 5900, // $59.00
+			Description:       "Adds BYOK, advanced verification, higher managed credits, and Ollama Cloud routing options for active builders shipping production apps regularly",
+			MonthlyPriceCents: 7900, // $79.00
 			MonthlyPriceID:    config.StripePriceIDProMonthly,
-			AnnualPriceCents:  56640, // $566.40/year ($47.20/month — 20% off)
+			AnnualPriceCents:  75840, // $758.40/year ($63.20/month — 20% off)
 			AnnualPriceID:     config.StripePriceIDProAnnual,
 			MonthlyCreditsUSD: 40.00, // $40 in AI credits per billing cycle
 			Limits: PlanLimits{

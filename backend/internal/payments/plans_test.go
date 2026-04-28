@@ -9,7 +9,7 @@ func TestUpdatedPlanPricing(t *testing.T) {
 		monthlyCredits float64
 	}{
 		{PlanBuilder, 2400, 12},
-		{PlanPro, 5900, 40},
+		{PlanPro, 7900, 40},
 		{PlanTeam, 14900, 110},
 	}
 

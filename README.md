@@ -41,23 +41,23 @@ This is not a toy. It runs production-grade multi-agent orchestration backed by 
 
 ## The Problem This Solves
 
-If you have used Replit, Bolt, v0, or any AI coding platform, you have hit the same walls. APEX.BUILD was designed to demolish every one of them.
+If you have used Replit, Bolt, v0, or another AI coding platform, you have likely hit tradeoffs around routing control, spend visibility, artifact ownership, and verification. APEX.BUILD is designed for builders who want those controls exposed during the build.
 
 ### Head-to-Head: APEX.BUILD vs. the Alternatives
 
-| Pain Point | Replit / Bolt / v0 | APEX.BUILD |
+| Builder Need | Typical AI builder tradeoff | APEX.BUILD |
 |---|---|---|
-| **Locked into one AI** | Replit uses its own model. Bolt uses Claude only. v0 uses GPT-4o only. Zero choice. | Six providers: Claude, OpenAI, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
-| **Opaque, unpredictable bills** | Credits vanish with no explanation. No per-request visibility. | Real-time per-token cost ticker on every request. Immutable credit ledger. Budget cap enforcement before anything expensive runs. |
-| **Always-on pricing gouges you** | Replit charges extra monthly per app to stay awake. Free apps spin down. | Deploy once to Vercel, Netlify, or Render. Your app lives on your account. Hosting cost is between you and the host, not APEX. |
-| **Your code is trapped** | Replit makes leaving awkward. Bolt has no export. Code lives on their servers. | Full GitHub export any time. Git push to your own repo. Your code is yours. Always. |
-| **One AI doing everything** | A single model writes, reviews, and debugs — so the reviewer always agrees with the writer. | Ten specialized agents with distinct roles. The Reviewer is deliberately separate from the writers. The Solver specializes in failures no other agent could fix. |
+| **Explicit model routing** | Many platforms default to managed model access and hide routing decisions from the build surface. | Six providers: Claude, OpenAI, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
+| **Transparent spend** | Usage can be hard to attribute to a specific model, role, request, or build step. | Real-time per-token cost ticker on every request. Immutable credit ledger. Budget cap enforcement before anything expensive runs. |
+| **Deployment ownership** | Hosted projects often depend on the platform's runtime and plan limits. | Deploy once to Vercel, Netlify, or Render. Your app lives on your account. Hosting cost is between you and the host, not APEX. |
+| **Code ownership** | Export and Git workflows vary by platform and plan. | Full GitHub export any time. Git push to your own repo. Your code is yours. Always. |
+| **Named specialist workflow** | Competitors generally do not publicly break app generation into Apex-style named specialist roles. | Ten specialized agents with distinct roles. The Reviewer is deliberately separate from the writers. The Solver specializes in failures no other agent could fix. |
 | **Large files get mangled** | AI context limits cause files to get truncated and content to disappear mid-build. | Chunked editor protocol: files over 400 lines split into overlapping 300-line windows, edited per chunk, reassembled without loss. |
-| **No real Git workflow** | Replit's Git is surface-level. Bolt has no Git at all. | Full Git panel: branch, commit, push, pull, merge, PR creation and review inside the IDE. |
+| **IDE-level Git workflow** | Some app builders emphasize prompt and preview flows more than IDE-native Git operations. | Full Git panel: branch, commit, push, pull, merge, PR creation and review inside the IDE. |
 | **Preview is slow** | 30–60 second cold starts. Refresh to see changes. | WebSocket hot reload. Preview updates as you save — no rebuild cycle. |
 | **Limited runtimes** | Mostly JavaScript and Python. | Node.js, TypeScript, Python, Go, Rust, C/C++, Java, Ruby, PHP, Bash, and more. |
 | **No hard cost control** | No budget ceiling. Builds run until credits are exhausted. | Per-build budget cap. Global monthly spend ceiling. Confirmation dialogs. Auto-pause at limit. |
-| **Vendor lock-in** | Self-hosting is impossible. Prompts may train their models. | Run it on your own hardware. BYOK means your API calls go directly from your server to the AI provider. |
+| **Provider and hosting optionality** | Defaults are often managed credentials, managed hosting, or platform-managed model access. | Run it on your own hardware. BYOK means your API calls go directly from your server to the AI provider. |
 | **Multiplayer is an afterthought** | Real-time collaboration is limited or missing across major platforms. | Operational transformation (Google Docs-style) with live cursors, presence tracking, and per-project access roles. |
 | **No spending history** | No way to see spend over time, by project, or by provider. | Full spend analytics dashboard: daily/weekly/monthly graphs, cost by provider and project, downloadable invoices. |
 
@@ -132,7 +132,7 @@ APEX.BUILD treats AI providers as interchangeable infrastructure. The AI router 
 
 ## The Ten-Agent System
 
-A single AI writing all your code is like hiring one person to be the architect, developer, QA engineer, and project manager simultaneously. APEX.BUILD uses ten specialized agents with distinct roles.
+APEX.BUILD exposes ten specialized agents with distinct roles so planning, implementation, review, repair, and verification are visible instead of collapsed into one opaque generation stream.
 
 | Agent | Role |
 |---|---|

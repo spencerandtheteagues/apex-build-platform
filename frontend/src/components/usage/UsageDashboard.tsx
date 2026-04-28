@@ -608,7 +608,7 @@ export default function UsageDashboard() {
                       <th className="text-left py-2 px-3 text-gray-400 font-medium">Feature</th>
                       <th className="text-center py-2 px-3 text-gray-400 font-medium">Free</th>
                       <th className="text-center py-2 px-3 text-blue-400 font-medium">Builder $24/mo</th>
-                      <th className="text-center py-2 px-3 text-purple-400 font-medium">Pro $59/mo</th>
+                      <th className="text-center py-2 px-3 text-purple-400 font-medium">Pro $79/mo</th>
                       <th className="text-center py-2 px-3 text-amber-400 font-medium">Team $149/mo</th>
                     </tr>
                   </thead>

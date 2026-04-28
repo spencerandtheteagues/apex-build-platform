@@ -31,11 +31,11 @@ Replit charges opaquely through "cycles" that obscure real spend. APEX Build sho
 
 ### Full-stack agent architecture
 
-Replit's "Replit Agent" is a single agent. APEX Build uses five specialized agents (Architect, Backend, Frontend, Reviewer, Solver) that work in parallel with defined handoffs, increasing the probability of a coherent full-stack output.
+APEX Build exposes named specialist roles (Architect, Backend, Frontend, Reviewer, Solver, and related build roles) with defined handoffs. Competitors may support agents and parallel work, but they generally do not publicly present an Apex-style specialist-agent workflow with per-role routing, cost attribution, and handoff visibility as the core product surface.
 
 ### Bring Your Own Keys (BYOK)
 
-Replit does not support BYOK. APEX Build lets paid users connect their own OpenAI, Anthropic, Gemini, or Grok keys and run builds at near-zero platform cost.
+Most competitors default to managed credentials or platform-managed model access, with BYOK support varying by product surface and use case. APEX Build makes BYOK a first-class paid-plan control so users can connect their own OpenAI, Anthropic, Gemini, Grok, or Ollama routes and see routing/spend attribution during builds.
 
 ---
 

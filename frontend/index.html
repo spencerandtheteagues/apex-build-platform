@@ -77,6 +77,7 @@
     </script>
 
     <link rel="stylesheet" href="/bootstrap.css" />
+    <link rel="stylesheet" href="/seo-fallback.css" />
     <script src="/config.js"></script>
   </head>
   <body>
@@ -90,6 +91,463 @@
 
     <!-- App Root -->
     <div id="root"></div>
+
+    <!--
+      Server-rendered SEO fallback. Visible to crawlers, link scrapers, and
+      no-JS clients. Hidden once React mounts (.app-loaded is toggled on
+      <html> by bootstrap.js when the app is ready).
+    -->
+    <main id="seo-fallback" class="seo-fallback" aria-label="APEX-BUILD product overview">
+      <header class="seo-nav">
+        <a class="seo-nav-brand" href="/">
+          <img src="/apex-build-mark-metal.png" alt="" aria-hidden="true" width="36" height="36" />
+          <span>APEX-BUILD</span>
+        </a>
+        <nav class="seo-nav-links" aria-label="Primary">
+          <a href="#features">Platform</a>
+          <a href="#agents">Agents</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#faq">FAQ</a>
+          <a class="seo-nav-cta" href="/login">Start building</a>
+        </nav>
+      </header>
+
+      <section class="seo-hero" aria-labelledby="seo-hero-title">
+        <p class="seo-eyebrow">Developer-control AI software creation</p>
+        <h1 id="seo-hero-title">Multi-provider AI app building with specialist agents, BYOK controls, live spend visibility, and browser-verified previews.</h1>
+        <p class="seo-lede">
+          APEX-BUILD is the developer-control AI app builder: multi-provider routing, BYOK,
+          live per-agent cost tracking, hard budget caps, Git ownership, IDE-level control,
+          and browser-verified full-stack builds in one workflow. Specialist agents can be
+          assigned to the provider and model best suited to the task, with health checks,
+          failover, and cost attribution visible during the build.
+        </p>
+        <ul class="seo-proof-list">
+          <li>Routes each agent task by cost, reliability, and model fit instead of hiding the build behind one opaque model choice.</li>
+          <li>Builds full-stack apps with frontend, backend, database, integration, testing, review, and repair stages surfaced in the build stream.</li>
+          <li>Runs explicit headless-browser/runtime verification before reporting a preview as successful.</li>
+          <li>Built for engineers: BYOK, managed credits, budget caps, audit trails, GitHub export, and IDE-level file control.</li>
+        </ul>
+        <div class="seo-cta-row">
+          <a class="seo-cta seo-cta-primary" href="/login">Start building free</a>
+          <a class="seo-cta" href="#vs">Compare Apex with Replit, Lovable, Cursor, and Bolt</a>
+        </div>
+      </section>
+
+      <section id="features" class="seo-section" aria-labelledby="seo-features-title">
+        <p class="seo-kicker">Why Apex wins</p>
+        <h2 id="seo-features-title">Lower credit burn. Higher software ceiling.</h2>
+        <p class="seo-copy">
+          Apex isn't a prettier prompt box. It's a multi-agent production software factory with
+          economics, architecture, and verification engineered into the workflow.
+        </p>
+        <div class="seo-grid">
+          <article class="seo-card">
+            <h3>Multi-provider model routing</h3>
+            <p>
+              Apex makes model routing explicit and developer-controlled: each specialist agent can
+              be assigned to the provider/model best suited to the task, with health checks, failover,
+              and cost attribution visible during the build.
+            </p>
+          </article>
+          <article class="seo-card">
+            <h3>BYOK and managed credits as build controls</h3>
+            <p>
+              Most competitors default to managed credentials or platform-managed model access.
+              Apex makes BYOK and managed credits first-class controls, with real-time spend
+              visibility and per-project routing decisions.
+            </p>
+          </article>
+          <article class="seo-card">
+            <h3>Browser-verified previews</h3>
+            <p>
+              Every preview is loaded in a real headless Chromium with chromedp before we report it
+              as working. We check for runtime errors, network failures, and missing assets. The
+              build is verified to render and respond before it gets shipped. Competitors provide
+              previews and deployment workflows; Apex makes explicit runtime verification part of
+              the product guarantee.
+            </p>
+          </article>
+          <article class="seo-card">
+            <h3>Live spend visibility per agent and per model</h3>
+            <p>
+              Every build streams real-time token usage and cost broken down by agent role and model.
+              See exactly which agent is burning credits and on which provider. Set hard budget caps
+              that abort the build if it exceeds them. No surprise bills.
+            </p>
+          </article>
+          <article class="seo-card">
+            <h3>True multi-language stacks</h3>
+            <p>
+              Build Python data services, Go microservices, Rust systems code, Java backends, and
+              Node/TypeScript APIs alongside React, Vue, or Svelte frontends. Lovable and Bolt are
+              strongest around web-app workflows and JavaScript/TypeScript-oriented stacks; Apex
+              targets broader backend generation across Python, Go, Rust, Java, Node, and TypeScript.
+            </p>
+          </article>
+          <article class="seo-card">
+            <h3>Deterministic build pipeline</h3>
+            <p>
+              Inputs locked, model versions pinned, dependency graphs reproducible, every artifact
+              hashed and traceable. Apex emphasizes staged planning, review, repair, and verification
+              so builds can be inspected and repeated instead of treated as a one-shot prompt box.
+            </p>
+          </article>
+          <article class="seo-card">
+            <h3>Native MCP tool integration</h3>
+            <p>
+              Attach Model Context Protocol tools — Stripe, Postgres, Slack, Jira, custom HTTP — and
+              the agents will use them as first-class capabilities, not webhook hacks. Wire secrets
+              once and reuse them across builds.
+            </p>
+          </article>
+          <article class="seo-card">
+            <h3>Enterprise from day one</h3>
+            <p>
+              SAML SSO, SCIM provisioning, RBAC roles, audit logs, single-tenant deployment, and VPC
+              peering are part of the Team and Enterprise architecture. Apex is designed to expose
+              serious deployment and governance controls alongside the build workflow instead of
+              burying them outside the product surface.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="vs" class="seo-section seo-section-alt" aria-labelledby="seo-vs-title">
+        <p class="seo-kicker">The honest comparison</p>
+        <h2 id="seo-vs-title">Apex vs Replit, Lovable, Cursor, Bolt, Devin, and Manus.</h2>
+        <p class="seo-copy">
+          This matrix focuses on how Apex positions developer control. Competitor capabilities change
+          quickly, so rows are phrased conservatively from public documentation and product surfaces.
+        </p>
+        <div class="seo-table-wrap">
+          <table class="seo-table">
+            <thead>
+              <tr>
+                <th>Capability</th>
+                <th>Apex-Build</th>
+                <th>Replit</th>
+                <th>Lovable</th>
+                <th>Cursor</th>
+                <th>Bolt</th>
+                <th>Devin</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Explicit per-agent model routing controls</td><td>Yes</td><td>Not publicly positioned as core</td><td>Limited / evolving</td><td>Agent/model controls</td><td>Not verified</td><td>Agent controls</td></tr>
+              <tr><td>BYOK and managed credits as build controls</td><td>Yes</td><td>Partial / context-dependent</td><td>Managed access</td><td>Partial / context-dependent</td><td>Managed access</td><td>Managed access</td></tr>
+              <tr><td>Named specialist-agent build roles</td><td>Yes</td><td>Agent modes</td><td>Not publicly broken out Apex-style</td><td>Cloud agents</td><td>Coding agents</td><td>Parallel managed agents</td></tr>
+              <tr><td>Explicit headless-browser/runtime verification gate</td><td>Yes</td><td>Preview/deploy workflow</td><td>Preview/deploy workflow</td><td>N/A</td><td>Preview plus automated iteration</td><td>Not verified</td></tr>
+              <tr><td>Python / Go / Rust / Java backend targeting</td><td>Yes</td><td>Yes</td><td>Web-app oriented</td><td>Local/dev environment</td><td>Web-app oriented</td><td>Yes</td></tr>
+              <tr><td>Live spend tracking per agent</td><td>Yes</td><td>Usage visibility</td><td>Usage visibility</td><td>Usage visibility</td><td>Usage visibility</td><td>Not verified</td></tr>
+              <tr><td>Hard budget caps with auto-stop</td><td>Yes</td><td>Not verified</td><td>Not verified</td><td>Not verified</td><td>Not verified</td><td>Not verified</td></tr>
+              <tr><td>SAML / SSO / SCIM / RBAC</td><td>Team / Enterprise</td><td>Enterprise</td><td>Not verified</td><td>Business / Enterprise</td><td>Enterprise</td><td>Enterprise</td></tr>
+              <tr><td>MCP / tool connectors</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Not verified</td><td>Yes</td></tr>
+              <tr><td>GitHub import / export</td><td>Yes</td><td>Yes</td><td>Limited</td><td>Yes</td><td>Limited</td><td>Yes</td></tr>
+              <tr><td>Free tier</td><td>Yes</td><td>Yes</td><td>Limited</td><td>Yes</td><td>Yes</td><td>No ($20/mo min)</td></tr>
+              <tr><td>Entry paid plan</td><td>$24/mo</td><td>$20/mo</td><td>$25/mo</td><td>$20/mo</td><td>$20/mo</td><td>$20/mo</td></tr>
+              <tr><td>Pro / mid plan</td><td>$79/mo</td><td>$100/mo</td><td>$50/mo</td><td>—</td><td>$50/mo</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="seo-copy seo-copy-muted">
+          Sources: public documentation and pricing pages from replit.com, lovable.dev, cursor.com,
+          bolt.new, devin.ai, and related product docs. Last reviewed 2026-04.
+        </p>
+      </section>
+
+      <section id="surfaces" class="seo-section" aria-labelledby="seo-surfaces-title">
+        <p class="seo-kicker">Platform cockpit</p>
+        <h2 id="seo-surfaces-title">Control the build from import to deploy.</h2>
+        <p class="seo-copy">
+          Apex gives serious builders the levers they expect: context intake, model routing, MCP tools,
+          secrets, GitHub handoff, database readiness, review gates, deploy controls, and live spend
+          visibility in one connected workflow.
+        </p>
+        <ul class="seo-pill-row" aria-label="Platform control rail">
+          <li>Import context</li>
+          <li>Route models</li>
+          <li>Attach tools</li>
+          <li>Wire secrets</li>
+          <li>Verify previews</li>
+          <li>Push to GitHub</li>
+          <li>Track spend</li>
+          <li>Ship to prod</li>
+        </ul>
+        <div class="seo-screenshot-grid" aria-label="Product screenshots">
+          <figure>
+            <img src="/screenshot-build.png" alt="Apex-Build multi-agent build console with live agent status, spend tracking, and a preview panel" loading="lazy" />
+            <figcaption>Multi-agent build console with live spend tracking</figcaption>
+          </figure>
+          <figure>
+            <img src="/screenshot-ide.png" alt="Apex-Build cloud IDE with file tree, Monaco editor, and integrated terminal" loading="lazy" />
+            <figcaption>Cloud IDE with Monaco editor and integrated terminal</figcaption>
+          </figure>
+          <figure>
+            <img src="/screenshot-spend.png" alt="Apex-Build per-agent and per-model spend dashboard with token usage breakdown" loading="lazy" />
+            <figcaption>Per-agent spend dashboard with token usage</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="agents" class="seo-section seo-section-alt" aria-labelledby="seo-agents-title">
+        <p class="seo-kicker">Nine specialists. One governed build.</p>
+        <h2 id="seo-agents-title">Specialist agents that act like a real engineering team.</h2>
+        <p class="seo-copy">
+          Apex exposes a named specialist-agent architecture instead of hiding the build behind a
+          single opaque generation stream. Each role has its own prompt pack, context window, and
+          model assignment, and the conductor reconciles their outputs into a structured build plan.
+        </p>
+        <ul class="seo-agent-grid">
+          <li><strong>Architect</strong> — designs the build plan and module contracts before a single line is written</li>
+          <li><strong>Frontend</strong> — owns React, Vue, Svelte, Tailwind, and shadcn UI scaffolds</li>
+          <li><strong>Backend</strong> — builds Go, Node, Python, Rust, and Java services with proper concurrency</li>
+          <li><strong>Database</strong> — schema design, migrations, indexes, RLS, seed data, query plan checks</li>
+          <li><strong>Integrator</strong> — auth flows, billing, third-party APIs, MCP tools, webhook plumbing</li>
+          <li><strong>QA &amp; Tests</strong> — unit, integration, and E2E coverage with real assertions</li>
+          <li><strong>Reviewer</strong> — code review with security audits, perf checks, and OWASP heuristics</li>
+          <li><strong>Repair</strong> — diagnoses build and runtime errors with chunked-edit recovery</li>
+          <li><strong>Verifier</strong> — runs the preview in a real browser before reporting success</li>
+        </ul>
+      </section>
+
+      <section id="capabilities" class="seo-section" aria-labelledby="seo-capabilities-title">
+        <p class="seo-kicker">Everything Apex ships out of the box</p>
+        <h2 id="seo-capabilities-title">A complete production stack — not a demo wrapper.</h2>
+        <div class="seo-grid">
+          <article class="seo-card">
+            <h3>AI &amp; agents</h3>
+            <ul class="seo-bullets">
+              <li>9 specialist agents with role-aware prompt packs</li>
+              <li>Multi-provider routing across OpenAI, Anthropic, Google, xAI, Ollama</li>
+              <li>Power modes: Fast, Balanced, Max — auto-route by tier</li>
+              <li>Kimi K2.6 conductor for orchestration</li>
+              <li>Deterministic chunked editor for large refactors</li>
+              <li>Error-analyzer with automated repair loop (up to 5 attempts)</li>
+              <li>Provider failover with circuit breaker</li>
+            </ul>
+          </article>
+          <article class="seo-card">
+            <h3>Build pipeline</h3>
+            <ul class="seo-bullets">
+              <li>Browser-verified previews via chromedp</li>
+              <li>Frontend approval gate before ship</li>
+              <li>shadcn UI scaffold injected upfront</li>
+              <li>Snapshot &amp; restore for follow-up sessions</li>
+              <li>Conflict detection on proposed edits</li>
+              <li>Pinned exact dependency versions</li>
+              <li>Build cost estimate before kickoff</li>
+            </ul>
+          </article>
+          <article class="seo-card">
+            <h3>Cloud IDE</h3>
+            <ul class="seo-bullets">
+              <li>Monaco editor with full TypeScript LSP</li>
+              <li>Integrated xterm terminal with real shell</li>
+              <li>File tree, multi-tab, split panes</li>
+              <li>Live preview pane with hot-reload</li>
+              <li>Diff &amp; review panel for every agent edit</li>
+              <li>AI telemetry overlay with prompt-pack inspector</li>
+              <li>Mobile-aware layout (works on iPad)</li>
+            </ul>
+          </article>
+          <article class="seo-card">
+            <h3>Languages &amp; runtimes</h3>
+            <ul class="seo-bullets">
+              <li>Python 3 with pip and ML libraries</li>
+              <li>Go 1.21 modules</li>
+              <li>Rust with cargo</li>
+              <li>Java with Maven/Gradle</li>
+              <li>Node 20 with pnpm and bun</li>
+              <li>Postgres, Redis, MySQL, SQLite</li>
+              <li>Docker sandboxes via E2B with Docker fallback</li>
+            </ul>
+          </article>
+          <article class="seo-card">
+            <h3>Integrations &amp; export</h3>
+            <ul class="seo-bullets">
+              <li>GitHub import &amp; export with one click</li>
+              <li>Stripe, Postgres, Resend, Cloudflare R2 wired in</li>
+              <li>Native MCP tool support</li>
+              <li>OAuth providers: Google, GitHub, Microsoft</li>
+              <li>Webhooks with signature verification</li>
+              <li>Custom domains with automated TLS</li>
+              <li>One-click deploy to Render, Vercel, or Cloudflare</li>
+            </ul>
+          </article>
+          <article class="seo-card">
+            <h3>Security &amp; compliance</h3>
+            <ul class="seo-bullets">
+              <li>CSRF protection on every protected route</li>
+              <li>JWT auth with refresh-token rotation</li>
+              <li>OWASP-aware code review heuristics</li>
+              <li>Encrypted-at-rest BYOK key vault</li>
+              <li>Audit logs for every admin action</li>
+              <li>Rate limits and quota enforcement (fails closed)</li>
+              <li>Token blacklist with rotation</li>
+            </ul>
+          </article>
+          <article class="seo-card">
+            <h3>Cost &amp; billing</h3>
+            <ul class="seo-bullets">
+              <li>Live spend per agent, per model, per build</li>
+              <li>Hard budget caps with auto-abort</li>
+              <li>Daily and monthly usage analytics</li>
+              <li>Credit top-up packs ($10–$100)</li>
+              <li>1 credit = $0.01, 1.5x markup engine</li>
+              <li>Power-mode surcharges (Fast 1.0x / Balanced 1.12x / Max 1.25x)</li>
+              <li>BYOK billing offset</li>
+            </ul>
+          </article>
+          <article class="seo-card">
+            <h3>Team &amp; enterprise</h3>
+            <ul class="seo-bullets">
+              <li>SAML SSO with IdP-initiated flow</li>
+              <li>SCIM 2.0 user provisioning</li>
+              <li>RBAC: owner, admin, builder, reviewer, viewer</li>
+              <li>Shared workspaces and shared secrets</li>
+              <li>Audit log streaming</li>
+              <li>Single-tenant isolation</li>
+              <li>VPC peering and on-prem options</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="pricing" class="seo-section seo-section-alt" aria-labelledby="seo-pricing-title">
+        <p class="seo-kicker">Simple trials. Transparent usage.</p>
+        <h2 id="seo-pricing-title">Pricing built for builders, not gatekeepers.</h2>
+        <div class="seo-pricing-grid">
+          <article class="seo-price">
+            <h3>Builder</h3>
+            <p class="seo-price-amount">$24<span>/mo</span></p>
+            <p class="seo-price-meta">Includes $12 of build credits</p>
+            <ul>
+              <li>Full-stack builds</li>
+              <li>GitHub import/export</li>
+              <li>Live preview and IDE</li>
+              <li>Multi-provider routing</li>
+              <li>5 GB storage, 240 min/day</li>
+            </ul>
+          </article>
+          <article class="seo-price seo-price-featured">
+            <h3>Pro <span class="seo-price-badge">Best value</span></h3>
+            <p class="seo-price-amount">$79<span>/mo</span></p>
+            <p class="seo-price-meta">Includes $40 of managed AI credits</p>
+            <ul>
+              <li><strong>Ollama Cloud routing</strong> — route supported open-model roles through configured Ollama infrastructure</li>
+              <li>BYOK on every provider</li>
+              <li>Hard budget caps and alerts</li>
+              <li>Priority frontier models &amp; build queue</li>
+              <li>Advanced verification &amp; runtime checks</li>
+              <li>20 GB storage, 720 min/day, 3 collaborators</li>
+            </ul>
+            <p class="seo-price-rationale">
+              Why $79: Pro unlocks BYOK, budget controls, stronger verification, and Ollama Cloud
+              routing options so heavy users can shift suitable agent work to lower-cost or
+              user-owned model infrastructure while keeping Apex-managed credits available.
+            </p>
+          </article>
+          <article class="seo-price">
+            <h3>Team</h3>
+            <p class="seo-price-amount">$149<span>/mo</span></p>
+            <p class="seo-price-meta">Includes $110 of build credits</p>
+            <ul>
+              <li>Everything in Pro</li>
+              <li>Shared workspaces &amp; secrets</li>
+              <li>SAML SSO, SCIM, RBAC</li>
+              <li>Audit logs and admin controls</li>
+              <li>100 GB storage, 5 seats included</li>
+              <li>Dedicated support</li>
+            </ul>
+          </article>
+        </div>
+        <p class="seo-copy seo-copy-muted">
+          Top-up credit packs from $10 to $100. Annual plans save 20%. Enterprise plans include
+          single-tenant deployment, VPC peering, on-prem options, and procurement support.
+        </p>
+      </section>
+
+      <section id="faq" class="seo-section" aria-labelledby="seo-faq-title">
+        <h2 id="seo-faq-title">Frequently asked questions</h2>
+        <dl class="seo-faq">
+          <dt>How is Apex different from Replit, Lovable, Cursor, or Bolt?</dt>
+          <dd>
+            Apex focuses on developer-controlled routing and verification: each specialist agent can
+            be mapped to the provider/model best suited to the task, BYOK and managed credits are
+            visible build controls, spend is attributed during the run, and previews go through an
+            explicit browser/runtime verification gate before success is reported. Competitors offer
+            valuable previews, deployment workflows, and in many cases multi-model or tool integrations;
+            they generally do not publicly position an Apex-style named specialist-agent routing and
+            cost-control workflow as the core product guarantee.
+          </dd>
+          <dt>Why does Pro cost $79 when Replit Core is $20?</dt>
+          <dd>
+            Apex Builder is the entry paid plan for full-stack generation. Apex Pro adds BYOK,
+            hard budget controls, advanced verification, and model-routing options so heavy users can
+            decide when to use Apex-managed credits and when to route eligible work through their own
+            provider subscriptions or open-model infrastructure.
+          </dd>
+          <dt>Which AI providers does Apex support?</dt>
+          <dd>
+            <strong>OpenAI</strong> — GPT-5.4 Pro, GPT-4.1, GPT-4o-mini.
+            <strong>Anthropic</strong> — Claude Opus 4.7, Sonnet 4.6, Haiku 4.5.
+            <strong>Google</strong> — Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash Lite.
+            <strong>xAI</strong> — Grok 4.20 reasoning, Grok 3, Grok 3 Mini.
+            <strong>Ollama-cloud / self-hosted</strong> — Kimi K2.6, GLM 5.1, DeepSeek R1.
+            With automatic failover, health monitoring, and per-task model selection.
+          </dd>
+          <dt>Can I bring my own API keys?</dt>
+          <dd>
+            Yes. BYOK is supported for every major provider on Pro and Team plans. Keys are
+            encrypted at rest, never logged, and can be mixed with managed credits per project.
+            BYOK calls bypass the Apex markup engine.
+          </dd>
+          <dt>What languages and stacks does Apex support?</dt>
+          <dd>
+            Frontends in React, Vue, Svelte, vanilla TypeScript, and HTML/CSS. Backends in Node,
+            Python, Go, Rust, and Java. Databases include Postgres, MySQL, SQLite, and Redis.
+            Sandboxes run in E2B with Docker fallback.
+          </dd>
+          <dt>Is the preview really verified, or just transpiled?</dt>
+          <dd>
+            Really verified. Apex spins up a headless Chromium via chromedp, loads the deployed
+            preview, captures runtime errors, network failures, and console exceptions, and only
+            reports success after the page renders. If verification fails, the build is repaired
+            and rerun automatically.
+          </dd>
+          <dt>Is there a free trial?</dt>
+          <dd>
+            Yes. Every paid plan includes a 3-day trial. The free tier lets you ship 3 projects,
+            100 MB storage, 10 execution minutes/day, and 1,000 AI requests/month at no cost.
+          </dd>
+          <dt>Can I run Apex on-prem or in a private cloud?</dt>
+          <dd>
+            Yes. Enterprise plans support single-tenant deployment, VPC peering, and full on-prem
+            installs with your own AI provider keys. SOC 2 docs available on request.
+          </dd>
+        </dl>
+      </section>
+
+      <footer class="seo-footer">
+        <p>© APEX-BUILD. Production-grade AI software factory.</p>
+        <nav aria-label="Footer">
+          <a href="/login">Sign in</a>
+          <a href="/register">Create account</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="mailto:hello@apex-build.dev">Contact</a>
+        </nav>
+      </footer>
+    </main>
+
+    <noscript>
+      <style>
+        .loading-screen { display: none !important; }
+        #seo-fallback { display: block !important; }
+        #root { display: none !important; }
+      </style>
+    </noscript>
 
     <!-- Scripts -->
     <script type="module" src="/src/main.tsx"></script>
