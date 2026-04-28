@@ -23299,9 +23299,8 @@ func validatePreviewManifestToolingDependencies(manifest previewManifest) []stri
 		{Token: "concurrently", Pkg: "concurrently"},
 	}
 	for scriptName, scriptValue := range manifest.Scripts {
-		lower := strings.ToLower(scriptValue)
 		for _, check := range scriptCommandChecks {
-			if strings.Contains(lower, check.Token) {
+			if scriptReferencesToolingCommand(scriptValue, check.Token) {
 				addMissing(fmt.Sprintf("package.json script %q references %q", scriptName, check.Token), check.Pkg)
 			}
 		}
@@ -23326,6 +23325,17 @@ func validatePreviewManifestToolingDependencies(manifest previewManifest) []stri
 	}
 
 	return dedupePreviewIssues(issues)
+}
+
+func scriptReferencesToolingCommand(scriptValue string, token string) bool {
+	scriptValue = strings.ToLower(scriptValue)
+	token = strings.ToLower(strings.TrimSpace(token))
+	if token == "" {
+		return false
+	}
+
+	pattern := regexp.MustCompile(`(?:^|[\s;&|()"'` + "`" + `])` + regexp.QuoteMeta(token) + `(?:$|[\s;&|()"'` + "`" + `])`)
+	return pattern.FindStringIndex(scriptValue) != nil
 }
 
 func shouldRunGeneratedNodeTests(files []GeneratedFile, prefix string, manifest previewManifest) bool {

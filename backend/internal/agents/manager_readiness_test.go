@@ -2395,6 +2395,31 @@ func TestValidatePreviewManifestToolingDependencies(t *testing.T) {
 	}
 }
 
+func TestValidatePreviewManifestToolingDependenciesIgnoresExtensions(t *testing.T) {
+	t.Parallel()
+
+	manifest := previewManifest{
+		Scripts: map[string]string{
+			"lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+		},
+		DevDependencies: map[string]string{
+			"eslint": "^8.57.0",
+		},
+	}
+
+	errs := validatePreviewManifestToolingDependencies(manifest)
+	joined := strings.Join(errs, "\n")
+	if strings.Contains(joined, `dependency "tsx"`) {
+		t.Fatalf("tsx file extension must not require the tsx runner dependency, got %v", errs)
+	}
+
+	manifest.Scripts["dev"] = "tsx watch server/index.ts"
+	errs = validatePreviewManifestToolingDependencies(manifest)
+	if !strings.Contains(strings.Join(errs, "\n"), `dependency "tsx"`) {
+		t.Fatalf("actual tsx command should require the tsx dependency, got %v", errs)
+	}
+}
+
 func TestCheckIntegrationCoherenceCatchesRouteDrift(t *testing.T) {
 	t.Parallel()
 
