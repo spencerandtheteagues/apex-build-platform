@@ -59,6 +59,9 @@ func (am *AgentManager) enrichWarRoomSpecWithLLMDebate(buildID string, userID ui
 	if am == nil || spec == nil || am.aiRouter == nil {
 		return
 	}
+	if !shouldRunWarRoomLLMDebate(powerMode) {
+		return
+	}
 	issues := am.runWarRoomLLMDebate(buildID, userID, usesPlatformKeys, powerMode, spec, contract)
 	if len(issues) == 0 {
 		return

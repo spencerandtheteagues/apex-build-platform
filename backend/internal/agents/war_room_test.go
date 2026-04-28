@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"apex-build/internal/ai"
@@ -108,17 +109,33 @@ func TestCompileWarRoomValidatedBuildSpecLocksWithCritiqueAdvisories(t *testing.
 
 type warRoomProbeRouter struct {
 	stubAIRouter
+	mu           sync.Mutex
 	lastProvider ai.AIProvider
 	lastOpt      GenerateOptions
+	calls        []warRoomProbeCall
+}
+
+type warRoomProbeCall struct {
+	provider ai.AIProvider
+	opts     GenerateOptions
 }
 
 func (r *warRoomProbeRouter) Generate(_ context.Context, provider ai.AIProvider, _ string, opts GenerateOptions) (*ai.AIResponse, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.lastProvider = provider
 	r.lastOpt = opts
+	r.calls = append(r.calls, warRoomProbeCall{provider: provider, opts: opts})
 	return &ai.AIResponse{Content: `[]`}, nil
 }
 
-func TestEffectiveWarRoomCritiquePowerModeFollowsSelectedModeWithFastOverride(t *testing.T) {
+func (r *warRoomProbeRouter) snapshotCalls() []warRoomProbeCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]warRoomProbeCall(nil), r.calls...)
+}
+
+func TestEffectiveWarRoomCritiquePowerModeFollowsSelectedPowerMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -130,7 +147,7 @@ func TestEffectiveWarRoomCritiquePowerModeFollowsSelectedModeWithFastOverride(t 
 		{name: "unset defaults cheap", build: &Build{}, want: PowerFast},
 		{name: "balanced follows selection", build: &Build{PowerMode: PowerBalanced}, want: PowerBalanced},
 		{name: "max follows selection", build: &Build{PowerMode: PowerMax}, want: PowerMax},
-		{name: "legacy fast mode overrides max", build: &Build{Mode: ModeFast, PowerMode: PowerMax}, want: PowerFast},
+		{name: "max power is not downgraded by fast build mode", build: &Build{Mode: ModeFast, PowerMode: PowerMax}, want: PowerMax},
 	}
 
 	for _, tt := range tests {
@@ -172,8 +189,72 @@ func TestRunSingleDebateRoundUsesSelectedPowerModeAndTokenCap(t *testing.T) {
 	if router.lastOpt.MaxTokens != warRoomLLMDebateMaxTokensForPowerMode(PowerMax) {
 		t.Fatalf("expected max-mode token cap, got %d", router.lastOpt.MaxTokens)
 	}
+	if router.lastOpt.ModelOverride != selectModelForPowerMode(ai.ProviderClaude, PowerMax) {
+		t.Fatalf("expected max-mode Claude flagship model override, got %q", router.lastOpt.ModelOverride)
+	}
 	if !router.lastOpt.UsePlatformKeys {
 		t.Fatalf("expected platform-key routing to be preserved")
+	}
+}
+
+func TestWarRoomLLMDebateRunsForBalancedAndMaxOnly(t *testing.T) {
+	spec := &ValidatedBuildSpec{AppType: "fullstack", DeliveryMode: "full_stack_preview"}
+	contract := &BuildContract{AppType: "fullstack", DeliveryMode: "full_stack_preview"}
+
+	for _, tt := range []struct {
+		name      string
+		powerMode PowerMode
+		wantCalls int
+	}{
+		{name: "fast skips paid LLM debate", powerMode: PowerFast, wantCalls: 0},
+		{name: "balanced runs War Room debate", powerMode: PowerBalanced, wantCalls: 2},
+		{name: "max runs War Room debate", powerMode: PowerMax, wantCalls: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			router := &warRoomProbeRouter{}
+			am := &AgentManager{aiRouter: router, ctx: context.Background()}
+
+			am.enrichWarRoomSpecWithLLMDebate("build-war-room-mode", 42, true, tt.powerMode, spec, contract)
+
+			if calls := router.snapshotCalls(); len(calls) != tt.wantCalls {
+				t.Fatalf("expected %d War Room LLM calls for %s, got %+v", tt.wantCalls, tt.powerMode, calls)
+			}
+		})
+	}
+}
+
+func TestWarRoomMaxUsesOnlyFlagshipModelOverrides(t *testing.T) {
+	router := &warRoomProbeRouter{}
+	am := &AgentManager{aiRouter: router, ctx: context.Background()}
+
+	am.runWarRoomLLMDebate(
+		"build-war-room-max-flagship",
+		42,
+		true,
+		PowerMax,
+		&ValidatedBuildSpec{AppType: "fullstack", DeliveryMode: "full_stack_preview"},
+		&BuildContract{AppType: "fullstack", DeliveryMode: "full_stack_preview"},
+	)
+
+	calls := router.snapshotCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 War Room calls, got %+v", calls)
+	}
+	wantModels := map[ai.AIProvider]string{
+		ai.ProviderClaude: selectModelForPowerMode(ai.ProviderClaude, PowerMax),
+		ai.ProviderGPT4:   selectModelForPowerMode(ai.ProviderGPT4, PowerMax),
+	}
+	for _, call := range calls {
+		want := wantModels[call.provider]
+		if want == "" {
+			t.Fatalf("unexpected War Room provider in max mode: %+v", call)
+		}
+		if call.opts.PowerMode != PowerMax {
+			t.Fatalf("expected max power mode for %+v", call)
+		}
+		if call.opts.ModelOverride != want {
+			t.Fatalf("expected flagship model %q for %s, got %q", want, call.provider, call.opts.ModelOverride)
+		}
 	}
 }
 

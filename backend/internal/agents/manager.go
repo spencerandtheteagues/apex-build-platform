@@ -3799,6 +3799,7 @@ Contract:
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict contract verifier. Output JSON only.",
 		RoleHint:        string(RoleArchitect),
+		ModelOverride:   warRoomModelOverrideForProvider(provider, critiquePowerMode, am.buildUsesPlatformKeys(build)),
 		PowerMode:       critiquePowerMode,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})

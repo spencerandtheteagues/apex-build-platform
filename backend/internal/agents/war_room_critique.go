@@ -168,16 +168,38 @@ func effectiveWarRoomCritiquePowerMode(build *Build) PowerMode {
 	if build == nil {
 		return PowerFast
 	}
-	if build.Mode == ModeFast || build.PowerMode == PowerFast {
-		return PowerFast
-	}
 	switch build.PowerMode {
 	case PowerMax:
 		return PowerMax
 	case PowerBalanced:
 		return PowerBalanced
-	default:
+	case PowerFast:
 		return PowerFast
+	default:
+		if build.Mode == ModeFast {
+			return PowerFast
+		}
+		return PowerFast
+	}
+}
+
+func shouldRunWarRoomLLMDebate(powerMode PowerMode) bool {
+	switch powerMode {
+	case PowerBalanced, PowerMax:
+		return true
+	default:
+		return false
+	}
+}
+
+func warRoomModelOverrideForProvider(provider ai.AIProvider, powerMode PowerMode, usesPlatformKeys bool) string {
+	switch powerMode {
+	case PowerMax:
+		return normalizeExecutionModelForProvider(provider, "", PowerMax, usesPlatformKeys)
+	case PowerBalanced:
+		return normalizeExecutionModelForProvider(provider, "", PowerBalanced, usesPlatformKeys)
+	default:
+		return normalizeExecutionModelForProvider(provider, "", PowerFast, usesPlatformKeys)
 	}
 }
 
@@ -231,6 +253,9 @@ func contractCritiqueMaxTokensForPowerMode(mode PowerMode) int {
 // provider error is silently skipped so the build is never blocked.
 func (am *AgentManager) runWarRoomLLMDebate(buildID string, userID uint, usesPlatformKeys bool, powerMode PowerMode, spec *ValidatedBuildSpec, contract *BuildContract) []buildSpecCritiqueIssue {
 	if am == nil || am.aiRouter == nil || spec == nil {
+		return nil
+	}
+	if !shouldRunWarRoomLLMDebate(powerMode) {
 		return nil
 	}
 
@@ -304,6 +329,7 @@ Return [] if no issues found. Maximum 4 issues. Only flag real problems.`, focus
 		Temperature:     0.15,
 		SystemPrompt:    "You are a strict build spec reviewer. Return a JSON array only.",
 		RoleHint:        string(RoleReviewer),
+		ModelOverride:   warRoomModelOverrideForProvider(provider, powerMode, usesPlatformKeys),
 		PowerMode:       powerMode,
 		UsePlatformKeys: usesPlatformKeys,
 	})
