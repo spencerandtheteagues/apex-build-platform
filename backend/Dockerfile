@@ -73,7 +73,7 @@ RUN apk --no-cache add \
     freetype \
     harfbuzz \
     ttf-freefont \
-    && printf '\nHost *\n    StrictHostKeyChecking accept-new\n    UserKnownHostsFile /tmp/ssh_known_hosts\n' >> /etc/ssh/ssh_config \
+    && printf '\nHost *\n    StrictHostKeyChecking accept-new\n    UserKnownHostsFile ~/.ssh/known_hosts /tmp/ssh_known_hosts\n' >> /etc/ssh/ssh_config \
     && npm install -g esbuild@0.24.2 \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip \
@@ -103,6 +103,28 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 RUN mkdir -p /app/uploads /app/logs /tmp/apex-build-projects && \
     chown -R appuser:appgroup /app /tmp/apex-build-projects
 
+# Materialize Docker-over-SSH credentials supplied by Render env vars.
+RUN cat > /app/render-entrypoint.sh <<'EOF' && chmod 755 /app/render-entrypoint.sh
+#!/bin/sh
+set -eu
+
+ssh_dir="${HOME:-/home/appuser}/.ssh"
+mkdir -p "$ssh_dir"
+chmod 700 "$ssh_dir"
+
+if [ -n "${DOCKER_SSH_PRIVATE_KEY:-}" ]; then
+  printf '%b\n' "$DOCKER_SSH_PRIVATE_KEY" > "$ssh_dir/id_rsa"
+  chmod 600 "$ssh_dir/id_rsa"
+fi
+
+if [ -n "${DOCKER_SSH_KNOWN_HOSTS:-}" ]; then
+  printf '%b\n' "$DOCKER_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+  chmod 600 "$ssh_dir/known_hosts"
+fi
+
+exec /app/apex-server "$@"
+EOF
+
 # Switch to non-root user
 USER appuser
 
@@ -128,4 +150,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Run the application
-ENTRYPOINT ["/app/apex-server"]
+ENTRYPOINT ["/app/render-entrypoint.sh"]
