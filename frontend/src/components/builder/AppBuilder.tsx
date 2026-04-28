@@ -1008,8 +1008,8 @@ const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxL
         "premium-textarea-border absolute -inset-[2px] rounded-2xl transition-all duration-500",
         isEmpty && !isFocused && "animate-pulse",
         isFocused
-          ? "bg-gradient-to-r from-red-500 via-orange-500 to-red-500 shadow-lg shadow-red-900/50"
-          : "bg-gradient-to-r from-red-900/50 to-red-800/50"
+          ? "bg-gradient-to-r from-sky-400 via-blue-500 to-cyan-300 shadow-lg shadow-sky-500/30"
+          : "bg-gradient-to-r from-sky-900/50 to-blue-900/50"
       )} style={isFocused ? { backgroundSize: '200% auto', animation: 'gradient-shift 2s linear infinite' } : {}} />
 
       {/* Glass effect background */}
@@ -1017,7 +1017,7 @@ const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxL
 
       {/* Inner glow on focus */}
       {isFocused && (
-        <div className="absolute inset-0 rounded-xl bg-gradient-to-b from-red-900/20 via-transparent to-red-900/10 pointer-events-none" />
+        <div className="absolute inset-0 rounded-xl bg-gradient-to-b from-sky-500/15 via-transparent to-blue-900/10 pointer-events-none" />
       )}
 
       {/* Textarea */}
@@ -1048,7 +1048,7 @@ For example:
           <div
             className={cn(
               "h-full rounded-full transition-all duration-500 relative overflow-hidden",
-              progressPercent > 80 ? "bg-orange-500" : progressPercent > 50 ? "bg-yellow-500" : "bg-red-500"
+              progressPercent > 80 ? "bg-cyan-300" : progressPercent > 50 ? "bg-sky-400" : "bg-blue-500"
             )}
             style={{ width: `${Math.min(progressPercent, 100)}%` }}
           >
@@ -1061,10 +1061,10 @@ For example:
       </div>
 
       {/* Corner decorations */}
-      <div className="absolute top-2 left-2 w-5 h-5 border-t-2 border-l-2 border-red-600/50 rounded-tl pointer-events-none" />
-      <div className="absolute top-2 right-2 w-5 h-5 border-t-2 border-r-2 border-red-600/50 rounded-tr pointer-events-none" />
-      <div className="absolute bottom-12 left-2 w-5 h-5 border-b-2 border-l-2 border-red-600/50 rounded-bl pointer-events-none" />
-      <div className="absolute bottom-12 right-2 w-5 h-5 border-b-2 border-r-2 border-red-600/50 rounded-br pointer-events-none" />
+      <div className="absolute top-2 left-2 w-5 h-5 border-t-2 border-l-2 border-sky-400/50 rounded-tl pointer-events-none" />
+      <div className="absolute top-2 right-2 w-5 h-5 border-t-2 border-r-2 border-sky-400/50 rounded-tr pointer-events-none" />
+      <div className="absolute bottom-12 left-2 w-5 h-5 border-b-2 border-l-2 border-sky-400/50 rounded-bl pointer-events-none" />
+      <div className="absolute bottom-12 right-2 w-5 h-5 border-b-2 border-r-2 border-sky-400/50 rounded-br pointer-events-none" />
     </div>
   )
 }
@@ -1089,8 +1089,8 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
         "tech-stack-card relative group min-h-[6rem] sm:min-h-[8.6rem] p-2 sm:p-4 rounded-xl transition-all duration-300 text-left overflow-hidden",
         "border-2 backdrop-blur-sm",
         isSelected
-          ? "is-selected border-red-500 bg-red-950/40 shadow-lg shadow-red-900/40 sm:scale-[1.02]"
-          : "border-gray-800 bg-gray-900/50 hover:border-gray-600 hover:bg-gray-900/70 sm:hover:scale-[1.01]"
+          ? "is-selected border-sky-400 bg-sky-950/35 shadow-lg shadow-sky-500/20 sm:scale-[1.02]"
+          : "border-slate-800 bg-slate-950/50 hover:border-sky-700/60 hover:bg-slate-900/70 sm:hover:scale-[1.01]"
       )}
     >
       {/* Holographic scan effect */}
@@ -1102,9 +1102,9 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
       {/* Selected glow */}
       {isSelected && (
         <>
-          <div className="absolute inset-0 bg-gradient-to-br from-red-600/20 via-transparent to-orange-600/20 pointer-events-none" />
-          <div className="absolute -inset-[1px] bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-xl opacity-40 blur-sm -z-10" />
-          <div className="tech-stack-selected-indicator absolute top-2 right-2 z-20 rounded-full border border-red-400/70 bg-red-950/60 p-1 text-red-100 shadow-lg shadow-red-900/40">
+          <div className="absolute inset-0 bg-gradient-to-br from-sky-500/20 via-transparent to-cyan-400/20 pointer-events-none" />
+          <div className="absolute -inset-[1px] bg-gradient-to-r from-sky-400 via-blue-500 to-cyan-300 rounded-xl opacity-40 blur-sm -z-10" />
+          <div className="tech-stack-selected-indicator absolute top-2 right-2 z-20 rounded-full border border-sky-300/70 bg-sky-950/70 p-1 text-sky-100 shadow-lg shadow-sky-500/30">
             <CheckCircle2 className="w-3.5 h-3.5" />
           </div>
         </>
@@ -1115,8 +1115,8 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
         <div className={cn(
           "tech-stack-icon w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition-all duration-300 flex-shrink-0",
           isSelected
-            ? "bg-red-600 text-white shadow-lg shadow-red-900/50"
-            : "bg-gray-800 text-gray-400 group-hover:text-white group-hover:bg-gray-700"
+            ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30"
+            : "bg-slate-800 text-slate-400 group-hover:text-white group-hover:bg-slate-700"
         )}>
           {stack.icon}
         </div>
@@ -1129,7 +1129,7 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
           </h4>
           <p className={cn(
             "tech-stack-description mt-0.5 sm:mt-1 [overflow-wrap:anywhere] break-words text-[10px] sm:text-xs leading-snug transition-colors",
-            isSelected ? "text-red-300" : "text-gray-500"
+            isSelected ? "text-sky-200" : "text-slate-500"
           )}>{stack.description}</p>
         </div>
       </div>
@@ -6368,7 +6368,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       {/* Animated background layers */}
       <div className="app-builder-background fixed inset-0 pointer-events-none">
         {/* Base gradient */}
-        <div className="app-builder-bg-base absolute inset-0 bg-gradient-to-b from-red-950/30 via-black to-black" />
+        <div className="app-builder-bg-base absolute inset-0 bg-gradient-to-b from-sky-950/25 via-slate-950 to-black" />
 
         {/* Animated background component */}
         <AnimatedBackground variant="full" intensity="low" interactive={false} className="app-builder-animated-bg opacity-40" />
@@ -6380,9 +6380,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         <FloatingParticles />
 
         {/* Radial gradient accents */}
-        <div className="app-builder-accent app-builder-accent-a absolute top-0 left-1/4 w-[500px] h-[500px] bg-red-900/15 rounded-full blur-3xl" />
-        <div className="app-builder-accent app-builder-accent-b absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-orange-900/10 rounded-full blur-3xl" />
-        <div className="app-builder-accent app-builder-accent-c absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-red-950/10 rounded-full blur-3xl" />
+        <div className="app-builder-accent app-builder-accent-a absolute top-0 left-1/4 w-[500px] h-[500px] bg-sky-500/15 rounded-full blur-3xl" />
+        <div className="app-builder-accent app-builder-accent-b absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-3xl" />
+        <div className="app-builder-accent app-builder-accent-c absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-blue-950/20 rounded-full blur-3xl" />
       </div>
 
       {/* Main content */}
@@ -6435,8 +6435,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           </div>
         )}
 
-        {/* Header Section — hidden during active build */}
-        {!buildState && (
+        {/* Legacy centered intro is intentionally disabled; the blue control surface below is the only setup UI. */}
+        {false && !buildState && (
           <div className="text-center mb-16 pt-8">
             <div className="flex items-center justify-center gap-6 mb-10">
               <AnimatedLogo />
@@ -6449,7 +6449,321 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         )}
 
         {/* Main Content */}
-        {!buildState ? (
+        {!buildState && (
+          <div className="mx-auto max-w-7xl space-y-8">
+            <section className="overflow-hidden rounded-[28px] border border-sky-300/15 bg-[linear-gradient(135deg,rgba(5,12,24,0.96),rgba(6,18,40,0.9),rgba(4,8,18,0.98))] px-6 py-8 shadow-[0_28px_90px_rgba(2,8,20,0.55)] sm:px-8 sm:py-10 md:px-10">
+              <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr),minmax(320px,0.8fr)] lg:items-end">
+                <div className="space-y-5">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/35 bg-sky-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-200">
+                    Build control surface
+                  </div>
+                  <div className="space-y-3">
+                    <h1 className="max-w-4xl text-4xl font-black tracking-[-0.04em] text-white sm:text-5xl lg:text-6xl">
+                      Design the build, lock the routing, and launch from one workspace.
+                    </h1>
+                    <p className="max-w-3xl text-sm leading-7 text-slate-300 sm:text-base">
+                      Define the product, choose build depth, set provider routing, attach visual references, and start the workflow without leaving the primary build surface.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px] font-medium text-cyan-100">
+                    {['Realtime orchestration', 'Frontend + backend', 'BYOK + hosted providers', 'Preview / IDE / deploy'].map((item) => (
+                      <span
+                        key={item}
+                        className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-[24px] border border-white/10 bg-slate-950/70 p-5 backdrop-blur-xl">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Launch policy</div>
+                  <div className="mt-3 space-y-3 text-sm leading-6 text-slate-300">
+                    <p>
+                      {['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user?.subscription_type || '')
+                        ? 'Your plan can execute full-stack work: frontend, backend, database, auth, billing, realtime, preview, and deploy handoff.'
+                        : 'Free stays honest: frontend-only builds and static experiences complete without pretending backend, auth, billing, or database work happened.'}
+                    </p>
+                    <div className="rounded-2xl border border-sky-300/20 bg-sky-400/10 px-4 py-3 text-xs text-sky-100">
+                      Build mode controls scope. Power mode controls model quality and orchestration depth. Both remain visible before the build starts.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <BuilderControlSurface
+              onImportReplit={() => setShowImportModal(true)}
+              onImportGitHub={() => setShowGitHubImport(true)}
+              onAttachImage={() => wireframeInputRef.current?.click()}
+              onOpenIDE={() => onNavigateToIDE?.({ target: 'editor', projectId: createdProjectId })}
+            />
+
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr),380px]">
+              <section className="rounded-[28px] border border-sky-300/15 bg-slate-950/70 p-5 shadow-[0_20px_60px_rgba(2,8,20,0.32)] backdrop-blur-xl sm:p-6 md:p-8">
+                <div className="flex flex-col gap-6">
+                  <div className="flex flex-wrap gap-3">
+                    {([
+                      { id: 'fast' as const, label: 'Rapid', hint: '~3-5 min', icon: <Zap className="h-4 w-4" /> },
+                      { id: 'full' as const, label: 'Full-stack', hint: '10+ min', icon: <Sparkles className="h-4 w-4" /> },
+                    ]).map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setBuildMode(mode.id)}
+                        className={cn(
+                          'min-w-[11rem] rounded-2xl border px-4 py-3 text-left transition-all duration-200',
+                          buildMode === mode.id
+                            ? 'border-sky-300/45 bg-sky-400/15 text-white shadow-[0_0_24px_rgba(56,189,248,0.16)]'
+                            : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:text-white'
+                        )}
+                      >
+                        <div className="flex items-center gap-2 text-sm font-semibold">
+                          {mode.icon}
+                          {mode.label}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">{mode.hint}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Build brief</div>
+                        <h2 className="mt-1 text-2xl font-black tracking-[-0.03em] text-white">Describe the app exactly once.</h2>
+                      </div>
+                      <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-slate-300">
+                        {buildMode === 'full' ? 'Full orchestration path' : 'Rapid delivery path'}
+                      </div>
+                    </div>
+                    <PremiumTextarea
+                      value={appDescription}
+                      onChange={setAppDescription}
+                      maxLength={promptMaxLength}
+                    />
+                    <p className="mt-3 text-xs leading-6 text-slate-400">
+                      {maxPowerPromptLimitEnabled
+                        ? `Full-stack with Max Power supports up to ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters.`
+                        : balancedPromptLimitEnabled
+                          ? `Full-stack with Balanced supports up to ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+                          : buildMode === 'full'
+                            ? `Full-stack stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters on Fast power. Switch to Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+                            : `Rapid stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Full-stack with Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {[
+                      {
+                        title: 'Investor-ready SaaS',
+                        body: 'Dashboard, billing-ready flows, admin surfaces, and polished states.',
+                        prompt: 'Build a production-ready B2B SaaS dashboard with authentication-ready UI, admin analytics, billing plan surfaces, responsive tables, empty states, error recovery, and deployment-ready code.',
+                      },
+                      {
+                        title: 'Marketplace workflow',
+                        body: 'Search, checkout-ready details, provider profiles, and operations views.',
+                        prompt: 'Build a production-ready services marketplace with listing discovery, provider profiles, booking workflow UI, customer dashboard, admin review queue, and responsive premium design.',
+                      },
+                      {
+                        title: 'Field ops platform',
+                        body: 'Jobs, estimates, crews, status tracking, and AI-assisted recommendations.',
+                        prompt: 'Build a production-ready contractor field operations platform with dashboard metrics, job pipeline, estimate builder, crew management, job detail pages, settings, and AI estimate recommendations.',
+                      },
+                    ].map((preset) => (
+                      <button
+                        key={preset.title}
+                        type="button"
+                        onClick={() => setAppDescription(preset.prompt)}
+                        className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-left transition-all hover:border-sky-300/35 hover:bg-sky-400/10"
+                      >
+                        <div className="text-sm font-semibold text-white">{preset.title}</div>
+                        <p className="mt-2 text-xs leading-6 text-slate-400">{preset.body}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {createdProjectId !== null && (
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-sky-100">
+                        <Upload className="h-4 w-4" />
+                        Project files
+                      </h3>
+                      <AssetUploader projectId={createdProjectId} />
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Build stack</div>
+                        <div className="mt-1 text-sm text-slate-300">{buildTechStackSummary()}</div>
+                      </div>
+                      <Cpu className="h-5 w-5 text-sky-300" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                      {techStacks.map((stack) => (
+                        <TechStackCard
+                          key={stack.id}
+                          stack={stack}
+                          isSelected={selectedStack.has(stack.id) || (stack.id === AUTO_STACK_ID && selectedStack.size === 0)}
+                          onClick={() => toggleStack(stack.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">AI power</div>
+                        <div className="mt-1 text-sm text-slate-300">Choose cost/quality before launch.</div>
+                      </div>
+                      <Sparkles className="h-5 w-5 text-cyan-300" />
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      {([
+                        { id: 'fast' as const, label: 'Efficient', icon: <Zap className="h-5 w-5" />, desc: getPowerModeModelSummary('fast'), tone: 'emerald', cost: '1.5x', perBuild: 'Lowest cost' },
+                        { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="h-5 w-5" />, desc: getPowerModeModelSummary('balanced'), tone: 'cyan', cost: '1.68x', perBuild: 'Best balance' },
+                        { id: 'max' as const, label: 'Flagship', icon: <Rocket className="h-5 w-5" />, desc: getPowerModeModelSummary('max'), tone: 'sky', cost: '1.88x', perBuild: 'Highest quality' },
+                      ]).map((mode) => (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => setPowerMode(mode.id)}
+                          className={cn(
+                            'rounded-2xl border p-4 text-left transition-all',
+                            powerMode === mode.id
+                              ? mode.tone === 'emerald'
+                                ? 'border-emerald-300/55 bg-emerald-400/10 text-white shadow-lg shadow-emerald-500/10'
+                                : mode.tone === 'cyan'
+                                  ? 'border-cyan-300/55 bg-cyan-400/10 text-white shadow-lg shadow-cyan-500/10'
+                                  : 'border-sky-300/55 bg-sky-400/10 text-white shadow-lg shadow-sky-500/10'
+                              : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20'
+                          )}
+                        >
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className={powerMode === mode.id ? 'text-white' : 'text-slate-400'}>{mode.icon}</span>
+                            <span className="text-sm font-bold">{mode.label}</span>
+                            <span className="ml-auto font-mono text-xs text-slate-300">{mode.cost}</span>
+                          </div>
+                          <p className="text-xs leading-5 text-slate-400">{mode.desc}</p>
+                          <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-slate-500">{mode.perBuild}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="mb-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">Visual reference</div>
+                    <input
+                      ref={wireframeInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        const reader = new FileReader()
+                        reader.onload = (ev) => {
+                          const result = ev.target?.result as string
+                          if (result) setWireframeImage(result)
+                        }
+                        reader.readAsDataURL(file)
+                        e.target.value = ''
+                      }}
+                    />
+                    {wireframeImage ? (
+                      <div className="flex items-center gap-3">
+                        <img src={wireframeImage} alt="Wireframe preview" className="h-14 w-14 rounded-xl border border-white/10 object-cover" />
+                        <div className="flex-1 text-sm text-slate-300">Wireframe attached. The next build will include it as visual context.</div>
+                        <button
+                          type="button"
+                          onClick={() => setWireframeImage('')}
+                          className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-sky-300/35 hover:text-white"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => wireframeInputRef.current?.click()}
+                        className="inline-flex items-center gap-2 rounded-lg border border-sky-300/25 bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-100 hover:bg-sky-400/15"
+                      >
+                        <Upload className="h-4 w-4" />
+                        Attach screenshot or wireframe
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-6 text-slate-300">
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.22em] text-slate-500">Plan policy</div>
+                    {['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user?.subscription_type || '')
+                      ? 'Backend, database, auth, billing, realtime, publish, and BYOK flows can run when the build contract requires them.'
+                      : 'Static frontend paths complete without claiming unsupported backend, database, auth, billing, realtime, publish, or BYOK work.'}
+                  </div>
+
+                  {(setupStartError || !isRoleAssignmentValid) && (
+                    <div
+                      role="alert"
+                      className="rounded-2xl border border-sky-400/35 bg-sky-500/10 p-4 text-sm text-sky-100 shadow-lg shadow-sky-500/10"
+                    >
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-sky-300" />
+                        <div>
+                          <div className="font-semibold text-white">Build did not start</div>
+                          <div className="mt-1 leading-6 text-sky-100/85">
+                            {setupStartError || 'Manual model routing needs at least Architect and Coder assignments. Switch model routing to Auto or complete the assignments.'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <EpicBuildButton
+                    onClick={startBuild}
+                    disabled={isBuilding || !isRoleAssignmentValid}
+                    isLoading={isBuilding}
+                  />
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowImportModal(true)}
+                      className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl border border-sky-300/25 bg-sky-400/10 px-4 text-sm font-semibold text-sky-100 transition-all hover:bg-sky-400/15"
+                    >
+                      <Download className="h-5 w-5" />
+                      Migrate from Replit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowGitHubImport(true)}
+                      className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-slate-200 transition-all hover:border-sky-300/25 hover:text-white"
+                    >
+                      <Github className="h-5 w-5" />
+                      Import from GitHub
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+                <ModelRoleConfig
+                  mode={roleConfigMode}
+                  onModeChange={setRoleConfigMode}
+                  assignments={roleAssignments}
+                  onAssignmentsChange={setRoleAssignments}
+                  providerStatuses={providerStatuses}
+                />
+                <BuildHistory userId={user?.id ?? null} onOpenBuild={openCompletedBuild} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {false && !buildState ? (
           // App Description Input + Model Config (2-column layout)
           <div className="max-w-7xl mx-auto">
             <BuilderControlSurface
@@ -6526,13 +6840,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </div>
 
                 {/* Asset Uploader — upload files for AI agents to use */}
-                {createdProjectId && (
+                {createdProjectId !== null && (
                   <div className="mb-6 md:mb-10">
                     <h3 className="builder-section-heading text-lg sm:text-xl font-bold text-gray-200 mb-3 sm:mb-5 flex items-center gap-3">
                       <Upload className="w-6 h-6 text-red-400" />
                       Project Files
                     </h3>
-                    <AssetUploader projectId={createdProjectId} />
+                    <AssetUploader projectId={createdProjectId ?? 0} />
                     <p className="mt-2 text-xs text-gray-600">
                       Uploaded files are automatically included in AI agent context — just describe what you want.
                     </p>
@@ -6827,7 +7141,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             {/* Build History */}
             <BuildHistory userId={user?.id ?? null} onOpenBuild={openCompletedBuild} />
           </div>
-        ) : (
+        ) : buildState ? (
           <BuildScreen
             buildState={buildState}
             providerPanels={providerPanels}
@@ -6900,7 +7214,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             onLoadProposedEdits={loadProposedEdits}
             onOpenCompletedBuild={openCompletedBuild}
           />
-        )}
+        ) : null}
       </div>
 
       {/* GitHub Import Modal */}
