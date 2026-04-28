@@ -707,7 +707,11 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		return
 	}
 
-	useSandbox := c.Query("sandbox") == "true" || c.Query("sandbox") == "1"
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(c.Query("sandbox") == "true" || c.Query("sandbox") == "1")
+	if sandboxErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": sandboxErr.Error()})
+		return
+	}
 	status, _ := h.getPreviewStatus(uint(projectID), useSandbox)
 	if status == nil || !status.Active {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Preview not running"})
@@ -1427,6 +1431,9 @@ func (h *PreviewHandler) getPreviewStatus(projectID uint, preferredSandbox bool)
 	if h.factory != nil {
 		primary := h.factory.GetPreviewStatus(projectID, preferredSandbox)
 		if primary != nil && primary.Active {
+			return primary, preferredSandbox
+		}
+		if h.requireSandbox && preferredSandbox && !h.sandboxFallbackActive() {
 			return primary, preferredSandbox
 		}
 		fallback := h.factory.GetPreviewStatus(projectID, !preferredSandbox)

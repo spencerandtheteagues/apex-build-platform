@@ -106,11 +106,13 @@ func (f *PreviewServerFactory) GetPreviewStatus(projectID uint, useSandbox bool)
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	// Check container preview first if sandbox mode
-	if useSandbox && f.containerServer != nil {
-		status := f.containerServer.GetContainerPreviewStatus(projectID)
-		if status.Active {
-			return status
+	if useSandbox {
+		if f.containerServer != nil {
+			return f.containerServer.GetContainerPreviewStatus(projectID)
+		}
+		return &PreviewStatus{
+			ProjectID: projectID,
+			Active:    false,
 		}
 	}
 
