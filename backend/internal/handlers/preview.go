@@ -754,7 +754,7 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		if isHTML {
 			rewritten = h.rewritePreviewHTMLForProxyWithBackend(string(originalBody), uint(projectID), backendProxyURL, previewToken)
 		} else {
-			rewritten = h.rewritePreviewJavaScriptForProxy(string(originalBody), uint(projectID), previewToken)
+			rewritten = h.rewritePreviewJavaScriptForProxyWithPrefix(string(originalBody), h.buildProxyURL(c, uint(projectID)), previewToken)
 		}
 		resp.Body = io.NopCloser(bytes.NewBufferString(rewritten))
 		resp.ContentLength = int64(len(rewritten))
@@ -1189,7 +1189,11 @@ func isPreviewJavaScriptResponse(contentType string, responsePath string) bool {
 
 func (h *PreviewHandler) rewritePreviewJavaScriptForProxy(js string, projectID uint, previewToken string) string {
 	prefix := fmt.Sprintf("/api/v1/preview/proxy/%d", projectID)
-	assetLiteralPattern := regexp.MustCompile(`(["'])(/?assets/[^"'\s)]+)(["'])`)
+	return h.rewritePreviewJavaScriptForProxyWithPrefix(js, prefix, previewToken)
+}
+
+func (h *PreviewHandler) rewritePreviewJavaScriptForProxyWithPrefix(js string, prefix string, previewToken string) string {
+	assetLiteralPattern := regexp.MustCompile(`(["'])((?:/?assets/|\./)[^"'\s)]+?\.(?:js|mjs|css|svg|png|jpe?g|webp|gif|woff2?|ttf|eot)(?:\?[^"'\s)]*)?(?:#[^"'\s)]*)?)(["'])`)
 
 	return assetLiteralPattern.ReplaceAllStringFunc(js, func(match string) string {
 		parts := assetLiteralPattern.FindStringSubmatch(match)
@@ -1212,6 +1216,8 @@ func rewritePreviewAssetTargetForProxy(target string, prefix string, previewToke
 	rewritten := target
 	if strings.HasPrefix(target, "/assets/") || strings.HasPrefix(target, "assets/") {
 		rewritten = prefix + "/" + strings.TrimPrefix(target, "/")
+	} else if strings.HasPrefix(target, "./") {
+		rewritten = strings.TrimRight(prefix, "/") + "/assets/" + strings.TrimPrefix(target, "./")
 	}
 	return appendPreviewTokenToProxyTarget(rewritten, prefix, previewToken)
 }

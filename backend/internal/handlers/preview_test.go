@@ -249,18 +249,34 @@ func TestRewritePreviewHTMLForProxyWithBackendAppendsPreviewTokenToAssets(t *tes
 
 func TestRewritePreviewJavaScriptForProxyRewritesViteDynamicAssetImports(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, false)
-	prefix := "/api/v1/preview/proxy/" + strconv.FormatUint(uint64(projectID), 10)
+	relativePrefix := "/api/v1/preview/proxy/" + strconv.FormatUint(uint64(projectID), 10)
 
-	js := `const deps=["assets/Dashboard-CVEE8rpR.js","/assets/api-CM3qBsrA.js","https://cdn.example.com/assets/external.js","` + prefix + `/assets/existing.js?preview_token=old-token"];`
+	js := `const deps=["assets/Dashboard-CVEE8rpR.js","/assets/api-CM3qBsrA.js","https://cdn.example.com/assets/external.js","` + relativePrefix + `/assets/existing.js?preview_token=old-token"];`
 
 	rewritten := handler.rewritePreviewJavaScriptForProxy(js, projectID, "token value")
 
-	require.Contains(t, rewritten, `"`+prefix+`/assets/Dashboard-CVEE8rpR.js?preview_token=token+value"`)
-	require.Contains(t, rewritten, `"`+prefix+`/assets/api-CM3qBsrA.js?preview_token=token+value"`)
+	require.Contains(t, rewritten, `"`+relativePrefix+`/assets/Dashboard-CVEE8rpR.js?preview_token=token+value"`)
+	require.Contains(t, rewritten, `"`+relativePrefix+`/assets/api-CM3qBsrA.js?preview_token=token+value"`)
 	require.Contains(t, rewritten, `"https://cdn.example.com/assets/external.js"`)
-	require.Contains(t, rewritten, `"`+prefix+`/assets/existing.js?preview_token=old-token"`)
+	require.Contains(t, rewritten, `"`+relativePrefix+`/assets/existing.js?preview_token=old-token"`)
 	require.NotContains(t, rewritten, `"assets/Dashboard-CVEE8rpR.js"`)
 	require.NotContains(t, rewritten, `"/assets/api-CM3qBsrA.js"`)
+}
+
+func TestRewritePreviewJavaScriptForProxyNormalizesRelativeViteChunksToPublicProxyURL(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+	prefix := "https://api.apex-build.dev/api/v1/preview/proxy/" + strconv.FormatUint(uint64(projectID), 10)
+
+	js := `import{r as React}from"./index-DZPHYNTJ.js";const View=lazy(()=>import("./Dashboard-CVEE8rpR.js"));const deps=["./api-CM3qBsrA.js","./style.css"];`
+
+	rewritten := handler.rewritePreviewJavaScriptForProxyWithPrefix(js, prefix, "token value")
+
+	require.Contains(t, rewritten, `from"`+prefix+`/assets/index-DZPHYNTJ.js?preview_token=token+value"`)
+	require.Contains(t, rewritten, `import("`+prefix+`/assets/Dashboard-CVEE8rpR.js?preview_token=token+value")`)
+	require.Contains(t, rewritten, `"`+prefix+`/assets/api-CM3qBsrA.js?preview_token=token+value"`)
+	require.Contains(t, rewritten, `"`+prefix+`/assets/style.css?preview_token=token+value"`)
+	require.NotContains(t, rewritten, `"./Dashboard-CVEE8rpR.js"`)
+	require.NotContains(t, rewritten, `from"./index-DZPHYNTJ.js"`)
 }
 
 func TestApplyPreviewResponseHeadersAllowsSameOriginStorageForHTML(t *testing.T) {
