@@ -32,3 +32,26 @@ func TestOllamaBuildMessagesSeparatesSystemAndUserPrompts(t *testing.T) {
 		t.Fatalf("expected user prompt in user message, got %q", messages[1].Content)
 	}
 }
+
+func TestOllamaCloudNormalizesKimiAlias(t *testing.T) {
+	t.Parallel()
+
+	client := NewOllamaClient("https://ollama.com", "cloud-key")
+	req := &AIRequest{
+		Capability: CapabilityCodeGeneration,
+		Model:      "kimi-k2.6",
+	}
+
+	if got := client.getModel(req); got != "kimi-k2.6:cloud" {
+		t.Fatalf("getModel() = %q, want kimi-k2.6:cloud", got)
+	}
+}
+
+func TestOllamaBaseURLNormalizesV1Suffix(t *testing.T) {
+	t.Parallel()
+
+	client := NewOllamaCloudClient("https://ollama.com/v1", "cloud-key")
+	if got := client.baseURL; got != "https://ollama.com" {
+		t.Fatalf("baseURL = %q, want https://ollama.com", got)
+	}
+}

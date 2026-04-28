@@ -17,7 +17,7 @@ import (
 // Updated February 2026 with latest verified models
 var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 	ai.ProviderClaude: {
-		PowerMax:      "claude-opus-4-6",
+		PowerMax:      "claude-opus-4-7",
 		PowerBalanced: "claude-sonnet-4-6",
 		PowerFast:     "claude-haiku-4-5-20251001",
 	},
@@ -28,7 +28,7 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 	},
 	ai.ProviderGemini: {
 		PowerMax:      "gemini-3.1-pro",
-		PowerBalanced: "gemini-3-flash-preview",
+		PowerBalanced: "gemini-2.5-pro",
 		PowerFast:     "gemini-2.5-flash-lite",
 	},
 	ai.ProviderGrok: {
@@ -91,8 +91,6 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 			"o4",
 			"gemini-",
 			"grok-",
-			"deepseek-",
-			"glm-",
 		} {
 			if strings.HasPrefix(normalized, foreignPrefix) {
 				return false

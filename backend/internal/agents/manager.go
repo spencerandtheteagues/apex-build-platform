@@ -19173,6 +19173,14 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 	interactionContext := buildInteractionPromptContext(build, agent)
 	build.mu.RUnlock()
 
+	interventionTask := &Task{
+		ID:          "lead-user-message-" + uuid.New().String(),
+		Type:        TaskReview,
+		Description: "Process the user's build instruction and decide whether to resume, revise, or ask a specific follow-up question.",
+	}
+	stopHeartbeat := am.startAgentActivityHeartbeat(ctx, agent.BuildID, agent, interventionTask, WSAgentWorking, "generation", agent.Provider, agent.Model)
+	defer stopHeartbeat()
+
 	prompt := fmt.Sprintf(`You are processing a live user intervention for build %s.
 
 Current build status: %s

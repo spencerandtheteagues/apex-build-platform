@@ -545,7 +545,7 @@ const (
 type PowerMode string
 
 const (
-	PowerMax      PowerMode = "max"      // Latest frontier tier (Opus 4.6, ChatGPT 5.4 Pro, Gemini 3.1 Pro, Grok 4.20)
+	PowerMax      PowerMode = "max"      // Highest-quality configured provider routes
 	PowerBalanced PowerMode = "balanced" // Mid-tier quality/speed balance (Sonnet 4.6, GPT-4.1, Gemini 3 Flash, Grok 3)
 	PowerFast     PowerMode = "fast"     // Cheapest mini tier (Haiku 4.5, GPT-4o-mini, Gemini 2.5 Flash Lite, Grok 3 Mini)
 )

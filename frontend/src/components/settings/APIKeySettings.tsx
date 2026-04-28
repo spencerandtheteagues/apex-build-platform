@@ -98,19 +98,19 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: 'ollama',
     name: 'Ollama (Local / Cloud)',
-    description: 'Free local inference or Ollama Cloud BYOK (e.g. kimi-k2.6:cloud)',
+    description: 'Local inference or Ollama Cloud BYOK (API key + optional base URL)',
     color: 'text-cyan-400',
     bgColor: 'bg-cyan-500/10',
     bgGlow: 'shadow-cyan-500/20',
     borderColor: 'border-cyan-500/30',
     activeBorder: 'border-cyan-500',
-    placeholder: 'http://localhost:11434   or   http://key@host/v1',
+    placeholder: 'Ollama API key, http://localhost:11434, or key / OLLAMA_BASE_URL:https://ollama.com',
     models: [
-      { id: 'kimi-k2.6', name: 'Kimi K2.6', speed: 'fast', cost: 'free', description: 'Default conductor/local max model' },
-      { id: 'glm-5.1', name: 'GLM-5.1', speed: 'fast', cost: 'free', description: 'Fast local/open-weight coding model' },
-      { id: 'qwen-3.6-27b', name: 'Qwen 3.6 27B', speed: 'fast', cost: 'free', description: 'Efficient local coding model' },
-      { id: 'devstral-small-24b', name: 'Devstral Small 24B', speed: 'medium', cost: 'free', description: 'Agentic coding model' },
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', speed: 'fast', cost: 'free', description: 'Budget local/cloud model' },
+      { id: 'kimi-k2.6', name: 'Kimi K2.6', speed: 'fast', cost: 'low', description: 'Default conductor/cloud model' },
+      { id: 'glm-5.1', name: 'GLM-5.1', speed: 'fast', cost: 'low', description: 'Fast open-model coding route' },
+      { id: 'qwen-3.6-27b', name: 'Qwen 3.6 27B', speed: 'fast', cost: 'low', description: 'Efficient coding model' },
+      { id: 'devstral-small-24b', name: 'Devstral Small 24B', speed: 'medium', cost: 'low', description: 'Agentic coding model' },
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', speed: 'fast', cost: 'low', description: 'Budget reasoning/coding route' },
     ],
   },
 ]
@@ -302,7 +302,7 @@ export default function APIKeySettings() {
   const handleSaveKey = async (provider: string) => {
     const value = inputValues[provider]
     if (!value?.trim()) {
-      setErrors(prev => ({ ...prev, [provider]: provider === 'ollama' ? 'Server URL is required' : 'API key is required' }))
+      setErrors(prev => ({ ...prev, [provider]: provider === 'ollama' ? 'Ollama API key or server URL is required' : 'API key is required' }))
       return
     }
 

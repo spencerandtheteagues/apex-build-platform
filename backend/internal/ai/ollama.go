@@ -93,8 +93,7 @@ func NewOllamaClient(baseURL, apiKey string) *OllamaClient {
 			}
 		}
 	}
-	// Strip trailing /v1 so makeRequest can always append /v1/<path> without doubling it.
-	baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+	baseURL = normalizeOllamaBaseURL(baseURL)
 	return &OllamaClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
@@ -113,6 +112,7 @@ func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
 	if baseURL == "" {
 		baseURL = "https://ollama.com/v1"
 	}
+	baseURL = normalizeOllamaBaseURL(baseURL)
 	return &OllamaClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
@@ -124,6 +124,15 @@ func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
 			LastUsed: time.Now(),
 		},
 	}
+}
+
+func normalizeOllamaBaseURL(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "http://localhost:11434"
+	}
+	// Strip trailing /v1 so makeRequest/Health can append OpenAI-compatible paths exactly once.
+	return strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
 }
 
 // Generate implements the AIClient interface for Ollama
@@ -259,7 +268,7 @@ func (o *OllamaClient) buildUserPrompt(req *AIRequest) string {
 func (o *OllamaClient) getModel(req *AIRequest) string {
 	// Respect explicit model override
 	if req.Model != "" {
-		return req.Model
+		return o.normalizeModelAlias(req.Model)
 	}
 
 	// Check if this is an Ollama Cloud client (has apiKey set)
@@ -290,6 +299,25 @@ func (o *OllamaClient) getModel(req *AIRequest) string {
 		}
 		return "deepseek-r1:14b" // General purpose fallback
 	}
+}
+
+func (o *OllamaClient) normalizeModelAlias(model string) string {
+	normalized := strings.TrimSpace(model)
+	if normalized == "" {
+		return normalized
+	}
+
+	// Ollama Cloud expects the cloud-qualified Kimi model id. The UI and older
+	// BYOK settings stored the shorter alias, which could leave planning calls
+	// hanging or failing after a long timeout instead of using the intended model.
+	if o.apiKey != "" {
+		lower := strings.ToLower(normalized)
+		if (lower == "kimi-k2.6" || lower == "kimi-k2" || lower == "kimi") && !strings.Contains(lower, ":") {
+			return "kimi-k2.6:cloud"
+		}
+	}
+
+	return normalized
 }
 
 // makeRequest sends HTTP request to Ollama API
@@ -453,7 +481,7 @@ func (o *OllamaClient) GetUsage() *ProviderUsage {
 		Provider:     o.usage.Provider,
 		RequestCount: o.usage.RequestCount,
 		TotalTokens:  o.usage.TotalTokens,
-		TotalCost:    o.usage.TotalCost, // Always 0 for Ollama
+		TotalCost:    o.usage.TotalCost,
 		AvgLatency:   o.usage.AvgLatency,
 		ErrorCount:   o.usage.ErrorCount,
 		LastUsed:     o.usage.LastUsed,
@@ -489,7 +517,7 @@ func (o *OllamaClient) updateUsage(totalTokens int, cost float64, duration time.
 
 	o.usage.RequestCount++
 	o.usage.TotalTokens += int64(totalTokens)
-	o.usage.TotalCost += cost // Will always be 0 for Ollama
+	o.usage.TotalCost += cost
 
 	// Safe incremental average calculation (prevents division by zero)
 	if o.usage.RequestCount > 1 {
@@ -504,7 +532,9 @@ func (o *OllamaClient) updateUsage(totalTokens int, cost float64, duration time.
 func (o *OllamaClient) incrementErrorCount() {
 	o.usageMu.Lock()
 	defer o.usageMu.Unlock()
+	o.usage.RequestCount++
 	o.usage.ErrorCount++
+	o.usage.LastUsed = time.Now()
 }
 
 // isMoonshotAPI returns true when the client is pointed at api.moonshot.cn.

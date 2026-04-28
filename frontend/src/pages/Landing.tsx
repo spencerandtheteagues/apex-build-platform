@@ -45,7 +45,7 @@ const FEATURE_PILLARS: Array<{
     icon: DollarSign,
     label: 'Credit burn',
     title: 'Reduce waste before tokens leave your wallet.',
-    body: 'Apex routes work to the cheapest capable model, caps budgets, shows every agent cost live, and lets BYOK or local Ollama models collapse expensive Power Mode runs to a routing fee.',
+    body: 'Apex routes work by task fit, availability, and budget, shows every agent cost live, and lets eligible BYOK or Ollama routes reduce managed-credit burn with transparent routing fees.',
   },
   {
     icon: ShieldCheck,
@@ -120,27 +120,27 @@ const AGENTS: Array<{
   icon: IconType
 }> = [
   { number: '01', name: 'Kimi K2.6 Conductor', model: 'Default: Kimi K2.6', body: 'Routes work, tracks dependencies, protects context, and keeps spend inside the build contract.', icon: Workflow },
-  { number: '02', name: 'Lead Architect', model: 'Default: Claude Opus 4.6', body: 'Owns architecture, data models, API contracts, security boundaries, and system shape.', icon: Layers3 },
-  { number: '03', name: 'Planner', model: 'Default: Gemini 3.1 Pro', body: 'Turns the prompt into work orders, checkpoints, acceptance criteria, and cross-agent memory.', icon: Brain },
-  { number: '04', name: 'Frontend', model: 'Default: ChatGPT 5.4 Pro', body: 'Builds React surfaces, layouts, state, accessibility, visual polish, and product flows.', icon: Code2 },
-  { number: '05', name: 'Backend', model: 'Default: ChatGPT 5.4 Pro', body: 'Builds APIs, middleware, auth, billing, integrations, background jobs, and services.', icon: TerminalSquare },
-  { number: '06', name: 'Database', model: 'Default: Gemini 3.1 Pro', body: 'Designs schema, migrations, seed data, query boundaries, and persistence contracts.', icon: Database },
-  { number: '07', name: 'Logic and Debug', model: 'Default: Grok 4.20', body: 'Handles business rules, failure repair, integration conflicts, and complex edge cases.', icon: Cpu },
-  { number: '08', name: 'Testing', model: 'Default: Claude Opus 4.6', body: 'Runs unit, integration, E2E, accessibility, smoke, and deploy-readiness checks.', icon: ShieldCheck },
-  { number: '09', name: 'Reviewer and Docs', model: 'Default: Claude Opus 4.6 + Gemini 3.1 Pro', body: 'Audits security, code quality, handoff docs, READMEs, runbooks, and launch evidence.', icon: FileCode2 },
+  { number: '02', name: 'Lead Architect', model: 'Default: Anthropic route', body: 'Owns architecture, data models, API contracts, security boundaries, and system shape.', icon: Layers3 },
+  { number: '03', name: 'Planner', model: 'Default: Google route', body: 'Turns the prompt into work orders, checkpoints, acceptance criteria, and cross-agent memory.', icon: Brain },
+  { number: '04', name: 'Frontend', model: 'Default: OpenAI route', body: 'Builds React surfaces, layouts, state, accessibility, visual polish, and product flows.', icon: Code2 },
+  { number: '05', name: 'Backend', model: 'Default: OpenAI route', body: 'Builds APIs, middleware, auth, billing, integrations, background jobs, and services.', icon: TerminalSquare },
+  { number: '06', name: 'Database', model: 'Default: Google route', body: 'Designs schema, migrations, seed data, query boundaries, and persistence contracts.', icon: Database },
+  { number: '07', name: 'Logic and Debug', model: 'Default: xAI route', body: 'Handles business rules, failure repair, integration conflicts, and complex edge cases.', icon: Cpu },
+  { number: '08', name: 'Testing', model: 'Default: Anthropic route', body: 'Runs unit, integration, E2E, accessibility, smoke, and deploy-readiness checks.', icon: ShieldCheck },
+  { number: '09', name: 'Reviewer and Docs', model: 'Default: Anthropic + Google routes', body: 'Audits security, code quality, handoff docs, READMEs, runbooks, and launch evidence.', icon: FileCode2 },
 ]
 
 const MODEL_ASSIGNMENTS = [
   ['Conductor', 'Kimi K2.6'],
-  ['Architecture + review', 'Claude Opus 4.6'],
-  ['Frontend + backend', 'ChatGPT 5.4 Pro'],
-  ['Planning + database', 'Gemini 3.1 Pro'],
-  ['Logic + debug', 'Grok 4.20'],
+  ['Architecture + review', 'Anthropic route'],
+  ['Frontend + backend', 'OpenAI route'],
+  ['Planning + database', 'Google route'],
+  ['Logic + debug', 'xAI route'],
 ]
 
 const COMPARISON = [
-  ['Architecture', '9 specialized agents across routed models', 'Single primary agent loop', 'Frontend-heavy prompt loop', 'Single orchestration path'],
-  ['Credit burn', 'Live spend, caps, BYOK, local model swaps', 'Opaque credits', 'Opaque credits', 'Known burn before stability'],
+  ['Architecture', '9 specialized agents across routed models', 'Agent workflow', 'Web-app prompt workflow', 'Coding-agent workflow'],
+  ['Credit burn', 'Live spend, caps, BYOK, local model swaps', 'Usage visibility varies', 'Usage visibility varies', 'Usage visibility varies'],
   ['Enterprise app depth', 'Backend, DB, auth, billing, deploy, tests', 'Useful IDE plus agent', 'Strong UI generation', 'Fast prototypes'],
   ['Code ownership', 'GitHub export, ZIP, deploy anywhere', 'Platform-centered', 'Limited handoff', 'Export friction varies'],
   ['Control', 'Model roles, MCP, secrets, settings, review gates', 'Lower-level workspace controls', 'Simple prompt controls', 'Prompt-first controls'],
@@ -1771,10 +1771,10 @@ const Comparison = () => (
     <div className="launch-shell">
       <motion.div {...fadeUp}>
         <div className="section-kicker">Head to head</div>
-        <h2 className="section-title">Built to beat single-agent app builders.</h2>
+        <h2 className="section-title">Built for explicit developer control.</h2>
         <p className="section-copy">
-          Replit, Lovable, and Bolt are useful tools. Apex is positioned as the next step:
-          a controlled multi-agent build system for people shipping real software.
+          Replit, Lovable, and Bolt are useful tools. Apex is positioned for teams that want
+          explicit role routing, spend attribution, review gates, and generated-code ownership.
         </p>
       </motion.div>
       <div className="comparison-wrap">
@@ -1815,9 +1815,9 @@ const Pricing = ({ onGetStarted }: LandingProps) => (
       <div className="pricing-grid">
         {[
           ['Free', '$0', ['Static frontend experiments', 'Prompt-to-UI exploration', 'Upgrade required for backend/auth/billing']],
-          ['Builder', '$29', ['3-day trial', 'Full-stack builds', 'GitHub import/export', 'Live preview and IDE']],
+          ['Builder', '$24', ['3-day trial', 'Full-stack builds', 'GitHub import/export', 'Live preview and IDE']],
           ['Pro', '$79', ['3-day trial', 'BYOK controls', 'Budget caps', 'Advanced verification'], true],
-          ['Team', '$199', ['3-day trial', 'Collaboration', 'Shared secrets', 'Admin controls']],
+          ['Team', '$149', ['3-day trial', 'Collaboration', 'Shared secrets', 'Admin controls']],
         ].map(([name, price, features, featured]) => (
           <motion.article key={name as string} className={`launch-card price-card ${featured ? 'featured' : ''}`} {...fadeUp}>
             <h3>{name}</h3>

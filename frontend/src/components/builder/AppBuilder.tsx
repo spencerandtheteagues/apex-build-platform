@@ -2047,8 +2047,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     resetCurrentBuildSpend()
     if (!buildId) return undefined
 
+    const service = apiService as unknown as {
+      getBuildSpend?: (id: string) => Promise<unknown>
+      get?: (url: string) => Promise<unknown>
+      client?: { get?: (url: string) => Promise<unknown> }
+    }
+    const spendSnapshotRequest =
+      typeof service.getBuildSpend === 'function'
+        ? service.getBuildSpend(buildId)
+        : typeof service.get === 'function'
+          ? service.get(`/spend/build/${encodeURIComponent(buildId)}`)
+          : typeof service.client?.get === 'function'
+            ? service.client.get(`/spend/build/${encodeURIComponent(buildId)}`)
+            : Promise.resolve({ data: { total_spend: 0, events: [] } })
+
     let cancelled = false
-    void apiService.get(`/spend/build/${encodeURIComponent(buildId)}`)
+    void spendSnapshotRequest
       .then((response: any) => {
         if (cancelled) return
         const payload = response?.data?.data ?? response?.data

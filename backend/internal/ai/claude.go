@@ -419,6 +419,8 @@ func (c *ClaudeClient) getMaxTokens(req *AIRequest) int {
 func (c *ClaudeClient) calculateCost(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int, model string) float64 {
 	var inputPer1M, outputPer1M float64
 	switch model {
+	case "claude-opus-4-7":
+		inputPer1M, outputPer1M = 5.00, 25.00
 	case "claude-opus-4-6":
 		inputPer1M, outputPer1M = 5.00, 25.00
 	case "claude-sonnet-4-6":

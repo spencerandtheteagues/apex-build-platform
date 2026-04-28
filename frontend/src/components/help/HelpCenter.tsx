@@ -251,7 +251,7 @@ The user avatar in the top-right shows your username. Your session persists acro
 - Best for: Most real-world applications
 
 **Max Power (2.0x platform cost)**
-- Models: Claude Opus 4.6, ChatGPT 5.4 Pro, Gemini 3.1 Pro, Grok 4.20, plus Kimi K2.6/local when BYOK is enabled
+- Models: configured Anthropic, OpenAI, Google, xAI, and Ollama/self-hosted routes, including Kimi K2.6/local routes when BYOK is enabled
 - Speed: Slower (larger models take longer)
 - Quality: Highest possible — most capable models
 - Best for: Complex apps, mission-critical code, production builds
@@ -708,33 +708,33 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
         content: `APEX-BUILD integrates with multiple AI providers. Each has different strengths:
 
 **Claude (Anthropic)**
-- Models: Opus 4.6 (most capable), Sonnet 4.6 (balanced), Haiku 4.5 (fast)
+- Models: configured Anthropic routes by power mode and account access
 - Strengths: Excellent code quality, long context understanding, careful reasoning
 - Best for: Complex code generation, debugging, architecture
 
 **GPT (OpenAI)**
-- Models: ChatGPT 5.4 Pro (most capable), GPT-4.1 (balanced), GPT-4o Mini (fast)
+- Models: configured OpenAI routes by power mode and account access
 - Strengths: Wide knowledge, creative solutions, strong at many languages
 - Best for: General coding tasks, multi-language projects
 
 **Gemini (Google)**
-- Models: Gemini 3.1 Pro (most capable), Gemini 3.1 Pro Preview (fallback), Gemini 3 Flash Preview (balanced), Gemini 2.5 Flash Lite (fast)
+- Models: configured Google routes by power mode and account access
 - Strengths: Fast responses, good at documentation, strong reasoning
 - Best for: Quick tasks, documentation, data processing code
 
 **Grok (xAI)**
-- Models: Grok 4.20 (most capable), Grok 3 (balanced), Grok 3 Mini (fast)
+- Models: configured xAI routes by power mode and account access
 - Strengths: Real-time knowledge, creative problem-solving
 - Best for: Cutting-edge tasks, up-to-date solutions
 
-**Ollama (Local)**
-- Models: Kimi K2.6, GLM-5.1, Qwen 3.6 27B, Devstral Small 24B, DeepSeek V4 Flash, and more
-- Strengths: Runs on your own hardware, no cloud-model API bill, strong privacy
-- Best for: Privacy-sensitive work, unlimited usage
-- Requires: Builder or higher for BYOK access, plus a running Ollama server on your machine or network
+**Ollama (Local or Cloud)**
+- Models: Kimi K2.6, GLM, Qwen, Devstral, DeepSeek, and other models exposed by your configured endpoint
+- Strengths: Runs through your configured Ollama endpoint, can reduce managed-provider spend, and supports privacy-sensitive work
+- Best for: BYOK/open-model workflows where your endpoint capacity and account limits are acceptable
+- Requires: Builder or higher for BYOK access, plus a reachable Ollama local, VPS, or cloud endpoint
 
 **Auto mode (default):**
-When set to "Auto," APEX-BUILD routes hosted work across Claude, GPT, Gemini, and Grok based on task shape, verification history, and availability. Ollama is local/BYOK-only and is not used as a hosted fallback.`,
+When set to "Auto," APEX-BUILD routes hosted work across configured providers based on task shape, verification history, budget, and availability. Ollama is used only when a reachable Ollama route is configured and healthy.`,
       },
     ],
   },

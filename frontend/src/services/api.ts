@@ -2741,6 +2741,17 @@ export class ApiService {
     return response.data
   }
 
+  async getBuildSpend(buildId: string): Promise<{
+    success: boolean
+    data?: {
+      total_spend: number
+      events: Array<Record<string, unknown>>
+    }
+  }> {
+    const response = await this.client.get(`/spend/build/${encodeURIComponent(buildId)}`)
+    return response.data
+  }
+
   async getSubscription(): Promise<{
     success: boolean
     data?: {

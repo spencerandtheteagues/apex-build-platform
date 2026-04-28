@@ -182,7 +182,7 @@ const isPlaceholderPriceID = (id: string): boolean =>
 const fallbackPlans: Plan[] = [
   { type: 'free', name: 'Free', monthly_price_cents: 0, monthly_price_id: '', monthly_credits_usd: 0, is_popular: false, features: [] },
   { type: 'builder', name: 'Builder', monthly_price_cents: 2400, monthly_price_id: '', monthly_credits_usd: 12, is_popular: false, features: [] },
-  { type: 'pro', name: 'Pro', monthly_price_cents: 5900, monthly_price_id: '', monthly_credits_usd: 40, is_popular: true, features: [] },
+  { type: 'pro', name: 'Pro', monthly_price_cents: 7900, monthly_price_id: '', monthly_credits_usd: 40, is_popular: true, features: [] },
   { type: 'team', name: 'Team', monthly_price_cents: 14900, monthly_price_id: '', monthly_credits_usd: 110, is_popular: false, features: [] },
 ]
 

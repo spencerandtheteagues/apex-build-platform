@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -241,18 +242,16 @@ func (m *BYOKManager) ValidateKey(ctx context.Context, userID uint, provider str
 	case ProviderGrok:
 		client = NewGrokClient(apiKey)
 	case ProviderOllama:
-		// For Ollama, the "apiKey" is actually the base URL
-		if !strings.HasPrefix(apiKey, "http://") && !strings.HasPrefix(apiKey, "https://") {
-			return false, fmt.Errorf("invalid Ollama URL: must start with http:// or https://")
-		}
-		client = NewOllamaClient(apiKey, "")
+		baseURL, ollamaAPIKey := parseOllamaCredential(apiKey)
+		client = NewOllamaClient(baseURL, ollamaAPIKey)
 	default:
 		return false, fmt.Errorf("unsupported provider: %s", provider)
 	}
 
 	err = client.Health(ctx)
 	if err != nil && AIProvider(provider) == ProviderOllama {
-		err = normalizeOllamaValidationError(apiKey, err)
+		baseURL, _ := parseOllamaCredential(apiKey)
+		err = normalizeOllamaValidationError(baseURL, err)
 	}
 	valid := err == nil
 
@@ -281,6 +280,60 @@ func isLocalOllamaURL(raw string) bool {
 	default:
 		return false
 	}
+}
+
+func parseOllamaCredential(raw string) (baseURL string, apiKey string) {
+	trimmed := strings.TrimSpace(raw)
+	defaultBaseURL := strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL"))
+	if defaultBaseURL == "" {
+		defaultBaseURL = "https://ollama.com"
+	}
+	if trimmed == "" {
+		return defaultBaseURL, ""
+	}
+
+	// Backward-compatible local/VPS mode: the saved value is just the server URL.
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		if parsed, err := url.Parse(trimmed); err == nil && parsed.User != nil {
+			apiKey = parsed.User.Username()
+			parsed.User = nil
+			trimmed = parsed.String()
+		}
+		return trimmed, apiKey
+	}
+
+	// Accept pasted forms like:
+	//   <api-key> / OLLAMA_BASE_URL:https://ollama.com
+	//   <api-key> base_url=https://ollama.com/v1
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ' ' || r == '\n' || r == '\t' || r == ',' || r == ';'
+	})
+	apiKey = trimmed
+	baseURL = defaultBaseURL
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		lower := strings.ToLower(part)
+		switch {
+		case strings.HasPrefix(part, "http://") || strings.HasPrefix(part, "https://"):
+			baseURL = part
+		case strings.HasPrefix(lower, "ollama_base_url:"):
+			baseURL = strings.TrimSpace(part[len("ollama_base_url:"):])
+		case strings.HasPrefix(lower, "ollama_base_url="):
+			baseURL = strings.TrimSpace(part[len("ollama_base_url="):])
+		case strings.HasPrefix(lower, "base_url:"):
+			baseURL = strings.TrimSpace(part[len("base_url:"):])
+		case strings.HasPrefix(lower, "base_url="):
+			baseURL = strings.TrimSpace(part[len("base_url="):])
+		default:
+			if apiKey == trimmed {
+				apiKey = part
+			}
+		}
+	}
+	return baseURL, apiKey
 }
 
 func normalizeOllamaValidationError(baseURL string, err error) error {
@@ -363,8 +416,8 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 			clients[ProviderGrok] = client
 			hasValidClient = true
 		case ProviderOllama:
-			// For Ollama, the "apiKey" is actually the base URL
-			client := AIClient(NewOllamaClient(apiKey, ""))
+			baseURL, ollamaAPIKey := parseOllamaCredential(apiKey)
+			client := AIClient(NewOllamaClient(baseURL, ollamaAPIKey))
 			if key.ModelPreference != "" {
 				client = &modelOverrideClient{base: client, defaultModel: key.ModelPreference}
 			}
@@ -734,7 +787,8 @@ func (m *BYOKManager) decryptUserKey(key models.UserAPIKey) (string, error) {
 func GetAvailableModels() map[string][]ModelInfo {
 	return map[string][]ModelInfo{
 		"claude": {
-			{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", Speed: "slow", CostTier: "high", Description: "MAX — latest flagship reasoning and coding model"},
+			{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", Speed: "slow", CostTier: "high", Description: "MAX — latest flagship reasoning and coding model"},
+			{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", Speed: "slow", CostTier: "high", Description: "MAX fallback — previous flagship tier"},
 			{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", Speed: "medium", CostTier: "medium", Description: "BALANCED — strong quality with lower cost"},
 			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "FAST — cheapest Claude tier"},
 		},
@@ -746,7 +800,8 @@ func GetAvailableModels() map[string][]ModelInfo {
 		"gemini": {
 			{ID: "gemini-3.1-pro", Name: "Gemini 3.1 Pro", Speed: "slow", CostTier: "high", Description: "MAX — Gemini 3.1 Pro tier"},
 			{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", Speed: "slow", CostTier: "high", Description: "MAX fallback — preview tier when Pro is unavailable"},
-			{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", Speed: "medium", CostTier: "medium", Description: "BALANCED — fast Gemini reasoning tier"},
+			{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Speed: "medium", CostTier: "medium", Description: "BALANCED — Gemini 2.5 Pro reasoning tier"},
+			{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", Speed: "medium", CostTier: "medium", Description: "BALANCED fallback — fast Gemini flash tier"},
 			{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite", Speed: "fast", CostTier: "low", Description: "FAST — lowest-cost Gemini tier"},
 		},
 		"grok": {
@@ -756,11 +811,11 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "grok-3-mini", Name: "Grok 3 Mini", Speed: "fast", CostTier: "low", Description: "FAST — lightweight Grok tier"},
 		},
 		"ollama": {
-			{ID: "kimi-k2.6", Name: "Kimi K2.6", Speed: "fast", CostTier: "free", Description: "Default conductor/local max model"},
-			{ID: "glm-5.1", Name: "GLM-5.1", Speed: "fast", CostTier: "free", Description: "Fast local/open-weight coding model"},
-			{ID: "qwen-3.6-27b", Name: "Qwen 3.6 27B", Speed: "fast", CostTier: "free", Description: "Efficient local coding model"},
-			{ID: "devstral-small-24b", Name: "Devstral Small 24B", Speed: "medium", CostTier: "free", Description: "Agentic coding model"},
-			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", Speed: "fast", CostTier: "free", Description: "Budget local/cloud model"},
+			{ID: "kimi-k2.6", Name: "Kimi K2.6", Speed: "fast", CostTier: "low", Description: "Default conductor/cloud-capable model"},
+			{ID: "glm-5.1", Name: "GLM-5.1", Speed: "fast", CostTier: "low", Description: "Fast open-model coding route"},
+			{ID: "qwen-3.6-27b", Name: "Qwen 3.6 27B", Speed: "fast", CostTier: "low", Description: "Efficient coding model"},
+			{ID: "devstral-small-24b", Name: "Devstral Small 24B", Speed: "medium", CostTier: "low", Description: "Agentic coding model"},
+			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", Speed: "fast", CostTier: "low", Description: "Budget reasoning/coding route"},
 		},
 	}
 }

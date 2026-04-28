@@ -45,7 +45,7 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 		mode     PowerMode
 		want     string
 	}{
-		{name: "claude max uses opus", provider: ai.ProviderClaude, mode: PowerMax, want: "claude-opus-4-6"},
+		{name: "claude max uses opus", provider: ai.ProviderClaude, mode: PowerMax, want: "claude-opus-4-7"},
 		{name: "openai max uses chatgpt", provider: ai.ProviderGPT4, mode: PowerMax, want: "gpt-5.4-pro"},
 		{name: "openai fast owns gpt 4o mini", provider: ai.ProviderGPT4, mode: PowerFast, want: "gpt-4o-mini"},
 		{name: "gemini max uses pro before preview", provider: ai.ProviderGemini, mode: PowerMax, want: "gemini-3.1-pro"},
@@ -77,8 +77,8 @@ func TestSelectModelForPowerModeUsesKimiCloudWhenManagedOllamaEnabled(t *testing
 func TestNormalizeModelForProviderRejectsCrossProviderModel(t *testing.T) {
 	t.Parallel()
 
-	if got := normalizeModelForProvider(ai.ProviderClaude, "gpt-4o-mini", PowerMax); got != "claude-opus-4-6" {
-		t.Fatalf("Claude model normalization = %q, want Claude Opus 4.6", got)
+	if got := normalizeModelForProvider(ai.ProviderClaude, "gpt-4o-mini", PowerMax); got != "claude-opus-4-7" {
+		t.Fatalf("Claude model normalization = %q, want Claude Opus 4.7", got)
 	}
 	if got := normalizeModelForProvider(ai.ProviderGPT4, "claude-opus-4-6", PowerFast); got != "gpt-4o-mini" {
 		t.Fatalf("OpenAI model normalization = %q, want GPT-4o Mini", got)
@@ -89,8 +89,11 @@ func TestNormalizeModelForProviderRejectsCrossProviderModel(t *testing.T) {
 	if got := normalizeModelForProvider(ai.ProviderGemini, "gemini-3.1-pro-preview", PowerMax); got != "gemini-3.1-pro-preview" {
 		t.Fatalf("Gemini preview fallback should remain valid, got %q", got)
 	}
-	if got := normalizeModelForProvider(ai.ProviderOllama, "glm-5.1", PowerFast); got != "kimi-k2.6" {
-		t.Fatalf("Ollama model normalization = %q, want Kimi fallback", got)
+	if got := normalizeModelForProvider(ai.ProviderOllama, "glm-5.1", PowerFast); got != "glm-5.1" {
+		t.Fatalf("Ollama model normalization = %q, want GLM route to remain valid", got)
+	}
+	if got := normalizeModelForProvider(ai.ProviderOllama, "deepseek-v4-flash", PowerFast); got != "deepseek-v4-flash" {
+		t.Fatalf("Ollama model normalization = %q, want DeepSeek route to remain valid", got)
 	}
 }
 

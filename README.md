@@ -7,7 +7,7 @@
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)](https://typescriptlang.org)
 
-**Live:** [apex-frontend-gigq.onrender.com](https://apex-frontend-gigq.onrender.com) &nbsp;|&nbsp; **Contact:** [SpencerAndTheTeagues@gmail.com](mailto:SpencerAndTheTeagues@gmail.com)
+**Live:** [apex-build.dev](https://apex-build.dev) &nbsp;|&nbsp; **Contact:** [SpencerAndTheTeagues@gmail.com](mailto:SpencerAndTheTeagues@gmail.com)
 
 ---
 
@@ -47,18 +47,18 @@ If you have used Replit, Bolt, v0, or another AI coding platform, you have likel
 
 | Builder Need | Typical AI builder tradeoff | APEX.BUILD |
 |---|---|---|
-| **Explicit model routing** | Many platforms default to managed model access and hide routing decisions from the build surface. | Six providers: Claude, OpenAI, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
+| **Explicit model routing** | Many platforms expose model or agent controls, but per-role routing and spend attribution are often not the center of the build stream. | Six provider routes: Claude, OpenAI, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
 | **Transparent spend** | Usage can be hard to attribute to a specific model, role, request, or build step. | Real-time per-token cost ticker on every request. Immutable credit ledger. Budget cap enforcement before anything expensive runs. |
 | **Deployment ownership** | Hosted projects often depend on the platform's runtime and plan limits. | Deploy once to Vercel, Netlify, or Render. Your app lives on your account. Hosting cost is between you and the host, not APEX. |
 | **Code ownership** | Export and Git workflows vary by platform and plan. | Full GitHub export any time. Git push to your own repo. Your code is yours. Always. |
 | **Named specialist workflow** | Competitors generally do not publicly break app generation into Apex-style named specialist roles. | Ten specialized agents with distinct roles. The Reviewer is deliberately separate from the writers. The Solver specializes in failures no other agent could fix. |
 | **Large files get mangled** | AI context limits cause files to get truncated and content to disappear mid-build. | Chunked editor protocol: files over 400 lines split into overlapping 300-line windows, edited per chunk, reassembled without loss. |
 | **IDE-level Git workflow** | Some app builders emphasize prompt and preview flows more than IDE-native Git operations. | Full Git panel: branch, commit, push, pull, merge, PR creation and review inside the IDE. |
-| **Preview is slow** | 30–60 second cold starts. Refresh to see changes. | WebSocket hot reload. Preview updates as you save — no rebuild cycle. |
-| **Limited runtimes** | Mostly JavaScript and Python. | Node.js, TypeScript, Python, Go, Rust, C/C++, Java, Ruby, PHP, Bash, and more. |
-| **No hard cost control** | No budget ceiling. Builds run until credits are exhausted. | Per-build budget cap. Global monthly spend ceiling. Confirmation dialogs. Auto-pause at limit. |
+| **Preview verification** | Preview and deploy workflows vary by platform; automated runtime verification is not always exposed as a named gate. | WebSocket hot reload plus explicit preview/runtime verification for supported generated preview flows. |
+| **Runtime breadth** | Many AI app builders are strongest around web-app and JavaScript/TypeScript workflows. | Node.js, TypeScript, Python, Go, Rust, C/C++, Java, Ruby, PHP, Bash, and more. |
+| **Cost control** | Budget controls and usage transparency vary by platform and plan. | Per-build budget cap. Global monthly spend ceiling. Confirmation dialogs. Auto-pause at limit. |
 | **Provider and hosting optionality** | Defaults are often managed credentials, managed hosting, or platform-managed model access. | Run it on your own hardware. BYOK means your API calls go directly from your server to the AI provider. |
-| **Multiplayer is an afterthought** | Real-time collaboration is limited or missing across major platforms. | Operational transformation (Google Docs-style) with live cursors, presence tracking, and per-project access roles. |
+| **Multiplayer workflow** | Real-time collaboration depth varies across major platforms. | Operational transformation (Google Docs-style) with live cursors, presence tracking, and per-project access roles. |
 | **No spending history** | No way to see spend over time, by project, or by provider. | Full spend analytics dashboard: daily/weekly/monthly graphs, cost by provider and project, downloadable invoices. |
 
 ---
@@ -77,7 +77,7 @@ When the build completes, proposed changes appear in a full diff review panel. Y
 
 **Balanced** — Sonnet 4.6 + GPT-4.1 + Gemini 3 Flash Preview + Grok 3. The sweet spot for real work. Production-quality output at a reasonable price.
 
-**Max** — Opus 4.6 + GPT-5.4 + Gemini 3.1 Pro Preview + Grok Code Fast 1. Every agent runs its strongest model. Full validation loops, deep code review, maximum quality. For code going to production.
+**Max** — highest-quality configured routes across Anthropic, OpenAI, Google, xAI, Ollama, and BYOK where available. Full validation loops, deep code review, maximum quality. For code going to production.
 
 ### Full-Featured IDE
 
@@ -101,7 +101,7 @@ Every significant build step creates a checkpoint. Browse the complete history o
 
 ### Bring Your Own Key (BYOK)
 
-Add your own API keys in Settings. Your API calls go directly from the APEX backend to the AI provider. The credit system is bypassed entirely. You pay providers at their rates with no APEX markup. BYOK keys are stored with AES-256 encryption and are never returned in plaintext.
+Add your own API keys in Settings. Your API calls go directly from the APEX backend to the AI provider. Managed model markup is bypassed for BYOK calls; any Apex routing or platform fee is surfaced separately. BYOK keys are stored with AES-256 encryption and are never returned in plaintext.
 
 ---
 
@@ -113,7 +113,7 @@ APEX.BUILD treats AI providers as interchangeable infrastructure. The AI router 
 
 **Automatic fallback chains** — If Claude is rate-limited or down, the router falls back across OpenAI, Grok, Ollama, and Gemini. Builds do not fail because one provider has an outage.
 
-**Rate limit awareness** — Per-provider request budgets enforced in real time: Claude 100 req/min, OpenAI 80, Gemini 120, Grok 100, Ollama unlimited.
+**Rate limit awareness** — Provider health, throttling, retries, and fallback routing are tracked in real time so unhealthy or constrained routes do not silently stall a build.
 
 **Cost ceiling enforcement** — Maximum spend per request enforced per provider. Requests that would exceed the ceiling are rerouted to a cheaper model in the same chain.
 
@@ -121,11 +121,11 @@ APEX.BUILD treats AI providers as interchangeable infrastructure. The AI router 
 
 | Provider | Best For | Available Models |
 |---|---|---|
-| **Claude (Anthropic)** | Complex reasoning, code review, documentation | Opus 4.6, Sonnet 4.6, Haiku 4.5 |
-| **OpenAI** | Agentic coding, fast iteration | GPT-5.4, GPT-4.1, GPT-4o Mini |
-| **Gemini (Google)** | Long-context, multi-modal, budget tasks | Gemini 3.1 Pro Preview, Gemini 3 Flash Preview, Gemini 2.5 Flash Lite |
-| **Grok (xAI)** | Logic, analysis, sharp reasoning | Grok Code Fast 1, Grok 3, Grok 3 Mini |
-| **Ollama (Local)** | Privacy, zero cost, offline/air-gapped | DeepSeek-R1, Llama 3, Mistral, any GGUF |
+| **Claude (Anthropic)** | Complex reasoning, code review, documentation | Configured Anthropic routes by power mode and account access |
+| **OpenAI** | Agentic coding, fast iteration | Configured OpenAI routes by power mode and account access |
+| **Gemini (Google)** | Long-context, multi-modal, budget tasks | Configured Google routes by power mode and account access |
+| **Grok (xAI)** | Logic, analysis, sharp reasoning | Configured xAI routes by power mode and account access |
+| **Ollama (Local / Cloud)** | BYOK/open-model routing, privacy-sensitive work, cost control | Any model exposed by the configured Ollama endpoint |
 | **BYOK** | Your own quotas and billing | Anything your keys allow |
 
 ---
@@ -248,8 +248,8 @@ Credit packs extend managed usage; they do not unlock backend/full-stack capabil
 
 | | Free | Builder | Pro | Team | Enterprise |
 |---|---|---|---|---|---|
-| **Price** | $0/mo | $24/mo | $59/mo | $149/mo | Contact |
-| **Annual** | — | $230/yr | $566/yr | $1430/yr | Negotiated |
+| **Price** | $0/mo | $24/mo | $79/mo | $149/mo | Contact |
+| **Annual** | — | $230/yr | $758/yr | $1430/yr | Negotiated |
 | **AI credits/mo** | 0 | $12 | $40 | $110 | Negotiated |
 | **Projects** | 3 | Unlimited | Unlimited | Unlimited | Unlimited |
 | **Storage** | 1 GB | 5 GB | 20 GB | 50 GB | Custom |

@@ -76,6 +76,7 @@ func newEngineFromEnv() *Engine {
 			"claude": {
 				Default: ModelPricing{InputPer1M: 3.00, OutputPer1M: 15.00},
 				Models: map[string]ModelPricing{
+					"claude-opus-4-7":            {InputPer1M: 5.00, OutputPer1M: 25.00},
 					"claude-opus-4-6":            {InputPer1M: 5.00, OutputPer1M: 25.00},
 					"claude-sonnet-4-6":          {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"claude-sonnet-4-5-20250929": {InputPer1M: 3.00, OutputPer1M: 15.00},
@@ -100,7 +101,9 @@ func newEngineFromEnv() *Engine {
 					"gemini-3.1-pro":         {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"gemini-3.1-pro-preview": {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"gemini-3-pro-preview":   {InputPer1M: 2.00, OutputPer1M: 6.00},
+					"gemini-2.5-pro":         {InputPer1M: 1.25, OutputPer1M: 10.00}, // balanced default
 					"gemini-3-flash-preview": {InputPer1M: 0.75, OutputPer1M: 3.00},
+					"gemini-2.5-flash":       {InputPer1M: 0.30, OutputPer1M: 2.50},
 					"gemini-2.5-flash-lite":  {InputPer1M: 0.10, OutputPer1M: 0.40},
 				},
 			},
@@ -232,7 +235,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 	switch providerKey {
 	case "claude":
 		if mode == ModeMax {
-			return "claude-opus-4-6"
+			return "claude-opus-4-7"
 		}
 		if mode == ModeBalanced {
 			return "claude-sonnet-4-6"
@@ -251,7 +254,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 			return "gemini-3.1-pro"
 		}
 		if mode == ModeBalanced {
-			return "gemini-3-flash-preview"
+			return "gemini-2.5-pro"
 		}
 		return "gemini-2.5-flash-lite"
 	case "grok":

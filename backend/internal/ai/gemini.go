@@ -43,10 +43,19 @@ type geminySafety struct {
 }
 
 type geminiGenConfig struct {
-	Temperature     float32 `json:"temperature,omitempty"`
-	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
-	TopP            float32 `json:"topP,omitempty"`
-	TopK            int     `json:"topK,omitempty"`
+	Temperature     float32                `json:"temperature,omitempty"`
+	MaxOutputTokens int                    `json:"maxOutputTokens,omitempty"`
+	TopP            float32                `json:"topP,omitempty"`
+	TopK            int                    `json:"topK,omitempty"`
+	ThinkingConfig  *geminiThinkingConfig  `json:"thinkingConfig,omitempty"`
+}
+
+// geminiThinkingConfig controls the thinking budget for "thinking" Gemini
+// models (e.g., gemini-2.5-pro). For thinking-required models, the API
+// rejects budget=0 — a non-zero budget must be set, and that budget is
+// consumed before any visible output tokens are produced.
+type geminiThinkingConfig struct {
+	ThinkingBudget int `json:"thinkingBudget"`
 }
 
 type geminiResponse struct {
@@ -100,6 +109,27 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	systemPrompt := g.buildSystemPrompt(req.Capability, req.Language)
 	userPrompt := g.buildUserPrompt(req)
 
+	// Select appropriate model - respect explicit override
+	model := g.getModelForCapability(req.Capability)
+	if req.Model != "" {
+		model = req.Model
+	}
+
+	// Build generation config. Thinking-required models (e.g. gemini-2.5-pro)
+	// burn a fixed thinking budget *before* any visible output tokens, so we
+	// pad MaxOutputTokens by the thinking budget to avoid silent truncation.
+	maxOut := g.getMaxTokens(req)
+	genConfig := &geminiGenConfig{
+		Temperature:     req.Temperature,
+		MaxOutputTokens: maxOut,
+		TopP:            0.8,
+		TopK:            40,
+	}
+	if budget := geminiThinkingBudgetForModel(model); budget > 0 {
+		genConfig.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: budget}
+		genConfig.MaxOutputTokens = maxOut + budget
+	}
+
 	// Create Gemini API request
 	geminiReq := &geminiRequest{
 		Contents: []geminiContent{
@@ -116,18 +146,7 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 			{Category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", Threshold: "BLOCK_MEDIUM_AND_ABOVE"},
 			{Category: "HARM_CATEGORY_DANGEROUS_CONTENT", Threshold: "BLOCK_MEDIUM_AND_ABOVE"},
 		},
-		GenerationConfig: &geminiGenConfig{
-			Temperature:     req.Temperature,
-			MaxOutputTokens: g.getMaxTokens(req),
-			TopP:            0.8,
-			TopK:            40,
-		},
-	}
-
-	// Select appropriate model - respect explicit override
-	model := g.getModelForCapability(req.Capability)
-	if req.Model != "" {
-		model = req.Model
+		GenerationConfig: genConfig,
 	}
 
 	// Make API request
@@ -199,10 +218,28 @@ func geminiModelFallbacks(model string) []string {
 		return []string{"gemini-3.1-pro-preview", "gemini-2.5-pro"}
 	case "gemini-3-pro-preview":
 		return []string{"gemini-3-pro-preview", "gemini-3.1-pro-preview", "gemini-2.5-pro"}
+	case "gemini-2.5-pro":
+		// Balanced default. If 2.5-pro is unavailable for any reason, fall
+		// through to a non-thinking flash tier rather than failing the build.
+		return []string{"gemini-2.5-pro", "gemini-3-flash-preview", "gemini-2.5-flash"}
 	case "gemini-3-flash-preview":
 		return []string{"gemini-3-flash-preview", "gemini-2.5-flash"}
 	default:
 		return []string{model}
+	}
+}
+
+// geminiThinkingBudgetForModel returns the thinking-token budget to attach
+// for thinking-required Gemini models. Returns 0 when no thinking config
+// should be sent (the API rejects budget=0 for thinking-only models, so we
+// only set it when explicitly needed).
+func geminiThinkingBudgetForModel(model string) int {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gemini-2.5-pro":
+		// 1024 covers most reasoning-heavy build/repair calls without runaway cost.
+		return 1024
+	default:
+		return 0
 	}
 }
 

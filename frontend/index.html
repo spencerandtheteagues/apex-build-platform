@@ -161,11 +161,10 @@
           <article class="seo-card">
             <h3>Browser-verified previews</h3>
             <p>
-              Every preview is loaded in a real headless Chromium with chromedp before we report it
-              as working. We check for runtime errors, network failures, and missing assets. The
-              build is verified to render and respond before it gets shipped. Competitors provide
-              previews and deployment workflows; Apex makes explicit runtime verification part of
-              the product guarantee.
+              For supported generated preview flows, Apex loads the preview in a real headless
+              Chromium with chromedp before reporting that preview as working. We check for runtime
+              errors, network failures, and missing assets. Competitors provide previews and
+              deployment workflows; Apex makes explicit runtime verification a visible build gate.
             </p>
           </article>
           <article class="seo-card">
@@ -204,10 +203,9 @@
           <article class="seo-card">
             <h3>Enterprise from day one</h3>
             <p>
-              SAML SSO, SCIM provisioning, RBAC roles, audit logs, single-tenant deployment, and VPC
-              peering are part of the Team and Enterprise architecture. Apex is designed to expose
-              serious deployment and governance controls alongside the build workflow instead of
-              burying them outside the product surface.
+              SAML SSO, SCIM provisioning, RBAC roles, and audit logs are part of the Team and
+              Enterprise architecture. Enterprise deployments can include single-tenant isolation,
+              private networking, and on-prem implementation support where contracted.
             </p>
           </article>
         </div>
@@ -463,8 +461,9 @@
           </article>
         </div>
         <p class="seo-copy seo-copy-muted">
-          Top-up credit packs from $10 to $100. Annual plans save 20%. Enterprise plans include
-          single-tenant deployment, VPC peering, on-prem options, and procurement support.
+          Top-up credit packs from $10 to $100. Annual plans save 20%. Enterprise deployments can
+          include single-tenant isolation, private networking, on-prem implementation support, and
+          procurement support where contracted.
         </p>
       </section>
 
@@ -490,18 +489,16 @@
           </dd>
           <dt>Which AI providers does Apex support?</dt>
           <dd>
-            <strong>OpenAI</strong> — GPT-5.4 Pro, GPT-4.1, GPT-4o-mini.
-            <strong>Anthropic</strong> — Claude Opus 4.7, Sonnet 4.6, Haiku 4.5.
-            <strong>Google</strong> — Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash Lite.
-            <strong>xAI</strong> — Grok 4.20 reasoning, Grok 3, Grok 3 Mini.
-            <strong>Ollama-cloud / self-hosted</strong> — Kimi K2.6, GLM 5.1, DeepSeek R1.
-            With automatic failover, health monitoring, and per-task model selection.
+            Apex supports configured routes across OpenAI, Anthropic, Google, xAI, Ollama Cloud,
+            and self-hosted/open-model infrastructure. Available model names depend on provider
+            account access and platform configuration. The router exposes health monitoring,
+            failover, and per-task model selection instead of hard-coding one vendor.
           </dd>
           <dt>Can I bring my own API keys?</dt>
           <dd>
-            Yes. BYOK is supported for every major provider on Pro and Team plans. Keys are
-            encrypted at rest, never logged, and can be mixed with managed credits per project.
-            BYOK calls bypass the Apex markup engine.
+            Yes. BYOK is supported for major providers on Pro and Team plans. Keys are encrypted
+            at rest, never logged, and can be mixed with managed credits per project. BYOK calls
+            bypass Apex-managed model markup; any Apex routing or platform fee is shown separately.
           </dd>
           <dt>What languages and stacks does Apex support?</dt>
           <dd>
@@ -511,10 +508,10 @@
           </dd>
           <dt>Is the preview really verified, or just transpiled?</dt>
           <dd>
-            Really verified. Apex spins up a headless Chromium via chromedp, loads the deployed
-            preview, captures runtime errors, network failures, and console exceptions, and only
-            reports success after the page renders. If verification fails, the build is repaired
-            and rerun automatically.
+            For supported generated preview flows, Apex spins up a headless Chromium via chromedp,
+            loads the preview, captures runtime errors, network failures, and console exceptions,
+            and only reports that preview as successful after the page renders. If verification
+            fails, Apex surfaces the failure and attempts targeted repair.
           </dd>
           <dt>Is there a free trial?</dt>
           <dd>
@@ -523,8 +520,9 @@
           </dd>
           <dt>Can I run Apex on-prem or in a private cloud?</dt>
           <dd>
-            Yes. Enterprise plans support single-tenant deployment, VPC peering, and full on-prem
-            installs with your own AI provider keys. SOC 2 docs available on request.
+            Yes. Enterprise deployment options can include single-tenant deployment, private
+            networking, and on-prem implementation support with your own AI provider keys where
+            contracted. Security documentation is available on request.
           </dd>
         </dl>
       </section>
