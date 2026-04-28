@@ -29,18 +29,19 @@ import (
 // ContainerPreviewServer provides Docker-based preview isolation
 type ContainerPreviewServer struct {
 	*PreviewServer
-	containerSessions map[uint]*ContainerSession
-	containerMu       sync.RWMutex
-	config            *ContainerPreviewConfig
-	dockerAvailable   bool
-	dockerHost        string
-	dockerContext     string
-	dockerDiagnostic  string
-	seccompProfile    string
-	baseTempDir       string
-	stats             *ContainerPreviewStats
-	cleanupTicker     *time.Ticker
-	stopCleanup       chan struct{}
+	containerSessions     map[uint]*ContainerSession
+	containerMu           sync.RWMutex
+	config                *ContainerPreviewConfig
+	dockerAvailable       bool
+	dockerHost            string
+	dockerContext         string
+	dockerDiagnostic      string
+	seccompProfile        string
+	baseTempDir           string
+	stats                 *ContainerPreviewStats
+	cleanupTicker         *time.Ticker
+	stopCleanup           chan struct{}
+	containerRunningCheck func(containerID string) bool
 }
 
 // ContainerSession represents an active container-based preview
@@ -418,10 +419,14 @@ func (s *ContainerPreviewServer) StartContainerPreview(ctx context.Context, conf
 
 	// Check if container session already exists
 	if session, exists := s.containerSessions[config.ProjectID]; exists {
-		session.mu.Lock()
-		session.LastAccess = time.Now()
-		session.mu.Unlock()
-		return s.getContainerStatus(session), nil
+		if s.isContainerRunning(session.ContainerID) {
+			session.mu.Lock()
+			session.LastAccess = time.Now()
+			session.mu.Unlock()
+			return s.getContainerStatus(session), nil
+		}
+		delete(s.containerSessions, config.ProjectID)
+		s.forgetContainerSession(config.ProjectID, session)
 	}
 
 	// Create container config with defaults
@@ -671,8 +676,57 @@ func (s *ContainerPreviewServer) GetContainerPreviewStatus(projectID uint) *Prev
 			Active:    false,
 		}
 	}
+	if !s.isContainerRunning(session.ContainerID) {
+		s.containerMu.Lock()
+		current, stillExists := s.containerSessions[projectID]
+		if stillExists && current.ContainerID == session.ContainerID {
+			delete(s.containerSessions, projectID)
+		}
+		s.containerMu.Unlock()
+		if stillExists && current.ContainerID == session.ContainerID {
+			s.forgetContainerSession(projectID, session)
+		}
+		return &PreviewStatus{
+			ProjectID: projectID,
+			Active:    false,
+		}
+	}
 
 	return s.getContainerStatus(session)
+}
+
+func (s *ContainerPreviewServer) isContainerRunning(containerID string) bool {
+	if s.containerRunningCheck != nil {
+		return s.containerRunningCheck(containerID)
+	}
+	return s.containerRunning(containerID)
+}
+
+func (s *ContainerPreviewServer) forgetContainerSession(projectID uint, session *ContainerSession) {
+	if s.stats != nil && atomic.LoadInt32(&s.stats.ActiveContainers) > 0 {
+		atomic.AddInt32(&s.stats.ActiveContainers, -1)
+	}
+	s.releaseContainerPort(projectID)
+	go s.cleanupContainerSessionResources(session)
+}
+
+func (s *ContainerPreviewServer) cleanupContainerSessionResources(session *ContainerSession) {
+	if session == nil {
+		return
+	}
+	ctx := context.Background()
+	if session.ContainerID != "" {
+		_ = s.removeContainer(ctx, session.ContainerID)
+	}
+	if session.ContainerName != "" && session.ContainerName != session.ContainerID {
+		_ = s.removeContainer(ctx, session.ContainerName)
+	}
+	if session.ImageName != "" {
+		_ = s.removeImage(ctx, session.ImageName)
+	}
+	if session.TempDir != "" && s.baseTempDir != "" && strings.HasPrefix(session.TempDir, s.baseTempDir) {
+		_ = os.RemoveAll(session.TempDir)
+	}
 }
 
 // buildDockerImage builds a Docker image from the project files

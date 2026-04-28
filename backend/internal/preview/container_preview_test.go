@@ -2,7 +2,9 @@ package preview
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDerivePreviewConnectHostFromSSHDockerHost(t *testing.T) {
@@ -106,5 +108,46 @@ func TestDockerMissingResourceOutputClassifiesIdempotentCleanup(t *testing.T) {
 
 	if dockerMissingResourceOutput([]byte("permission denied while trying to connect to the Docker daemon socket")) {
 		t.Fatal("permission errors must not be treated as idempotent cleanup")
+	}
+}
+
+func TestContainerPreviewStatusDropsDeadSession(t *testing.T) {
+	t.Parallel()
+
+	projectID := uint(53)
+	server := &ContainerPreviewServer{
+		PreviewServer: &PreviewServer{
+			portMap: map[uint]int{projectID: 10000},
+		},
+		containerSessions: map[uint]*ContainerSession{
+			projectID: {
+				ProjectID:     projectID,
+				ContainerID:   "missing-container",
+				ContainerName: "apex-preview-53",
+				Port:          10000,
+				StartedAt:     time.Now(),
+				LastAccess:    time.Now(),
+			},
+		},
+		config: &ContainerPreviewConfig{ConnectHost: "177.7.36.223"},
+		stats:  &ContainerPreviewStats{},
+		containerRunningCheck: func(containerID string) bool {
+			return false
+		},
+	}
+	atomic.StoreInt32(&server.stats.ActiveContainers, 1)
+
+	status := server.GetContainerPreviewStatus(projectID)
+	if status.Active {
+		t.Fatalf("dead container session reported active: %+v", status)
+	}
+	if _, exists := server.containerSessions[projectID]; exists {
+		t.Fatal("dead container session was not removed from memory")
+	}
+	if _, exists := server.portMap[projectID]; exists {
+		t.Fatal("dead container session port was not released")
+	}
+	if got := atomic.LoadInt32(&server.stats.ActiveContainers); got != 0 {
+		t.Fatalf("active container count = %d, want 0", got)
 	}
 }
