@@ -77,7 +77,7 @@ const CONTROL_SURFACES: Array<{ icon: IconType; title: string; body: string; sta
   {
     icon: KeyRound,
     title: 'BYOK routing',
-    body: 'Assign OpenAI, Anthropic, Gemini, xAI, Kimi, Ollama, or local models by role while spend stays visible per provider.',
+    body: 'Assign OpenAI, Anthropic, Gemini, xAI, Ollama Cloud (Pro+), or local models by role while spend stays visible per provider.',
     status: 'model control',
   },
   {
@@ -1742,8 +1742,8 @@ const ModelRouting = () => (
             Icon: Brain,
           },
           {
-            title: 'Local or cloud Ollama',
-            body: 'Run open-weight models through Ollama endpoints and reduce provider spend without losing the agent framework.',
+            title: 'Ollama Cloud (Pro+)',
+            body: 'Route any agent role through kimi-k2.6, GLM-5.1, DeepSeek V4, Qwen 3.5, Gemma 4, Devstral 2, or more — 7 top open-weight models, one flat-rate subscription.',
             Icon: Cpu,
           },
           {
@@ -1815,9 +1815,9 @@ const Pricing = ({ onGetStarted }: LandingProps) => (
       <div className="pricing-grid">
         {[
           ['Free', '$0', ['Static frontend experiments', 'Prompt-to-UI exploration', 'Upgrade required for backend/auth/billing']],
-          ['Builder', '$29', ['3-day trial', 'Full-stack builds', 'GitHub import/export', 'Live preview and IDE']],
-          ['Pro', '$79', ['3-day trial', 'BYOK controls', 'Budget caps', 'Advanced verification'], true],
-          ['Team', '$199', ['3-day trial', 'Collaboration', 'Shared secrets', 'Admin controls']],
+          ['Builder', '$24', ['Full-stack builds', 'GitHub import/export', 'BYOK — any provider API key', 'Live preview and IDE']],
+          ['Pro', '$59', ['Ollama Cloud builds — 7 top open-weight models', 'BYOK controls', 'Budget caps', 'Priority queue'], true],
+          ['Team', '$149', ['Everything in Pro', 'Collaboration', 'Shared secrets', 'Admin controls']],
         ].map(([name, price, features, featured]) => (
           <motion.article key={name as string} className={`launch-card price-card ${featured ? 'featured' : ''}`} {...fadeUp}>
             <h3>{name}</h3>

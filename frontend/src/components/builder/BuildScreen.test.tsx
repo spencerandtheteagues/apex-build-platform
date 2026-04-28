@@ -61,6 +61,7 @@ const baseProps = () => ({
     gemini: 'auto',
     grok: 'auto',
     ollama: 'auto',
+    ollama_cloud: 'kimi-k2.6',
   },
   providerModelOptions: {
     claude: [{ id: 'claude-opus-4-6', name: 'Claude Opus 4.6' }],
@@ -68,6 +69,7 @@ const baseProps = () => ({
     gemini: [{ id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' }],
     grok: [{ id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' }],
     ollama: [{ id: 'kimi-k2.6', name: 'Kimi K2.6' }],
+    ollama_cloud: [{ id: 'kimi-k2.6', name: 'Kimi K2.6' }],
   },
   providerModelPendingProvider: null,
   agentMessageDrafts: {},

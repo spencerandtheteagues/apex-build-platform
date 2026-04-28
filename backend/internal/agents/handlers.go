@@ -524,7 +524,8 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	// Validate role_assignments if provided
 	if req.RoleAssignments != nil {
 		validCats := map[string]bool{"architect": true, "coder": true, "tester": true, "devops": true}
-		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true}
+		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true, "ollama_cloud": true}
+		usesOllamaCloud := false
 		for cat, prov := range req.RoleAssignments {
 			if !validCats[cat] {
 				c.JSON(http.StatusBadRequest, gin.H{
@@ -536,14 +537,31 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 			if !validProvs[prov] {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":   "invalid provider",
-					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama", prov),
+					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama, ollama_cloud", prov),
 				})
 				return
 			}
 			if prov == "ollama" && strings.ToLower(strings.TrimSpace(req.ProviderMode)) != "byok" {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":   "invalid provider for hosted build",
-					"details": "Ollama is local/BYOK-only. Hosted platform builds may only assign Claude, GPT, Gemini, or Grok.",
+					"details": "Ollama (local) is BYOK-only. Use ollama_cloud for hosted platform builds, or set provider_mode=byok.",
+				})
+				return
+			}
+			if prov == "ollama_cloud" {
+				usesOllamaCloud = true
+			}
+		}
+		// Ollama Cloud requires Pro+ subscription
+		if usesOllamaCloud {
+			isPro := planType == "pro" || planType == "team" || planType == "enterprise" || planType == "owner"
+			if !isPro {
+				c.JSON(http.StatusPaymentRequired, gin.H{
+					"error":        "Ollama Cloud requires Pro plan",
+					"error_code":   "OLLAMA_CLOUD_UPGRADE_REQUIRED",
+					"current_plan": planType,
+					"suggestion":   "Upgrade to Pro ($59/mo) to use Ollama Cloud — 7 top open-weight models, flat-rate.",
+					"upgrade_url":  "/settings/billing",
 				})
 				return
 			}
@@ -551,21 +569,36 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	}
 
 	if req.ProviderModelOverrides != nil {
-		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true}
+		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true, "ollama_cloud": true}
 		for provider, model := range req.ProviderModelOverrides {
 			if !validProvs[provider] {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":   "invalid provider",
-					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama", provider),
+					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama, ollama_cloud", provider),
 				})
 				return
 			}
 			if provider == "ollama" && strings.ToLower(strings.TrimSpace(req.ProviderMode)) != "byok" {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":   "invalid provider for hosted build",
-					"details": "Ollama is local/BYOK-only. Hosted platform builds may only override Claude, GPT, Gemini, or Grok models.",
+					"details": "Ollama (local) is BYOK-only. Hosted platform builds may only override Claude, GPT, Gemini, Grok, or Ollama Cloud.",
 				})
 				return
+			}
+			// ollama_cloud model overrides are always allowed for platform builds (Pro+ checked above in role_assignments)
+			if provider == "ollama_cloud" && req.RoleAssignments == nil {
+				// standalone model override without explicit role_assignments; check Pro+
+				isPro := planType == "pro" || planType == "team" || planType == "enterprise" || planType == "owner"
+				if !isPro {
+					c.JSON(http.StatusPaymentRequired, gin.H{
+						"error":        "Ollama Cloud requires Pro plan",
+						"error_code":   "OLLAMA_CLOUD_UPGRADE_REQUIRED",
+						"current_plan": planType,
+						"suggestion":   "Upgrade to Pro ($59/mo) to use Ollama Cloud.",
+						"upgrade_url":  "/settings/billing",
+					})
+					return
+				}
 			}
 			normalizedModel := strings.TrimSpace(model)
 			if normalizedModel != "" && !strings.EqualFold(normalizedModel, "auto") && !modelBelongsToProvider(ai.AIProvider(provider), normalizedModel) {
@@ -1696,7 +1729,7 @@ func (h *BuildHandler) SetProviderModelOverride(c *gin.Context) {
 
 	provider := ai.AIProvider(strings.TrimSpace(strings.ToLower(req.Provider)))
 	switch provider {
-	case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama:
+	case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama, ai.ProviderOllamaCloud:
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "invalid provider",
@@ -1708,7 +1741,7 @@ func (h *BuildHandler) SetProviderModelOverride(c *gin.Context) {
 	if provider == ai.ProviderOllama && strings.ToLower(strings.TrimSpace(build.ProviderMode)) != "byok" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "invalid provider for hosted build",
-			"details": "Ollama is local/BYOK-only.",
+			"details": "Ollama (local) is BYOK-only. Use ollama_cloud for hosted platform builds.",
 		})
 		return
 	}

@@ -19,6 +19,7 @@ import (
 type OllamaClient struct {
 	baseURL    string
 	apiKey     string
+	provider   AIProvider // ProviderOllama (local) or ProviderOllamaCloud
 	httpClient *http.Client
 	usage      *ProviderUsage
 	usageMu    sync.RWMutex
@@ -93,8 +94,9 @@ func NewOllamaClient(baseURL, apiKey string) *OllamaClient {
 	// Strip trailing /v1 so makeRequest can always append /v1/<path> without doubling it.
 	baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
 	return &OllamaClient{
-		baseURL: baseURL,
-		apiKey:  apiKey,
+		baseURL:  baseURL,
+		apiKey:   apiKey,
+		provider: ProviderOllama,
 		httpClient: &http.Client{
 			Timeout: 900 * time.Second,
 		},
@@ -105,19 +107,21 @@ func NewOllamaClient(baseURL, apiKey string) *OllamaClient {
 	}
 }
 
-// NewOllamaCloudClient creates an Ollama client configured for Ollama Cloud (e.g., kimi-k2.6:cloud)
+// NewOllamaCloudClient creates an Ollama client configured for Ollama Cloud hosted models (Pro+).
+// baseURL should be "https://ollama.com" (or wherever the Ollama Cloud API lives).
 func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
 	if baseURL == "" {
-		baseURL = "http://127.0.0.1:11434"
+		baseURL = "https://ollama.com"
 	}
 	return &OllamaClient{
-		baseURL: baseURL,
-		apiKey:  apiKey,
+		baseURL:  baseURL,
+		apiKey:   apiKey,
+		provider: ProviderOllamaCloud,
 		httpClient: &http.Client{
 			Timeout: 15 * time.Minute, // 15-minute timeout for large cloud models
 		},
 		usage: &ProviderUsage{
-			Provider: ProviderOllama,
+			Provider: ProviderOllamaCloud,
 			LastUsed: time.Now(),
 		},
 	}
@@ -143,14 +147,14 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		o.incrementErrorCount()
 		return &AIResponse{
 			ID:        req.ID,
-			Provider:  ProviderOllama,
+			Provider:  o.GetProvider(),
 			Error:     err.Error(),
 			Duration:  time.Since(startTime),
 			CreatedAt: time.Now(),
 		}, err
 	}
 
-	// Ollama runs locally — cost is always $0
+	// Ollama Cloud is flat-rate subscription — cost is $0 per request
 	cost := 0.0
 	o.updateUsage(resp.Usage.TotalTokens, cost, time.Since(startTime))
 
@@ -161,7 +165,7 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 
 	return &AIResponse{
 		ID:       req.ID,
-		Provider: ProviderOllama,
+		Provider: o.GetProvider(),
 		Content:  content,
 		Metadata: map[string]interface{}{
 			"model": resp.Model,
@@ -351,8 +355,11 @@ func (o *OllamaClient) GetCapabilities() []AICapability {
 	}
 }
 
-// GetProvider returns the provider identifier
+// GetProvider returns the provider identifier (ProviderOllama for local, ProviderOllamaCloud for cloud)
 func (o *OllamaClient) GetProvider() AIProvider {
+	if o.provider != "" {
+		return o.provider
+	}
 	return ProviderOllama
 }
 

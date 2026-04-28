@@ -100,6 +100,15 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 	if ollamaURL != "" {
 		clients[ProviderOllama] = NewOllamaClient(ollamaURL, ollamaAPIKey)
 	}
+	// Register Ollama Cloud as a separate platform provider when API key is configured.
+	// ProviderOllamaCloud is gated behind Pro+ on the API layer; the router just routes it.
+	if ollamaAPIKey != "" {
+		cloudURL := ollamaURL
+		if cloudURL == "" {
+			cloudURL = "https://ollama.com"
+		}
+		clients[ProviderOllamaCloud] = NewOllamaCloudClient(cloudURL, ollamaAPIKey)
+	}
 
 	for provider, emulation := range configuredOllamaEmulations() {
 		if _, exists := clients[provider]; exists {

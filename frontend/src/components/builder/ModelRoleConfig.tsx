@@ -14,6 +14,9 @@ import {
   Settings,
   AlertCircle,
   Check,
+  Lock,
+  ChevronDown,
+  Zap,
 } from 'lucide-react'
 
 // User-facing role categories (maps to backend UserRoleCategory)
@@ -34,6 +37,17 @@ const PLATFORM_PROVIDERS = [
 ] as const
 
 const OLLAMA_PROVIDER = { id: 'ollama', label: 'Ollama', subtitle: 'Local', letter: 'O', borderActive: 'border-cyan-500/60', bgActive: 'bg-cyan-500/10', text: 'text-cyan-400', shadow: 'shadow-cyan-500/10' } as const
+
+// Ollama Cloud models available under Pro+ flat-rate subscription
+const OLLAMA_CLOUD_MODELS = [
+  { id: 'kimi-k2.6',         name: 'Kimi K2.6',         desc: '128B MoE · Frontier reasoning + long context' },
+  { id: 'glm-5.1',           name: 'GLM-5.1',            desc: '128B · Fast + capable, excels at code' },
+  { id: 'deepseek-v4-pro',   name: 'DeepSeek V4 Pro',    desc: '236B MoE · Top code + math reasoning' },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash',  desc: '21B · Ultra-fast DeepSeek V4 distill' },
+  { id: 'qwen3.5:397b',      name: 'Qwen 3.5 (397B)',    desc: '397B MoE · Best open-weight general model' },
+  { id: 'gemma4:31b',        name: 'Gemma 4 (31B)',       desc: '31B · Google\'s efficient open model' },
+  { id: 'devstral-2:123b',   name: 'Devstral 2 (123B)',  desc: '123B · Mistral\'s best coding model' },
+] as const
 
 // Default assignments matching backend policy
 const DEFAULT_ASSIGNMENTS: Record<string, string> = {
@@ -60,6 +74,9 @@ interface ModelRoleConfigProps {
   assignments: Record<string, string>
   onAssignmentsChange: (assignments: Record<string, string>) => void
   providerStatuses: Record<string, string>
+  isPro?: boolean
+  ollamaCloudModel?: string
+  onOllamaCloudModelChange?: (model: string) => void
 }
 
 export default function ModelRoleConfig({
@@ -68,7 +85,12 @@ export default function ModelRoleConfig({
   assignments,
   onAssignmentsChange,
   providerStatuses,
+  isPro = false,
+  ollamaCloudModel = 'kimi-k2.6',
+  onOllamaCloudModelChange,
 }: ModelRoleConfigProps) {
+  const [cloudModelOpen, setCloudModelOpen] = React.useState(false)
+
   // Build visible providers: always show platform providers, add Ollama only when user has it
   const visibleProviders = 'ollama' in providerStatuses
     ? [...PLATFORM_PROVIDERS, OLLAMA_PROVIDER]
@@ -79,20 +101,20 @@ export default function ModelRoleConfig({
   const toggleRole = (roleId: string, providerId: string) => {
     const updated = { ...assignments }
     if (updated[roleId] === providerId) {
-      // Unassign
       delete updated[roleId]
     } else {
-      // Assign (moves from previous provider if any)
       updated[roleId] = providerId
     }
     onAssignmentsChange(updated)
   }
 
   const isProviderAvailable = (providerId: string) => {
-    // If we have no status data yet (preflight hasn't returned), assume available
     if (Object.keys(providerStatuses).length === 0) return true
     return providerStatuses[providerId] === 'available'
   }
+
+  const ollamaCloudAssignedRoles = ROLE_CATEGORIES.filter(cat => assignments[cat.id] === 'ollama_cloud')
+  const selectedCloudModel = OLLAMA_CLOUD_MODELS.find(m => m.id === ollamaCloudModel) ?? OLLAMA_CLOUD_MODELS[0]
 
   return (
     <Card variant="cyberpunk" glow="intense" className="border border-[rgba(188,239,255,0.18)] bg-[rgba(7,15,32,0.78)] backdrop-blur-xl">
@@ -180,7 +202,7 @@ export default function ModelRoleConfig({
           /* Manual Mode: provider cards with role chips */
           <div>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-              Click a role chip to assign it to a model. Each role can only be assigned to one model. Ollama is only available for local/BYOK builds and is never used for hosted platform runs.
+              Click a role chip to assign it to a provider. Each role can only be assigned to one provider. Ollama (local) requires BYOK; Ollama Cloud is available to Pro+ subscribers at flat-rate.
             </p>
 
             <div className="space-y-3">
@@ -260,6 +282,111 @@ export default function ModelRoleConfig({
                   </div>
                 )
               })}
+            </div>
+
+            {/* Ollama Cloud section */}
+            <div className={cn(
+              'mt-1 p-4 rounded-xl border-2 transition-all duration-200',
+              isPro
+                ? ollamaCloudAssignedRoles.length > 0
+                  ? 'border-purple-500/60 bg-purple-500/10 shadow-lg shadow-purple-500/10'
+                  : 'border-purple-700/40 bg-gray-900/30 hover:border-purple-600/50'
+                : 'border-gray-800/40 bg-gray-950/30 opacity-60'
+            )}>
+              {/* Header */}
+              <div className="flex items-center gap-3 mb-3">
+                <div className={cn(
+                  'w-9 h-9 rounded-lg flex items-center justify-center font-bold text-base',
+                  isPro ? 'bg-purple-500/20 text-purple-300' : 'bg-gray-900 text-gray-600'
+                )}>
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className={cn('font-bold text-sm', isPro ? 'text-white' : 'text-gray-600')}>
+                    Ollama Cloud
+                  </span>
+                  <span className="text-[11px] text-gray-600 ml-1.5">7 top open-weight models · flat-rate</span>
+                </div>
+                {isPro ? (
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/20">
+                    Pro
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-700/40 text-gray-500 border border-gray-700/40 flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5" />Pro+
+                  </span>
+                )}
+              </div>
+
+              {isPro ? (
+                <>
+                  {/* Model selector */}
+                  <div className="mb-3 relative">
+                    <button
+                      onClick={() => setCloudModelOpen(v => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-gray-900/60 border border-gray-700/60 hover:border-purple-600/50 transition-colors text-left"
+                    >
+                      <div>
+                        <span className="text-sm font-medium text-gray-200">{selectedCloudModel.name}</span>
+                        <span className="text-[11px] text-gray-500 ml-2">{selectedCloudModel.desc}</span>
+                      </div>
+                      <ChevronDown className={cn('w-4 h-4 text-gray-500 flex-shrink-0 transition-transform', cloudModelOpen && 'rotate-180')} />
+                    </button>
+                    {cloudModelOpen && (
+                      <div className="absolute z-20 top-full mt-1 w-full rounded-xl bg-gray-900 border border-gray-700/60 shadow-xl overflow-hidden">
+                        {OLLAMA_CLOUD_MODELS.map(model => (
+                          <button
+                            key={model.id}
+                            onClick={() => {
+                              onOllamaCloudModelChange?.(model.id)
+                              setCloudModelOpen(false)
+                            }}
+                            className={cn(
+                              'w-full text-left px-3 py-2.5 hover:bg-purple-500/10 transition-colors flex items-start gap-2',
+                              ollamaCloudModel === model.id && 'bg-purple-500/15'
+                            )}
+                          >
+                            {ollamaCloudModel === model.id && <Check className="w-3.5 h-3.5 text-purple-400 mt-0.5 flex-shrink-0" />}
+                            {ollamaCloudModel !== model.id && <span className="w-3.5 h-3.5 flex-shrink-0" />}
+                            <div>
+                              <div className="text-sm font-medium text-gray-200">{model.name}</div>
+                              <div className="text-[11px] text-gray-500">{model.desc}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Role chips */}
+                  <div className="flex flex-wrap gap-2">
+                    {ROLE_CATEGORIES.map((cat) => {
+                      const isAssigned = assignments[cat.id] === 'ollama_cloud'
+                      const Icon = cat.icon
+                      const colors = CHIP_COLORS[cat.color]
+                      return (
+                        <button
+                          key={cat.id}
+                          onClick={() => toggleRole(cat.id, 'ollama_cloud')}
+                          className={cn(
+                            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border',
+                            isAssigned
+                              ? `${colors.active} ring-1 ${colors.ring}`
+                              : 'border-gray-700/50 bg-gray-800/40 text-gray-500 hover:border-purple-600/40 hover:text-gray-400'
+                          )}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          {cat.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  Upgrade to <strong className="text-gray-400">Pro ($59/mo)</strong> to route agents through Ollama Cloud — kimi-k2.6, GLM-5.1, DeepSeek V4, Qwen 3.5, Gemma 4, Devstral 2, and more at flat-rate.
+                </p>
+              )}
             </div>
 
             {/* Validation */}

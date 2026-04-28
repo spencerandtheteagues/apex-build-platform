@@ -55,6 +55,7 @@ type PlanLimits struct {
 	AIRequestsPerMonth      int  `json:"ai_requests_per_month"` // Platform-key requests; -1 for unlimited
 	BYOKEnabled             bool `json:"byok_enabled"`          // Can use Bring Your Own Key
 	BYOKUnlimited           bool `json:"byok_unlimited"`        // Unlimited requests via BYOK
+	OllamaCloudEnabled      bool `json:"ollama_cloud_enabled"`  // Can route agents through Ollama Cloud hosted models
 	ProjectsLimit           int  `json:"projects_limit"`        // -1 for unlimited
 	StorageGB               int  `json:"storage_gb"`
 	CollaboratorsPerProject int  `json:"collaborators_per_project"` // -1 for unlimited
@@ -141,6 +142,7 @@ func GetAllPlans() []Plan {
 				AIRequestsPerMonth:      0,
 				BYOKEnabled:             false,
 				BYOKUnlimited:           false,
+				OllamaCloudEnabled:      false,
 				ProjectsLimit:           3,
 				StorageGB:               1,
 				CollaboratorsPerProject: 1,
@@ -178,6 +180,7 @@ func GetAllPlans() []Plan {
 				AIRequestsPerMonth:      -1, // Unlimited via credits
 				BYOKEnabled:             true,
 				BYOKUnlimited:           true,
+				OllamaCloudEnabled:      false,
 				ProjectsLimit:           -1,
 				StorageGB:               5,
 				CollaboratorsPerProject: 1,
@@ -194,6 +197,7 @@ func GetAllPlans() []Plan {
 				"Backend and full-stack builds",
 				"All 5 AI agents",
 				"All 6 AI providers",
+				"Bring Your Own API Key (BYOK)",
 				"Deployable app architecture",
 				"Full cost transparency dashboard",
 				"Live per-token cost tracking",
@@ -217,6 +221,7 @@ func GetAllPlans() []Plan {
 				AIRequestsPerMonth:      -1, // Unlimited via credits
 				BYOKEnabled:             true,
 				BYOKUnlimited:           true,
+				OllamaCloudEnabled:      true,
 				ProjectsLimit:           -1,
 				StorageGB:               20,
 				CollaboratorsPerProject: 3,
@@ -231,6 +236,7 @@ func GetAllPlans() []Plan {
 			Features: []string{
 				"$40 in managed AI credits / mo",
 				"Everything in Builder",
+				"Ollama Cloud builds — 7 top open-weight models, flat-rate",
 				"Longer autonomous runs",
 				"Priority build queue",
 				"Advanced usage analytics",
@@ -255,6 +261,7 @@ func GetAllPlans() []Plan {
 				AIRequestsPerMonth:      -1, // Unlimited via credits
 				BYOKEnabled:             true,
 				BYOKUnlimited:           true,
+				OllamaCloudEnabled:      true,
 				ProjectsLimit:           -1,
 				StorageGB:               100, // matches tracker.go and UsageDashboard
 				CollaboratorsPerProject: -1,
@@ -269,6 +276,7 @@ func GetAllPlans() []Plan {
 			Features: []string{
 				"$110 in managed AI credits / mo",
 				"Everything in Pro",
+				"Ollama Cloud builds — 7 top open-weight models, flat-rate",
 				"Shared team workspace",
 				"Up to 5 seats",
 				"Priority build queue",
@@ -293,6 +301,7 @@ func GetAllPlans() []Plan {
 				AIRequestsPerMonth:      -1,
 				BYOKEnabled:             true,
 				BYOKUnlimited:           true,
+				OllamaCloudEnabled:      true,
 				ProjectsLimit:           -1,
 				StorageGB:               -1,
 				CollaboratorsPerProject: -1,
@@ -332,6 +341,7 @@ func GetAllPlans() []Plan {
 				AIRequestsPerMonth:      -1,
 				BYOKEnabled:             true,
 				BYOKUnlimited:           true,
+				OllamaCloudEnabled:      true,
 				ProjectsLimit:           -1,
 				StorageGB:               -1,
 				CollaboratorsPerProject: -1,
@@ -433,6 +443,10 @@ func CanAccessFeature(planType PlanType, feature string) bool {
 		return limits.SLA
 	case "custom_integrations":
 		return limits.CustomIntegrations
+	case "ollama_cloud":
+		return limits.OllamaCloudEnabled
+	case "byok":
+		return limits.BYOKEnabled
 	default:
 		return true
 	}

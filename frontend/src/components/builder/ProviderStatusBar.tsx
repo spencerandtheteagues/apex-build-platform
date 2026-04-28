@@ -4,7 +4,7 @@ import React from 'react'
 import { cn } from '@/lib/utils'
 
 type ProviderStatus = 'idle' | 'working' | 'thinking' | 'completed' | 'error' | 'unavailable'
-type SupportedProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
+type SupportedProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'ollama_cloud'
 
 interface PanelData {
   provider: SupportedProvider
@@ -97,6 +97,18 @@ const PROVIDER_CONFIG: Record<SupportedProvider, {
     dotWorking: 'bg-cyan-300',
     dotThinking: 'bg-yellow-400',
     badgeActive: 'bg-cyan-500/20 border-cyan-500/40 text-cyan-200',
+  },
+  ollama_cloud: {
+    label: 'Ollama Cloud',
+    tagline: 'Pro · Flat-rate',
+    borderActive: 'border-purple-500/70',
+    borderIdle: 'border-purple-500/15',
+    bgActive: 'bg-gradient-to-br from-purple-950/60 via-black to-slate-950/40',
+    textActive: 'text-purple-200',
+    glowActive: 'shadow-[0_0_24px_rgba(168,85,247,0.2)]',
+    dotWorking: 'bg-purple-300',
+    dotThinking: 'bg-yellow-400',
+    badgeActive: 'bg-purple-500/20 border-purple-500/40 text-purple-200',
   },
 }
 

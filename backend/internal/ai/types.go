@@ -9,11 +9,12 @@ import (
 type AIProvider string
 
 const (
-	ProviderClaude AIProvider = "claude"
-	ProviderGPT4   AIProvider = "gpt4"
-	ProviderGemini AIProvider = "gemini"
-	ProviderGrok   AIProvider = "grok"
-	ProviderOllama AIProvider = "ollama"
+	ProviderClaude      AIProvider = "claude"
+	ProviderGPT4        AIProvider = "gpt4"
+	ProviderGemini      AIProvider = "gemini"
+	ProviderGrok        AIProvider = "grok"
+	ProviderOllama      AIProvider = "ollama"       // local Ollama (BYOK)
+	ProviderOllamaCloud AIProvider = "ollama_cloud" // Ollama Cloud hosted models (Pro+)
 )
 
 // AICapability represents different AI use cases
@@ -169,35 +170,39 @@ func DefaultRouterConfig() *RouterConfig {
 		},
 		LoadBalancing: map[AIProvider]float64{
 			// Ollama (kimi-k2.6:cloud) is the primary orchestrator — highest weight.
-			ProviderOllama: 0.50,
-			ProviderClaude: 0.15,
-			ProviderGPT4:   0.15,
-			ProviderGrok:   0.10,
-			ProviderGemini: 0.10,
+			ProviderOllama:      0.50,
+			ProviderOllamaCloud: 0.40,
+			ProviderClaude:      0.15,
+			ProviderGPT4:        0.15,
+			ProviderGrok:        0.10,
+			ProviderGemini:      0.10,
 		},
 		RateLimits: map[AIProvider]int{
-			ProviderClaude: 100,  // requests per minute
-			ProviderGPT4:   80,   // requests per minute
-			ProviderGemini: 120,  // requests per minute
-			ProviderGrok:   100,  // requests per minute
-			ProviderOllama: 1000, // Local — no real limit
+			ProviderClaude:      100,  // requests per minute
+			ProviderGPT4:        80,   // requests per minute
+			ProviderGemini:      120,  // requests per minute
+			ProviderGrok:        100,  // requests per minute
+			ProviderOllama:      1000, // Local — no real limit
+			ProviderOllamaCloud: 60,   // Ollama Cloud — API rate limit
 		},
 		CostThresholds: map[AIProvider]float64{
-			ProviderClaude: 0.10, // max cost per request
-			ProviderGPT4:   0.15, // max cost per request
-			ProviderGemini: 0.08, // max cost per request
-			ProviderGrok:   0.05, // max cost per request
-			ProviderOllama: 0.00, // Free — runs locally
+			ProviderClaude:      0.10, // max cost per request
+			ProviderGPT4:        0.15, // max cost per request
+			ProviderGemini:      0.08, // max cost per request
+			ProviderGrok:        0.05, // max cost per request
+			ProviderOllama:      0.00, // Free — runs locally
+			ProviderOllamaCloud: 0.00, // Flat-rate subscription — no per-request cost
 		},
 		// Enable emergency fallback for BYOK scenarios to prevent build failures
 		EnableBYOKEmergencyFallback: true,
 		// Retry local models multiple times before falling back to cloud
 		MaxRetryAttempts: map[AIProvider]int{
-			ProviderClaude: 2, // Cloud providers get fewer retries
-			ProviderGPT4:   2, // Cloud providers get fewer retries
-			ProviderGemini: 2, // Cloud providers get fewer retries
-			ProviderGrok:   2, // Cloud providers get fewer retries
-			ProviderOllama: 5, // Local model gets more retries (network/startup issues)
+			ProviderClaude:      2, // Cloud providers get fewer retries
+			ProviderGPT4:        2, // Cloud providers get fewer retries
+			ProviderGemini:      2, // Cloud providers get fewer retries
+			ProviderGrok:        2, // Cloud providers get fewer retries
+			ProviderOllama:      5, // Local model gets more retries (network/startup issues)
+			ProviderOllamaCloud: 3, // Ollama Cloud — moderate retries
 		},
 	}
 }

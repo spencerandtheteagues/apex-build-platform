@@ -41,6 +41,13 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerBalanced: "kimi-k2.6",
 		PowerFast:     "glm-5.1",
 	},
+	// Ollama Cloud — 7 top open-weight models available via flat-rate subscription (Pro+)
+	// Default selects best model per power tier; user can override per-build via provider_model_overrides
+	ai.ProviderOllamaCloud: {
+		PowerMax:      "kimi-k2.6",      // Best: 128B MoE, frontier reasoning + long context
+		PowerBalanced: "glm-5.1",        // Fast + capable: GLM-5.1 cloud
+		PowerFast:     "gemma4:31b",     // Lightweight but capable for fast runs
+	},
 }
 
 // selectModelForPowerMode returns the best model ID for a given provider and power mode
@@ -82,6 +89,18 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 		return strings.HasPrefix(normalized, "grok-")
 	case ai.ProviderOllama:
 		return true
+	case ai.ProviderOllamaCloud:
+		// Accepted Ollama Cloud model IDs (Pro+ flat-rate subscription)
+		ollamaCloudModels := map[string]bool{
+			"kimi-k2.6":        true,
+			"glm-5.1":          true,
+			"deepseek-v4-pro":  true,
+			"deepseek-v4-flash": true,
+			"qwen3.5:397b":     true,
+			"gemma4:31b":       true,
+			"devstral-2:123b":  true,
+		}
+		return ollamaCloudModels[normalized]
 	default:
 		return false
 	}

@@ -429,7 +429,7 @@ const isActiveBuildStatus = (status?: string) =>
   status === 'reviewing' ||
   status === 'awaiting_review'
 
-type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
+type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'ollama_cloud'
 
 type ProviderModelTier = {
   id: string
@@ -465,6 +465,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gemini: { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
     grok: { id: 'grok-3-mini', name: 'Grok 3 Mini' },
     ollama: { id: 'glm-5.1', name: 'GLM-5.1' },
+    ollama_cloud: { id: 'gemma4:31b', name: 'Gemma 4 (31B)' },
   },
   balanced: {
     claude: { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
@@ -472,6 +473,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gemini: { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
     grok: { id: 'grok-3', name: 'Grok 3' },
     ollama: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
+    ollama_cloud: { id: 'glm-5.1', name: 'GLM-5.1' },
   },
   max: {
     claude: { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
@@ -479,6 +481,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gemini: { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
     grok: { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' },
     ollama: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
+    ollama_cloud: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
   },
 }
 
@@ -530,12 +533,21 @@ const PROVIDER_UI: Record<SupportedBuildProvider, {
     titleClass: 'text-cyan-100',
     dotClass: 'bg-cyan-300',
   },
+  ollama_cloud: {
+    label: 'Ollama Cloud',
+    badgeClass: 'border-purple-500/60 text-purple-200 bg-purple-500/10',
+    cardClass: 'border-purple-500/35 bg-gradient-to-br from-purple-950/45 via-black to-slate-950/35',
+    activeClass: 'shadow-[0_0_28px_rgba(168,85,247,0.18)]',
+    titleClass: 'text-purple-100',
+    dotClass: 'bg-purple-300',
+  },
 }
 
 const normalizeProviderKey = (provider?: string): SupportedBuildProvider | null => {
   const value = String(provider || '').toLowerCase()
   if (value === 'gpt' || value === 'gpt4' || value === 'openai') return 'gpt4'
   if (value === 'ollama' || value === 'local' || value === 'kimi' || value === 'kimi-k2.6') return 'ollama'
+  if (value === 'ollama_cloud' || value === 'ollama-cloud') return 'ollama_cloud'
   if (value === 'claude' || value === 'gemini' || value === 'grok') return value
   return null
 }
@@ -551,7 +563,19 @@ const DEFAULT_PROVIDER_MODEL_SELECTIONS: Record<SupportedBuildProvider, string> 
   gemini: 'auto',
   grok: 'auto',
   ollama: 'auto',
+  ollama_cloud: 'kimi-k2.6',
 }
+
+// Ollama Cloud model catalog (Pro+ flat-rate subscription)
+const OLLAMA_CLOUD_MODELS = [
+  { id: 'kimi-k2.6',        name: 'Kimi K2.6',        desc: '128B MoE · Frontier reasoning + long context' },
+  { id: 'glm-5.1',          name: 'GLM-5.1',           desc: '128B · Fast + capable, excels at code' },
+  { id: 'deepseek-v4-pro',  name: 'DeepSeek V4 Pro',   desc: '236B MoE · Top code + math reasoning' },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', desc: '21B · Ultra-fast DeepSeek V4 distill' },
+  { id: 'qwen3.5:397b',     name: 'Qwen 3.5 (397B)',   desc: '397B MoE · Best open-weight general model' },
+  { id: 'gemma4:31b',       name: 'Gemma 4 (31B)',      desc: '31B · Google\'s efficient open model' },
+  { id: 'devstral-2:123b',  name: 'Devstral 2 (123B)', desc: '123B · Mistral\'s best coding model' },
+] as const
 
 const canonicalizeModelId = (model?: string) => {
   const value = String(model || '').trim()
@@ -2023,6 +2047,7 @@ interface BuilderLaunchpadProps {
   roleConfigMode: 'auto' | 'manual'
   roleAssignments: Record<string, string>
   providerStatuses: Record<string, string>
+  ollamaCloudModel: string
   userPlan?: string
   userId?: number | null
   wireframeInputRef: React.RefObject<HTMLInputElement | null>
@@ -2037,6 +2062,7 @@ interface BuilderLaunchpadProps {
   onToggleStack: (id: string) => void
   onSetRoleConfigMode: (mode: 'auto' | 'manual') => void
   onSetRoleAssignments: (assignments: Record<string, string>) => void
+  onSetOllamaCloudModel: (model: string) => void
   onStartBuild: () => void
   onImportReplit: () => void
   onImportGitHub: () => void
@@ -2064,6 +2090,7 @@ const BuilderLaunchpad: React.FC<BuilderLaunchpadProps> = ({
   roleConfigMode,
   roleAssignments,
   providerStatuses,
+  ollamaCloudModel,
   userPlan,
   userId,
   wireframeInputRef,
@@ -2078,6 +2105,7 @@ const BuilderLaunchpad: React.FC<BuilderLaunchpadProps> = ({
   onToggleStack,
   onSetRoleConfigMode,
   onSetRoleAssignments,
+  onSetOllamaCloudModel,
   onStartBuild,
   onImportReplit,
   onImportGitHub,
@@ -2375,6 +2403,9 @@ const BuilderLaunchpad: React.FC<BuilderLaunchpadProps> = ({
             assignments={roleAssignments}
             onAssignmentsChange={onSetRoleAssignments}
             providerStatuses={providerStatuses}
+            ollamaCloudModel={ollamaCloudModel}
+            onOllamaCloudModelChange={onSetOllamaCloudModel}
+            isPro={['pro', 'team', 'enterprise', 'owner'].includes(userPlan || '')}
           />
         </div>
       </div>
@@ -2412,6 +2443,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
   // Model role assignment state
   const [roleConfigMode, setRoleConfigMode] = useState<'auto' | 'manual'>('auto')
   const [roleAssignments, setRoleAssignments] = useState<Record<string, string>>({})
+  const [ollamaCloudModel, setOllamaCloudModel] = useState<string>('kimi-k2.6')
   const [providerModelOverrides, setProviderModelOverrides] = useState<Record<SupportedBuildProvider, string>>(DEFAULT_PROVIDER_MODEL_SELECTIONS)
   const [providerModelPendingProvider, setProviderModelPendingProvider] = useState<SupportedBuildProvider | null>(null)
   const [providerStatuses, setProviderStatuses] = useState<Record<string, string>>({})
@@ -2451,6 +2483,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
     gemini: null,
     grok: null,
     ollama: null,
+    ollama_cloud: null,
   })
   const previewPreparedRef = useRef(false)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
@@ -6225,6 +6258,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
       const imageAttachment = attachedFiles.find(f => f.fileType === 'image')
       const effectiveWireframe = wireframeImage || imageAttachment?.content || undefined
 
+      // When any role uses ollama_cloud, include the selected model in overrides
+      const hasOllamaCloudRoles = roleConfigMode === 'manual' &&
+        Object.values(roleAssignments).some(p => p === 'ollama_cloud')
+      const ollamaCloudOverride = hasOllamaCloudRoles
+        ? { ...serializeProviderModelOverrides(providerModelOverrides), ollama_cloud: ollamaCloudModel }
+        : serializeProviderModelOverrides(providerModelOverrides)
+
       const response = await apiService.startBuild({
         description: effectiveDescription,
         prompt: effectiveDescription,
@@ -6235,7 +6275,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
         tech_stack: techStackOverride || undefined,
         diff_mode: false,
         role_assignments: roleConfigMode === 'manual' ? roleAssignments : undefined,
-        provider_model_overrides: serializeProviderModelOverrides(providerModelOverrides),
+        provider_model_overrides: ollamaCloudOverride,
         wireframe_image: effectiveWireframe,
       })
 
@@ -6869,6 +6909,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
             roleConfigMode={roleConfigMode}
             roleAssignments={roleAssignments}
             providerStatuses={providerStatuses}
+            ollamaCloudModel={ollamaCloudModel}
             userPlan={user?.subscription_type}
             userId={user?.id ?? null}
             wireframeInputRef={wireframeInputRef}
@@ -6883,6 +6924,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
             onToggleStack={toggleStack}
             onSetRoleConfigMode={setRoleConfigMode}
             onSetRoleAssignments={setRoleAssignments}
+            onSetOllamaCloudModel={setOllamaCloudModel}
             onStartBuild={startBuild}
             onImportReplit={() => setShowImportModal(true)}
             onImportGitHub={() => setShowGitHubImport(true)}

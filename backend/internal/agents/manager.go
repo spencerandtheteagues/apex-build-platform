@@ -2272,11 +2272,12 @@ func (am *AgentManager) selectLeadProvider(providers []ai.AIProvider) ai.AIProvi
 	// Ollama: Local model (capability depends on underlying model, assume good but not top)
 
 	capabilityRank := map[ai.AIProvider]int{
-		ai.ProviderClaude: 5, // Highest capability for reasoning and planning
-		ai.ProviderGPT4:   4, // Strong for code generation and complex tasks
-		ai.ProviderGrok:   4, // grok-4.20-reasoning: frontier reasoning + coding model
-		ai.ProviderGemini: 3, // Good general purpose
-		ai.ProviderOllama: 1, // Local model (good but depends on specific model)
+		ai.ProviderClaude:      5, // Highest capability for reasoning and planning
+		ai.ProviderGPT4:        4, // Strong for code generation and complex tasks
+		ai.ProviderGrok:        4, // grok-4.20-reasoning: frontier reasoning + coding model
+		ai.ProviderGemini:      3, // Good general purpose
+		ai.ProviderOllamaCloud: 2, // Ollama Cloud (kimi-k2.6, glm-5.1, etc.) — strong open-weight models
+		ai.ProviderOllama:      1, // Local model (good but depends on specific model)
 	}
 
 	var bestProvider ai.AIProvider
