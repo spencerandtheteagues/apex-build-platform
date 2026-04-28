@@ -12,6 +12,13 @@ const BROKEN_PRODUCTION_API_HOSTS = new Set(['api.apex.build'])
 const BROKEN_PRODUCTION_WS_HOSTS = new Set(['api.apex.build'])
 const PRODUCTION_API_HOSTS = new Set(['api.apex-build.dev'])
 const PRODUCTION_WS_HOSTS = new Set(['api.apex-build.dev'])
+const PRODUCTION_FRONTEND_HOSTS = new Set([
+  'apex-build.dev',
+  'www.apex-build.dev',
+  'apex.build',
+  'www.apex.build',
+  'apex-frontend-gigq.onrender.com',
+])
 
 const readRuntimeConfig = (): RuntimeConfig => {
   if (typeof window === 'undefined' || !window.__APEX_CONFIG__) {
@@ -106,6 +113,68 @@ const isProductionWsUrl = (value: string): boolean => {
   }
 }
 
+const getCurrentFrontendHost = (): string => {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  return window.location.hostname.trim().toLowerCase()
+}
+
+const isProductionFrontendHost = (): boolean => {
+  if (normalizeConfigValue(readRuntimeConfig().ENVIRONMENT).toLowerCase() === 'production') {
+    return true
+  }
+
+  const host = getCurrentFrontendHost()
+  if (!host) {
+    return false
+  }
+
+  return PRODUCTION_FRONTEND_HOSTS.has(host) || (host.endsWith('.onrender.com') && host.includes('apex-frontend'))
+}
+
+const targetsCurrentFrontendOrigin = (value: string): boolean => {
+  const normalized = normalizeConfigValue(value)
+  if (!normalized || typeof window === 'undefined') {
+    return false
+  }
+
+  if (normalized.startsWith('/')) {
+    return true
+  }
+
+  try {
+    return new URL(normalized).host === window.location.host
+  } catch {
+    return false
+  }
+}
+
+const productionSafeApiUrl = (value: string): string => {
+  if (!value) {
+    return ''
+  }
+
+  if (isProductionFrontendHost() && targetsCurrentFrontendOrigin(value)) {
+    return PRIMARY_PRODUCTION_API_URL
+  }
+
+  return value
+}
+
+const productionSafeWsUrl = (value: string): string => {
+  if (!value) {
+    return ''
+  }
+
+  if (isProductionFrontendHost() && targetsCurrentFrontendOrigin(value)) {
+    return PRIMARY_PRODUCTION_WS_URL
+  }
+
+  return value
+}
+
 export const getConfiguredApiUrl = (): string => {
   const importedValue = normalizeConfiguredApiUrl(getImportedApiUrl())
   if (isLocalDevelopmentHost() && importedValue) {
@@ -117,11 +186,12 @@ export const getConfiguredApiUrl = (): string => {
     return ''
   }
 
-  if (runtimeValue) {
-    return runtimeValue
+  const safeRuntimeValue = productionSafeApiUrl(runtimeValue)
+  if (safeRuntimeValue) {
+    return safeRuntimeValue
   }
 
-  return importedValue
+  return productionSafeApiUrl(importedValue)
 }
 
 export const getConfiguredWsUrl = (): string => {
@@ -135,13 +205,14 @@ export const getConfiguredWsUrl = (): string => {
     return ''
   }
 
-  if (runtimeValue) {
-    return runtimeValue
+  const safeRuntimeValue = productionSafeWsUrl(runtimeValue)
+  if (safeRuntimeValue) {
+    return safeRuntimeValue
   }
 
-  return importedValue
+  return productionSafeWsUrl(importedValue)
 }
 
 export const getRuntimeConfiguredWsUrl = (): string => {
-  return normalizeConfiguredWsUrl(readRuntimeConfig().WS_URL)
+  return productionSafeWsUrl(normalizeConfiguredWsUrl(readRuntimeConfig().WS_URL))
 }

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   getConfiguredApiUrl,
   getConfiguredWsUrl,
+  getRuntimeConfiguredWsUrl,
   normalizeConfiguredApiUrl,
   normalizeConfiguredWsUrl,
 } from './runtime'
@@ -77,6 +78,24 @@ describe('getConfiguredApiUrl', () => {
 
     expect(getConfiguredApiUrl()).toBe('http://127.0.0.1:8080/api/v1')
   })
+
+  it('does not allow production runtime config to point API calls at the frontend origin', () => {
+    window.__APEX_CONFIG__ = {
+      API_URL: '/api/v1',
+      ENVIRONMENT: 'production',
+    }
+
+    expect(getConfiguredApiUrl()).toBe('https://api.apex-build.dev/api/v1')
+  })
+
+  it('rewrites absolute frontend-origin API config in production runtime config', () => {
+    window.__APEX_CONFIG__ = {
+      API_URL: 'http://localhost:3000/api/v1',
+      ENVIRONMENT: 'production',
+    }
+
+    expect(getConfiguredApiUrl()).toBe('https://api.apex-build.dev/api/v1')
+  })
 })
 
 describe('getConfiguredWsUrl', () => {
@@ -95,5 +114,15 @@ describe('getConfiguredWsUrl', () => {
     }
 
     expect(getConfiguredWsUrl()).toBe('')
+  })
+
+  it('does not allow production runtime config to point websocket calls at the frontend origin', () => {
+    window.__APEX_CONFIG__ = {
+      WS_URL: '/ws',
+      ENVIRONMENT: 'production',
+    }
+
+    expect(getConfiguredWsUrl()).toBe('wss://api.apex-build.dev/ws')
+    expect(getRuntimeConfiguredWsUrl()).toBe('wss://api.apex-build.dev/ws')
   })
 })
