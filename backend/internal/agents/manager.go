@@ -47,6 +47,9 @@ const (
 	frontendApprovalCheckpointID    = "frontend-preview-approval"
 	frontendApprovalPrompt          = "The frontend preview is ready. Reply yes if you are happy with this UI and I should continue the backend/runtime implementation on the same app, or describe the changes you want first."
 	promptPackActivationFeatureFlag = "APEX_PROMPT_PACK_ACTIVATION_REQUESTS"
+	taskPromptRouterReserveChars    = 25000
+	taskPromptMinBudgetChars        = 42000
+	taskPromptClampMarker           = "\n\n...[context compacted to stay within provider prompt limits; use the remaining manifest, targeted snippets, and error context to continue]...\n\n"
 )
 
 var agentActivityHeartbeatInterval = 10 * time.Second
@@ -175,6 +178,97 @@ func userFacingTaskLabel(task *Task) string {
 		}
 		return "the current work order"
 	}
+}
+
+func taskPromptBudget(build *Build, agent *Agent, task *Task) int {
+	budget := ai.MaxPromptLength - taskPromptRouterReserveChars
+	if budget < taskPromptMinBudgetChars {
+		budget = taskPromptMinBudgetChars
+	}
+
+	if build != nil {
+		switch build.PowerMode {
+		case PowerMax:
+			budget = minInt(ai.MaxPromptLength-18000, 82000)
+		case PowerFast:
+			budget = minInt(budget, 60000)
+		default:
+			budget = minInt(budget, 75000)
+		}
+	}
+
+	if agent != nil && agent.Provider == ai.ProviderOllama {
+		budget = minInt(budget, 62000)
+	}
+	if task != nil {
+		switch task.Type {
+		case TaskFix, TaskReview:
+			// Repair/review prompts add history, file context, and patch schema.
+			// Keep extra headroom for the adapter's system/output wrappers.
+			budget = minInt(budget, 70000)
+		}
+	}
+	if budget < taskPromptMinBudgetChars {
+		return taskPromptMinBudgetChars
+	}
+	return budget
+}
+
+func codeContextBudgetForAgent(build *Build, agent *Agent, task *Task) int {
+	if agent == nil {
+		return 15000
+	}
+	if agent.Provider == ai.ProviderOllama {
+		if build != nil && build.PowerMode == PowerMax {
+			return 18000
+		}
+		return 12000
+	}
+
+	switch {
+	case task != nil && task.Type == TaskFix:
+		if build != nil && build.PowerMode == PowerMax {
+			return 46000
+		}
+		if build != nil && build.PowerMode == PowerFast {
+			return 18000
+		}
+		return 34000
+	case agent.Role == RoleReviewer:
+		if build != nil && build.PowerMode == PowerMax {
+			return 52000
+		}
+		return 36000
+	default:
+		if build != nil && build.PowerMode == PowerMax {
+			return 52000
+		}
+		return 30000
+	}
+}
+
+func clampPromptPreservingEnds(prompt string, maxChars int) string {
+	if maxChars <= 0 || len(prompt) <= maxChars {
+		return prompt
+	}
+	marker := taskPromptClampMarker
+	if maxChars <= len(marker)+200 {
+		return prompt[:maxChars]
+	}
+
+	remaining := maxChars - len(marker)
+	head := remaining * 2 / 3
+	tail := remaining - head
+	if head < 0 {
+		head = 0
+	}
+	if tail < 0 {
+		tail = 0
+	}
+	if head+tail > len(prompt) {
+		return prompt
+	}
+	return prompt[:head] + marker + prompt[len(prompt)-tail:]
 }
 
 func (am *AgentManager) recordBuildSpend(build *Build, agent *Agent, input spend.RecordSpendInput, taskID, taskType string) {
@@ -20924,7 +21018,10 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 			}
 		}
 		if agent.Role == RoleReviewer || agent.Role == RoleSolver {
-			// Include all generated files for reviewer/solver.
+			// Include generated files for reviewer/solver, but keep a strict
+			// budget. Large enterprise apps must be repaired through scoped
+			// context and follow-up chunks, not by replaying the whole repo into
+			// every model call.
 			files := am.collectGeneratedFiles(build)
 			if len(files) > 0 {
 				var fileList strings.Builder
@@ -20932,15 +21029,9 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 					fileList.WriteString(fmt.Sprintf("// File: %s\n```%s\n%s\n```\n\n", f.Path, f.Language, f.Content))
 				}
 				content := fileList.String()
-				// Cloud flagship models (Claude, GPT-4, Gemini, Grok) have large context windows.
-				// Give them the full codebase so reviewer/solver can see every file.
-				// Ollama models have limited context — keep the tighter limit.
-				codeContextLimit := 15000
-				if agent.Provider != ai.ProviderOllama && agent.Provider != "" {
-					codeContextLimit = 100000
-				}
+				codeContextLimit := codeContextBudgetForAgent(build, agent, task)
 				if len(content) > codeContextLimit {
-					content = content[:codeContextLimit] + "\n... (truncated)"
+					content = clampPromptPreservingEnds(content, codeContextLimit)
 				}
 				block := "code_to_review"
 				if agent.Role == RoleSolver {
@@ -21090,7 +21181,7 @@ COMPLETENESS:
 		outputFormatPrompt = patchFirstTaskOutputFormatPrompt()
 	}
 
-	return fmt.Sprintf(`Task: %s
+	prompt := fmt.Sprintf(`Task: %s
 
 Description: %s
 
@@ -21142,6 +21233,10 @@ App being built: %s
 		deliveryConstraintsContext,
 		powerModeContext,
 		outputFormatPrompt)
+	if maxPromptChars := taskPromptBudget(build, agent, task); len(prompt) > maxPromptChars {
+		prompt = clampPromptPreservingEnds(prompt, maxPromptChars)
+	}
+	return prompt
 }
 
 func formatTechStackSummary(stack *TechStack) string {

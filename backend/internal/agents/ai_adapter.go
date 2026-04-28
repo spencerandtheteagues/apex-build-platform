@@ -197,6 +197,20 @@ func defaultOllamaModelForMode() string {
 	return "kimi-k2.6"
 }
 
+func clampAIRouterPrompt(prompt string, maxChars int) string {
+	if maxChars <= 0 || len(prompt) <= maxChars {
+		return prompt
+	}
+	const marker = "\n\n...[prompt compacted before provider call to stay within Apex router safety limits]...\n\n"
+	if maxChars <= len(marker)+200 {
+		return prompt[:maxChars]
+	}
+	remaining := maxChars - len(marker)
+	head := remaining * 2 / 3
+	tail := remaining - head
+	return prompt[:head] + marker + prompt[len(prompt)-tail:]
+}
+
 // AIRouterAdapter adapts the existing AI router to the agent system interface
 type AIRouterAdapter struct {
 	router      *ai.AIRouter
@@ -296,6 +310,10 @@ For code files, use this exact format:
 		}
 		contextStr += "</previous_context>\n\n"
 		fullPrompt = contextStr + fullPrompt
+	}
+	if len(fullPrompt) > ai.MaxPromptLength {
+		log.Printf("AI prompt exceeded router limit; compacting prompt from %d to %d characters", len(fullPrompt), ai.MaxPromptLength-1024)
+		fullPrompt = clampAIRouterPrompt(fullPrompt, ai.MaxPromptLength-1024)
 	}
 
 	// Map agent provider to AI package provider
