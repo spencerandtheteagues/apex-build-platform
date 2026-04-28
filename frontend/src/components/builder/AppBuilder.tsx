@@ -84,7 +84,6 @@ import {
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
-import { OnboardingTour } from './OnboardingTour'
 import { BuildHistory } from './BuildHistory'
 import {
   extractBuildFailureReason,
@@ -871,8 +870,8 @@ const FloatingParticles: React.FC = () => {
             top: `${particle.y}%`,
             animation: `float ${particle.duration}s ease-in-out infinite`,
             animationDelay: `${particle.delay}s`,
-            background: 'var(--builder-particle-bg, rgba(239, 68, 68, 0.4))',
-            boxShadow: 'var(--builder-particle-shadow, 0 0 8px rgba(204, 0, 0, 0.6))',
+            background: 'var(--builder-particle-bg, rgba(56, 189, 248, 0.34))',
+            boxShadow: 'var(--builder-particle-shadow, 0 0 8px rgba(56, 189, 248, 0.52))',
           }}
         />
       ))}
@@ -1172,27 +1171,31 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
 
   return (
     <button
+      type="button"
       ref={buttonRef}
       onClick={handleClick}
       disabled={disabled}
+      aria-label={isLoading ? 'Build is starting' : 'Launch build'}
+      aria-busy={isLoading}
+      data-testid="launch-build-button"
       className={cn(
         "launch-build-btn",
         "relative w-full py-5 rounded-2xl font-black text-xl overflow-hidden",
         "transition-all duration-300 transform",
         disabled
           ? "opacity-50 cursor-not-allowed"
-          : "hover:scale-[1.02] hover:shadow-2xl hover:shadow-red-900/60 active:scale-[0.98]"
+          : "hover:scale-[1.01] hover:shadow-2xl hover:shadow-sky-500/30 active:scale-[0.99]"
       )}
     >
       {/* Animated gradient background */}
       <div className={cn(
-        "launch-build-bg absolute inset-0 bg-gradient-to-r from-red-700 via-orange-600 to-red-700",
+        "launch-build-bg absolute inset-0 bg-gradient-to-r from-sky-500 via-blue-600 to-cyan-400",
         !disabled && !isLoading && "animate-gradient-shift"
       )} style={{ backgroundSize: '200% auto' }} />
 
       {/* Pulsing glow effect */}
       {!disabled && !isLoading && (
-        <div className="launch-build-glow absolute -inset-1 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-2xl opacity-60 blur-lg animate-pulse" />
+        <div className="launch-build-glow pointer-events-none absolute -inset-1 rounded-2xl bg-gradient-to-r from-sky-400 via-blue-500 to-cyan-300 opacity-55 blur-lg animate-pulse" />
       )}
 
       {/* Inner shine */}
@@ -1202,10 +1205,10 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
       {isLoading && (
         <div className="absolute inset-0 rounded-2xl overflow-hidden">
           <div
-            className="absolute inset-[-100%] bg-gradient-conic from-red-500 via-transparent to-red-500"
+            className="absolute inset-[-100%] bg-gradient-conic from-sky-400 via-transparent to-cyan-300"
             style={{ animation: 'spin 1.5s linear infinite' }}
           />
-          <div className="absolute inset-[2px] bg-gradient-to-r from-red-700 via-orange-600 to-red-700 rounded-2xl" />
+          <div className="absolute inset-[2px] bg-gradient-to-r from-sky-500 via-blue-600 to-cyan-400 rounded-2xl" />
         </div>
       )}
 
@@ -1942,7 +1945,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [telemetryNow, setTelemetryNow] = useState(() => Date.now())
   const AUTO_STACK_ID = 'auto'
   const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set([AUTO_STACK_ID]))
-  const [powerMode, setPowerMode] = useState<'fast' | 'balanced' | 'max'>('fast')
+  const [powerMode, setPowerMode] = useState<'fast' | 'balanced' | 'max'>('balanced')
   const promptMaxLength = getBuildPromptMaxLength(buildMode, powerMode)
   const maxPowerPromptLimitEnabled = buildMode === 'full' && powerMode === 'max'
   const balancedPromptLimitEnabled = buildMode === 'full' && powerMode === 'balanced'
@@ -1993,6 +1996,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const previewPreparedRef = useRef(false)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
   const [buyCreditsReason, setBuyCreditsReason] = useState<string | undefined>(undefined)
+  const [setupStartError, setSetupStartError] = useState<string | null>(null)
   const [upgradePrompt, setUpgradePrompt] = useState<UpgradePromptState | null>(null)
   const [upgradeCheckoutPending, setUpgradeCheckoutPending] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
@@ -5713,9 +5717,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   // Start build
   const startBuild = async () => {
-    if (!appDescription.trim()) return
+    setSetupStartError(null)
+    if (!appDescription.trim()) {
+      setSetupStartError('Add a build prompt before launching.')
+      return
+    }
     if (appDescription.length > promptMaxLength) {
-      addSystemMessage(
+      const lengthMessage =
         buildMode === 'fast'
           ? `Fast Build prompts are capped at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Full Build with Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
           : powerMode === 'max'
@@ -5723,7 +5731,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             : powerMode === 'balanced'
               ? `Full Build Balanced prompts are capped at ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch AI Power to Max for up to ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
               : `Full Build prompts stay capped at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters on Fast power. Switch AI Power to Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
-      )
+      addSystemMessage(lengthMessage)
+      setSetupStartError(lengthMessage)
       return
     }
 
@@ -5760,6 +5769,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         if (!preflight.ready) {
           const errorMsg = preflight.suggestion || preflight.error || 'AI providers unavailable'
           addSystemMessage(`Preflight failed: ${errorMsg}`)
+          setSetupStartError(errorMsg)
           setIsBuilding(false)
           return
         }
@@ -5775,7 +5785,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       } catch (preflightErr: any) {
         const errData = preflightErr?.response?.data
         if (errData?.error_code) {
-          addSystemMessage(`Cannot start build: ${errData.error || errData.suggestion || 'Provider check failed'}`)
+          const errorMsg = errData.error || errData.suggestion || 'Provider check failed'
+          addSystemMessage(`Cannot start build: ${errorMsg}`)
+          setSetupStartError(errorMsg)
           setIsBuilding(false)
           return
         }
@@ -5869,6 +5881,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         if (errorCode === 'BACKEND_SUBSCRIPTION_REQUIRED') {
           const suggestion = (error.response?.data as any)?.suggestion || 'Upgrade to Builder or higher to unlock backend and full-stack app generation.'
           addSystemMessage(`Build blocked: ${suggestion}`)
+          setSetupStartError(suggestion)
           openUpgradePrompt({
             source: 'start',
             requiredPlan: (error.response?.data as any)?.required_plan,
@@ -5880,7 +5893,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         }
 
         if (error.response?.status === 402 || errorCode === 'INSUFFICIENT_CREDITS') {
-          setBuyCreditsReason('Your credit balance has run out. Purchase credits to continue building.')
+          const creditMessage = 'Your credit balance has run out. Purchase credits to continue building.'
+          setBuyCreditsReason(creditMessage)
+          setSetupStartError(creditMessage)
           setShowBuyCredits(true)
           setIsBuilding(false)
           return
@@ -5900,6 +5915,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       }
 
       addSystemMessage(`Error: ${errorMsg}`)
+      setSetupStartError(errorMsg)
       setIsBuilding(false)
       clearActiveBuildId()
       setBuildState(null)
@@ -6301,9 +6317,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         />
       )}
 
-      {/* Onboarding Tour - shows on first visit */}
-      <OnboardingTour />
-
       {/* CSS Keyframe Animations */}
       <style>{`
         @keyframes gradient-shift {
@@ -6670,9 +6683,26 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     </div>
                   </div>
 
+                  {(setupStartError || !isRoleAssignmentValid) && (
+                    <div
+                      role="alert"
+                      className="rounded-xl border border-sky-400/35 bg-sky-500/10 p-4 text-sm text-sky-100 shadow-lg shadow-sky-500/10"
+                    >
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-sky-300" />
+                        <div>
+                          <div className="font-semibold text-white">Build did not start</div>
+                          <div className="mt-1 leading-6 text-sky-100/85">
+                            {setupStartError || 'Manual model routing needs at least Architect and Coder assignments. Switch model routing to Auto or complete the assignments.'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <EpicBuildButton
                     onClick={startBuild}
-                    disabled={!appDescription.trim() || !isRoleAssignmentValid}
+                    disabled={isBuilding || !isRoleAssignmentValid}
                     isLoading={isBuilding}
                   />
 

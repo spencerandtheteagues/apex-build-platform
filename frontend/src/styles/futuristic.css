@@ -8,29 +8,29 @@
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* === NEON GLOW SYSTEM - RED DOMINANT === */
-  --glow-red: #ff0033;
-  --glow-red-intense: #ff3355;
-  --glow-cyan: #ff0033;
-  --glow-cyan-intense: #ff3355;
-  --glow-purple: #990022;
-  --glow-purple-intense: #bb0033;
-  --glow-yellow: #ff4444;
-  --glow-yellow-intense: #ff6666;
-  --glow-green: #cc0022;
-  --glow-green-intense: #dd0033;
-  --glow-orange: #ff2200;
-  --glow-orange-intense: #ff4422;
-  --glow-blue: #aa0022;
-  --glow-blue-intense: #cc0033;
-  --glow-pink: #ff0044;
-  --glow-pink-intense: #ff2266;
+  /* === NEON GLOW SYSTEM - BLUE/STEEL REDESIGN === */
+  --glow-red: #38bdf8;
+  --glow-red-intense: #7dd3fc;
+  --glow-cyan: #22d3ee;
+  --glow-cyan-intense: #a5f3fc;
+  --glow-purple: #60a5fa;
+  --glow-purple-intense: #93c5fd;
+  --glow-yellow: #38bdf8;
+  --glow-yellow-intense: #7dd3fc;
+  --glow-green: #6ee7b7;
+  --glow-green-intense: #a7f3d0;
+  --glow-orange: #0ea5e9;
+  --glow-orange-intense: #38bdf8;
+  --glow-blue: #2563eb;
+  --glow-blue-intense: #60a5fa;
+  --glow-pink: #22d3ee;
+  --glow-pink-intense: #67e8f9;
 
-  /* === HOLOGRAPHIC PALETTE - RED/BLACK === */
-  --holo-start: #ff0033;
-  --holo-mid-1: #990022;
-  --holo-mid-2: #ff0044;
-  --holo-end: #cc0022;
+  /* === HOLOGRAPHIC PALETTE - BLUE/BLACK === */
+  --holo-start: #38bdf8;
+  --holo-mid-1: #1d4ed8;
+  --holo-mid-2: #22d3ee;
+  --holo-end: #0f172a;
 
   /* === GLASS MORPHISM SETTINGS === */
   --glass-bg: rgba(0, 0, 0, 0.4);

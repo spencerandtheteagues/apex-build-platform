@@ -12,18 +12,18 @@
 /* Fonts - Extended Futuristic Typography */
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Exo+2:wght@100;200;300;400;500;600;700;800;900&family=Share+Tech+Mono&display=swap');
 
-/* CSS Custom Properties - BLACK & RED Theme */
+/* CSS Custom Properties - redesigned blue/steel workspace theme */
 :root {
-  /* === PRIMARY THEME COLORS - RED === */
-  --color-primary: #ff0033;
-  --color-primary-light: #ff3355;
-  --color-primary-dark: #cc0028;
-  --color-secondary: #990022;
-  --color-secondary-light: #bb0033;
-  --color-secondary-dark: #660018;
-  --color-accent: #ff4444;
-  --color-accent-light: #ff6666;
-  --color-accent-dark: #cc2222;
+  /* === PRIMARY THEME COLORS - BLUE === */
+  --color-primary: #38bdf8;
+  --color-primary-light: #7dd3fc;
+  --color-primary-dark: #0284c7;
+  --color-secondary: #1d4ed8;
+  --color-secondary-light: #60a5fa;
+  --color-secondary-dark: #172554;
+  --color-accent: #22d3ee;
+  --color-accent-light: #a5f3fc;
+  --color-accent-dark: #0891b2;
 
   /* === BACKGROUND SYSTEM - PURE BLACK === */
   --color-background: #000000;
@@ -37,23 +37,23 @@
   --color-text-secondary: #999999;
   --color-text-muted: #666666;
 
-  /* === BORDER COLORS - RED TINTED === */
-  --color-border: rgba(255, 0, 51, 0.2);
-  --color-border-bright: rgba(255, 0, 51, 0.4);
+  /* === BORDER COLORS - BLUE TINTED === */
+  --color-border: rgba(56, 189, 248, 0.2);
+  --color-border-bright: rgba(125, 211, 252, 0.42);
   --color-border-subtle: rgba(255, 255, 255, 0.05);
 
-  /* === GLOW EFFECTS - RED === */
-  --color-glow: rgba(255, 0, 51, 0.3);
-  --color-glow-secondary: rgba(153, 0, 34, 0.3);
-  --color-glow-accent: rgba(255, 68, 68, 0.3);
+  /* === GLOW EFFECTS - BLUE === */
+  --color-glow: rgba(56, 189, 248, 0.3);
+  --color-glow-secondary: rgba(37, 99, 235, 0.3);
+  --color-glow-accent: rgba(34, 211, 238, 0.3);
 
-  /* === EFFECT PRESETS - RED GLOWS === */
-  --effect-glow: 0 0 20px rgba(255, 0, 51, 0.5);
-  --effect-glow-strong: 0 0 40px rgba(255, 0, 51, 0.7);
-  --effect-glow-purple: 0 0 20px rgba(153, 0, 34, 0.5);
+  /* === EFFECT PRESETS - BLUE GLOWS === */
+  --effect-glow: 0 0 20px rgba(56, 189, 248, 0.5);
+  --effect-glow-strong: 0 0 40px rgba(56, 189, 248, 0.7);
+  --effect-glow-purple: 0 0 20px rgba(37, 99, 235, 0.5);
   --effect-blur: blur(0.5px);
   --effect-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-  --effect-shadow-glow: 0 8px 32px rgba(255, 0, 51, 0.15);
+  --effect-shadow-glow: 0 8px 32px rgba(56, 189, 248, 0.15);
 
   /* === ANIMATIONS === */
   --transition-fast: 150ms cubic-bezier(0.23, 1, 0.32, 1);
@@ -110,6 +110,14 @@ html[data-ui-theme="red"] .mobile-header-logo,
 html[data-ui-theme="red"] .mobile-menu-logo,
 html[data-ui-theme="red"] .mobile-menu-tab-logo {
   filter: contrast(1.14) saturate(1.1) drop-shadow(0 0 14px rgba(239, 68, 68, 0.5));
+}
+
+html[data-ui-theme="blue-steel"] .desktop-header-logo,
+html[data-ui-theme="blue-steel"] .desktop-tab-logo,
+html[data-ui-theme="blue-steel"] .mobile-header-logo,
+html[data-ui-theme="blue-steel"] .mobile-menu-logo,
+html[data-ui-theme="blue-steel"] .mobile-menu-tab-logo {
+  filter: contrast(1.16) saturate(1.08) drop-shadow(0 0 16px rgba(56, 189, 248, 0.55));
 }
 
 /* Base Styles */
@@ -1430,6 +1438,160 @@ h1, h2, h3 {
 .ide-control-surface__section > div {
   border-color: rgba(184, 226, 255, 0.13) !important;
   background: rgba(7, 12, 20, 0.88) !important;
+}
+
+/* Hard guardrail: authenticated workspace must not fall back to the old red/orange UI. */
+.apex-shell,
+.app-builder-root {
+  color-scheme: dark;
+}
+
+.apex-shell .text-red-100,
+.apex-shell .text-red-200,
+.apex-shell .text-red-300,
+.apex-shell .text-red-400,
+.apex-shell .text-red-500,
+.apex-shell .text-orange-100,
+.apex-shell .text-orange-200,
+.apex-shell .text-orange-300,
+.apex-shell .text-orange-400,
+.apex-shell .text-orange-500,
+.app-builder-root .text-red-100,
+.app-builder-root .text-red-200,
+.app-builder-root .text-red-300,
+.app-builder-root .text-red-400,
+.app-builder-root .text-red-500,
+.app-builder-root .text-orange-100,
+.app-builder-root .text-orange-200,
+.app-builder-root .text-orange-300,
+.app-builder-root .text-orange-400,
+.app-builder-root .text-orange-500 {
+  color: #7dd3fc !important;
+}
+
+.apex-shell .border-red-300,
+.apex-shell .border-red-400,
+.apex-shell .border-red-500,
+.apex-shell .border-red-600,
+.apex-shell .border-red-700,
+.apex-shell .border-red-800,
+.apex-shell .border-red-900,
+.apex-shell .border-orange-300,
+.apex-shell .border-orange-400,
+.apex-shell .border-orange-500,
+.apex-shell .border-orange-600,
+.apex-shell .border-orange-700,
+.app-builder-root .border-red-300,
+.app-builder-root .border-red-400,
+.app-builder-root .border-red-500,
+.app-builder-root .border-red-600,
+.app-builder-root .border-red-700,
+.app-builder-root .border-red-800,
+.app-builder-root .border-red-900,
+.app-builder-root .border-orange-300,
+.app-builder-root .border-orange-400,
+.app-builder-root .border-orange-500,
+.app-builder-root .border-orange-600,
+.app-builder-root .border-orange-700 {
+  border-color: rgba(125, 211, 252, 0.42) !important;
+}
+
+.apex-shell .bg-red-500,
+.apex-shell .bg-red-600,
+.apex-shell .bg-red-700,
+.apex-shell .bg-red-800,
+.apex-shell .bg-red-900,
+.apex-shell .bg-red-950,
+.apex-shell .bg-orange-500,
+.apex-shell .bg-orange-600,
+.apex-shell .bg-orange-700,
+.apex-shell .bg-orange-900,
+.apex-shell .bg-orange-950,
+.app-builder-root .bg-red-500,
+.app-builder-root .bg-red-600,
+.app-builder-root .bg-red-700,
+.app-builder-root .bg-red-800,
+.app-builder-root .bg-red-900,
+.app-builder-root .bg-red-950,
+.app-builder-root .bg-orange-500,
+.app-builder-root .bg-orange-600,
+.app-builder-root .bg-orange-700,
+.app-builder-root .bg-orange-900,
+.app-builder-root .bg-orange-950 {
+  background-color: rgba(14, 165, 233, 0.16) !important;
+}
+
+.apex-shell [class*="from-red-"],
+.apex-shell [class*="from-orange-"],
+.app-builder-root [class*="from-red-"],
+.app-builder-root [class*="from-orange-"] {
+  --tw-gradient-from: rgba(14, 165, 233, 0.95) var(--tw-gradient-from-position) !important;
+}
+
+.apex-shell [class*="via-red-"],
+.apex-shell [class*="via-orange-"],
+.app-builder-root [class*="via-red-"],
+.app-builder-root [class*="via-orange-"] {
+  --tw-gradient-via: rgba(37, 99, 235, 0.9) var(--tw-gradient-via-position) !important;
+}
+
+.apex-shell [class*="to-red-"],
+.apex-shell [class*="to-orange-"],
+.app-builder-root [class*="to-red-"],
+.app-builder-root [class*="to-orange-"] {
+  --tw-gradient-to: rgba(34, 211, 238, 0.82) var(--tw-gradient-to-position) !important;
+}
+
+.app-builder-root .premium-textarea-border,
+.app-builder-root .tech-stack-selected-indicator,
+.app-builder-root .build-mode-active-overlay {
+  border-color: rgba(125, 211, 252, 0.48) !important;
+  box-shadow: 0 0 36px rgba(56, 189, 248, 0.14) !important;
+}
+
+.apex-shell [class*="text-red-"],
+.apex-shell [class*="text-orange-"],
+.app-builder-root [class*="text-red-"],
+.app-builder-root [class*="text-orange-"] {
+  color: #7dd3fc !important;
+}
+
+.apex-shell [class*="border-red-"],
+.apex-shell [class*="border-orange-"],
+.apex-shell [class*="border-t-red-"],
+.apex-shell [class*="border-t-orange-"],
+.apex-shell [class*="border-b-red-"],
+.apex-shell [class*="border-b-orange-"],
+.apex-shell [class*="border-l-red-"],
+.apex-shell [class*="border-l-orange-"],
+.apex-shell [class*="border-r-red-"],
+.apex-shell [class*="border-r-orange-"],
+.app-builder-root [class*="border-red-"],
+.app-builder-root [class*="border-orange-"],
+.app-builder-root [class*="border-t-red-"],
+.app-builder-root [class*="border-t-orange-"],
+.app-builder-root [class*="border-b-red-"],
+.app-builder-root [class*="border-b-orange-"],
+.app-builder-root [class*="border-l-red-"],
+.app-builder-root [class*="border-l-orange-"],
+.app-builder-root [class*="border-r-red-"],
+.app-builder-root [class*="border-r-orange-"] {
+  border-color: rgba(125, 211, 252, 0.42) !important;
+}
+
+.apex-shell [class*="bg-red-"],
+.apex-shell [class*="bg-orange-"],
+.app-builder-root [class*="bg-red-"],
+.app-builder-root [class*="bg-orange-"] {
+  background-color: rgba(14, 165, 233, 0.16) !important;
+}
+
+.apex-shell [class*="shadow-red-"],
+.apex-shell [class*="shadow-orange-"],
+.app-builder-root [class*="shadow-red-"],
+.app-builder-root [class*="shadow-orange-"] {
+  --tw-shadow-color: rgba(56, 189, 248, 0.26) !important;
+  --tw-shadow: var(--tw-shadow-colored) !important;
 }
 
 @media (max-width: 1200px) {

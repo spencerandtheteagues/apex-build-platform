@@ -396,10 +396,10 @@ function App() {
         view: 'builder',
         label: 'Build App',
         icon: <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-5 h-5 object-contain" />,
-        color: '#ff4466',
-        glow: 'rgba(255,0,51,0.5)',
-        activeClassName: 'border-[#ff0033] text-[#ff4466] bg-[rgba(255,0,51,0.15)] shadow-[0_0_12px_rgba(255,0,51,0.4)]',
-        inactiveClassName: 'border-[rgba(255,0,51,0.3)] text-[rgba(255,68,102,0.6)] hover:border-[#ff0033] hover:text-[#ff4466] hover:bg-[rgba(255,0,51,0.08)]',
+        color: '#7dc4ff',
+        glow: 'rgba(96,165,250,0.5)',
+        activeClassName: 'border-[#60a5fa] text-[#bfdbfe] bg-[rgba(96,165,250,0.16)] shadow-[0_0_16px_rgba(96,165,250,0.36)]',
+        inactiveClassName: 'border-[rgba(96,165,250,0.24)] text-[rgba(191,219,254,0.66)] hover:border-[#60a5fa] hover:text-[#bfdbfe] hover:bg-[rgba(96,165,250,0.08)]',
       },
       {
         view: 'ide',
@@ -487,7 +487,7 @@ function App() {
         label: viewMetadata.settings.label,
         description: viewMetadata.settings.description,
         icon: <Settings className="w-4 h-4" />,
-        activeClassName: 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20',
+        activeClassName: 'bg-sky-500/15 text-sky-200 border border-sky-500/40 shadow-sm shadow-sky-500/20',
       },
     ],
     [navigationItems, viewMetadata]
@@ -495,8 +495,8 @@ function App() {
 
   const shellScrollViewClass = 'absolute inset-0 min-h-0 overflow-y-auto overscroll-contain'
   const renderSettingsSectionFallback = (title: string, description: string) => (
-    <div className="rounded-xl border border-red-900/40 bg-red-950/10 p-6">
-      <h2 className="mb-2 text-lg font-bold text-red-300">{title} is temporarily unavailable</h2>
+    <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-6">
+      <h2 className="mb-2 text-lg font-bold text-sky-200">{title} is temporarily unavailable</h2>
       <p className="text-sm text-gray-400">{description}</p>
     </div>
   )
@@ -841,15 +841,15 @@ function App() {
     }
   }, [currentProject?.id, currentView])
 
-  // Force the current production theme so legacy light-mode overrides cannot restyle the app.
+  // Force the redesigned production theme so legacy light-mode/red workspace overrides cannot restyle the app.
   useEffect(() => {
     if (typeof window === 'undefined') return
     try {
-      localStorage.setItem('apex_ui_color_scheme', 'red-dark')
+      localStorage.setItem('apex_ui_color_scheme', 'blue-steel')
     } catch {
       // Ignore localStorage failures.
     }
-    document.documentElement.setAttribute('data-ui-theme', 'red')
+    document.documentElement.setAttribute('data-ui-theme', 'blue-steel')
   }, [])
 
   // Loading screen
@@ -1303,9 +1303,9 @@ function App() {
 
   // Main application with view switching
   return (
-    <div className="h-screen flex flex-col bg-black">
+    <div className="apex-shell h-screen flex flex-col bg-black">
       {/* Top Navigation */}
-      <div className="shrink-0 bg-black/90 border-b border-red-900/30 px-4 py-3 z-50 relative">
+      <div className="shrink-0 bg-black/90 border-b border-sky-500/20 px-4 py-3 z-50 relative">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
           {/* Logo */}
           <div className="flex items-center gap-3 shrink-0">
@@ -1313,11 +1313,11 @@ function App() {
               <img
                 src={logoSrc}
                 alt="APEX Logo"
-                className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+                className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_16px_rgba(96,165,250,0.55)]"
               />
             </div>
             <div className="min-w-0">
-              <span className="desktop-header-wordmark hidden sm:inline text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
+              <span className="desktop-header-wordmark hidden sm:inline text-xl font-bold bg-gradient-to-r from-sky-100 via-blue-300 to-cyan-300 bg-clip-text text-transparent">
                 APEX-BUILD
               </span>
               <div className="sm:hidden text-[11px] uppercase tracking-[0.2em] text-gray-500">
@@ -1403,7 +1403,7 @@ function App() {
             <div className="ml-auto flex items-center gap-2 shrink-0 rounded-2xl border border-gray-900/80 bg-black/40 px-2 py-1 backdrop-blur-sm">
               <button
                 onClick={handleStartNewBuild}
-                className="flex items-center gap-2 whitespace-nowrap rounded-md border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-red-300 transition-all duration-200 hover:bg-red-900/30 hover:text-white"
+                className="flex items-center gap-2 whitespace-nowrap rounded-md border border-sky-500/40 bg-sky-500/12 px-3 py-1.5 text-sky-100 transition-all duration-200 hover:bg-sky-500/18 hover:text-white"
                 title="Start a new build"
               >
                 <Rocket className="w-4 h-4" />
@@ -1416,7 +1416,7 @@ function App() {
                 onClick={() => navigateToView('settings')}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-200 ${
                   currentView === 'settings'
-                    ? 'bg-red-900/20 text-red-400 border border-red-900/50'
+                    ? 'bg-sky-500/15 text-sky-200 border border-sky-500/40'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800'
                 }`}
                 title="Settings & API Keys"
@@ -1424,7 +1424,7 @@ function App() {
                 <Settings className="w-4 h-4" />
               </button>
               <span className="hidden lg:inline max-w-[10rem] truncate text-sm text-gray-400">{user.username}</span>
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-red-900/30">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-400 to-blue-700 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-sky-500/25">
                 {user.username?.charAt(0).toUpperCase()}
               </div>
             </div>
@@ -1504,7 +1504,7 @@ function App() {
                 <div className="min-h-full bg-black p-6">
                   <div className="max-w-4xl mx-auto space-y-8">
                     <div>
-                      <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500 mb-2">
+                      <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-100 via-blue-300 to-cyan-300 mb-2">
                         Settings
                       </h1>
                       <p className="text-gray-400">Configure your AI providers and API keys</p>
@@ -1514,11 +1514,11 @@ function App() {
                     <ErrorBoundary fallback={renderSettingsSectionFallback('Workspace Theme', 'Theme status hit an unexpected error. The rest of Settings is still available.')}>
                       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
                         <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                          <Palette className="w-5 h-5 text-red-400" />
+                          <Palette className="w-5 h-5 text-sky-300" />
                           Workspace Theme
                         </h2>
                         <p className="text-sm leading-relaxed text-gray-300">
-                          The latest Apex UI is now fixed to the red-and-black workspace theme across every page.
+                          The latest Apex UI is now fixed to the blue/steel workspace theme across every page.
                           Legacy light-theme switching is disabled so older builder and shell styling cannot reappear.
                         </p>
                       </div>

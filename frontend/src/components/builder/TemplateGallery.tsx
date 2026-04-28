@@ -160,13 +160,13 @@ export default function TemplateGallery({ onSelect }: TemplateGalleryProps) {
             type="button"
             onClick={() => onSelect(tpl.prompt)}
             className={cn(
-              'group text-left rounded-xl border border-gray-800 bg-gray-900/50 px-3 py-2.5',
-              'hover:border-red-800/60 hover:bg-red-950/20 transition-all duration-200'
+              'group text-left rounded-xl border border-sky-500/15 bg-slate-950/70 px-3 py-2.5',
+              'hover:border-sky-400/50 hover:bg-sky-500/10 transition-all duration-200'
             )}
           >
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-base leading-none">{tpl.emoji}</span>
-              <span className="text-sm font-semibold text-gray-200 group-hover:text-red-300 transition-colors">
+              <span className="text-sm font-semibold text-gray-200 group-hover:text-sky-200 transition-colors">
                 {tpl.label}
               </span>
             </div>
