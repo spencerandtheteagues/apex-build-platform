@@ -279,6 +279,21 @@ func TestRewritePreviewJavaScriptForProxyNormalizesRelativeViteChunksToPublicPro
 	require.NotContains(t, rewritten, `from"./index-DZPHYNTJ.js"`)
 }
 
+func TestPreviewHandlerBuildProxyBaseURLExcludesPreviewToken(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/preview/proxy?preview_token=token-value", nil)
+	context.Request.Host = "api.apex-build.dev"
+	context.Request.Header.Set("X-Forwarded-Proto", "https")
+
+	baseURL := handler.buildProxyBaseURL(context, projectID)
+
+	require.Equal(t, "https://api.apex-build.dev/api/v1/preview/proxy/"+strconv.FormatUint(uint64(projectID), 10), baseURL)
+	require.NotContains(t, baseURL, "preview_token")
+}
+
 func TestApplyPreviewResponseHeadersAllowsSameOriginStorageForHTML(t *testing.T) {
 	handler, _ := newPreviewHandlerTestFixture(t, false)
 

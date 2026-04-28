@@ -754,7 +754,7 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		if isHTML {
 			rewritten = h.rewritePreviewHTMLForProxyWithBackend(string(originalBody), uint(projectID), backendProxyURL, previewToken)
 		} else {
-			rewritten = h.rewritePreviewJavaScriptForProxyWithPrefix(string(originalBody), h.buildProxyURL(c, uint(projectID)), previewToken)
+			rewritten = h.rewritePreviewJavaScriptForProxyWithPrefix(string(originalBody), h.buildProxyBaseURL(c, uint(projectID)), previewToken)
 		}
 		resp.Body = io.NopCloser(bytes.NewBufferString(rewritten))
 		resp.ContentLength = int64(len(rewritten))
@@ -957,13 +957,17 @@ func previewPublicBase(c *gin.Context) (string, string) {
 }
 
 func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
-	scheme, host := previewPublicBase(c)
-	base := fmt.Sprintf("%s://%s/api/v1/preview/proxy/%d", scheme, host, projectID)
+	base := h.buildProxyBaseURL(c, projectID)
 	token := h.issuePreviewAccessToken(c, projectID)
 	if token == "" {
 		return base
 	}
 	return base + "?preview_token=" + url.QueryEscape(token)
+}
+
+func (h *PreviewHandler) buildProxyBaseURL(c *gin.Context, projectID uint) string {
+	scheme, host := previewPublicBase(c)
+	return fmt.Sprintf("%s://%s/api/v1/preview/proxy/%d", scheme, host, projectID)
 }
 
 // ProxyBackend proxies API calls from the preview frontend to the running backend process.
