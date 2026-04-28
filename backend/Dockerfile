@@ -73,6 +73,7 @@ RUN apk --no-cache add \
     freetype \
     harfbuzz \
     ttf-freefont \
+    && printf '\nHost *\n    StrictHostKeyChecking accept-new\n    UserKnownHostsFile /tmp/ssh_known_hosts\n' >> /etc/ssh/ssh_config \
     && npm install -g esbuild@0.24.2 \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip \
