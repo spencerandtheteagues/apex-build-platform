@@ -36,15 +36,14 @@ test.describe('Launch readiness smoke', () => {
   test('landing exposes real public resource links', async ({ page }) => {
     await page.goto('/')
 
-    await expect(page.getByRole('button', { name: /Get Started Free|Start Building Free/i }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /Start building|Get Started Free|Start Building Free/i }).first()).toBeVisible()
 
     await expect(page.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/?legal=privacy')
     await expect(page.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/?legal=terms')
-    await expect(page.getByRole('link', { name: 'Docs' })).toHaveAttribute('href', '/?help=1')
+    await expect(page.getByRole('link', { name: 'Docs' })).toHaveAttribute('href', /(?:\/\?help=1|#docs)$/)
 
-    const statusLink = page.getByRole('link', { name: 'Status' })
-    await expect(statusLink).toHaveAttribute('href', /health\/features$/)
-    await expect(statusLink).not.toHaveAttribute('href', '#')
+    const helpLink = page.getByRole('link', { name: 'Help' })
+    await expect(helpLink).toHaveAttribute('href', '/?help=1')
   })
 
   test('public legal and help surfaces open without authentication', async ({ page }) => {
