@@ -41,7 +41,7 @@ const PROVIDERS: ProviderConfig[] = [
     activeBorder: 'border-orange-500',
     placeholder: 'sk-ant-...',
     models: [
-      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', speed: 'slow', cost: 'high', description: 'Most powerful — reasoning & coding' },
+      { id: 'claude-opus-4-7', name: 'Claude Opus 4.7', speed: 'slow', cost: 'high', description: 'Most powerful — reasoning & coding' },
       { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', speed: 'medium', cost: 'medium', description: 'Balanced quality and speed' },
       { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost: 'low', description: 'Fast mini tier' },
     ],
@@ -57,7 +57,7 @@ const PROVIDERS: ProviderConfig[] = [
     activeBorder: 'border-green-500',
     placeholder: 'sk-...',
     models: [
-      { id: 'gpt-5.4-pro', name: 'ChatGPT 5.4 Pro', speed: 'slow', cost: 'high', description: 'Max tier - latest frontier model' },
+      { id: 'gpt-5.4-codex', name: 'ChatGPT 5.4 Codex', speed: 'slow', cost: 'high', description: 'Max tier - current OpenAI Codex route' },
       { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost: 'medium', description: 'Balanced tier — best current mid-tier coder' },
       { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost: 'low', description: 'Fast mini tier' },
     ],

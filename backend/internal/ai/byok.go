@@ -788,12 +788,11 @@ func GetAvailableModels() map[string][]ModelInfo {
 	return map[string][]ModelInfo{
 		"claude": {
 			{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", Speed: "slow", CostTier: "high", Description: "MAX — latest flagship reasoning and coding model"},
-			{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", Speed: "slow", CostTier: "high", Description: "MAX fallback — previous flagship tier"},
 			{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", Speed: "medium", CostTier: "medium", Description: "BALANCED — strong quality with lower cost"},
 			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "FAST — cheapest Claude tier"},
 		},
 		"gpt4": {
-			{ID: "gpt-5.4-pro", Name: "ChatGPT 5.4 Pro", Speed: "slow", CostTier: "high", Description: "MAX - latest frontier OpenAI model"},
+			{ID: "gpt-5.4-codex", Name: "ChatGPT 5.4 Codex", Speed: "slow", CostTier: "high", Description: "MAX - current OpenAI Codex route"},
 			{ID: "gpt-4.1", Name: "GPT-4.1", Speed: "medium", CostTier: "medium", Description: "BALANCED — best current mid-tier OpenAI coding model"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "FAST — mini OpenAI tier"},
 		},

@@ -718,7 +718,7 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		Description:            effectiveDescription,
 		TechStack:              req.TechStack,
 		RoleAssignments:        req.RoleAssignments,
-		ProviderModelOverrides: cloneStringMap(req.ProviderModelOverrides),
+		ProviderModelOverrides: normalizeProviderModelOverridesMap(req.ProviderModelOverrides),
 		Agents:                 make(map[string]*Agent),
 		Tasks:                  make([]*Task, 0),
 		Checkpoints:            make([]*Checkpoint, 0),
@@ -18370,7 +18370,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 			maxTokens = restoreContext.MaxTokensPerRequest
 		}
 		roleAssignments = cloneStringMap(restoreContext.RoleAssignments)
-		providerModelOverrides = cloneStringMap(restoreContext.ProviderModelOverrides)
+		providerModelOverrides = normalizeProviderModelOverridesMap(restoreContext.ProviderModelOverrides)
 		phasedPipelineComplete = restoreContext.PhasedPipelineComplete
 		diffMode = restoreContext.DiffMode
 		techStack = cloneTechStack(restoreContext.TechStack)

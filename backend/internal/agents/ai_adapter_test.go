@@ -46,7 +46,7 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 		want     string
 	}{
 		{name: "claude max uses opus", provider: ai.ProviderClaude, mode: PowerMax, want: "claude-opus-4-7"},
-		{name: "openai max uses chatgpt", provider: ai.ProviderGPT4, mode: PowerMax, want: "gpt-5.4-pro"},
+		{name: "openai max uses chatgpt codex 5.4", provider: ai.ProviderGPT4, mode: PowerMax, want: "gpt-5.4-codex"},
 		{name: "openai fast owns gpt 4o mini", provider: ai.ProviderGPT4, mode: PowerFast, want: "gpt-4o-mini"},
 		{name: "gemini max uses pro before preview", provider: ai.ProviderGemini, mode: PowerMax, want: "gemini-3.1-pro"},
 		{name: "grok max uses 4.20", provider: ai.ProviderGrok, mode: PowerMax, want: "grok-4.20-0309-reasoning"},
@@ -60,6 +60,56 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 				t.Fatalf("selectModelForPowerMode(%s, %s) = %q, want %q", tt.provider, tt.mode, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeProviderModelOverrideDowngradesUnavailableOpenAIMaxAlias(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeProviderModelOverride(ai.ProviderGPT4, "gpt-codex-5.5"); got != "gpt-5.4-codex" {
+		t.Fatalf("stale codex 5.5 override = %q, want gpt-5.4-codex", got)
+	}
+	if got := normalizeModelForProvider(ai.ProviderGPT4, "gpt-5.5", PowerMax); got != "gpt-5.4-codex" {
+		t.Fatalf("stale gpt 5.5 model = %q, want gpt-5.4-codex", got)
+	}
+	if got := normalizeProviderModelOverride(ai.ProviderGPT4, "gpt-5.4-pro"); got != "gpt-5.4-codex" {
+		t.Fatalf("stale gpt 5.4 pro override = %q, want gpt-5.4-codex", got)
+	}
+}
+
+func TestNormalizeProviderModelOverrideUpgradesClaudeOpusMaxAlias(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeProviderModelOverride(ai.ProviderClaude, "claude-opus-4-6"); got != "claude-opus-4-7" {
+		t.Fatalf("stale claude opus override = %q, want claude-opus-4-7", got)
+	}
+	if got := normalizeModelForProvider(ai.ProviderClaude, "claude-opus-4-6", PowerMax); got != "claude-opus-4-7" {
+		t.Fatalf("stale claude opus model = %q, want claude-opus-4-7", got)
+	}
+}
+
+func TestCreateBuildNormalizesUnavailableOpenAIProviderModelOverride(t *testing.T) {
+	manager := &AgentManager{
+		builds: make(map[string]*Build),
+	}
+
+	build, err := manager.CreateBuild(1, "owner", &BuildRequest{
+		Description: "Build a production-ready project management application",
+		PowerMode:   PowerMax,
+		ProviderModelOverrides: map[string]string{
+			"gpt4":   "gpt-codex-5.5",
+			"grok":   "grok-4.20-0309-reasoning",
+			"gemini": "auto",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBuild returned error: %v", err)
+	}
+	if got := build.ProviderModelOverrides["gpt4"]; got != "gpt-5.4-codex" {
+		t.Fatalf("stored OpenAI override = %q, want gpt-5.4-codex", got)
+	}
+	if _, exists := build.ProviderModelOverrides["gemini"]; exists {
+		t.Fatalf("auto override should not be persisted, got %+v", build.ProviderModelOverrides)
 	}
 }
 

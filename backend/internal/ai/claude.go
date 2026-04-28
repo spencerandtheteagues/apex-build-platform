@@ -120,7 +120,7 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	// Select model - respect explicit override or use Sonnet 4.6
 	model := "claude-sonnet-4-6"
 	if req.Model != "" {
-		model = req.Model
+		model = normalizeClaudeModelAlias(req.Model)
 	}
 
 	// Create Claude API request — use ephemeral cache_control on the system prompt
@@ -247,6 +247,17 @@ func (c *ClaudeClient) AnalyzeImage(ctx context.Context, imageData []byte, promp
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n")), nil
+}
+
+func normalizeClaudeModelAlias(model string) string {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(normalized, "claude-opus-4-6"),
+		strings.HasPrefix(normalized, "claude-opus-4-7"):
+		return "claude-opus-4-7"
+	default:
+		return strings.TrimSpace(model)
+	}
 }
 
 // buildSystemPrompt creates capability-specific system prompts

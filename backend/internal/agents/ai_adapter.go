@@ -22,7 +22,7 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "claude-haiku-4-5-20251001",
 	},
 	ai.ProviderGPT4: {
-		PowerMax:      "gpt-5.4-pro",
+		PowerMax:      "gpt-5.4-codex",
 		PowerBalanced: "gpt-4.1",
 		PowerFast:     "gpt-4o-mini",
 	},
@@ -102,8 +102,39 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 	}
 }
 
+func canonicalizeProviderModelAlias(provider ai.AIProvider, model string) string {
+	trimmed := strings.TrimSpace(model)
+	normalized := strings.ToLower(trimmed)
+	if normalized == "" {
+		return ""
+	}
+
+	if provider == ai.ProviderGPT4 {
+		switch {
+		case strings.HasPrefix(normalized, "gpt-codex-5.5"),
+			strings.HasPrefix(normalized, "gpt-5.5"),
+			strings.HasPrefix(normalized, "chatgpt-5.5"):
+			return "gpt-5.4-codex"
+		case strings.HasPrefix(normalized, "gpt-codex-5.4"),
+			strings.HasPrefix(normalized, "chatgpt-5.4-codex"),
+			strings.HasPrefix(normalized, "gpt-5.4-codex"),
+			strings.HasPrefix(normalized, "gpt-5.4-pro"):
+			return "gpt-5.4-codex"
+		}
+	}
+	if provider == ai.ProviderClaude {
+		switch {
+		case strings.HasPrefix(normalized, "claude-opus-4-6"),
+			strings.HasPrefix(normalized, "claude-opus-4-7"):
+			return "claude-opus-4-7"
+		}
+	}
+
+	return trimmed
+}
+
 func normalizeModelForProvider(provider ai.AIProvider, model string, mode PowerMode) string {
-	model = strings.TrimSpace(model)
+	model = canonicalizeProviderModelAlias(provider, model)
 	if modelBelongsToProvider(provider, model) {
 		return model
 	}
@@ -118,7 +149,7 @@ func normalizeExecutionModelForProvider(provider ai.AIProvider, model string, mo
 }
 
 func normalizeProviderModelOverride(provider ai.AIProvider, model string) string {
-	model = strings.TrimSpace(model)
+	model = canonicalizeProviderModelAlias(provider, model)
 	if model == "" || strings.EqualFold(model, "auto") {
 		return ""
 	}
@@ -126,6 +157,26 @@ func normalizeProviderModelOverride(provider ai.AIProvider, model string) string
 		return ""
 	}
 	return model
+}
+
+func normalizeProviderModelOverridesMap(overrides map[string]string) map[string]string {
+	if len(overrides) == 0 {
+		return nil
+	}
+
+	normalized := make(map[string]string, len(overrides))
+	for provider, model := range overrides {
+		providerID := strings.ToLower(strings.TrimSpace(provider))
+		modelID := normalizeProviderModelOverride(ai.AIProvider(providerID), model)
+		if providerID == "" || modelID == "" {
+			continue
+		}
+		normalized[providerID] = modelID
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func providerModelOverrideForBuildLocked(build *Build, provider ai.AIProvider) string {

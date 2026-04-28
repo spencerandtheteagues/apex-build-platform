@@ -98,13 +98,13 @@ func NewEnhancedAIRouter() *EnhancedAIRouter {
 
 // initializeProviders sets up all AI service providers
 func (ear *EnhancedAIRouter) initializeProviders() {
-	// Claude Opus 4.6 - Best for complex reasoning and code analysis
+	// Claude Opus 4.7 - Best for complex reasoning and code analysis
 	ear.providers["claude"] = &ClaudeProvider{
-		Name:    "Claude Opus 4.6",
-		Version: "opus-4.6",
+		Name:    "Claude Opus 4.7",
+		Version: "opus-4.7",
 		Capabilities: &ProviderCapabilities{
-			Name:                "Claude Opus 4.6",
-			Version:             "4.6",
+			Name:                "Claude Opus 4.7",
+			Version:             "4.7",
 			MaxTokens:           200000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp", "html", "css"},
 			Strengths:           []string{"complex_reasoning", "code_analysis", "refactoring", "architecture", "debugging"},
@@ -122,12 +122,12 @@ func (ear *EnhancedAIRouter) initializeProviders() {
 		},
 	}
 
-	// ChatGPT 5.4 Pro - Best for code generation and documentation
+	// ChatGPT 5.4 Codex - Best for code generation and documentation
 	ear.providers["gpt4"] = &GPTProvider{
-		Name:    "ChatGPT 5.4 Pro",
-		Version: "gpt-5.4-pro",
+		Name:    "ChatGPT 5.4 Codex",
+		Version: "gpt-5.4-codex",
 		Capabilities: &ProviderCapabilities{
-			Name:                "ChatGPT 5.4 Pro",
+			Name:                "ChatGPT 5.4 Codex",
 			Version:             "5.4",
 			MaxTokens:           128000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp", "html", "css"},

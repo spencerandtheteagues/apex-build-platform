@@ -72,7 +72,7 @@ const tourSteps: TourStep[] = [
     details: [
       'Fast & Cheap (1.6x) — Budget models for quick prototypes and experiments',
       'Balanced (1.8x) — Mid-tier models for solid production code',
-      'Max Power (2.0x) - Flagship routing across Claude Opus 4.6, ChatGPT 5.4 Pro, Gemini 3.1 Pro, Grok 4.20, and Kimi K2.6/local models',
+      'Max Power (2.0x) - Flagship routing across Claude Opus 4.7, ChatGPT 5.4 Codex, Gemini 3.1 Pro, Grok 4.20, and Kimi K2.6/local models',
     ],
     tip: 'Start with Fast mode to test your idea, then rebuild with Max Power once you\'re happy with the concept.',
   },

@@ -809,7 +809,7 @@ The Settings area also includes the legal center with the Terms of Service, Priv
 After saving, click "Validate" to test that the key works. A green checkmark means it's valid.
 
 **To choose a specific model:**
-Each provider card has a model dropdown. Select your preferred model (e.g., "claude-opus-4-6" for Claude's most powerful model).
+Each provider card has a model dropdown. Select your preferred model (e.g., "claude-opus-4-7" for Claude's most powerful model).
 
 **To disable a provider:**
 Toggle the "Active" switch off. Your key stays saved but won't be used.

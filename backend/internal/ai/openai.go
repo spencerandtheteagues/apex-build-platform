@@ -24,12 +24,12 @@ type OpenAIClient struct {
 
 // OpenAI API request/response structures
 type openAIRequest struct {
-	Model                string          `json:"model"`
-	Messages             []openAIMessage `json:"messages"`
-	MaxTokens            int             `json:"max_tokens,omitempty"`
-	MaxCompletionTokens  int             `json:"max_completion_tokens,omitempty"`
-	Temperature          float32         `json:"temperature,omitempty"`
-	Stream               bool            `json:"stream"`
+	Model               string          `json:"model"`
+	Messages            []openAIMessage `json:"messages"`
+	MaxTokens           int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
+	Temperature         float32         `json:"temperature,omitempty"`
+	Stream              bool            `json:"stream"`
 }
 
 // useMaxCompletionTokens returns true for o1/o3/o4 reasoning models that
@@ -482,9 +482,25 @@ func (o *OpenAIClient) makeResponsesRequest(
 // getModelForRequest selects model respecting explicit override
 func (o *OpenAIClient) getModelForRequest(req *AIRequest) string {
 	if req.Model != "" {
-		return req.Model
+		return normalizeOpenAIModelAlias(req.Model)
 	}
 	return o.getModelForCapability(req.Capability)
+}
+
+func normalizeOpenAIModelAlias(model string) string {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(normalized, "gpt-codex-5.5"),
+		strings.HasPrefix(normalized, "gpt-5.5"),
+		strings.HasPrefix(normalized, "chatgpt-5.5"),
+		strings.HasPrefix(normalized, "gpt-codex-5.4"),
+		strings.HasPrefix(normalized, "chatgpt-5.4-codex"),
+		strings.HasPrefix(normalized, "gpt-5.4-codex"),
+		strings.HasPrefix(normalized, "gpt-5.4-pro"):
+		return "gpt-5.4-codex"
+	default:
+		return strings.TrimSpace(model)
+	}
 }
 
 // getModelForCapability selects the best OpenAI model for the capability
@@ -583,7 +599,7 @@ func (o *OpenAIClient) calculateCost(inputTokens, outputTokens int, model string
 	case "o1", "o1-2024-12-17", "o1-pro":
 		inputCostPer1K = 0.015
 		outputCostPer1K = 0.060
-	case "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-2026-03-05", "gpt-5.4-pro-2026-03-05":
+	case "gpt-5.4", "gpt-5.4-codex", "gpt-codex-5.4", "gpt-5.4-pro", "gpt-5.4-2026-03-05", "gpt-5.4-pro-2026-03-05":
 		inputCostPer1K = 0.0025
 		outputCostPer1K = 0.015
 	case "gpt-4.1":
