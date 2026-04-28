@@ -112,13 +112,29 @@ ssh_dir="${HOME:-/home/appuser}/.ssh"
 mkdir -p "$ssh_dir"
 chmod 700 "$ssh_dir"
 
+write_secret_file() {
+  value="$1"
+  target="$2"
+
+  if printf '%s' "$value" | grep -q '\\n'; then
+    printf '%b\n' "$value" > "$target"
+    return
+  fi
+
+  if printf '%s' "$value" | base64 -d > "$target" 2>/dev/null; then
+    return
+  fi
+
+  printf '%s\n' "$value" > "$target"
+}
+
 if [ -n "${DOCKER_SSH_PRIVATE_KEY:-}" ]; then
-  printf '%b\n' "$DOCKER_SSH_PRIVATE_KEY" > "$ssh_dir/id_rsa"
+  write_secret_file "$DOCKER_SSH_PRIVATE_KEY" "$ssh_dir/id_rsa"
   chmod 600 "$ssh_dir/id_rsa"
 fi
 
 if [ -n "${DOCKER_SSH_KNOWN_HOSTS:-}" ]; then
-  printf '%b\n' "$DOCKER_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+  write_secret_file "$DOCKER_SSH_KNOWN_HOSTS" "$ssh_dir/known_hosts"
   chmod 600 "$ssh_dir/known_hosts"
 fi
 
