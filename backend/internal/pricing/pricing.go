@@ -263,12 +263,6 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		}
 		return "grok-3-mini"
 	case "ollama":
-		if mode == ModeMax {
-			return "kimi-k2.6"
-		}
-		if mode == ModeBalanced {
-			return "kimi-k2.6"
-		}
 		return "kimi-k2.6:cloud"
 	case "deepseek":
 		if mode == ModeMax {

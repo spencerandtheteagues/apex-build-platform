@@ -174,10 +174,10 @@ func enhancedToolchainProfileForLanguage(language string) SandboxToolchainProfil
 		return mergeToolchainProfiles(common, newSandboxToolchainProfile(
 			[]string{"node", "npm", "npx", "pnpm", "yarn"},
 			nil,
-			[]string{"netlify", "railway", "vercel", "wrangler"},
+			[]string{"netlify", "railway", "supabase", "vercel", "wrangler"},
 			[]string{"drizzle-kit", "node", "npm", "npx", "prisma", "serve", "tsc", "tsx", "vite"},
 			nil,
-			[]string{"netlify", "railway", "vercel", "wrangler"},
+			[]string{"netlify", "railway", "supabase", "vercel", "wrangler"},
 		))
 	case "go":
 		return mergeToolchainProfiles(common, newSandboxToolchainProfile(
@@ -339,6 +339,7 @@ func sandboxGlobalInstallCommands(language string) []string {
 	case "javascript":
 		return []string{
 			"npm install -g pnpm typescript tsx vite serve prisma drizzle-kit vercel netlify-cli wrangler @railway/cli",
+			"curl -fsSL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz | tar -xz -C /usr/local/bin supabase",
 		}
 	default:
 		return nil
@@ -350,7 +351,7 @@ func DefaultAgentCommandCatalog() []string {
 		"cargo", "composer", "curl", "drizzle-kit", "g++", "gcc", "git", "go", "gofmt",
 		"gradle", "java", "javac", "jq", "make", "mvn", "mysql", "nc", "netlify", "node",
 		"npm", "npx", "pip", "pip3", "pipenv", "pnpm", "poetry", "prisma",
-		"psql", "python", "python3", "railway", "redis-cli", "rg", "rustc", "serve",
+		"psql", "python", "python3", "railway", "redis-cli", "rg", "rustc", "serve", "supabase",
 		"sqlite3", "tsc", "tsx", "uv", "vercel", "vite", "wget", "wrangler", "yarn",
 	})
 }

@@ -988,6 +988,13 @@ func (am *AgentManager) buildTimeoutForBuild(build *Build) time.Duration {
 	}
 
 	timeout := am.buildTimeoutForMode(build.Mode)
+	envKey := "BUILD_TIMEOUT_FAST_SECONDS"
+	if build.Mode == ModeFull {
+		envKey = "BUILD_TIMEOUT_FULL_SECONDS"
+	}
+	if _, explicitlySet := os.LookupEnv(envKey); explicitlySet {
+		return timeout
+	}
 
 	switch build.PowerMode {
 	case PowerMax:

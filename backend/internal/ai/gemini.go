@@ -193,8 +193,8 @@ func (g *GeminiClient) generateWithModelFallback(ctx context.Context, model stri
 func geminiModelFallbacks(model string) []string {
 	switch model {
 	case "gemini-3.1-pro":
-		// The stable alias doesn't exist yet; go straight to preview.
-		return []string{"gemini-3.1-pro-preview", "gemini-2.5-pro"}
+		// Prefer the stable alias, then fall back to preview while it rolls out.
+		return []string{"gemini-3.1-pro", "gemini-3.1-pro-preview", "gemini-2.5-pro"}
 	case "gemini-3.1-pro-preview":
 		return []string{"gemini-3.1-pro-preview", "gemini-2.5-pro"}
 	case "gemini-3-pro-preview":
