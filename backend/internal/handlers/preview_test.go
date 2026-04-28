@@ -279,6 +279,21 @@ func TestRewritePreviewJavaScriptForProxyNormalizesRelativeViteChunksToPublicPro
 	require.NotContains(t, rewritten, `from"./index-DZPHYNTJ.js"`)
 }
 
+func TestRewritePreviewJavaScriptForProxyKeepsVitePreloadDepsOriginRelative(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+	prefix := "https://api.apex-build.dev/api/v1/preview/proxy/" + strconv.FormatUint(uint64(projectID), 10)
+	preloadPrefix := "api/v1/preview/proxy/" + strconv.FormatUint(uint64(projectID), 10)
+
+	js := `const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/Dashboard-CVEE8rpR.js","assets/api-CM3qBsrA.js"])))=>i.map(i=>d[i]);const View=lazy(()=>import("./Dashboard-CVEE8rpR.js"),__vite__mapDeps([0,1]));`
+
+	rewritten := handler.rewritePreviewJavaScriptForProxyWithPrefix(js, prefix, "token value")
+
+	require.Contains(t, rewritten, `m.f=["`+preloadPrefix+`/assets/Dashboard-CVEE8rpR.js?preview_token=token+value","`+preloadPrefix+`/assets/api-CM3qBsrA.js?preview_token=token+value"]`)
+	require.Contains(t, rewritten, `import("`+prefix+`/assets/Dashboard-CVEE8rpR.js?preview_token=token+value")`)
+	require.NotContains(t, rewritten, `"/https://api.apex-build.dev`)
+	require.NotContains(t, rewritten, `"https://api.apex-build.dev/api/v1/preview/proxy/`+strconv.FormatUint(uint64(projectID), 10)+`/assets/api-CM3qBsrA.js`)
+}
+
 func TestPreviewHandlerBuildProxyBaseURLExcludesPreviewToken(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, false)
 

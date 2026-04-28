@@ -1199,7 +1199,7 @@ func (h *PreviewHandler) rewritePreviewJavaScriptForProxy(js string, projectID u
 func (h *PreviewHandler) rewritePreviewJavaScriptForProxyWithPrefix(js string, prefix string, previewToken string) string {
 	assetLiteralPattern := regexp.MustCompile(`(["'])((?:/?assets/|\./)[^"'\s)]+?\.(?:js|mjs|css|svg|png|jpe?g|webp|gif|woff2?|ttf|eot)(?:\?[^"'\s)]*)?(?:#[^"'\s)]*)?)(["'])`)
 
-	return assetLiteralPattern.ReplaceAllStringFunc(js, func(match string) string {
+	rewritten := assetLiteralPattern.ReplaceAllStringFunc(js, func(match string) string {
 		parts := assetLiteralPattern.FindStringSubmatch(match)
 		if len(parts) != 4 || parts[1] != parts[3] {
 			return match
@@ -1207,6 +1207,7 @@ func (h *PreviewHandler) rewritePreviewJavaScriptForProxyWithPrefix(js string, p
 		rewritten := rewritePreviewAssetTargetForProxy(parts[2], prefix, previewToken)
 		return parts[1] + rewritten + parts[3]
 	})
+	return normalizeVitePreloadDependencyMapForProxy(rewritten, prefix)
 }
 
 func rewritePreviewAssetTargetForProxy(target string, prefix string, previewToken string) string {
@@ -1243,6 +1244,29 @@ func appendPreviewTokenToProxyTarget(target string, prefix string, previewToken 
 		separator = "&"
 	}
 	return base + separator + "preview_token=" + url.QueryEscape(previewToken) + fragment
+}
+
+func normalizeVitePreloadDependencyMapForProxy(js string, prefix string) string {
+	parsedPrefix, err := url.Parse(prefix)
+	if err != nil || parsedPrefix.Scheme == "" || parsedPrefix.Host == "" {
+		return js
+	}
+
+	fullAssetPrefix := strings.TrimRight(prefix, "/") + "/assets/"
+	preloadAssetPrefix := strings.TrimLeft(strings.TrimRight(parsedPrefix.Path, "/")+"/assets/", "/")
+	if preloadAssetPrefix == "" || fullAssetPrefix == preloadAssetPrefix {
+		return js
+	}
+
+	mapDepsPattern := regexp.MustCompile(`m\.f\|\|\(m\.f=\[([^\]]*)\]\)`)
+	return mapDepsPattern.ReplaceAllStringFunc(js, func(match string) string {
+		parts := mapDepsPattern.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		normalizedDeps := strings.ReplaceAll(parts[1], fullAssetPrefix, preloadAssetPrefix)
+		return strings.Replace(match, parts[1], normalizedDeps, 1)
+	})
 }
 
 func appendPreviewTokenToProxyAssets(html string, prefix string, previewToken string) string {
