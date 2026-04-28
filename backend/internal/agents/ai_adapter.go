@@ -429,6 +429,7 @@ For code files, use this exact format:
 		Prompt:            fullPrompt,
 		MaxTokens:         maxTokens,
 		Temperature:       float32(temperature),
+		PowerMode:         string(opts.PowerMode),
 		Provider:          aiProvider,
 		CacheSystemPrompt: opts.CacheSystemPrompt,
 	}

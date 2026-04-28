@@ -74,3 +74,25 @@ func TestClampAIRouterPromptPreservesHeadAndTail(t *testing.T) {
 		t.Fatalf("expected clamped prompt to include compaction marker")
 	}
 }
+
+func TestTaskNeedsProactiveTokenBoostForLargeFirstPassOutputs(t *testing.T) {
+	t.Parallel()
+
+	if !taskNeedsProactiveTokenBoost(&Task{Type: TaskGenerateUI}, RoleFrontend) {
+		t.Fatalf("expected frontend generation to receive first-pass output headroom")
+	}
+	if !taskNeedsProactiveTokenBoost(&Task{
+		Type: TaskFix,
+		Input: map[string]any{
+			"required_files": []string{"src/App.tsx", "src/main.tsx", "src/routes.tsx", "src/api.ts"},
+		},
+	}, RoleSolver) {
+		t.Fatalf("expected multi-file solver repair to receive first-pass output headroom")
+	}
+	if taskNeedsProactiveTokenBoost(&Task{Type: TaskGenerateUI, RetryCount: 1}, RoleFrontend) {
+		t.Fatalf("retry attempts should use truncation-specific boost logic instead")
+	}
+	if taskNeedsProactiveTokenBoost(&Task{Type: TaskReview}, RoleReviewer) {
+		t.Fatalf("expected review-only task to avoid proactive output boost")
+	}
+}

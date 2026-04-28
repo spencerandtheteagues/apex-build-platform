@@ -168,7 +168,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
     try {
       setDeletingAll(true)
       setActionError(null)
-      const result = await apiService.deleteAllBuilds()
+      await apiService.deleteAllBuilds()
       setBuilds([])
     } catch (err: any) {
       setActionError(err?.response?.data?.error || 'Unable to delete all builds right now.')

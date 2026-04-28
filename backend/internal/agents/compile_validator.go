@@ -25,6 +25,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -122,8 +123,57 @@ func maxCompileAttempts(mode PowerMode) int {
 	case PowerBalanced:
 		return 2
 	default: // PowerFast and unknown
-		return 1 // one shot — validate but don't loop
+		return 2 // Fast still gets one repair pass; a single missed import should not fail first-pass.
 	}
+}
+
+var cvPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
+
+func cvPackageManifestSanityIssues(files []GeneratedFile) []ParsedBuildError {
+	for _, file := range files {
+		path := filepath.ToSlash(strings.TrimSpace(file.Path))
+		if path != "package.json" && !strings.HasSuffix(path, "/package.json") {
+			continue
+		}
+		content := strings.TrimSpace(file.Content)
+		if content == "" {
+			continue
+		}
+		var manifest map[string]any
+		if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+			return []ParsedBuildError{{
+				File:    path,
+				Message: fmt.Sprintf("package.json is invalid JSON: %v", err),
+				Source:  "install",
+			}}
+		}
+		for _, section := range []string{"dependencies", "devDependencies", "peerDependencies", "optionalDependencies"} {
+			raw, ok := manifest[section]
+			if !ok || raw == nil {
+				continue
+			}
+			deps, ok := raw.(map[string]any)
+			if !ok {
+				return []ParsedBuildError{{
+					File:    path,
+					Message: fmt.Sprintf("package.json field %q must be an object", section),
+					Source:  "install",
+				}}
+			}
+			for name := range deps {
+				normalized := strings.ToLower(strings.TrimSpace(name))
+				if !cvPackageNamePattern.MatchString(normalized) {
+					return []ParsedBuildError{{
+						File:    path,
+						Message: fmt.Sprintf("package.json %s contains invalid dependency name %q", section, name),
+						Source:  "install",
+					}}
+				}
+			}
+		}
+		return nil
+	}
+	return nil
 }
 
 // ─── Main Entry Point ─────────────────────────────────────────────────────────
@@ -187,6 +237,12 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 	if err := cvMaterializeFiles(*allFiles, tmpDir); err != nil {
 		result.SkipReason = fmt.Sprintf("failed to materialise workspace: %v", err)
 		log.Printf("[compile_validator] build %s: %s", build.ID, result.SkipReason)
+		return result
+	}
+	if manifestIssues := cvPackageManifestSanityIssues(*allFiles); len(manifestIssues) > 0 {
+		result.FinalErrors = manifestIssues
+		result.SkipReason = "package.json sanity failed before npm install"
+		log.Printf("[compile_validator] build %s: %s: %v", build.ID, result.SkipReason, manifestIssues)
 		return result
 	}
 

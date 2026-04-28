@@ -46,6 +46,7 @@ type AIRequest struct {
 	Context            map[string]interface{} `json:"context,omitempty"`
 	MaxTokens          int                    `json:"max_tokens,omitempty"`
 	Temperature        float32                `json:"temperature,omitempty"`
+	PowerMode          string                 `json:"power_mode,omitempty"`
 	UserID             string                 `json:"user_id"`
 	ProjectID          string                 `json:"project_id,omitempty"`
 	CreatedAt          time.Time              `json:"created_at"`

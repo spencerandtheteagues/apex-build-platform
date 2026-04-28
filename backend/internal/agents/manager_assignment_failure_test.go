@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"apex-build/internal/ai"
 )
 
 func TestEnqueueRecoveryTask_DoesNotLeavePendingTaskWithoutSolver(t *testing.T) {
@@ -89,6 +91,83 @@ func TestEnqueueRecoveryTask_RollsBackWhenAssignmentFails(t *testing.T) {
 	}
 	if _, ok := failedTask.Input["superseded_by_recovery"]; ok {
 		t.Fatalf("expected rollback to clear superseded_by_recovery, got %+v", failedTask.Input["superseded_by_recovery"])
+	}
+}
+
+func TestEnqueueRecoveryTaskCarriesFailedTaskContext(t *testing.T) {
+	t.Parallel()
+
+	manager := newTestIterationManager(nil)
+	build := &Build{
+		ID:          "recovery-context-build",
+		Status:      BuildReviewing,
+		Description: "Recover a failed frontend task",
+		MaxRetries:  3,
+		Agents:      map[string]*Agent{},
+	}
+	frontend := &Agent{
+		ID:       "frontend-1",
+		BuildID:  build.ID,
+		Role:     RoleFrontend,
+		Provider: ai.ProviderGPT4,
+		Status:   StatusIdle,
+	}
+	solver := &Agent{
+		ID:       "solver-1",
+		BuildID:  build.ID,
+		Role:     RoleSolver,
+		Provider: ai.ProviderGPT4,
+		Status:   StatusIdle,
+	}
+	build.Agents[frontend.ID] = frontend
+	build.Agents[solver.ID] = solver
+	manager.agents[frontend.ID] = frontend
+	manager.agents[solver.ID] = solver
+	manager.builds[build.ID] = build
+
+	failedTask := &Task{
+		ID:          "frontend-failed",
+		Type:        TaskGenerateUI,
+		Description: "Build dashboard UI",
+		AssignedTo:  frontend.ID,
+		Status:      TaskFailed,
+		Input: map[string]any{
+			"work_order_summary": "Create the dashboard surface.",
+		},
+		Output: &TaskOutput{
+			Messages: []string{"Generated initial dashboard before failing validation."},
+			Files: []GeneratedFile{
+				{Path: "src/App.tsx", Language: "typescript", Content: "export default function App(){return <main />}", IsNew: true},
+			},
+			ProviderVerificationReport: &VerificationReport{
+				ID:       "vr-1",
+				BuildID:  build.ID,
+				Provider: ai.ProviderGPT4,
+				Errors:   []string{"missing route export"},
+			},
+		},
+	}
+	build.Tasks = []*Task{failedTask}
+
+	if queued := manager.enqueueRecoveryTask(build.ID, failedTask, errors.New("preview verification failed")); !queued {
+		t.Fatal("expected recovery task to queue")
+	}
+
+	var recoveryTask *Task
+	select {
+	case recoveryTask = <-manager.taskQueue:
+	default:
+		t.Fatal("expected recovery task in queue")
+	}
+
+	if taskInputStringValue(recoveryTask.Input, "failed_task_original_prompt") == "" {
+		t.Fatalf("expected original task prompt in recovery input")
+	}
+	if !strings.Contains(taskInputStringValue(recoveryTask.Input, "failed_task_partial_output"), "src/App.tsx") {
+		t.Fatalf("expected failed generated file context, got %q", taskInputStringValue(recoveryTask.Input, "failed_task_partial_output"))
+	}
+	if !strings.Contains(taskInputStringValue(recoveryTask.Input, "failed_task_provider_verification_report"), "missing route export") {
+		t.Fatalf("expected provider verification report in recovery input")
 	}
 }
 

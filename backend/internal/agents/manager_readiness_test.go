@@ -2045,6 +2045,75 @@ func TestTaskHasRecentTruncationError(t *testing.T) {
 	}
 }
 
+func TestMaxAutomatedRecoveryAttemptsByPowerMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode PowerMode
+		want int
+	}{
+		{name: "fast", mode: PowerFast, want: 3},
+		{name: "balanced", mode: PowerBalanced, want: 3},
+		{name: "max", mode: PowerMax, want: 4},
+		{name: "unknown defaults to fast", mode: PowerMode("unknown"), want: 3},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := maxAutomatedRecoveryAttempts(tt.mode); got != tt.want {
+				t.Fatalf("maxAutomatedRecoveryAttempts(%q) = %d, want %d", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepeatedReadinessErrorClassRequiresThreeAttempts(t *testing.T) {
+	t.Parallel()
+
+	if repeatedReadinessErrorClassExhausted(2, "missing_dependency", "missing_dependency") {
+		t.Fatalf("expected two attempts to allow another recovery pass")
+	}
+	if !repeatedReadinessErrorClassExhausted(3, "missing_dependency", "missing_dependency") {
+		t.Fatalf("expected third repeated attempt to exhaust the repeated class")
+	}
+	if repeatedReadinessErrorClassExhausted(3, "", "missing_dependency") {
+		t.Fatalf("expected empty prior class to avoid exhaustion")
+	}
+	if repeatedReadinessErrorClassExhausted(3, "missing_dependency", "syntax") {
+		t.Fatalf("expected different classes to avoid exhaustion")
+	}
+}
+
+func TestCrossAgentFileCoherenceErrorsDetectMissingLocalImport(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "cross-coherence-build",
+		Tasks: []*Task{
+			{
+				ID:     "frontend",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{Path: "src/App.tsx", Language: "typescript", Content: `import Panel from "./components/Panel"; export default function App(){ return <Panel /> }`},
+					},
+				},
+			},
+		},
+	}
+
+	errs := am.crossAgentFileCoherenceErrors(build)
+	if len(errs) == 0 || !strings.Contains(errs[0], "generated file") {
+		t.Fatalf("expected missing local import coherence error, got %+v", errs)
+	}
+}
+
 func TestCancelAutomatedRecoveryTasksForLoopCap(t *testing.T) {
 	t.Parallel()
 
@@ -2190,6 +2259,31 @@ npm ERR! gyp ERR! stack Error: Could not find any Python installation to use`
 		skip, _ := classifyNodeInstallFailure(out, errors.New("exit status 1"))
 		if !skip {
 			t.Fatalf("expected node-gyp toolchain failure to skip verifier")
+		}
+	})
+
+	t.Run("peer_dependency_cycle_remains_artifact_failure", func(t *testing.T) {
+		t.Parallel()
+
+		out := `npm ERR! code ERESOLVE
+npm ERR! ERESOLVE unable to resolve dependency tree
+npm ERR! peer react@"^17" from legacy-widget@1.0.0`
+
+		skip, _ := classifyNodeInstallFailure(out, errors.New("exit status 1"))
+		if skip {
+			t.Fatalf("expected peer dependency conflict to remain a real artifact failure")
+		}
+	})
+
+	t.Run("malformed_package_json_remains_artifact_failure", func(t *testing.T) {
+		t.Parallel()
+
+		out := `npm ERR! code EJSONPARSE
+npm ERR! JSON.parse Unexpected end of JSON input while parsing package.json`
+
+		skip, _ := classifyNodeInstallFailure(out, errors.New("exit status 1"))
+		if skip {
+			t.Fatalf("expected malformed package.json to remain a real artifact failure")
 		}
 	})
 }

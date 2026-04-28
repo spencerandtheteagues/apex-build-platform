@@ -81,8 +81,8 @@ func NewOptimizedAgentManager(aiRouter AIRouter) *OptimizedAgentManager {
 	am := &OptimizedAgentManager{
 		agents:      make(map[string]*Agent),
 		builds:      make(map[string]*ManagedBuild),
-		taskQueue:   make(chan *Task, 100),
-		resultQueue: make(chan *TaskResult, 100),
+		taskQueue:   make(chan *Task, agentTaskQueueBuffer),
+		resultQueue: make(chan *TaskResult, agentResultQueueBuffer),
 		subscribers: make(map[string][]*managedSubscriber),
 		aiRouter:    aiRouter,
 		ctx:         ctx,

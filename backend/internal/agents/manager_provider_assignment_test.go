@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -337,6 +338,108 @@ func TestGetNextFallbackProviderForTask_UsesLiveScorecards(t *testing.T) {
 	got := am.getNextFallbackProviderForTask(build, task, RoleFrontend, ai.ProviderGPT4)
 	if got != ai.ProviderGemini {
 		t.Fatalf("fallback provider = %s, want live-scorecard provider %s", got, ai.ProviderGemini)
+	}
+}
+
+func TestRankedFallbackProvidersForTaskUsesScorecardsAndCooldown(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini},
+			hasConfiguredProvider: true,
+		},
+		providerCooldowns: make(map[string]map[ai.AIProvider]time.Time),
+	}
+	build := &Build{
+		ID:           "build-ranked-fallback",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				ProviderScorecards: []ProviderScorecard{
+					{Provider: ai.ProviderClaude, TaskShape: TaskShapeFrontendPatch, SampleCount: 5, FirstPassSampleCount: 5, CompilePassRate: 0.70, FirstPassVerificationRate: 0.68, RepairSuccessRate: 0.72, PromotionRate: 0.70, FailureClassRecurrence: 0.20, TruncationRate: 0.04, AverageCostPerSuccess: 0.10},
+					{Provider: ai.ProviderGemini, TaskShape: TaskShapeFrontendPatch, SampleCount: 5, FirstPassSampleCount: 5, CompilePassRate: 0.96, FirstPassVerificationRate: 0.95, RepairSuccessRate: 0.90, PromotionRate: 0.94, FailureClassRecurrence: 0.06, TruncationRate: 0.01, AverageCostPerSuccess: 0.05},
+				},
+			},
+		},
+	}
+	task := &Task{
+		ID:   "task-ranked-fallback",
+		Type: TaskGenerateUI,
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				ID:        "wo-front",
+				Role:      RoleFrontend,
+				TaskShape: TaskShapeFrontendPatch,
+			},
+		},
+	}
+	tried := map[ai.AIProvider]bool{ai.ProviderGPT4: true}
+
+	got := am.rankedFallbackProvidersForTask(build, task, RoleFrontend, tried)
+	if len(got) == 0 || got[0] != ai.ProviderGemini {
+		t.Fatalf("fallback order = %+v, want Gemini first by scorecard", got)
+	}
+
+	am.markProviderTemporaryFailure(build.ID, ai.ProviderGemini)
+	got = am.rankedFallbackProvidersForTask(build, task, RoleFrontend, tried)
+	if len(got) == 0 || got[0] == ai.ProviderGemini {
+		t.Fatalf("fallback order = %+v, expected cooled-down Gemini to be skipped", got)
+	}
+}
+
+func TestPlanningRetryRotatesProviderAfterProviderFailure(t *testing.T) {
+	am := newTestIterationManager(&stubAIRouter{
+		providers:             []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
+		hasConfiguredProvider: true,
+	})
+	build := &Build{
+		ID:           "build-plan-rotation",
+		Status:       BuildPlanning,
+		ProviderMode: "platform",
+		PowerMode:    PowerBalanced,
+		MaxRetries:   2,
+		Agents:       map[string]*Agent{},
+	}
+	lead := &Agent{
+		ID:       "lead-1",
+		BuildID:  build.ID,
+		Role:     RoleLead,
+		Provider: ai.ProviderClaude,
+		Model:    "claude-opus-4-7",
+		Status:   StatusWorking,
+	}
+	task := &Task{
+		ID:         "plan-1",
+		Type:       TaskPlan,
+		Status:     TaskInProgress,
+		MaxRetries: 2,
+		Input:      map[string]any{"description": "Build an app"},
+	}
+	lead.CurrentTask = task
+	build.Agents[lead.ID] = lead
+	build.Tasks = []*Task{task}
+	am.agents[lead.ID] = lead
+	am.builds[build.ID] = build
+
+	am.handleTaskFailure(lead, task, &TaskResult{
+		TaskID:  task.ID,
+		AgentID: lead.ID,
+		Error:   errors.New("rate limit exceeded"),
+	})
+
+	if lead.Provider != ai.ProviderGPT4 {
+		t.Fatalf("lead provider = %s, want provider rotation to GPT4", lead.Provider)
+	}
+	if taskInputStringValue(task.Input, "retry_provider_rotation") != "claude -> gpt4" {
+		t.Fatalf("missing retry provider rotation marker, got %+v", task.Input)
+	}
+	select {
+	case queued := <-am.taskQueue:
+		if queued.ID != task.ID {
+			t.Fatalf("queued task = %s, want %s", queued.ID, task.ID)
+		}
+	default:
+		t.Fatal("expected planning task to be requeued")
 	}
 }
 

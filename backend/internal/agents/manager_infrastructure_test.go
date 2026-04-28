@@ -14,8 +14,14 @@ func TestEnsureWorkerInfrastructureInitializesQueuesAndContext(t *testing.T) {
 	if am.taskQueue == nil {
 		t.Fatal("expected task queue to be initialized")
 	}
+	if cap(am.taskQueue) != agentTaskQueueBuffer {
+		t.Fatalf("task queue capacity = %d, want %d", cap(am.taskQueue), agentTaskQueueBuffer)
+	}
 	if am.resultQueue == nil {
 		t.Fatal("expected result queue to be initialized")
+	}
+	if cap(am.resultQueue) != agentResultQueueBuffer {
+		t.Fatalf("result queue capacity = %d, want %d", cap(am.resultQueue), agentResultQueueBuffer)
 	}
 	if am.subscribers == nil {
 		t.Fatal("expected subscribers map to be initialized")
@@ -62,5 +68,23 @@ func TestEnsureWorkerInfrastructureRestartsWorkersAfterCancelledContext(t *testi
 	}
 	if !am.resultProcessorRunning {
 		t.Fatal("expected result processor to be restarted")
+	}
+}
+
+func TestEnqueueTaskQueueFailsFastWhenFull(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{taskQueue: make(chan *Task, 1)}
+	am.taskQueue <- &Task{ID: "already-queued"}
+	task := &Task{ID: "overflow", Status: TaskPending}
+
+	if am.enqueueTaskQueue(task) {
+		t.Fatal("expected enqueue to fail when task queue is full")
+	}
+	if task.Status != TaskFailed {
+		t.Fatalf("task status = %s, want failed", task.Status)
+	}
+	if task.Error != "task queue saturated" {
+		t.Fatalf("task error = %q, want queue saturation", task.Error)
 	}
 }

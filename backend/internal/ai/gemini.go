@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,11 +45,11 @@ type geminySafety struct {
 }
 
 type geminiGenConfig struct {
-	Temperature     float32                `json:"temperature,omitempty"`
-	MaxOutputTokens int                    `json:"maxOutputTokens,omitempty"`
-	TopP            float32                `json:"topP,omitempty"`
-	TopK            int                    `json:"topK,omitempty"`
-	ThinkingConfig  *geminiThinkingConfig  `json:"thinkingConfig,omitempty"`
+	Temperature     float32               `json:"temperature,omitempty"`
+	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
+	TopP            float32               `json:"topP,omitempty"`
+	TopK            int                   `json:"topK,omitempty"`
+	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
 // geminiThinkingConfig controls the thinking budget for "thinking" Gemini
@@ -125,7 +127,7 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		TopP:            0.8,
 		TopK:            40,
 	}
-	if budget := geminiThinkingBudgetForModel(model); budget > 0 {
+	if budget := geminiThinkingBudgetForModel(model, req.PowerMode, len(systemPrompt)+len(userPrompt)); budget > 0 {
 		genConfig.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: budget}
 		genConfig.MaxOutputTokens = maxOut + budget
 	}
@@ -233,14 +235,79 @@ func geminiModelFallbacks(model string) []string {
 // for thinking-required Gemini models. Returns 0 when no thinking config
 // should be sent (the API rejects budget=0 for thinking-only models, so we
 // only set it when explicitly needed).
-func geminiThinkingBudgetForModel(model string) int {
+func geminiThinkingBudgetForModel(model, powerMode string, promptChars int) int {
 	switch strings.ToLower(strings.TrimSpace(model)) {
 	case "gemini-2.5-pro":
-		// 1024 covers most reasoning-heavy build/repair calls without runaway cost.
-		return 1024
+		// continue below
 	default:
 		return 0
 	}
+
+	mode := strings.ToLower(strings.TrimSpace(powerMode))
+	base := 1024
+	switch mode {
+	case "fast":
+		base = 256
+	case "balanced", "":
+		base = 1024
+	case "max":
+		base = 4096
+	}
+
+	if override := geminiThinkingBudgetEnv("GEMINI_THINKING_BUDGET_" + strings.ToUpper(firstNonEmpty(mode, "balanced"))); override > 0 {
+		base = override
+	} else if override := geminiThinkingBudgetEnv("GEMINI_THINKING_BUDGET"); override > 0 {
+		base = override
+	}
+
+	if promptChars >= 100000 {
+		base *= 2
+	} else if promptChars >= 60000 {
+		base = base * 3 / 2
+	}
+
+	floor := firstPositive(geminiThinkingBudgetEnv("GEMINI_THINKING_BUDGET_FLOOR"), 256)
+	ceiling := firstPositive(geminiThinkingBudgetEnv("GEMINI_THINKING_BUDGET_CEILING"), 8192)
+	if ceiling < floor {
+		ceiling = floor
+	}
+	if base < floor {
+		return floor
+	}
+	if base > ceiling {
+		return ceiling
+	}
+	return base
+}
+
+func geminiThinkingBudgetEnv(name string) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func shouldFallbackGeminiModel(err error) bool {

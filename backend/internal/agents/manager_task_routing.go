@@ -658,6 +658,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	attachAIResponseMetrics(output, providerUsed, modelUsed, response)
 	am.materializeStructuredPatchOutput(build, task, output)
 	trackLikelyTruncatedSourceFiles(output)
+	output.Metrics["truncation_preflight_detected"] = len(output.TruncatedFiles)
 
 	candidateAgent := *agent
 	candidateAgent.Provider = providerUsed

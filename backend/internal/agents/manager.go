@@ -44,6 +44,8 @@ var (
 const (
 	insufficientCreditsBuildMessage = "Build paused: Your account has insufficient credits. Please add credits in Settings or contact support."
 	defaultEstimatedRequestCostUSD  = 0.02
+	agentTaskQueueBuffer            = 1000
+	agentResultQueueBuffer          = 1000
 	frontendApprovalCheckpointID    = "frontend-preview-approval"
 	frontendApprovalPrompt          = "The frontend preview is ready. Reply yes if you are happy with this UI and I should continue the backend/runtime implementation on the same app, or describe the changes you want first."
 	promptPackActivationFeatureFlag = "APEX_PROMPT_PACK_ACTIVATION_REQUESTS"
@@ -495,6 +497,7 @@ type AgentManager struct {
 	subscribers            map[string][]chan *WSMessage
 	buildMonitors          map[string]struct{}
 	inFlightTasks          map[string]bool // Tracks task IDs currently in the queue or executing to prevent double-dispatch
+	providerCooldowns      map[string]map[ai.AIProvider]time.Time
 	aiRouter               AIRouter
 	db                     *gorm.DB // Database connection for persisting completed builds
 	editStore              *ProposedEditStore
@@ -564,24 +567,25 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	am := &AgentManager{
-		agents:        make(map[string]*Agent),
-		builds:        make(map[string]*Build),
-		taskQueue:     make(chan *Task, 100),
-		resultQueue:   make(chan *TaskResult, 100),
-		subscribers:   make(map[string][]chan *WSMessage),
-		buildMonitors: make(map[string]struct{}),
-		inFlightTasks: make(map[string]bool),
-		aiRouter:      aiRouter,
-		editStore:     NewProposedEditStore(),
-		pathGuard:     NewPathGuard(),
-		errorAnalyzer: NewErrorAnalyzer(aiRouter, ""),
-		ctxSelector:   NewContextSelector(),
-		chunkedEditor: NewChunkedEditor(),
-		visionIntake:  NewVisionIntakeProcessorFromEnv(),
-		taskCancels:   make(map[string]context.CancelFunc),
-		instanceID:    resolveAgentManagerInstanceID(),
-		ctx:           ctx,
-		cancel:        cancel,
+		agents:            make(map[string]*Agent),
+		builds:            make(map[string]*Build),
+		taskQueue:         make(chan *Task, agentTaskQueueBuffer),
+		resultQueue:       make(chan *TaskResult, agentResultQueueBuffer),
+		subscribers:       make(map[string][]chan *WSMessage),
+		buildMonitors:     make(map[string]struct{}),
+		inFlightTasks:     make(map[string]bool),
+		providerCooldowns: make(map[string]map[ai.AIProvider]time.Time),
+		aiRouter:          aiRouter,
+		editStore:         NewProposedEditStore(),
+		pathGuard:         NewPathGuard(),
+		errorAnalyzer:     NewErrorAnalyzer(aiRouter, ""),
+		ctxSelector:       NewContextSelector(),
+		chunkedEditor:     NewChunkedEditor(),
+		visionIntake:      NewVisionIntakeProcessorFromEnv(),
+		taskCancels:       make(map[string]context.CancelFunc),
+		instanceID:        resolveAgentManagerInstanceID(),
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 	if len(db) > 0 && db[0] != nil {
 		am.db = db[0]
@@ -615,16 +619,19 @@ func (am *AgentManager) ensureWorkerInfrastructure() {
 		am.resultProcessorRunning = false
 	}
 	if am.taskQueue == nil {
-		am.taskQueue = make(chan *Task, 100)
+		am.taskQueue = make(chan *Task, agentTaskQueueBuffer)
 	}
 	if am.resultQueue == nil {
-		am.resultQueue = make(chan *TaskResult, 100)
+		am.resultQueue = make(chan *TaskResult, agentResultQueueBuffer)
 	}
 	if am.subscribers == nil {
 		am.subscribers = make(map[string][]chan *WSMessage)
 	}
 	if am.buildMonitors == nil {
 		am.buildMonitors = make(map[string]struct{})
+	}
+	if am.providerCooldowns == nil {
+		am.providerCooldowns = make(map[string]map[ai.AIProvider]time.Time)
 	}
 	if !am.taskDispatcherRunning {
 		am.taskDispatcherRunning = true
@@ -971,14 +978,19 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	leadAgent.Status = StatusWorking
 	leadAgent.mu.Unlock()
 
-	// Create planning task with proper initialization
+	// Create planning task with proper initialization. Planning is the only
+	// single-entrypoint task, so guarantee one provider-rotation retry.
+	planMaxRetries := build.MaxRetries
+	if planMaxRetries < 2 {
+		planMaxRetries = 2
+	}
 	planTask := &Task{
 		ID:          uuid.New().String(),
 		Type:        TaskPlan,
 		Description: fmt.Sprintf("Create comprehensive build plan for: %s", build.Description),
 		Priority:    100,
 		Status:      TaskPending,
-		MaxRetries:  build.MaxRetries,
+		MaxRetries:  planMaxRetries,
 		Input: map[string]any{
 			"description": build.Description,
 			"mode":        string(build.Mode),
@@ -1018,7 +1030,15 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	})
 
 	// Queue the planning task
-	am.taskQueue <- planTask
+	if !am.enqueueTaskQueue(planTask) {
+		build.mu.Lock()
+		build.Status = BuildFailed
+		build.Error = planTask.Error
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
+		am.persistBuildSnapshot(build, nil)
+		return fmt.Errorf("failed to queue planning task: %s", planTask.Error)
+	}
 
 	am.startBuildMonitors(buildID)
 
@@ -1318,6 +1338,120 @@ func (am *AgentManager) retainRecentSuccessfulBuildProviders(build *Build, provi
 	}
 	log.Printf("Build %s: retaining ollama for the active build because a recent task already succeeded with it", build.ID)
 	return next
+}
+
+const providerFailoverCooldown = 60 * time.Second
+
+func (am *AgentManager) markProviderTemporaryFailure(buildID string, provider ai.AIProvider) {
+	if am == nil || strings.TrimSpace(buildID) == "" || provider == "" {
+		return
+	}
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if am.providerCooldowns == nil {
+		am.providerCooldowns = make(map[string]map[ai.AIProvider]time.Time)
+	}
+	if am.providerCooldowns[buildID] == nil {
+		am.providerCooldowns[buildID] = make(map[ai.AIProvider]time.Time)
+	}
+	am.providerCooldowns[buildID][provider] = time.Now().Add(providerFailoverCooldown)
+}
+
+func (am *AgentManager) clearProviderTemporaryFailure(buildID string, provider ai.AIProvider) {
+	if am == nil || strings.TrimSpace(buildID) == "" || provider == "" {
+		return
+	}
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if providers := am.providerCooldowns[buildID]; providers != nil {
+		delete(providers, provider)
+		if len(providers) == 0 {
+			delete(am.providerCooldowns, buildID)
+		}
+	}
+}
+
+func (am *AgentManager) providerOnTemporaryCooldown(buildID string, provider ai.AIProvider, now time.Time) bool {
+	if am == nil || strings.TrimSpace(buildID) == "" || provider == "" {
+		return false
+	}
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	providers := am.providerCooldowns[buildID]
+	if providers == nil {
+		return false
+	}
+	expiresAt, ok := providers[provider]
+	if !ok {
+		return false
+	}
+	if now.After(expiresAt) {
+		delete(providers, provider)
+		if len(providers) == 0 {
+			delete(am.providerCooldowns, buildID)
+		}
+		return false
+	}
+	return true
+}
+
+func (am *AgentManager) rankedFallbackProvidersForTask(build *Build, task *Task, role AgentRole, tried map[ai.AIProvider]bool) []ai.AIProvider {
+	if build == nil {
+		return nil
+	}
+	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(availableProviders) == 0 {
+		return nil
+	}
+	now := time.Now()
+	candidates := make([]ai.AIProvider, 0, len(availableProviders))
+	for _, provider := range availableProviders {
+		if tried[provider] || am.providerOnTemporaryCooldown(build.ID, provider, now) {
+			continue
+		}
+		candidates = append(candidates, provider)
+	}
+	if len(candidates) == 0 {
+		for _, provider := range availableProviders {
+			if !tried[provider] {
+				candidates = append(candidates, provider)
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	allowed := make(map[ai.AIProvider]bool, len(candidates))
+	for _, provider := range candidates {
+		allowed[provider] = true
+	}
+	ranked := make([]ai.AIProvider, 0, len(candidates))
+	addRanked := func(provider ai.AIProvider) {
+		if provider == "" || !allowed[provider] {
+			return
+		}
+		for _, existing := range ranked {
+			if existing == provider {
+				return
+			}
+		}
+		ranked = append(ranked, provider)
+	}
+
+	shape := taskExecutionShape(task, &Agent{Role: role})
+	if shape == "" {
+		shape = taskShapeForRole(role)
+	}
+	if shape != "" {
+		for _, provider := range rankedProvidersForTaskShapeWithCost(shape, am.providerScorecardsForBuild(build, availableProviders), buildCostSensitivity(build)) {
+			addRanked(provider)
+		}
+	}
+	for _, provider := range candidates {
+		addRanked(provider)
+	}
+	return ranked
 }
 
 func providerListContains(providers []ai.AIProvider, target ai.AIProvider) bool {
@@ -2813,7 +2947,9 @@ func (am *AgentManager) AssignTask(agentID string, task *Task) error {
 		},
 	})
 
-	am.taskQueue <- task
+	if !am.enqueueTaskQueue(task) {
+		return fmt.Errorf("failed to queue task: %s", task.Error)
+	}
 	return nil
 }
 
@@ -4779,8 +4915,34 @@ func (am *AgentManager) safeEnqueueTask(task *Task) bool {
 	}
 	am.inFlightTasks[task.ID] = true
 	am.mu.Unlock()
-	am.taskQueue <- task
+	if !am.enqueueTaskQueue(task) {
+		am.clearInFlight(task.ID)
+		return false
+	}
 	return true
+}
+
+func (am *AgentManager) enqueueTaskQueue(task *Task) bool {
+	if am == nil || task == nil || am.taskQueue == nil {
+		markTaskQueueEnqueueFailure(task, "task queue unavailable")
+		return false
+	}
+	select {
+	case am.taskQueue <- task:
+		return true
+	default:
+		markTaskQueueEnqueueFailure(task, "task queue saturated")
+		log.Printf("Task queue saturated; failed to enqueue task %s", task.ID)
+		return false
+	}
+}
+
+func markTaskQueueEnqueueFailure(task *Task, reason string) {
+	if task == nil {
+		return
+	}
+	task.Status = TaskFailed
+	task.Error = reason
 }
 
 // clearInFlight removes a task from the in-flight set (called when task reaches terminal state).
@@ -5065,6 +5227,12 @@ func (am *AgentManager) executeTask(task *Task) {
 			}
 		}
 	}
+	if taskNeedsProactiveTokenBoost(task, agent.Role) {
+		boosted := maxTokens * 3 / 2
+		if boosted > maxTokens {
+			maxTokens = boosted
+		}
+	}
 	if task.RetryCount > 0 && taskHasRecentTruncationError(task) {
 		// Prefer a larger response budget when the prior attempt was truncated.
 		boosted := maxTokens * 3 / 2
@@ -5133,6 +5301,7 @@ func (am *AgentManager) executeTask(task *Task) {
 			continue
 		}
 		log.Printf("AI generation succeeded for task %s with provider %s", task.ID, provider)
+		am.clearProviderTemporaryFailure(build.ID, provider)
 		candidates = append(candidates, candidate)
 	}
 
@@ -5143,8 +5312,9 @@ func (am *AgentManager) executeTask(task *Task) {
 		triedProviders := make(map[ai.AIProvider]bool, len(candidateProviders)+1)
 		for _, p := range candidateProviders {
 			triedProviders[p] = true
+			am.markProviderTemporaryFailure(build.ID, p)
 		}
-		for _, fallback := range am.getCurrentlyAvailableProvidersForBuild(build) {
+		for _, fallback := range am.rankedFallbackProvidersForTask(build, task, agent.Role, triedProviders) {
 			if triedProviders[fallback] {
 				continue
 			}
@@ -5172,8 +5342,10 @@ func (am *AgentManager) executeTask(task *Task) {
 					generationErr = candidateErr
 					break
 				}
+				am.markProviderTemporaryFailure(build.ID, fallback)
 				continue
 			}
+			am.clearProviderTemporaryFailure(build.ID, fallback)
 			log.Printf("Provider fallback succeeded: %s → %s for task %s", agent.Provider, fallback, task.ID)
 			candidates = append(candidates, candidate)
 			break
@@ -5680,7 +5852,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 						},
 					})
 
-					am.taskQueue <- task
+					am.enqueueTaskQueue(task)
 					return
 				}
 
@@ -5765,7 +5937,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 						},
 					})
 
-					am.taskQueue <- task
+					am.enqueueTaskQueue(task)
 					return
 				}
 
@@ -5982,7 +6154,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			taskInput["retry_strategy"] = retryStrategy
 
 			// Put task back in queue
-			am.taskQueue <- task
+			am.enqueueTaskQueue(task)
 		} else {
 			// Max retries exceeded - mark as failed
 			log.Printf("Task %s failed after %d attempts. Giving up.", task.ID, task.RetryCount)
@@ -6493,6 +6665,104 @@ func (am *AgentManager) ensureProblemSolverAgent(buildID string) *Agent {
 	return nil
 }
 
+func recoveryContextAgentForTask(build *Build, task *Task) *Agent {
+	if task == nil {
+		return nil
+	}
+	if build != nil && task.AssignedTo != "" {
+		build.mu.RLock()
+		if agent := build.Agents[task.AssignedTo]; agent != nil {
+			build.mu.RUnlock()
+			return agent
+		}
+		build.mu.RUnlock()
+	}
+	return &Agent{Role: roleForTaskType(task.Type)}
+}
+
+func roleForTaskType(taskType TaskType) AgentRole {
+	switch taskType {
+	case TaskPlan:
+		return RoleLead
+	case TaskArchitecture:
+		return RoleArchitect
+	case TaskGenerateUI:
+		return RoleFrontend
+	case TaskGenerateAPI:
+		return RoleBackend
+	case TaskGenerateSchema:
+		return RoleDatabase
+	case TaskTest:
+		return RoleTesting
+	case TaskReview:
+		return RoleReviewer
+	case TaskFix:
+		return RoleSolver
+	default:
+		return RoleSolver
+	}
+}
+
+func summarizeFailedTaskOutputForRecovery(output *TaskOutput, maxChars int) string {
+	if output == nil {
+		return ""
+	}
+	var sb strings.Builder
+	if len(output.Messages) > 0 {
+		sb.WriteString("Messages:\n")
+		for _, msg := range output.Messages {
+			if trimmed := strings.TrimSpace(msg); trimmed != "" {
+				sb.WriteString("- " + trimmed + "\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+	if len(output.TruncatedFiles) > 0 {
+		sb.WriteString("Truncated files:\n")
+		for _, path := range output.TruncatedFiles {
+			sb.WriteString("- " + path + "\n")
+		}
+		sb.WriteString("\n")
+	}
+	if len(output.DeletedFiles) > 0 {
+		sb.WriteString("Deleted files:\n")
+		for _, path := range output.DeletedFiles {
+			sb.WriteString("- " + path + "\n")
+		}
+		sb.WriteString("\n")
+	}
+	if len(output.Files) > 0 {
+		sb.WriteString("Generated files from failed attempt:\n")
+		for _, file := range output.Files {
+			path := sanitizeFilePath(file.Path)
+			if path == "" {
+				continue
+			}
+			content := file.Content
+			if content == "" {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("// File: %s\n```%s\n%s\n```\n\n", path, file.Language, content))
+		}
+	}
+	raw := strings.TrimSpace(sb.String())
+	if raw == "" {
+		return ""
+	}
+	return clampPromptPreservingEnds(raw, maxChars)
+}
+
+func summarizeFailedTaskVerificationReportForRecovery(output *TaskOutput, maxChars int) string {
+	if output == nil || output.ProviderVerificationReport == nil {
+		return ""
+	}
+	raw, err := json.MarshalIndent(output.ProviderVerificationReport, "", "  ")
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	return clampPromptPreservingEnds(string(raw), maxChars)
+}
+
 func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, err error) bool {
 	if failedTask == nil || err == nil {
 		return false
@@ -6546,6 +6816,38 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	failedTaskType := string(failedTask.Type)
 	failedTaskDescription := failedTask.Description
 	failureMessage := err.Error()
+	originalAgent := recoveryContextAgentForTask(build, failedTask)
+	failedTaskPrompt := ""
+	failedTaskSystemPrompt := ""
+	if originalAgent != nil {
+		failedTaskPrompt = clampPromptPreservingEnds(am.buildTaskPrompt(failedTask, build, originalAgent), 12000)
+		failedTaskSystemPrompt = clampPromptPreservingEnds(am.getSystemPrompt(originalAgent.Role, build), 5000)
+	}
+	failedTaskPartialOutput := summarizeFailedTaskOutputForRecovery(failedTask.Output, 16000)
+	failedTaskVerificationReport := summarizeFailedTaskVerificationReportForRecovery(failedTask.Output, 5000)
+	recoveryInput := map[string]any{
+		"action":                   "solve_build_failure",
+		"failed_task_id":           failedTaskID,
+		"failed_task_type":         failedTaskType,
+		"failed_task_description":  failedTaskDescription,
+		"failure_error":            failureMessage,
+		"app_description":          build.Description,
+		"retry_strategy":           "fix_and_retry",
+		"requires_regression_test": true,
+		"recovery_depth":           currentRecoveryDepth + 1,
+	}
+	if failedTaskPrompt != "" {
+		recoveryInput["failed_task_original_prompt"] = failedTaskPrompt
+	}
+	if failedTaskSystemPrompt != "" {
+		recoveryInput["failed_task_system_prompt"] = failedTaskSystemPrompt
+	}
+	if failedTaskPartialOutput != "" {
+		recoveryInput["failed_task_partial_output"] = failedTaskPartialOutput
+	}
+	if failedTaskVerificationReport != "" {
+		recoveryInput["failed_task_provider_verification_report"] = failedTaskVerificationReport
+	}
 
 	build.mu.Lock()
 	if flag, ok := failedTask.Input["recovery_queued"].(bool); ok && flag {
@@ -6564,18 +6866,8 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 		Priority:    99,
 		Status:      TaskPending,
 		MaxRetries:  build.MaxRetries,
-		Input: map[string]any{
-			"action":                   "solve_build_failure",
-			"failed_task_id":           failedTaskID,
-			"failed_task_type":         failedTaskType,
-			"failed_task_description":  failedTaskDescription,
-			"failure_error":            failureMessage,
-			"app_description":          build.Description,
-			"retry_strategy":           "fix_and_retry",
-			"requires_regression_test": true,
-			"recovery_depth":           currentRecoveryDepth + 1,
-		},
-		CreatedAt: time.Now(),
+		Input:       recoveryInput,
+		CreatedAt:   time.Now(),
 	}
 	// Supersede the failed task with an explicit recovery flow so the build can
 	// still converge to success if solver + validation tasks pass.
@@ -7977,6 +8269,21 @@ func (p *generatedFilePatchPlan) createFile(path, content, language string) bool
 	return true
 }
 
+func (p *generatedFilePatchPlan) deleteFile(path string) bool {
+	if p == nil {
+		return false
+	}
+	sanitized := sanitizeFilePath(path)
+	if sanitized == "" {
+		return false
+	}
+	if _, exists := p.filesByPath[sanitized]; !exists {
+		return false
+	}
+	delete(p.filesByPath, sanitized)
+	return true
+}
+
 func (p *generatedFilePatchPlan) files() []GeneratedFile {
 	if p == nil || len(p.orderedPaths) == 0 {
 		return nil
@@ -8184,6 +8491,49 @@ func (am *AgentManager) applyPatchBundleToBuild(build *Build, bundle *PatchBundl
 		}
 	}
 	return applied
+}
+
+func (am *AgentManager) applyPatchBundleToGeneratedFiles(files []GeneratedFile, bundle *PatchBundle) ([]GeneratedFile, bool) {
+	if bundle == nil || len(bundle.Operations) == 0 {
+		return files, false
+	}
+	plan := newGeneratedFilePatchPlan(files)
+	applied := false
+	for _, op := range bundle.Operations {
+		switch op.Type {
+		case PatchCreateFile:
+			if plan.createFile(op.Path, op.Content, am.detectLanguage(op.Path)) {
+				applied = true
+			}
+		case PatchDeleteBlock:
+			targetPath := firstBuildActivityString(op.Path, op.Anchor)
+			if strings.TrimSpace(op.Content) == "" {
+				if plan.deleteFile(targetPath) {
+					applied = true
+				}
+				continue
+			}
+			if strings.TrimSpace(targetPath) == "" {
+				continue
+			}
+			if plan.patchFile(targetPath, op.Content, am.detectLanguage(targetPath)) {
+				applied = true
+			}
+		case PatchReplaceSymbol, PatchReplaceFunction, PatchInsertAfterSymbol,
+			PatchPatchJSONKey, PatchPatchEnvVar, PatchPatchRouteRegistration,
+			PatchPatchDependency, PatchPatchSchemaEntity, PatchRenameSymbol:
+			if strings.TrimSpace(op.Path) == "" || strings.TrimSpace(op.Content) == "" {
+				continue
+			}
+			if plan.patchFile(op.Path, op.Content, am.detectLanguage(op.Path)) {
+				applied = true
+			}
+		}
+	}
+	if !applied {
+		return files, false
+	}
+	return plan.files(), true
 }
 
 type patchBundleReviewResult struct {
@@ -15103,6 +15453,15 @@ type validationRepairSpec struct {
 	summaryKey  string
 }
 
+type validationRepairCandidate struct {
+	spec           validationRepairSpec
+	bundle         *PatchBundle
+	summary        string
+	index          int
+	scoreable      bool
+	postErrorCount int
+}
+
 func maxAutomatedRecoveryAttempts(mode PowerMode) int {
 	switch mode {
 	case PowerMax:
@@ -15110,8 +15469,111 @@ func maxAutomatedRecoveryAttempts(mode PowerMode) int {
 	case PowerBalanced:
 		return 3
 	default:
-		return 2 // Fast mode gets 2 attempts instead of 1
+		return 3 // Fast mode gets enough passes for chained dependency/import repairs.
 	}
+}
+
+func repeatedReadinessErrorClassExhausted(attempts int, priorErrorClass, currentErrorClass string) bool {
+	return attempts >= 3 && priorErrorClass != "" && priorErrorClass == currentErrorClass
+}
+
+func deterministicRepairScoringBuild(build *Build) *Build {
+	if build == nil {
+		return nil
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	clone := &Build{
+		ID:                          build.ID + "-repair-score",
+		UserID:                      build.UserID,
+		ProjectID:                   build.ProjectID,
+		Status:                      build.Status,
+		Mode:                        build.Mode,
+		PowerMode:                   build.PowerMode,
+		SubscriptionPlan:            build.SubscriptionPlan,
+		ProviderMode:                build.ProviderMode,
+		RequirePreviewReady:         build.RequirePreviewReady,
+		Description:                 build.Description,
+		TechStack:                   cloneTechStack(build.TechStack),
+		Plan:                        cloneBuildPlan(build.Plan),
+		MaxAgents:                   build.MaxAgents,
+		MaxRetries:                  build.MaxRetries,
+		MaxRequests:                 build.MaxRequests,
+		MaxTokensPerRequest:         build.MaxTokensPerRequest,
+		RoleAssignments:             cloneStringMap(build.RoleAssignments),
+		ProviderModelOverrides:      cloneStringMap(build.ProviderModelOverrides),
+		CompileValidationPassed:     true, // scoring should stay structural and avoid repeated npm/browser probes.
+		CompileValidationAttempts:   build.CompileValidationAttempts,
+		PhasedPipelineComplete:      build.PhasedPipelineComplete,
+		DiffMode:                    build.DiffMode,
+		SnapshotState:               build.SnapshotState,
+		CreatedAt:                   build.CreatedAt,
+		UpdatedAt:                   build.UpdatedAt,
+		Error:                       build.Error,
+		Agents:                      map[string]*Agent{},
+		Tasks:                       nil,
+		Checkpoints:                 nil,
+		ActivityTimeline:            nil,
+		SnapshotFiles:               nil,
+		ReadinessRecoveryAttempts:   build.ReadinessRecoveryAttempts,
+		PreviewVerificationAttempts: build.PreviewVerificationAttempts,
+	}
+	clone.SnapshotState.Orchestration = cloneBuildOrchestrationState(build.SnapshotState.Orchestration)
+	if clone.SnapshotState.Orchestration != nil {
+		clone.SnapshotState.Orchestration.Flags.EnableSurfaceLocalVerification = false
+		clone.SnapshotState.Orchestration.VerificationReports = nil
+	}
+	return clone
+}
+
+func (am *AgentManager) selectBestDeterministicValidationRepair(
+	build *Build,
+	readinessErrors []string,
+	repairs []validationRepairSpec,
+) *validationRepairCandidate {
+	if build == nil || len(repairs) == 0 {
+		return nil
+	}
+	currentFiles := am.collectGeneratedFiles(build)
+	candidates := make([]validationRepairCandidate, 0, len(repairs))
+	for i, repair := range repairs {
+		bundle, summary := repair.apply(build, readinessErrors)
+		if bundle == nil {
+			continue
+		}
+		bundle.BuildID = build.ID
+		if strings.TrimSpace(bundle.Justification) == "" && strings.TrimSpace(summary) != "" {
+			bundle.Justification = repair.summaryKey + ": " + summary
+		}
+		candidate := validationRepairCandidate{
+			spec:      repair,
+			bundle:    bundle,
+			summary:   summary,
+			index:     i,
+			scoreable: false,
+		}
+		if simulatedFiles, applied := am.applyPatchBundleToGeneratedFiles(currentFiles, bundle); applied {
+			postErrors := am.validateFinalBuildReadiness(deterministicRepairScoringBuild(build), simulatedFiles)
+			candidate.scoreable = true
+			candidate.postErrorCount = len(postErrors)
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left, right := candidates[i], candidates[j]
+		if left.scoreable != right.scoreable {
+			return left.scoreable
+		}
+		if left.scoreable && right.scoreable && left.postErrorCount != right.postErrorCount {
+			return left.postErrorCount < right.postErrorCount
+		}
+		return left.index < right.index
+	})
+	best := candidates[0]
+	return &best
 }
 
 func (am *AgentManager) markBuildForValidationRepair(build *Build, now time.Time, buildError string) int {
@@ -15315,34 +15777,27 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 		},
 	}
 
-	for _, repair := range repairs {
-		bundle, summary := repair.apply(build, readinessErrors)
-		if bundle == nil {
-			continue
-		}
-		bundle.BuildID = build.ID
-		if strings.TrimSpace(bundle.Justification) == "" && strings.TrimSpace(summary) != "" {
-			bundle.Justification = repair.summaryKey + ": " + summary
-		}
-		if !am.applyPatchBundleToBuild(build, bundle) {
-			continue
-		}
-		if recordPatchBundles {
-			appendPatchBundle(build, *bundle)
-		}
-
-		am.cancelAutomatedRecoveryTasksForLoopCap(build)
-		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf(repair.errorFormat, errorSummary, summary))
-		message := repair.message
-		if strings.Contains(message, "%s") {
-			message = fmt.Sprintf(message, summary)
-		}
-		am.broadcastValidationRepair(build.ID, now, progress, readinessErrors, message, repair.summaryKey, summary)
-		am.checkBuildCompletion(build)
-		return true
+	candidate := am.selectBestDeterministicValidationRepair(build, readinessErrors, repairs)
+	if candidate == nil || candidate.bundle == nil {
+		return false
+	}
+	if !am.applyPatchBundleToBuild(build, candidate.bundle) {
+		return false
+	}
+	if recordPatchBundles {
+		appendPatchBundle(build, *candidate.bundle)
 	}
 
-	return false
+	am.cancelAutomatedRecoveryTasksForLoopCap(build)
+	progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf(candidate.spec.errorFormat, errorSummary, candidate.summary))
+	message := candidate.spec.message
+	if strings.Contains(message, "%s") {
+		message = fmt.Sprintf(message, candidate.summary)
+	}
+	am.broadcastValidationRepair(build.ID, now, progress, readinessErrors, message, candidate.spec.summaryKey, candidate.summary)
+	am.checkBuildCompletion(build)
+	return true
+
 }
 
 func (am *AgentManager) finalValidationRepairHints(
@@ -15517,9 +15972,9 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 
 			build.mu.Lock()
 			priorErrorClass := readinessErrorClassFromBuildError(build.Error)
-			// Require 2+ prior recovery attempts before giving up on a repeated error class.
-			// A single prior attempt may have partially fixed things; give it one more chance.
-			repeatedClass := build.ReadinessRecoveryAttempts >= 2 && priorErrorClass != "" && priorErrorClass == currentErrorClass
+			// Require 3+ prior recovery attempts before giving up on a repeated error class.
+			// Missing dependency/import classes often need two partial repairs before the final pass.
+			repeatedClass := repeatedReadinessErrorClassExhausted(build.ReadinessRecoveryAttempts, priorErrorClass, currentErrorClass)
 			if repeatedClass {
 				build.Status = BuildFailed
 				build.CompletedAt = &now
@@ -15996,6 +16451,36 @@ func (am *AgentManager) finalizePhasedPipeline(build *Build) {
 		return
 	}
 
+	if coherenceErrors := am.crossAgentFileCoherenceErrors(build); len(coherenceErrors) > 0 {
+		failedTask := &Task{
+			ID:          "cross_coherence_check",
+			Type:        TaskReview,
+			Description: "Cross-agent file coherence check",
+			Status:      TaskFailed,
+			Input: map[string]any{
+				"coordination_errors": coherenceErrors,
+				"validation_errors":   coherenceErrors,
+			},
+		}
+		if am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("cross-agent file coherence failed: %s", strings.Join(coherenceErrors, "; "))) {
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"phase":                 "cross_coherence_check",
+					"status":                string(BuildReviewing),
+					"message":               "Cross-agent file coherence found import/export drift before final validation. Solver recovery started.",
+					"quality_gate_required": true,
+					"quality_gate_active":   true,
+					"quality_gate_stage":    "validation",
+					"validation_errors":     coherenceErrors,
+				},
+			})
+			return
+		}
+	}
+
 	build.mu.Lock()
 	build.PhasedPipelineComplete = true
 	if build.Status != BuildFailed && build.Status != BuildCancelled && build.Progress < 95 {
@@ -16006,6 +16491,17 @@ func (am *AgentManager) finalizePhasedPipeline(build *Build) {
 
 	am.updateBuildProgress(build)
 	am.checkBuildCompletion(build)
+}
+
+func (am *AgentManager) crossAgentFileCoherenceErrors(build *Build) []string {
+	if build == nil {
+		return nil
+	}
+	files := am.collectGeneratedFiles(build)
+	if len(files) == 0 {
+		return nil
+	}
+	return validateGeneratedLocalModuleImports(files, "")
 }
 
 // persistCompletedBuild remains as a compatibility alias used by orchestrator paths.
@@ -21051,6 +21547,18 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 				agentContext += fmt.Sprintf("\n<failure_context>\nfailed_task_id: %s\nfailed_task_type: %s\nfailed_task_description: %s\nerror: %s\n</failure_context>\n",
 					failedTaskID, failedTaskType, failedTaskDesc, failureErr)
 			}
+			if originalPrompt := taskInputStringValue(task.Input, "failed_task_original_prompt"); originalPrompt != "" {
+				agentContext += fmt.Sprintf("\n<failed_task_original_prompt>\n%s\n</failed_task_original_prompt>\n", originalPrompt)
+			}
+			if systemPrompt := taskInputStringValue(task.Input, "failed_task_system_prompt"); systemPrompt != "" {
+				agentContext += fmt.Sprintf("\n<failed_task_system_prompt>\n%s\n</failed_task_system_prompt>\n", systemPrompt)
+			}
+			if partialOutput := taskInputStringValue(task.Input, "failed_task_partial_output"); partialOutput != "" {
+				agentContext += fmt.Sprintf("\n<failed_task_partial_output>\n%s\n</failed_task_partial_output>\n", partialOutput)
+			}
+			if verificationReport := taskInputStringValue(task.Input, "failed_task_provider_verification_report"); verificationReport != "" {
+				agentContext += fmt.Sprintf("\n<failed_task_provider_verification_report>\n%s\n</failed_task_provider_verification_report>\n", verificationReport)
+			}
 		}
 	}
 
@@ -25047,6 +25555,24 @@ func classifyNodeInstallFailure(output string, err error) (bool, string) {
 	}
 
 	lower := strings.ToLower(strings.Join([]string{output, summary, err.Error()}, "\n"))
+	artifactIndicators := []string{
+		"npm err! code e404",
+		"npm err! code etarget",
+		"npm err! code ejsonparse",
+		"npm err! code eintegrity",
+		"npm err! code eresolve",
+		"no matching version found",
+		"unable to resolve dependency tree",
+		"invalid package name",
+		"invalid tag name",
+		"unsupported url type",
+		"json.parse",
+	}
+	for _, indicator := range artifactIndicators {
+		if strings.Contains(lower, indicator) {
+			return false, summary
+		}
+	}
 	hostIndicators := []string{
 		"timed out after",
 		"npm err! network",
@@ -25973,6 +26499,28 @@ func taskHasRecentTruncationError(task *Task) bool {
 		strings.Contains(last, "abrupt eof")
 }
 
+func taskNeedsProactiveTokenBoost(task *Task, role AgentRole) bool {
+	if task == nil || task.RetryCount > 0 {
+		return false
+	}
+	switch task.Type {
+	case TaskGenerateUI, TaskGenerateAPI, TaskGenerateSchema, TaskTest:
+		return true
+	}
+	switch role {
+	case RoleFrontend, RoleBackend, RoleDatabase, RoleTesting:
+		return true
+	}
+	if len(taskInputStringList(task.Input["required_files"])) >= 4 ||
+		len(taskInputStringList(task.Input["owned_files"])) >= 4 {
+		return true
+	}
+	descriptiveChars := len(task.Description) +
+		len(taskInputStringValue(task.Input, "work_order_summary")) +
+		len(taskInputStringValue(task.Input, "description"))
+	return descriptiveChars >= 1400
+}
+
 // hasEmptyFunctions checks if content has empty function bodies
 func (am *AgentManager) hasEmptyFunctions(content string, language string) bool {
 	patterns := []string{}
@@ -26062,6 +26610,31 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 		taskInput := ensureTaskInputMap(task)
 		taskInput["previous_errors"] = task.ErrorHistory
 		taskInput["retry_strategy"] = retryStrategy
+		if task.Type == TaskPlan && isProviderLevelFailure(result.Error) && build != nil {
+			oldProvider := agent.Provider
+			triedProviders := map[ai.AIProvider]bool{oldProvider: true}
+			am.markProviderTemporaryFailure(build.ID, oldProvider)
+			if fallbacks := am.rankedFallbackProvidersForTask(build, task, agent.Role, triedProviders); len(fallbacks) > 0 {
+				nextProvider := fallbacks[0]
+				agent.Provider = nextProvider
+				agent.Model = selectBuildModelForProvider(build, nextProvider)
+				taskInput["retry_provider_rotation"] = fmt.Sprintf("%s -> %s", oldProvider, nextProvider)
+				am.broadcast(agent.BuildID, &WSMessage{
+					Type:      "agent:provider_fallback",
+					BuildID:   agent.BuildID,
+					AgentID:   agent.ID,
+					Timestamp: time.Now(),
+					Data: map[string]any{
+						"task_id":           task.ID,
+						"failed_provider":   string(oldProvider),
+						"fallback_provider": string(nextProvider),
+						"reason":            "planning_retry_provider_rotation",
+						"original_error":    errorMsg,
+						"content":           fmt.Sprintf("Lead agent rotating planning retry to %s after provider-level failure.", nextProvider),
+					},
+				})
+			}
+		}
 
 		agent.Status = StatusWorking
 		agent.Error = ""
@@ -26088,7 +26661,7 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 		})
 
 		agent.mu.Unlock()
-		am.taskQueue <- task
+		am.enqueueTaskQueue(task)
 		agent.mu.Lock()
 	} else {
 		// Max retries exceeded

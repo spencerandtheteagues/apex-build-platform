@@ -197,8 +197,44 @@ const mountCheckJS = `JSON.stringify((function() {
           hasContent: bodyVisible.length > 20, snippet: bodyText.substring(0, 80)};
 })())`
 
+const (
+	browserMountPollInterval = 200 * time.Millisecond
+	browserMountPollTimeout  = 4 * time.Second
+)
+
+func browserMountJSONHasContent(raw string) bool {
+	var mount struct {
+		HasContent bool `json:"hasContent"`
+	}
+	if err := json.Unmarshal([]byte(raw), &mount); err != nil {
+		return false
+	}
+	return mount.HasContent
+}
+
+func pollBrowserMountContent(ctx context.Context, mountJSON *string) error {
+	deadline := time.Now().Add(browserMountPollTimeout)
+	for {
+		var current string
+		if err := chromedp.Evaluate(mountCheckJS, &current).Do(ctx); err != nil {
+			return err
+		}
+		*mountJSON = current
+		if browserMountJSONHasContent(current) || time.Now().After(deadline) {
+			return nil
+		}
+		timer := time.NewTimer(browserMountPollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 // VerifyPageLoad navigates to pageURL in an isolated headless browser, waits
-// for DOMContentLoaded, pauses briefly for React/Vue to mount, then evaluates
+// for DOMContentLoaded, polls briefly for React/Vue to mount, then evaluates
 // whether the mount point has content and whether fatal JS errors occurred.
 func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *BrowserPageLoadResult {
 	start := time.Now()
@@ -296,13 +332,14 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		}),
 		// Navigate — chromedp waits for DOMContentLoaded by default
 		chromedp.Navigate(pageURL),
-		// Brief pause for React/Vue synchronous mount and any micro-task flushing
-		chromedp.Sleep(800*time.Millisecond),
+		// Poll for actual rendered content instead of assuming every React app
+		// mounts within a fixed 800ms window.
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return pollBrowserMountContent(ctx, &mountJSON)
+		}),
 		// Capture the fully rendered page before evaluating mount heuristics so
 		// downstream visual analysis can inspect the actual preview state.
 		chromedp.CaptureScreenshot(&screenshotData),
-		// Evaluate mount state
-		chromedp.Evaluate(mountCheckJS, &mountJSON),
 	)
 
 	mu.Lock()

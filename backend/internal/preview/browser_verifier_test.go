@@ -319,6 +319,43 @@ func TestBrowserVerifier_PassesWhenJSPopulatesMount(t *testing.T) {
 	}
 }
 
+func TestBrowserVerifier_PollsForDelayedMount(t *testing.T) {
+	bv := NewBrowserVerifier()
+	if !bv.Available() {
+		t.Skip("Chrome not available")
+	}
+
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html>
+<html>
+<head><title>Delayed App</title></head>
+<body>
+  <div id="root"></div>
+  <script>
+    setTimeout(function() {
+      var root = document.getElementById('root');
+      root.innerHTML = '<main><h1>Loaded after route chunk</h1><button>Open dashboard</button></main>';
+    }, 1500);
+  </script>
+</body>
+</html>`)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result := bv.VerifyPageLoad(ctx, srv.URL)
+	if result.Skipped {
+		t.Skip("Chrome not available at check time")
+	}
+	if !result.Passed {
+		t.Errorf("expected pass for delayed mount, got: kind=%s detail=%s jsErrs=%v",
+			result.FailureKind, result.Details, result.JSErrors)
+	}
+}
+
 func TestBrowserVerifier_DetectsUncaughtException(t *testing.T) {
 	bv := NewBrowserVerifier()
 	if !bv.Available() {

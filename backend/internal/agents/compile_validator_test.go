@@ -16,10 +16,10 @@ func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
 		mode PowerMode
 		want int
 	}{
-		{name: "fast", mode: PowerFast, want: 1},
+		{name: "fast", mode: PowerFast, want: 2},
 		{name: "balanced", mode: PowerBalanced, want: 2},
 		{name: "max", mode: PowerMax, want: 3},
-		{name: "unknown defaults to fast behavior", mode: PowerMode("unknown"), want: 1},
+		{name: "unknown defaults to fast behavior", mode: PowerMode("unknown"), want: 2},
 	}
 
 	for _, tt := range tests {
@@ -32,6 +32,37 @@ func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCVPackageManifestSanityIssues(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invalid_json", func(t *testing.T) {
+		t.Parallel()
+
+		issues := cvPackageManifestSanityIssues([]GeneratedFile{{Path: "package.json", Content: `{"dependencies":`}})
+		if len(issues) != 1 || !strings.Contains(issues[0].Message, "invalid JSON") {
+			t.Fatalf("expected invalid JSON issue, got %+v", issues)
+		}
+	})
+
+	t.Run("invalid_dependency_name", func(t *testing.T) {
+		t.Parallel()
+
+		issues := cvPackageManifestSanityIssues([]GeneratedFile{{Path: "package.json", Content: `{"dependencies":{"Bad Package":"1.0.0"}}`}})
+		if len(issues) != 1 || !strings.Contains(issues[0].Message, "invalid dependency name") {
+			t.Fatalf("expected invalid dependency issue, got %+v", issues)
+		}
+	})
+
+	t.Run("valid_manifest", func(t *testing.T) {
+		t.Parallel()
+
+		issues := cvPackageManifestSanityIssues([]GeneratedFile{{Path: "package.json", Content: `{"dependencies":{"@vitejs/plugin-react":"latest","react":"latest"}}`}})
+		if len(issues) != 0 {
+			t.Fatalf("expected no manifest issues, got %+v", issues)
+		}
+	})
 }
 
 func TestRunCompileValidationLoopSkipsWhenAIRouterNil(t *testing.T) {
