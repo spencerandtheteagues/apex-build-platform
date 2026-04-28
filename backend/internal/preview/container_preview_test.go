@@ -1,6 +1,9 @@
 package preview
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDerivePreviewConnectHostFromSSHDockerHost(t *testing.T) {
 	t.Parallel()
@@ -42,5 +45,32 @@ func TestContainerPreviewURLFallsBackToLocalhost(t *testing.T) {
 
 	if got := server.previewDialAddress(10000); got != "localhost:10000" {
 		t.Fatalf("preview dial address = %q, want localhost address", got)
+	}
+}
+
+func TestNodeDockerfileInstallsDevDependenciesForPreviewBuilds(t *testing.T) {
+	t.Parallel()
+
+	server := &ContainerPreviewServer{}
+	dockerfile := server.nodeDockerfile()
+
+	for _, forbidden := range []string{
+		"npm install --production",
+		"npm ci --production",
+		"npm run build 2>/dev/null || true",
+		"npm run build || true",
+	} {
+		if strings.Contains(dockerfile, forbidden) {
+			t.Fatalf("node preview Dockerfile must not contain %q:\n%s", forbidden, dockerfile)
+		}
+	}
+	for _, required := range []string{
+		"npm ci --include=dev",
+		"npm install --include=dev",
+		"npm run build;",
+	} {
+		if !strings.Contains(dockerfile, required) {
+			t.Fatalf("node preview Dockerfile missing %q:\n%s", required, dockerfile)
+		}
 	}
 }

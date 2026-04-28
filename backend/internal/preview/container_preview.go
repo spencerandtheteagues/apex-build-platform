@@ -806,14 +806,22 @@ WORKDIR /app
 # Copy project files
 COPY --chown=sandbox:sandbox . .
 
-# Install dependencies if package.json exists
+# Install dependencies if package.json exists.
+# Preview builds require devDependencies because Vite, TypeScript, Tailwind,
+# and framework compilers are normally declared there. Serving raw TSX/JSX from
+# a failed build produces a blank iframe with MIME/module errors, so do not
+# suppress install or build failures for Node previews.
 RUN if [ -f package.json ]; then \
-      npm install --production 2>/dev/null || true; \
+      if [ -f package-lock.json ]; then \
+        npm ci --include=dev; \
+      else \
+        npm install --include=dev; \
+      fi; \
     fi
 
 # Build if build script exists
 RUN if [ -f package.json ] && grep -q '"build"' package.json; then \
-      npm run build 2>/dev/null || true; \
+      npm run build; \
     fi
 
 # Switch to non-root user
