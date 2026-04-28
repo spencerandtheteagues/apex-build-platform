@@ -392,8 +392,8 @@ export const languageConfigs = {
     icon: '⚡',
     color: '#3178C6',
     monacoLanguage: 'typescript',
-    defaultCode: `// Welcome to APEX-BUILD TypeScript Environment
-// 1000x faster than Replit!
+    defaultCode: `// Welcome to the APEX-BUILD TypeScript environment
+// Multi-provider AI assistance and visible build controls.
 
 interface User {
   id: number;
@@ -424,7 +424,7 @@ console.log("User created:", user);
     icon: '📜',
     color: '#F7DF1E',
     monacoLanguage: 'javascript',
-    defaultCode: `// Welcome to APEX-BUILD JavaScript Environment
+    defaultCode: `// Welcome to the APEX-BUILD JavaScript environment
 // Lightning fast execution!
 
 const greetUser = (name) => {
@@ -435,10 +435,10 @@ const greetUser = (name) => {
 const message = greetUser("Developer");
 console.log(message);
 
-// Multi-AI assistance available:
-// - Claude for code review and debugging
-// - GPT-4 for generation and refactoring
-// - Gemini for explanations and completion
+// Multi-provider assistance is available through configured routes:
+// - Code review and debugging
+// - Generation and refactoring
+// - Explanations and completion
 `,
     runCommand: 'node',
     testCommand: 'jest',
@@ -451,7 +451,7 @@ console.log(message);
     icon: '🐍',
     color: '#3776AB',
     monacoLanguage: 'python',
-    defaultCode: `# Welcome to APEX-BUILD Python Environment
+    defaultCode: `# Welcome to the APEX-BUILD Python environment
 # Supercharged with AI assistance!
 
 def fibonacci(n):
@@ -474,10 +474,10 @@ fib_sequence = fibonacci(10)
 print(f"Fibonacci sequence: {fib_sequence}")
 
 # APEX-BUILD features:
-# - Multi-AI integration (Claude, GPT-4, Gemini)
+# - Multi-provider routing
 # - Real-time collaboration
-# - Beautiful cyberpunk interface
-print("APEX-BUILD: Leaving Replit in the dust! 🚀")
+# - Production-oriented workspace controls
+print("APEX-BUILD workspace ready")
 `,
     runCommand: 'python3',
     testCommand: 'pytest',
@@ -519,11 +519,11 @@ func main() {
 	fmt.Printf("User ID: %d\\n", user.ID)
 	fmt.Printf("Joined: %s\\n", user.JoinedAt.Format(time.RFC3339))
 
-	fmt.Println("\\n🚀 APEX-BUILD Features:")
-	fmt.Println("- Multi-AI assistance (Claude + GPT-4 + Gemini)")
-	fmt.Println("- 1000x faster than Replit")
-	fmt.Println("- Beautiful cyberpunk interface")
-	fmt.Println("- Enterprise-grade performance")
+	fmt.Println("\\nAPEX-BUILD Features:")
+	fmt.Println("- Multi-provider AI assistance")
+	fmt.Println("- Visible build controls")
+	fmt.Println("- Production-oriented workspace")
+	fmt.Println("- Enterprise-grade workflow")
 }
 `,
     runCommand: 'go run',

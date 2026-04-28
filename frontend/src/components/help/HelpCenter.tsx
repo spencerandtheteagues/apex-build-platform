@@ -239,13 +239,13 @@ The user avatar in the top-right shows your username. Your session persists acro
         content: `Power Mode controls which AI models build your app. Higher power = better code quality and higher cost.
 
 **Fast & Cheap (1.6x platform cost) — Default**
-- Models: Claude Haiku 4.5, GPT-4o Mini, Gemini 2.5 Flash Lite, Grok 3 Mini
+- Models: lower-cost configured provider routes
 - Speed: Fastest responses
 - Quality: Good for simple apps and prototypes
 - Best for: Testing ideas, learning, budget-conscious builds
 
 **Balanced (1.8x platform cost)**
-- Models: Claude Sonnet 4.6, GPT-4.1, Gemini 3 Flash Preview, Grok 3
+- Models: mid/high-quality configured provider routes
 - Speed: Moderate
 - Quality: Solid production-quality code
 - Best for: Most real-world applications
@@ -1133,17 +1133,17 @@ Both are tracked separately in the history, so you can see every change regardle
 **Free — $0/month**
 - Static frontend websites and UI mockups
 - 3 projects
-- 100 MB storage
-- 10 min/day code execution
+- 1 GB storage
+- 50 code executions/day
 - 1 collaborator per project
-- No included managed AI credits
+- One-time $5 managed trial credits
 - Upgrade required for backend, database, auth, billing, and realtime app generation
 
 **Builder — $24/month**
 - Unlocks backend and full-stack app generation
 - Unlimited projects
 - 5 GB storage
-- 240 min/day execution
+- 200 code executions/day
 - 1 collaborator per project
 - GitHub export
 - $12 monthly managed AI credits included
@@ -1152,7 +1152,7 @@ Both are tracked separately in the history, so you can see every change regardle
 - Higher managed AI allowance with better throughput
 - Unlimited projects
 - 20 GB storage
-- 720 min/day execution
+- 1,000 code executions/day
 - 3 collaborators per project
 - Priority AI routing
 - $40 monthly managed AI credits included
@@ -1161,7 +1161,7 @@ Both are tracked separately in the history, so you can see every change regardle
 - Shared team workspace limits with larger managed AI allowance
 - Unlimited projects
 - 100 GB storage
-- 1,440 min/day execution
+- 5,000 code executions/day
 - Team collaboration features
 - $110 monthly managed AI credits included
 

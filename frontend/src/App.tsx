@@ -1086,7 +1086,7 @@ function App() {
                 <p className="text-sm text-slate-400">
                   {isAuthMode === 'login'
                     ? 'Log in to an existing APEX-BUILD account.'
-                    : 'Start a card-backed trial and build with the full platform.'}
+                    : 'Create an account and use managed trial credits before upgrading to the full platform.'}
                 </p>
               </div>
             </div>

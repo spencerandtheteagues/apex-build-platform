@@ -1,6 +1,6 @@
 # APEX.BUILD
 
-> **The cloud IDE that puts every major AI model in one place, gives you total cost transparency, and actually lets you own your code.**
+> **The cloud IDE that makes model routing explicit, shows build spend, and lets you own your generated code.**
 
 [![License: APEX Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](#license)
 [![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://golang.org)
@@ -15,7 +15,7 @@
 
 APEX.BUILD is a full-stack cloud development platform where you describe what you want to build in plain English and a coordinated team of AI agents writes the code, reviews it, fixes it, tests it, and deploys it — while you watch in real time and stay in complete control of every decision.
 
-This is not a toy. It runs production-grade multi-agent orchestration backed by six AI providers (Claude, OpenAI, Gemini, Grok, Ollama, and your own keys), a Monaco-powered IDE identical to VS Code, live preview with hot reload, one-click deployment to Vercel / Netlify / Render, real-time multiplayer collaboration, a full Git workflow, and a billing system with per-token cost tracking, hard budget caps, and an immutable transaction ledger so you always know exactly what you spent and why.
+This is not a toy. It runs production-grade multi-agent orchestration across configured Anthropic, OpenAI, Google, xAI, Ollama, and BYOK routes, a VS Code-style Monaco IDE, live preview with hot reload, deployment handoff to Vercel / Netlify / Render, real-time collaboration, Git workflow controls, and a billing system with tracked model spend, hard budget caps, and an immutable transaction ledger so you can see what was spent and why.
 
 ---
 
@@ -47,17 +47,17 @@ If you have used Replit, Bolt, v0, or another AI coding platform, you have likel
 
 | Builder Need | Typical AI builder tradeoff | APEX.BUILD |
 |---|---|---|
-| **Explicit model routing** | Many platforms expose model or agent controls, but per-role routing and spend attribution are often not the center of the build stream. | Six provider routes: Claude, OpenAI, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
-| **Transparent spend** | Usage can be hard to attribute to a specific model, role, request, or build step. | Real-time per-token cost ticker on every request. Immutable credit ledger. Budget cap enforcement before anything expensive runs. |
-| **Deployment ownership** | Hosted projects often depend on the platform's runtime and plan limits. | Deploy once to Vercel, Netlify, or Render. Your app lives on your account. Hosting cost is between you and the host, not APEX. |
-| **Code ownership** | Export and Git workflows vary by platform and plan. | Full GitHub export any time. Git push to your own repo. Your code is yours. Always. |
+| **Explicit model routing** | Many platforms expose model or agent controls, but per-role routing and spend attribution are often not the center of the build stream. | Configured Anthropic, OpenAI, Google, xAI, Ollama, and BYOK routes. Switch per task where enabled. Mix mid-build. |
+| **Transparent spend** | Usage can be hard to attribute to a specific model, role, request, or build step. | Tracked spend ticker for provider usage events. Immutable credit ledger. Budget cap enforcement before expensive managed-credit work runs. |
+| **Deployment ownership** | Hosted projects often depend on the platform's runtime and plan limits. | Handoff deployments to Vercel, Netlify, or Render so the app can run on your hosting account where supported. |
+| **Code ownership** | Export and Git workflows vary by platform and plan. | GitHub export and ZIP handoff for generated projects on supported plans. Your generated code remains inspectable and portable. |
 | **Named specialist workflow** | Competitors generally do not publicly break app generation into Apex-style named specialist roles. | Ten specialized agents with distinct roles. The Reviewer is deliberately separate from the writers. The Solver specializes in failures no other agent could fix. |
 | **Large files get mangled** | AI context limits cause files to get truncated and content to disappear mid-build. | Chunked editor protocol: files over 400 lines split into overlapping 300-line windows, edited per chunk, reassembled without loss. |
 | **IDE-level Git workflow** | Some app builders emphasize prompt and preview flows more than IDE-native Git operations. | Full Git panel: branch, commit, push, pull, merge, PR creation and review inside the IDE. |
 | **Preview verification** | Preview and deploy workflows vary by platform; automated runtime verification is not always exposed as a named gate. | WebSocket hot reload plus explicit preview/runtime verification for supported generated preview flows. |
 | **Runtime breadth** | Many AI app builders are strongest around web-app and JavaScript/TypeScript workflows. | Node.js, TypeScript, Python, Go, Rust, C/C++, Java, Ruby, PHP, Bash, and more. |
 | **Cost control** | Budget controls and usage transparency vary by platform and plan. | Per-build budget cap. Global monthly spend ceiling. Confirmation dialogs. Auto-pause at limit. |
-| **Provider and hosting optionality** | Defaults are often managed credentials, managed hosting, or platform-managed model access. | Run it on your own hardware. BYOK means your API calls go directly from your server to the AI provider. |
+| **Provider and hosting optionality** | Defaults are often managed credentials, managed hosting, or platform-managed model access. | Use managed credits or BYOK routes; BYOK calls use your configured provider account with any Apex routing/platform fee surfaced separately. |
 | **Multiplayer workflow** | Real-time collaboration depth varies across major platforms. | Operational transformation (Google Docs-style) with live cursors, presence tracking, and per-project access roles. |
 | **No spending history** | No way to see spend over time, by project, or by provider. | Full spend analytics dashboard: daily/weekly/monthly graphs, cost by provider and project, downloadable invoices. |
 
@@ -73,9 +73,9 @@ When the build completes, proposed changes appear in a full diff review panel. Y
 
 ### Three Power Modes
 
-**Fast** — Haiku 4.5 + GPT-4o Mini + Gemini 2.5 Flash Lite + Grok 3 Mini. Fastest turnaround, lowest cost. Best for scaffolding, boilerplate, and rapid iteration.
+**Fast** — lower-cost configured routes. Fastest turnaround, lowest managed-credit use. Best for scaffolding, boilerplate, and rapid iteration.
 
-**Balanced** — Sonnet 4.6 + GPT-4.1 + Gemini 3 Flash Preview + Grok 3. The sweet spot for real work. Production-quality output at a reasonable price.
+**Balanced** — mid/high-quality configured routes. The sweet spot for real work and production-quality output at a reasonable price.
 
 **Max** — highest-quality configured routes across Anthropic, OpenAI, Google, xAI, Ollama, and BYOK where available. Full validation loops, deep code review, maximum quality. For code going to production.
 
@@ -111,13 +111,13 @@ APEX.BUILD treats AI providers as interchangeable infrastructure. The AI router 
 
 **Intelligent routing** — Assigns the best model to each task type based on your power mode.
 
-**Automatic fallback chains** — If Claude is rate-limited or down, the router falls back across OpenAI, Grok, Ollama, and Gemini. Builds do not fail because one provider has an outage.
+**Automatic fallback chains** — If a provider is rate-limited or down and fallback routes are healthy, the router can switch across configured providers instead of silently stalling the build.
 
 **Rate limit awareness** — Provider health, throttling, retries, and fallback routing are tracked in real time so unhealthy or constrained routes do not silently stall a build.
 
 **Cost ceiling enforcement** — Maximum spend per request enforced per provider. Requests that would exceed the ceiling are rerouted to a cheaper model in the same chain.
 
-### All Six Providers
+### Configured Provider Routes
 
 | Provider | Best For | Available Models |
 |---|---|---|
@@ -252,16 +252,16 @@ Credit packs extend managed usage; they do not unlock backend/full-stack capabil
 | **Annual** | — | $230/yr | $758/yr | $1430/yr | Negotiated |
 | **AI credits/mo** | 0 | $12 | $40 | $110 | Negotiated |
 | **Projects** | 3 | Unlimited | Unlimited | Unlimited | Unlimited |
-| **Storage** | 1 GB | 5 GB | 20 GB | 50 GB | Custom |
+| **Storage** | 1 GB | 5 GB | 20 GB | 100 GB | Custom |
 | **Executions/day** | 50 | 200 | 1,000 | 5,000 | Unlimited |
 | **Collaborators** | 1 | 1 | 3 | Unlimited | Unlimited |
 | **Backend / full-stack builds** | No | Yes | Yes | Yes | Yes |
-| **All 6 AI providers** | BYOK / limited | Yes | Yes | Yes | Yes |
+| **Configured provider routes** | Limited | Yes | Yes | Yes | Yes |
 | **GitHub export** | No | Yes | Yes | Yes | Yes |
 | **Priority queue** | No | No | Yes | Yes | Yes |
 | **SSO / Audit logs** | No | No | No | No | Yes |
 
-All plans: all 10 agent roles, live preview, deployment integrations, full Git, real-time collaboration, Monaco IDE, cost dashboard, budget controls, checkpoint system, BYOK support.
+Paid plans include the full build workspace with specialist agent roles, live preview, deployment handoff, Git controls, real-time collaboration, Monaco IDE, cost dashboard, budget controls, checkpoint system, and BYOK support where enabled by plan.
 
 ---
 
@@ -406,9 +406,9 @@ APEX.BUILD is actively available for acquisition.
 - Complete source code (frontend + backend)
 - Full documentation suite
 - Live production deployment on Render
-- Custom domain: apex.build
+- Custom domain: apex-build.dev
 - Stripe live mode integration (account, products, prices, webhooks)
-- All six AI provider integrations
+- Configured AI provider integrations
 - PostgreSQL database with complete schema and migration history
 - Render infrastructure credentials
 - 30 days of transition support from the builder

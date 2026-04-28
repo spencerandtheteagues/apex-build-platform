@@ -123,9 +123,9 @@
           failover, and cost attribution visible during the build.
         </p>
         <ul class="seo-proof-list">
-          <li>Routes each agent task by cost, reliability, and model fit instead of hiding the build behind one opaque model choice.</li>
+          <li>Routes each agent task by cost, reliability, and model fit so routing decisions are visible instead of treated as an implementation detail.</li>
           <li>Builds full-stack apps with frontend, backend, database, integration, testing, review, and repair stages surfaced in the build stream.</li>
-          <li>Runs explicit headless-browser/runtime verification before reporting a preview as successful.</li>
+          <li>Runs explicit headless-browser/runtime verification for supported preview flows before reporting a preview as successful.</li>
           <li>Built for engineers: BYOK, managed credits, budget caps, audit trails, GitHub export, and IDE-level file control.</li>
         </ul>
         <div class="seo-cta-row">
@@ -170,9 +170,9 @@
           <article class="seo-card">
             <h3>Live spend visibility per agent and per model</h3>
             <p>
-              Every build streams real-time token usage and cost broken down by agent role and model.
-              See exactly which agent is burning credits and on which provider. Set hard budget caps
-              that abort the build if it exceeds them. No surprise bills.
+              Builds stream tracked token usage and cost broken down by agent role and model when
+              providers return usage data. See which agent is spending managed credits, which provider
+              handled it, and whether hard budget caps stopped a run before it exceeded your threshold.
             </p>
           </article>
           <article class="seo-card">
@@ -242,9 +242,7 @@
               <tr><td>SAML / SSO / SCIM / RBAC</td><td>Team / Enterprise</td><td>Enterprise</td><td>Not verified</td><td>Business / Enterprise</td><td>Enterprise</td><td>Enterprise</td></tr>
               <tr><td>MCP / tool connectors</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Not verified</td><td>Yes</td></tr>
               <tr><td>GitHub import / export</td><td>Yes</td><td>Yes</td><td>Limited</td><td>Yes</td><td>Limited</td><td>Yes</td></tr>
-              <tr><td>Free tier</td><td>Yes</td><td>Yes</td><td>Limited</td><td>Yes</td><td>Yes</td><td>No ($20/mo min)</td></tr>
-              <tr><td>Entry paid plan</td><td>$24/mo</td><td>$20/mo</td><td>$25/mo</td><td>$20/mo</td><td>$20/mo</td><td>$20/mo</td></tr>
-              <tr><td>Pro / mid plan</td><td>$79/mo</td><td>$100/mo</td><td>$50/mo</td><td>—</td><td>$50/mo</td><td>—</td></tr>
+              <tr><td>Pricing and limits</td><td>Published plans plus live spend controls</td><td>See current public pricing</td><td>See current public pricing</td><td>See current public pricing</td><td>See current public pricing</td><td>See current public pricing</td></tr>
             </tbody>
           </table>
         </div>
@@ -392,7 +390,7 @@
               <li>Hard budget caps with auto-abort</li>
               <li>Daily and monthly usage analytics</li>
               <li>Credit top-up packs ($10–$100)</li>
-              <li>1 credit = $0.01, 1.5x markup engine</li>
+              <li>Transparent managed-credit conversion and routing fees</li>
               <li>Power-mode surcharges (Fast 1.0x / Balanced 1.12x / Max 1.25x)</li>
               <li>BYOK billing offset</li>
             </ul>
@@ -413,7 +411,7 @@
       </section>
 
       <section id="pricing" class="seo-section seo-section-alt" aria-labelledby="seo-pricing-title">
-        <p class="seo-kicker">Simple trials. Transparent usage.</p>
+        <p class="seo-kicker">Transparent usage. Honest limits.</p>
         <h2 id="seo-pricing-title">Pricing built for builders, not gatekeepers.</h2>
         <div class="seo-pricing-grid">
           <article class="seo-price">
@@ -425,7 +423,7 @@
               <li>GitHub import/export</li>
               <li>Live preview and IDE</li>
               <li>Multi-provider routing</li>
-              <li>5 GB storage, 240 min/day</li>
+              <li>5 GB storage, 200 code executions/day</li>
             </ul>
           </article>
           <article class="seo-price seo-price-featured">
@@ -434,11 +432,11 @@
             <p class="seo-price-meta">Includes $40 of managed AI credits</p>
             <ul>
               <li><strong>Ollama Cloud routing</strong> — route supported open-model roles through configured Ollama infrastructure</li>
-              <li>BYOK on every provider</li>
+              <li>BYOK for supported providers</li>
               <li>Hard budget caps and alerts</li>
               <li>Priority frontier models &amp; build queue</li>
               <li>Advanced verification &amp; runtime checks</li>
-              <li>20 GB storage, 720 min/day, 3 collaborators</li>
+              <li>20 GB storage, 1,000 code executions/day, 3 collaborators</li>
             </ul>
             <p class="seo-price-rationale">
               Why $79: Pro unlocks BYOK, budget controls, stronger verification, and Ollama Cloud
@@ -455,7 +453,7 @@
               <li>Shared workspaces &amp; secrets</li>
               <li>SAML SSO, SCIM, RBAC</li>
               <li>Audit logs and admin controls</li>
-              <li>100 GB storage, 5 seats included</li>
+              <li>100 GB storage, 5,000 code executions/day, team workspace</li>
               <li>Dedicated support</li>
             </ul>
           </article>
@@ -480,7 +478,7 @@
             they generally do not publicly position an Apex-style named specialist-agent routing and
             cost-control workflow as the core product guarantee.
           </dd>
-          <dt>Why does Pro cost $79 when Replit Core is $20?</dt>
+          <dt>Why does Pro cost $79?</dt>
           <dd>
             Apex Builder is the entry paid plan for full-stack generation. Apex Pro adds BYOK,
             hard budget controls, advanced verification, and model-routing options so heavy users can
@@ -515,8 +513,9 @@
           </dd>
           <dt>Is there a free trial?</dt>
           <dd>
-            Yes. Every paid plan includes a 3-day trial. The free tier lets you ship 3 projects,
-            100 MB storage, 10 execution minutes/day, and 1,000 AI requests/month at no cost.
+            New free accounts receive one-time managed trial credits for static frontend experiments.
+            The free tier supports 3 projects, 1 GB storage, and static frontend/UI work; backend,
+            full-stack generation, BYOK, and publishing require a paid plan.
           </dd>
           <dt>Can I run Apex on-prem or in a private cloud?</dt>
           <dd>

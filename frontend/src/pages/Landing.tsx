@@ -56,7 +56,7 @@ const FEATURE_PILLARS: Array<{
   {
     icon: Workflow,
     label: '9-agent system',
-    title: 'Parallel specialists, not a single chat loop.',
+    title: 'Parallel specialists with visible ownership.',
     body: 'Architect, planner, frontend, backend, database, testing, docs, debug, and reviewer agents work from a contract with visible tasks, checkpoints, and verification evidence.',
   },
 ]
@@ -71,13 +71,13 @@ const CONTROL_SURFACES: Array<{ icon: IconType; title: string; body: string; sta
   {
     icon: UploadCloud,
     title: 'Project intake',
-    body: 'Bring Replit apps, ZIPs, files, screenshots, images, wireframes, and product context into the build contract.',
+    body: 'Bring repos, ZIPs, files, screenshots, images, wireframes, and product context into the build contract.',
     status: 'context control',
   },
   {
     icon: KeyRound,
     title: 'BYOK routing',
-    body: 'Assign OpenAI, Anthropic, Gemini, xAI, Kimi, Ollama, or local models by role while spend stays visible per provider.',
+    body: 'Assign configured OpenAI, Anthropic, Google, xAI, Kimi, Ollama, or reachable self-hosted routes by role while spend stays visible per provider.',
     status: 'model control',
   },
   {
@@ -140,9 +140,9 @@ const MODEL_ASSIGNMENTS = [
 
 const COMPARISON = [
   ['Architecture', '9 specialized agents across routed models', 'Agent workflow', 'Web-app prompt workflow', 'Coding-agent workflow'],
-  ['Credit burn', 'Live spend, caps, BYOK, local model swaps', 'Usage visibility varies', 'Usage visibility varies', 'Usage visibility varies'],
+  ['Credit burn', 'Live spend, caps, BYOK, reachable open-model routes', 'Usage visibility varies', 'Usage visibility varies', 'Usage visibility varies'],
   ['Enterprise app depth', 'Backend, DB, auth, billing, deploy, tests', 'Useful IDE plus agent', 'Strong UI generation', 'Fast prototypes'],
-  ['Code ownership', 'GitHub export, ZIP, deploy anywhere', 'Platform-centered', 'Limited handoff', 'Export friction varies'],
+  ['Code ownership', 'GitHub export, ZIP, deploy handoff', 'Workspace-centered', 'Handoff model varies', 'Export model varies'],
   ['Control', 'Model roles, MCP, secrets, settings, review gates', 'Lower-level workspace controls', 'Simple prompt controls', 'Prompt-first controls'],
 ]
 
@@ -150,8 +150,8 @@ const PRICING_NOTES = [
   'Fast mode uses low-cost models for prototypes and quick iterations.',
   'Balanced mode is the default path for production-quality full-stack work.',
   'Power mode uses flagship routing and heavier validation for critical apps.',
-  'BYOK routes your own provider or local model keys with a platform routing fee.',
-  'Credit cards are required for trials. Paid-plan trials run 3 days.',
+  'BYOK routes your own provider keys or reachable self-hosted model endpoints with a platform routing fee.',
+  'Free accounts include one-time managed trial credits; paid plans unlock backend, BYOK, and publishing.',
 ]
 
 const launchCss = `
@@ -1518,7 +1518,7 @@ const HeroWorkspace = () => (
           </p>
           <div className="prompt-tools">
             <span><Github width={14} height={14} /> GitHub</span>
-            <span><UploadCloud width={14} height={14} /> Replit</span>
+            <span><UploadCloud width={14} height={14} /> Import</span>
             <span><FileCode2 width={14} height={14} /> ZIP</span>
             <span><Brain width={14} height={14} /> Image</span>
             <span><PlugZap width={14} height={14} /> MCP</span>
@@ -1698,8 +1698,8 @@ const Agents = () => (
           <div className="agent-custom-note">
             <span>customizable routing</span>
             <p>
-              These are default assignments. Swap any role to your own OpenAI, Anthropic,
-              Gemini, xAI, Kimi, Ollama cloud, or local model setup whenever you want.
+              These are default assignments. Swap any role to your configured OpenAI, Anthropic,
+              Google, xAI, Kimi, Ollama Cloud, VPS, or other reachable self-hosted model endpoint.
             </p>
           </div>
         </motion.aside>
@@ -1728,10 +1728,11 @@ const ModelRouting = () => (
     <div className="launch-shell">
       <motion.div {...fadeUp}>
         <div className="section-kicker">BYOK and open-weight routing</div>
-        <h2 className="section-title">Bring the expensive models. Replace them when you want.</h2>
+        <h2 className="section-title">Bring premium models. Route suitable work elsewhere when you want.</h2>
         <p className="section-copy">
-          Use hosted flagship models when quality demands it, or swap roles to Ollama cloud and local
-          open-weight models when cost matters. Apex keeps the same build contract and orchestration layer.
+          Use hosted flagship models when quality demands it, or route suitable roles to Ollama Cloud,
+          a VPS, or another reachable open-model endpoint when cost or control matters. Apex keeps the
+          same build contract and orchestration layer.
         </p>
       </motion.div>
       <div className="pillar-grid">
@@ -1743,12 +1744,12 @@ const ModelRouting = () => (
           },
           {
             title: 'Local or cloud Ollama',
-            body: 'Run open-weight models through Ollama endpoints and reduce provider spend without losing the agent framework.',
+            body: 'Run open-weight models through reachable Ollama endpoints and reduce managed-provider spend without losing the agent framework.',
             Icon: Cpu,
           },
           {
             title: 'Live cost ledger',
-            body: 'Every model call is reflected in the budget ticker, provider scorecard, and credit ledger as the build runs.',
+            body: 'Tracked model calls feed the budget ticker, provider scorecard, and credit ledger as providers return usage events.',
             Icon: DollarSign,
           },
         ].map(({ title, body, Icon }) => {
@@ -1806,18 +1807,18 @@ const Pricing = ({ onGetStarted }: LandingProps) => (
     <div className="launch-shell">
       <motion.div {...fadeUp}>
         <div className="section-kicker">Pricing truth</div>
-        <h2 className="section-title">Simple trials. Transparent usage. No fake free lunch.</h2>
+        <h2 className="section-title">Transparent usage. No fake free lunch.</h2>
         <p className="section-copy">
-          Apex should feel honest from the first click: credit cards are required for trials,
-          paid-plan trials are 3 days, and model spend stays visible while agents work.
+          Apex should feel honest from the first click: free accounts get one-time managed trial credits,
+          paid plans unlock production build controls, and tracked model spend stays visible while agents work.
         </p>
       </motion.div>
       <div className="pricing-grid">
         {[
           ['Free', '$0', ['Static frontend experiments', 'Prompt-to-UI exploration', 'Upgrade required for backend/auth/billing']],
-          ['Builder', '$24', ['3-day trial', 'Full-stack builds', 'GitHub import/export', 'Live preview and IDE']],
-          ['Pro', '$79', ['3-day trial', 'BYOK controls', 'Budget caps', 'Advanced verification'], true],
-          ['Team', '$149', ['3-day trial', 'Collaboration', 'Shared secrets', 'Admin controls']],
+          ['Builder', '$24', ['Full-stack builds', 'GitHub import/export', 'Live preview and IDE', '$12 managed credits/mo']],
+          ['Pro', '$79', ['BYOK controls', 'Budget caps', 'Advanced verification', '$40 managed credits/mo'], true],
+          ['Team', '$149', ['Collaboration', 'Shared secrets', 'Admin controls', '$110 managed credits/mo']],
         ].map(([name, price, features, featured]) => (
           <motion.article key={name as string} className={`launch-card price-card ${featured ? 'featured' : ''}`} {...fadeUp}>
             <h3>{name}</h3>

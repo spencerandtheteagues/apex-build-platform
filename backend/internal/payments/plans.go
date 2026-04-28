@@ -192,8 +192,8 @@ func GetAllPlans() []Plan {
 			Features: []string{
 				"$12 in managed AI credits / mo",
 				"Backend and full-stack builds",
-				"All 5 AI agents",
-				"All 6 AI providers",
+				"Specialist agent workflow",
+				"Configured multi-provider routes",
 				"Deployable app architecture",
 				"Full cost transparency dashboard",
 				"Live per-token cost tracking",
