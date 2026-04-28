@@ -51,6 +51,9 @@ const baseProps = () => ({
   permissionActionId: null,
   rollbackCheckpointId: null,
   patchBundleActionId: null,
+  currentBuildSpend: 0,
+  currentBuildSpendEvents: 0,
+  buildStalled: false,
   chatInput: "",
   setChatInput: vi.fn(),
   plannerSendMode: "lead" as const,
@@ -183,6 +186,31 @@ describe("BuildScreen header prompt actions", () => {
 
     fireEvent.click(previewButtons[0]);
     expect(props.onPreviewWorkspace).toHaveBeenCalled();
+  });
+
+  it("shows current-build spend independently from monthly spend and marks stalled builds", () => {
+    const props = baseProps();
+    props.currentBuildSpend = 0.0375;
+    props.currentBuildSpendEvents = 3;
+    props.buildStalled = true;
+
+    const { container } = render(<BuildScreen {...props} />);
+
+    expect(screen.getByLabelText(/current build spend 0\.0375 dollars/i)).toBeTruthy();
+    expect(screen.getByText("$0.0375")).toBeTruthy();
+    expect(screen.getByText("3 calls")).toBeTruthy();
+    expect(screen.getByText(/No recent heartbeat/i)).toBeTruthy();
+    expect(container.querySelector(".from-yellow-200")).toBeTruthy();
+  });
+
+  it("turns the progress bar red for failed builds", () => {
+    const props = baseProps();
+    (props.buildState as any).status = "failed";
+
+    const { container } = render(<BuildScreen {...props} />);
+
+    expect(container.querySelector(".from-rose-400")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
   });
 
   it("shows an honest preview-building state for free-plan frontend fallback before files exist", async () => {

@@ -137,7 +137,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
   }
 
   return (
-    <div className="flex border-b border-gray-900 shrink-0 overflow-x-auto" style={{ minHeight: '108px' }}>
+    <div className="flex border-b border-sky-500/20 bg-slate-950/95 shrink-0 overflow-x-auto" style={{ minHeight: '112px' }}>
       {DISPLAY_ORDER.map((provider) => {
         const panel = panelMap[provider]
         const cfg = PROVIDER_CONFIG[provider]
@@ -172,8 +172,8 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
               'relative flex-1 min-w-[132px] border-r last:border-r-0 flex flex-col justify-between gap-2 px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
               isActive
                 ? `${cfg.borderActive} ${cfg.bgActive} ${cfg.glowActive}`
-                : `${cfg.borderIdle} bg-black/30`,
-              isUnavailable && 'opacity-35 grayscale',
+                : `${cfg.borderIdle} bg-slate-950/82`,
+              isUnavailable && 'opacity-55 grayscale',
               isError && 'border-red-500/30 bg-red-950/15 opacity-100 grayscale-0',
             )}
           >
@@ -188,11 +188,11 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
               <div className="min-w-0">
                 <div className={cn(
                   'text-sm font-bold leading-tight truncate',
-                  isActive ? cfg.textActive : localDisabled ? 'text-gray-700' : 'text-gray-500'
+                  isActive ? cfg.textActive : localDisabled ? 'text-slate-500' : 'text-slate-200'
                 )}>
                   {cfg.label}
                 </div>
-                <div className="text-[9px] text-gray-700 font-mono">{cfg.tagline}</div>
+                <div className="text-[9px] text-slate-400 font-mono">{cfg.tagline}</div>
               </div>
               <div className={dotClass} />
             </div>
@@ -204,7 +204,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
                   ? 'border-red-500/30 bg-red-500/10 text-red-300'
                   : isLocalProvider
                     ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
-                    : 'border-white/10 bg-white/5 text-gray-400'
+                    : 'border-sky-500/15 bg-sky-500/5 text-slate-300'
               )}>
                 {cfg.routeLabel}
               </span>
@@ -213,7 +213,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
                   'rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.24em]',
                   hasBYOK
                     ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
-                    : 'border-gray-800 bg-gray-950/70 text-gray-600'
+                      : 'border-slate-700 bg-slate-950/70 text-slate-400'
                 )}>
                   {hasBYOK ? 'BYOK Ready' : panel?.available !== false ? 'Hosted Ready' : 'BYOK Required'}
                 </span>
@@ -221,25 +221,25 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
             </div>
 
             <div className="space-y-1">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.24em] text-gray-700">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.24em] text-sky-300/70">
                 Active Model
               </div>
               <div className={cn(
                 'text-[10px] font-mono leading-tight truncate',
-                isActive ? 'text-gray-300' : localDisabled ? 'text-gray-800' : 'text-gray-700'
+                isActive ? 'text-slate-100' : localDisabled ? 'text-slate-500' : 'text-slate-300'
               )}>
                 {modelDescriptor}
               </div>
             </div>
 
             <div className="space-y-1">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.24em] text-gray-700">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.24em] text-sky-300/70">
                 Route Control
               </div>
               {canConfigureModel ? (
                 <select
                   aria-label={`${cfg.label} model`}
-                  className="w-full rounded border border-gray-800 bg-black/70 px-1.5 py-1 text-[10px] text-gray-200 outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  className="w-full rounded border border-sky-500/20 bg-slate-950/85 px-1.5 py-1 text-[10px] text-slate-100 outline-none focus:border-cyan-300/60 disabled:cursor-not-allowed disabled:opacity-50"
                   value={selectedModel}
                   disabled={!isBuildActive || isUnavailable || modelUpdatePendingProvider === provider}
                   onChange={(event) => onModelSelect?.(provider, event.target.value)}
@@ -250,7 +250,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
                   ))}
                 </select>
               ) : null}
-              <div className="text-[9px] text-gray-700">
+              <div className="text-[9px] text-slate-400">
                 {isLocalProvider
                   ? hasBYOK
                     ? 'BYOK routing is enabled for this build.'
@@ -266,8 +266,8 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
               isActive ? cfg.badgeActive :
                 isCompleted ? 'bg-green-500/15 border-green-500/25 text-green-500' :
                   isError ? 'bg-red-500/15 border-red-500/25 text-red-400' :
-                    localDisabled ? 'bg-gray-900/40 border-gray-800 text-gray-700' :
-                      'bg-gray-900/60 border-gray-800 text-gray-600'
+                    localDisabled ? 'bg-slate-900/50 border-slate-700 text-slate-500' :
+                      'bg-slate-900/70 border-slate-700 text-slate-300'
             )}>
               {statusLabel}
             </div>

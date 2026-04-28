@@ -271,13 +271,14 @@ func TestGetDailySpend_Mock_DayIsolation(t *testing.T) {
 
 	now := time.Now().UTC()
 	dayKey := now.Format("2006-01-02")
-	yesterdayKey := now.AddDate(0, 0, -1).Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1)
+	yesterdayKey := yesterday.Format("2006-01-02")
 	monthKey := now.Format("2006-01")
 
 	// Today
 	db.Create(&SpendEvent{UserID: 1, Provider: "claude", Model: "claude-opus-4-6", BilledCost: 0.10, DayKey: dayKey, MonthKey: monthKey, Status: "success"})
 	// Yesterday
-	db.Create(&SpendEvent{UserID: 1, Provider: "claude", Model: "claude-opus-4-6", BilledCost: 0.50, DayKey: yesterdayKey, MonthKey: monthKey, Status: "success"})
+	db.Create(&SpendEvent{CreatedAt: yesterday, UserID: 1, Provider: "claude", Model: "claude-opus-4-6", BilledCost: 0.50, DayKey: yesterdayKey, MonthKey: monthKey, Status: "success"})
 
 	_, count, _ := tracker.GetDailySpend(1, now)
 	if count != 1 {
@@ -531,7 +532,7 @@ func TestSpendTracker_Mock_ErrorPropagation(t *testing.T) {
 	if err6 == nil {
 		t.Error("GetHistory should error on closed DB")
 	}
-	_, err7 := tracker.ExportCSV(1, time.Now().UTC().AddDate(0,0,-1), time.Now().UTC())
+	_, err7 := tracker.ExportCSV(1, time.Now().UTC().AddDate(0, 0, -1), time.Now().UTC())
 	if err7 == nil {
 		t.Error("ExportCSV should error on closed DB")
 	}

@@ -137,13 +137,14 @@ func TestGetDailySpend_FiltersOtherDays(t *testing.T) {
 	// Manually insert an event with a different day_key
 	yesterday := time.Now().UTC().AddDate(0, 0, -1)
 	db.Create(&SpendEvent{
-		UserID:    1,
-		Provider:  "claude",
-		Model:     "claude-opus-4-6",
+		CreatedAt:  yesterday,
+		UserID:     1,
+		Provider:   "claude",
+		Model:      "claude-opus-4-6",
 		BilledCost: 1.0,
-		DayKey:    yesterday.Format("2006-01-02"),
-		MonthKey:  yesterday.Format("2006-01"),
-		Status:    "success",
+		DayKey:     yesterday.Format("2006-01-02"),
+		MonthKey:   yesterday.Format("2006-01"),
+		Status:     "success",
 	})
 
 	total, count, err := tracker.GetDailySpend(1, time.Now().UTC())
@@ -220,6 +221,37 @@ func TestGetBuildSpend_UnknownBuildReturnsZero(t *testing.T) {
 	}
 	if len(events) != 0 || total != 0 {
 		t.Fatalf("expected 0 events and 0 total, got %d events and %f", len(events), total)
+	}
+}
+
+func TestGetUserBuildSpendScopesByUser(t *testing.T) {
+	db := testDB(t)
+	tracker := NewSpendTracker(db)
+
+	now := time.Now().UTC()
+	db.Create(&SpendEvent{
+		UserID: 1, BuildID: "shared-build",
+		Provider: "gpt4", Model: "gpt-4.1",
+		BilledCost: 0.35, DayKey: now.Format("2006-01-02"), MonthKey: now.Format("2006-01"), Status: "success",
+	})
+	db.Create(&SpendEvent{
+		UserID: 2, BuildID: "shared-build",
+		Provider: "gpt4", Model: "gpt-4.1",
+		BilledCost: 9.99, DayKey: now.Format("2006-01-02"), MonthKey: now.Format("2006-01"), Status: "success",
+	})
+
+	total, events, err := tracker.GetUserBuildSpend(1, "shared-build")
+	if err != nil {
+		t.Fatalf("GetUserBuildSpend: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 scoped event, got %d", len(events))
+	}
+
+	const epsilon = 1e-6
+	expected := 0.35
+	if total < expected-epsilon || total > expected+epsilon {
+		t.Fatalf("expected total=0.35, got %f", total)
 	}
 }
 

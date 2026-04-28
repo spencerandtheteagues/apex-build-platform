@@ -86,6 +86,215 @@ const humanize = (value?: string): string =>
     .trim()
     .replace(/\b\w/g, (part) => part.toUpperCase())
 
+const truncate = (value: string, maxLength = 260): string => {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (compact.length <= maxLength) return compact
+  return `${compact.slice(0, maxLength - 1).trimEnd()}…`
+}
+
+const lowerFirst = (value: string): string => (
+  value ? value.charAt(0).toLowerCase() + value.slice(1) : value
+)
+
+const taskWorkLabel = (taskType?: string): string => {
+  switch (taskType) {
+    case 'plan':
+      return 'build plan and work-order breakdown'
+    case 'architecture':
+      return 'architecture and contract boundaries'
+    case 'generate_ui':
+      return 'frontend UI shell and interactive screens'
+    case 'generate_file':
+      return 'generated project files'
+    case 'generate_api':
+      return 'backend API routes and contracts'
+    case 'generate_schema':
+      return 'database schema and persistence model'
+    case 'test':
+      return 'regression tests and runtime checks'
+    case 'review':
+      return 'acceptance review and quality gate'
+    case 'fix':
+      return 'repair patch for verification blockers'
+    case 'deploy':
+      return 'deployment configuration'
+    case 'code_generation':
+      return 'generated-code validation'
+    default:
+      return taskType ? lowerFirst(humanize(taskType)) : 'current work order'
+  }
+}
+
+const taskActionPhrase = (taskType?: string): string => {
+  switch (taskType) {
+    case 'plan':
+      return 'drafting the build plan, splitting work across agents, and defining acceptance checks'
+    case 'architecture':
+      return 'locking architecture boundaries before code generation'
+    case 'generate_ui':
+      return 'building the visible app UI, state flow, and responsive screens'
+    case 'generate_file':
+      return 'writing project files into the generated app'
+    case 'generate_api':
+      return 'implementing backend API routes and response contracts'
+    case 'generate_schema':
+      return 'creating database models, seed data, and persistence wiring'
+    case 'test':
+      return 'running regression checks against the generated project'
+    case 'review':
+      return 'reviewing output against the scaffold, contract, and acceptance checklist'
+    case 'fix':
+      return 'repairing blockers found by tests, preview verification, or code review'
+    case 'deploy':
+      return 'preparing deploy scripts and runtime configuration'
+    case 'code_generation':
+      return 'verifying generated files and integration points'
+    default:
+      return `working on ${taskWorkLabel(taskType)}`
+  }
+}
+
+const extractElapsed = (content: string): string => {
+  const match = content.match(/\(([^()]*elapsed)\)/i)
+  return match?.[1]?.trim() || ''
+}
+
+const cleanActivityDetail = (thought: AIThoughtEntry): string => {
+  let detail = String(thought.content || '').trim()
+  if (!detail) return ''
+
+  detail = detail
+    .replace(/\s*\([^()]*elapsed\)/gi, '')
+    .replace(/^[\w\s/-]+agent\s+is\s+still\s+(?:analyzing|generating|working on)\s*/i, '')
+    .replace(/^[\w\s/-]+agent\s+is\s+(?:analyzing|generating|working on)\s*:?\s*/i, '')
+    .replace(/^[\w\s/-]+agent\s+is\s+generating\s+code\s+with\s+[\w.-]+\.{0,3}$/i, '')
+    .replace(/^[\w\s/-]+\s+is\s+still\s+(?:drafting|generating|working on)\s*/i, '')
+    .replace(/^[\w\s/-]+\s+is\s+(?:analyzing|generating)\s*/i, '')
+    .replace(/\s+Active heartbeat; no user action required\.?$/i, '')
+    .replace(/\s+Waiting on provider output; not stalled\.?$/i, '')
+    .replace(/^completed\s+/i, 'Completed ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!detail || /^code with [\w.-]+\.{0,3}$/i.test(detail)) {
+    return ''
+  }
+  return truncate(detail)
+}
+
+const providerRunLabel = (label: string, thought: AIThoughtEntry): string => {
+  const model = String(thought.model || '').trim()
+  return model ? `${label} / ${model}` : label
+}
+
+const activityCopy = (thought: AIThoughtEntry, providerLabel: string): { summary: string; detail: string } => {
+  const actor = humanize(thought.agentRole) || providerLabel || 'Agent'
+  const taskLabel = taskWorkLabel(thought.taskType)
+  const actionPhrase = taskActionPhrase(thought.taskType)
+  const detail = cleanActivityDetail(thought)
+  const elapsed = extractElapsed(thought.content)
+  const runner = providerRunLabel(providerLabel, thought)
+  const filesCount = thought.filesCount || thought.files?.length || 0
+  const stillWorking = /still\s+(?:analyzing|generating|working)/i.test(thought.content)
+
+  let summary = `${actor} is ${actionPhrase}.`
+
+  switch (thought.eventType) {
+    case 'agent:spawned':
+      summary = `${actor} joined the build and is ready for ${taskLabel}.`
+      break
+    case 'agent:working':
+      summary = `${actor} started ${taskLabel}.`
+      break
+    case 'agent:thinking':
+      summary = stillWorking
+        ? `${actor} is still ${actionPhrase}.`
+        : `${actor} is analyzing ${taskLabel}.`
+      break
+    case 'agent:generating':
+      summary = stillWorking
+        ? `${actor} is still generating output for ${taskLabel}.`
+        : `${actor} is generating output for ${taskLabel}.`
+      break
+    case 'agent:completed':
+      summary = `${actor} completed ${taskLabel}.`
+      break
+    case 'agent:output':
+      summary = `${actor} produced output for ${taskLabel}.`
+      break
+    case 'code:generated':
+      summary = `${actor} wrote ${filesCount || 'new'} project file${filesCount === 1 ? '' : 's'} for ${taskLabel}.`
+      break
+    case 'agent:retrying':
+      summary = `${actor} is retrying ${taskLabel} with recovery context.`
+      break
+    case 'agent:verification_failed':
+      summary = `${actor} found a verification issue and is routing a repair for ${taskLabel}.`
+      break
+    case 'agent:coordination_failed':
+      summary = `${actor} hit a coordination issue and is reassigning ${taskLabel}.`
+      break
+    case 'agent:provider_switched':
+      summary = `${actor} switched provider/model to keep ${taskLabel} moving.`
+      break
+    case 'agent:generation_failed':
+    case 'agent:error':
+      summary = `${actor} hit an error while handling ${taskLabel}.`
+      break
+    case 'spend:update':
+      summary = `${actor} recorded model spend for this build step.`
+      break
+    case 'glassbox:provider_route_selected':
+      summary = `${actor} routed ${taskLabel} to ${runner}.`
+      break
+    case 'glassbox:work_order_compiled':
+      summary = `${actor} compiled a concrete work order for ${taskLabel}.`
+      break
+    case 'glassbox:deterministic_gate_passed':
+      summary = `${actor} passed a deterministic gate for ${taskLabel}.`
+      break
+    case 'glassbox:deterministic_gate_failed':
+      summary = `${actor} failed a deterministic gate and is preparing repair context.`
+      break
+    case 'glassbox:hydra_candidate_started':
+      summary = `${actor} started a repair candidate for ${taskLabel}.`
+      break
+    case 'glassbox:hydra_candidate_passed':
+      summary = `${actor} passed a repair candidate for ${taskLabel}.`
+      break
+    case 'glassbox:hydra_candidate_failed':
+      summary = `${actor} rejected a failed repair candidate for ${taskLabel}.`
+      break
+    case 'glassbox:hydra_winner_selected':
+      summary = `${actor} selected the safest patch candidate for ${taskLabel}.`
+      break
+    case 'glassbox:patch_review_required':
+      summary = `${actor} marked a generated patch for review before merge.`
+      break
+    case 'glassbox:war_room_critique_started':
+      summary = `${actor} opened a war-room critique for the current build risk.`
+      break
+    case 'glassbox:war_room_critique_resolved':
+      summary = `${actor} resolved the war-room critique and returned to execution.`
+      break
+    default:
+      if (thought.type === 'error') {
+        summary = `${actor} needs recovery on ${taskLabel}.`
+      }
+      break
+  }
+
+  const detailParts = [
+    elapsed ? `${elapsed}; still active, not stalled.` : '',
+    detail,
+  ].filter(Boolean)
+
+  return {
+    summary,
+    detail: detailParts.length > 0 ? detailParts.join(' ') : `Provider: ${runner}. Task: ${taskLabel}.`,
+  }
+}
+
 const eventLabel = (eventType?: string): string => {
   switch (eventType) {
     case 'agent:spawned':
@@ -214,17 +423,17 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
   else if (lastAgentMsg) attentionMsg = lastAgentMsg.content
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950/95">
 
       {/* Scrollable activity feed */}
       <div
         ref={feedRef}
         onScroll={handleFeedScroll}
         aria-label="Live activity feed"
-        className="flex-1 overflow-y-auto px-4 py-3 overscroll-contain"
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-3 overscroll-contain"
         style={{
           scrollbarWidth: 'thin',
-          scrollbarColor: 'rgba(255,255,255,0.08) transparent',
+          scrollbarColor: 'rgba(56,189,248,0.55) rgba(15,23,42,0.55)',
           WebkitOverflowScrolling: 'touch',
           touchAction: 'pan-y',
           overscrollBehavior: 'contain',
@@ -232,16 +441,16 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
       >
         {displayThoughts.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
-            <div className="w-8 h-8 rounded-full border-2 border-gray-800 border-t-red-600 animate-spin" />
-            <div className="text-gray-600 text-sm font-mono">
+            <div className="w-8 h-8 rounded-full border-2 border-slate-700 border-t-cyan-300 animate-spin shadow-[0_0_18px_rgba(34,211,238,0.35)]" />
+            <div className="text-slate-300 text-sm font-mono">
               {isBuildActive ? 'Agents are initializing...' : 'No activity yet'}
             </div>
           </div>
         ) : (
-          <div className="space-y-1 sm:space-y-0.5 font-mono text-sm">
+          <div className="space-y-2 font-mono text-sm">
             {displayThoughts.map((thought, i) => {
               const prov = normalizeProvider(thought.provider)
-              const badge = PROVIDER_BADGE[prov] || 'bg-gray-500/20 text-gray-300 border-gray-500/30'
+              const badge = PROVIDER_BADGE[prov] || 'bg-slate-500/20 text-slate-200 border-slate-500/30'
               const label = PROVIDER_LABEL[prov] || thought.provider || 'AI'
               const isError = thought.type === 'error'
               const metaItems = [
@@ -257,37 +466,45 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                     hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
                   })
                 : ''
+              const message = activityCopy(thought, label)
 
               return (
                 <div
                   key={thought.id || i}
                   className={cn(
-                    'flex items-start gap-1.5 sm:gap-2 py-1 sm:py-[3px] leading-relaxed',
-                    isError && 'text-red-400'
+                    'group flex items-start gap-2 rounded-xl border px-2.5 py-2 leading-relaxed transition-colors',
+                    isError
+                      ? 'border-rose-400/30 bg-rose-950/20'
+                      : 'border-sky-400/10 bg-slate-900/45 hover:border-sky-300/25 hover:bg-slate-900/70'
                   )}
                 >
-                  <span className="text-gray-700 text-[11px] sm:text-[10px] shrink-0 mt-px w-[52px] sm:w-[54px] tabular-nums">
+                  <span className="text-slate-400 text-[11px] sm:text-[10px] shrink-0 mt-1 w-[52px] sm:w-[54px] tabular-nums">
                     {ts}
                   </span>
                   <span className={cn(
-                    'text-[10px] sm:text-[10px] font-bold uppercase border rounded px-1 py-px shrink-0 mt-px',
+                    'text-[10px] sm:text-[10px] font-bold uppercase border rounded-md px-1.5 py-0.5 shrink-0 mt-0.5 shadow-[0_0_12px_rgba(56,189,248,0.08)]',
                     badge
                   )}>
                     {label}
                   </span>
                   <span className={cn(
-                    'flex-1 break-words text-[13px] sm:text-sm leading-snug text-gray-300',
-                    isError && 'text-red-400',
-                    thought.isInternal && 'text-gray-500 italic'
+                    'flex-1 min-w-0 break-words text-[13px] sm:text-sm leading-snug',
+                    isError ? 'text-rose-100' : 'text-slate-100',
+                    thought.isInternal && 'not-italic'
                   )}>
                     {metaItems.length > 0 && (
-                      <span className="mr-2 text-[10px] uppercase tracking-[0.12em] text-gray-600 not-italic">
+                      <span className="block text-[10px] uppercase tracking-[0.14em] text-sky-300/80 not-italic">
                         {metaItems.join(' / ')}
                       </span>
                     )}
-                    <span>{thought.content}</span>
+                    <span className="block font-semibold text-slate-50">
+                      {message.summary}
+                    </span>
+                    <span className="block pt-0.5 text-xs leading-relaxed text-slate-300">
+                      {message.detail}
+                    </span>
                     {Array.isArray(thought.files) && thought.files.length > 0 && (
-                      <span className="ml-2 text-[11px] text-gray-600 not-italic">
+                      <span className="block pt-1 text-[11px] text-cyan-200/80 not-italic">
                         {thought.files.slice(0, 3).join(', ')}{thought.files.length > 3 ? ` (+${thought.files.length - 3})` : ''}
                       </span>
                     )}
@@ -304,13 +521,13 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
 
       {/* Jump-to-bottom button when user has scrolled up */}
       {userScrolledUp && displayThoughts.length > 0 && (
-        <div className="absolute bottom-[200px] right-6 z-10">
+        <div className="absolute bottom-24 right-6 z-10">
           <button
             onClick={() => {
               setUserScrolledUp(false)
               scrollToLatest('smooth')
             }}
-            className="text-[10px] px-2.5 py-1.5 rounded-full bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 font-semibold flex items-center gap-1"
+            className="text-[10px] px-3 py-1.5 rounded-full bg-sky-500/20 border border-sky-300/40 text-sky-100 hover:bg-sky-500/30 font-bold uppercase tracking-wide flex items-center gap-1 shadow-[0_0_18px_rgba(56,189,248,0.22)]"
           >
             ↓ Latest
           </button>
@@ -407,7 +624,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
               ? 'border-amber-500/60 bg-amber-950/25'
               : needsAttention
                 ? 'border-amber-500/25 bg-amber-950/10'
-                : 'border-gray-800/60 bg-black/30',
+                : 'border-sky-500/15 bg-slate-950/90',
           )}
           style={{ minHeight: '68px' }}
         >
@@ -419,7 +636,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                 ? 'bg-amber-500/25 text-amber-300'
                 : needsAttention
                   ? 'bg-amber-500/15 text-amber-500'
-                  : 'bg-gray-800/80 text-gray-600'
+                  : 'bg-sky-500/10 text-sky-300'
             )}>
               {needsAttention
                 ? <AlertTriangle className="w-3.5 h-3.5" />
@@ -446,7 +663,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
               )}
               <div className={cn(
                 'text-sm leading-snug',
-                needsAttention ? 'text-gray-200' : 'text-gray-600'
+                needsAttention ? 'text-gray-100' : 'text-slate-300'
               )}>
                 {attentionMsg || (isBuildActive ? 'Agents are working...' : 'Ready')}
               </div>

@@ -131,4 +131,26 @@ describe('LiveActivityFeed', () => {
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: 'smooth' })
   })
+
+  it('rewrites generic provider heartbeat text into planner-style user updates', () => {
+    render(
+      <LiveActivityFeed
+        {...defaultProps()}
+        aiThoughts={[{
+          ...makeThought(
+            'thought-heartbeat',
+            'solver is still generating repair patches for failed verification with gpt4 / gpt-4.1 (1m10s elapsed). Waiting on provider output; not stalled.',
+            'gpt4'
+          ),
+          agentRole: 'solver',
+          model: 'gpt-4.1',
+          eventType: 'agent:generating',
+          taskType: 'fix',
+        }]}
+      />
+    )
+
+    expect(screen.getByText(/Solver is still generating output for repair patch/i)).toBeTruthy()
+    expect(screen.getByText(/1m10s elapsed; still active, not stalled/i)).toBeTruthy()
+  })
 })

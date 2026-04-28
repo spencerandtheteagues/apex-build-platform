@@ -1972,6 +1972,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
   const [showDiffReview, setShowDiffReview] = useState(true)
   const [spendToasts, setSpendToasts] = useState<Array<{ id: string; agentRole: string; cost: number }>>([])
+  const [currentBuildSpend, setCurrentBuildSpend] = useState(0)
+  const [currentBuildSpendEvents, setCurrentBuildSpendEvents] = useState(0)
+  const currentBuildSpendEventKeysRef = useRef<Set<string>>(new Set())
 
   const addSpendToast = useCallback((agentRole: string, cost: number) => {
     const id = `${Date.now()}-${Math.random()}`
@@ -1980,6 +1983,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   const dismissSpendToast = useCallback((id: string) => {
     setSpendToasts(prev => prev.filter(t => t.id !== id))
+  }, [])
+
+  const resetCurrentBuildSpend = useCallback(() => {
+    currentBuildSpendEventKeysRef.current.clear()
+    setCurrentBuildSpend(0)
+    setCurrentBuildSpendEvents(0)
   }, [])
   const [patchBundleActionId, setPatchBundleActionId] = useState<string | null>(null)
   const [promptProposalActionId, setPromptProposalActionId] = useState<string | null>(null)
@@ -2032,6 +2041,36 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   useEffect(() => {
     buildStateRef.current = buildState
   }, [buildState])
+
+  useEffect(() => {
+    const buildId = buildState?.id
+    resetCurrentBuildSpend()
+    if (!buildId) return undefined
+
+    let cancelled = false
+    void apiService.get(`/spend/build/${encodeURIComponent(buildId)}`)
+      .then((response: any) => {
+        if (cancelled) return
+        const payload = response?.data?.data ?? response?.data
+        const events = Array.isArray(payload?.events) ? payload.events : []
+        const total = Number(payload?.total_spend ?? events.reduce((sum: number, event: any) => sum + Number(event?.billed_cost || 0), 0))
+        currentBuildSpendEventKeysRef.current = new Set(
+          events
+            .map((event: any) => event?.id)
+            .filter((id: unknown) => id !== undefined && id !== null)
+            .map((id: unknown) => `${buildId}:${String(id)}`)
+        )
+        setCurrentBuildSpend(Number.isFinite(total) ? Number(total.toFixed(6)) : 0)
+        setCurrentBuildSpendEvents(events.length)
+      })
+      .catch(() => {
+        // Spend endpoints are best-effort; live spend events will continue updating the ticker.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [buildState?.id, resetCurrentBuildSpend])
 
   const dismissUpgradePrompt = useCallback(() => {
     setUpgradePrompt(null)
@@ -2541,6 +2580,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       totalUpdates: aiThoughts.length,
       blockerCount,
       checkpointCount: buildState?.checkpoints.length ?? 0,
+      secondsSinceLastThought,
       lastThoughtLabel: lastThought == null
         ? 'No AI activity yet'
         : secondsSinceLastThought == null
@@ -2562,6 +2602,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     buildState?.blockers?.length,
     isBuildActive,
   ])
+  const buildStalled = Boolean(
+    isBuildActive &&
+    !buildPaused &&
+    buildState?.status !== 'failed' &&
+    buildState?.status !== 'cancelled' &&
+    buildState?.status !== 'completed' &&
+    telemetrySummary.secondsSinceLastThought != null &&
+    telemetrySummary.secondsSinceLastThought >= 45
+  )
   const recentThoughtsByAgent = useMemo(() => {
     const next = new Map<string, AIThought[]>()
     for (const thought of aiThoughts) {
@@ -4002,6 +4051,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         break
 
       case 'build:started':
+        if (message.build_id && message.build_id !== buildStateRef.current?.id) {
+          resetCurrentBuildSpend()
+        }
         addSystemMessage('Build initialized, spawning agents...')
         setBuildState(prev => prev ? {
           ...prev,
@@ -4294,15 +4346,44 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         break
 
       case 'spend:update':
-        if (data.billed_cost) {
-          addSpendToast(data.agent_role || 'agent', Number(data.billed_cost))
+        {
+          const billedCost = Number(data.billed_cost ?? data.cost ?? 0)
+          const hasBilledCost = Number.isFinite(billedCost)
+          const eventBuildId = String(data.build_id || message.build_id || buildStateRef.current?.id || '')
+          const activeBuildId = buildStateRef.current?.id
+          const spendEventId = data.spend_event_id || data.id
+          const eventKey = spendEventId
+            ? `${eventBuildId}:${spendEventId}`
+            : [
+                eventBuildId,
+                data.request_id || '',
+                message.timestamp || '',
+                message.agent_id || '',
+                data.task_id || '',
+                data.provider || '',
+                data.model || '',
+                data.billed_cost ?? data.cost ?? '',
+              ].join(':')
+          if (
+            hasBilledCost &&
+            (!activeBuildId || !eventBuildId || eventBuildId === activeBuildId) &&
+            !currentBuildSpendEventKeysRef.current.has(eventKey)
+          ) {
+            currentBuildSpendEventKeysRef.current.add(eventKey)
+            setCurrentBuildSpend((prev) => Number((prev + billedCost).toFixed(6)))
+            setCurrentBuildSpendEvents((prev) => prev + 1)
+          }
+        }
+        if (data.billed_cost !== undefined || data.cost !== undefined) {
+          const billedCost = Number(data.billed_cost ?? data.cost ?? 0)
+          addSpendToast(data.agent_role || 'agent', Number.isFinite(billedCost) ? billedCost : 0)
           addAiThought(
             message.agent_id,
             data.agent_role || 'agent',
             data.provider || '',
             data.model,
             'output',
-            `Spend recorded: $${Number(data.billed_cost).toFixed(4)} billed`,
+            `Spend recorded: $${(Number.isFinite(billedCost) ? billedCost : 0).toFixed(4)} billed`,
             {
               eventType: 'spend:update',
             }
@@ -5816,6 +5897,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       }
 
       const buildId = response.build_id
+      resetCurrentBuildSpend()
       persistActiveBuildId(buildId)
       persistLastWorkflowBuildId(buildId)
       setWireframeImage('')
@@ -7172,6 +7254,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             rollbackCheckpointId={rollbackCheckpointId}
             patchBundleActionId={patchBundleActionId}
             promptProposalActionId={promptProposalActionId}
+            currentBuildSpend={currentBuildSpend}
+            currentBuildSpendEvents={currentBuildSpendEvents}
+            buildStalled={buildStalled}
             chatInput={chatInput}
             setChatInput={setChatInput}
             plannerSendMode={plannerSendMode}

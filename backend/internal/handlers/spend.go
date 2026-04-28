@@ -158,7 +158,7 @@ func (h *SpendHandler) GetBuildSpend(c *gin.Context) {
 		return
 	}
 
-	total, events, err := h.tracker.GetBuildSpend(buildID)
+	total, events, err := h.tracker.GetUserBuildSpend(userID, buildID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,

@@ -100,7 +100,7 @@ func buildAgentHeartbeatLabel(task *Task) string {
 }
 
 func formatAgentHeartbeatContent(role AgentRole, provider ai.AIProvider, model string, task *Task, stage string, elapsed time.Duration) string {
-	taskLabel := buildAgentHeartbeatLabel(task)
+	taskLabel := userFacingTaskLabel(task)
 	elapsedLabel := elapsed.Round(time.Second).String()
 	roleLabel := firstNonEmptyString(strings.TrimSpace(string(role)), "agent")
 	providerLabel := firstNonEmptyString(strings.TrimSpace(string(provider)), "configured provider")
@@ -108,14 +108,14 @@ func formatAgentHeartbeatContent(role AgentRole, provider ai.AIProvider, model s
 
 	switch stage {
 	case "planning":
-		return fmt.Sprintf("%s agent is still analyzing %s with %s (%s elapsed)", roleLabel, taskLabel, providerLabel, elapsedLabel)
+		return fmt.Sprintf("%s is still drafting %s with %s (%s elapsed). Active heartbeat; no user action required.", roleLabel, taskLabel, providerLabel, elapsedLabel)
 	case "generation":
 		if modelLabel != "" {
-			return fmt.Sprintf("%s agent is still generating %s with %s / %s (%s elapsed)", roleLabel, taskLabel, providerLabel, modelLabel, elapsedLabel)
+			return fmt.Sprintf("%s is still generating %s with %s / %s (%s elapsed). Waiting on provider output; not stalled.", roleLabel, taskLabel, providerLabel, modelLabel, elapsedLabel)
 		}
-		return fmt.Sprintf("%s agent is still generating %s with %s (%s elapsed)", roleLabel, taskLabel, providerLabel, elapsedLabel)
+		return fmt.Sprintf("%s is still generating %s with %s (%s elapsed). Waiting on provider output; not stalled.", roleLabel, taskLabel, providerLabel, elapsedLabel)
 	default:
-		return fmt.Sprintf("%s agent is still working on %s (%s elapsed)", roleLabel, taskLabel, elapsedLabel)
+		return fmt.Sprintf("%s is still working on %s (%s elapsed). Active heartbeat; no user action required.", roleLabel, taskLabel, elapsedLabel)
 	}
 }
 
@@ -142,6 +142,86 @@ func (am *AgentManager) touchBuildExecutionHeartbeat(buildID string, agent *Agen
 		agent.UpdatedAt = now.UTC()
 		agent.mu.Unlock()
 	}
+}
+
+func userFacingTaskLabel(task *Task) string {
+	if task == nil {
+		return "the current work order"
+	}
+	switch task.Type {
+	case TaskPlan:
+		return "the build plan and work-order split"
+	case TaskArchitecture:
+		return "architecture and contract boundaries"
+	case TaskGenerateUI:
+		return "the frontend UI, app shell, and interactive screens"
+	case TaskGenerateFile:
+		return "generated project files"
+	case TaskGenerateAPI:
+		return "backend API routes and response contracts"
+	case TaskGenerateSchema:
+		return "database schema and persistence wiring"
+	case TaskTest:
+		return "regression tests and runtime verification"
+	case TaskReview:
+		return "acceptance review and quality gate checks"
+	case TaskFix:
+		return "repair patches for failed verification"
+	case TaskDeploy:
+		return "deployment configuration"
+	default:
+		if label := buildAgentHeartbeatLabel(task); label != "" {
+			return label
+		}
+		return "the current work order"
+	}
+}
+
+func (am *AgentManager) recordBuildSpend(build *Build, agent *Agent, input spend.RecordSpendInput, taskID, taskType string) {
+	if am == nil || am.spendTracker == nil {
+		return
+	}
+	event, err := am.spendTracker.RecordSpend(input)
+	if err != nil {
+		log.Printf("spend: failed to record spend for build %s agent %s: %v", input.BuildID, input.AgentID, err)
+		return
+	}
+	if event == nil || strings.TrimSpace(input.BuildID) == "" {
+		return
+	}
+
+	agentID := input.AgentID
+	if agentID == "" && agent != nil {
+		agentID = agent.ID
+	}
+	agentRole := event.AgentRole
+	if agentRole == "" && agent != nil {
+		agentRole = string(agent.Role)
+	}
+
+	am.broadcast(input.BuildID, &WSMessage{
+		Type:      WSSpendUpdate,
+		BuildID:   input.BuildID,
+		AgentID:   agentID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"spend_event_id": event.ID,
+			"build_id":       event.BuildID,
+			"agent_id":       agentID,
+			"agent_role":     agentRole,
+			"provider":       event.Provider,
+			"model":          event.Model,
+			"task_id":        taskID,
+			"task_type":      taskType,
+			"capability":     event.Capability,
+			"input_tokens":   event.InputTokens,
+			"output_tokens":  event.OutputTokens,
+			"raw_cost":       event.RawCost,
+			"billed_cost":    event.BilledCost,
+			"is_byok":        event.IsBYOK,
+			"content":        fmt.Sprintf("Spend recorded for %s: $%.4f billed", firstNonEmptyString(agentRole, "agent"), event.BilledCost),
+		},
+	})
 }
 
 func (am *AgentManager) startAgentActivityHeartbeat(
@@ -3498,7 +3578,7 @@ Contract:
 
 	if am.spendTracker != nil && resp.Usage != nil {
 		projectID := build.ProjectID
-		if _, spendErr := am.spendTracker.RecordSpend(spend.RecordSpendInput{
+		am.recordBuildSpend(build, nil, spend.RecordSpendInput{
 			UserID:       build.UserID,
 			ProjectID:    projectID,
 			BuildID:      build.ID,
@@ -3512,9 +3592,7 @@ Contract:
 			OutputTokens: resp.Usage.CompletionTokens,
 			PowerMode:    string(critiquePowerMode),
 			Status:       "success",
-		}); spendErr != nil {
-			log.Printf("spend: failed to record contract critique spend for build %s: %v", build.ID, spendErr)
-		}
+		}, "", "contract_critique")
 	}
 
 	var critique contractCritiquePayload
@@ -4821,9 +4899,10 @@ func (am *AgentManager) executeTask(task *Task) {
 	build.mu.Unlock()
 
 	// Broadcast that the agent is thinking with task-specific detail
-	thinkingContent := fmt.Sprintf("%s agent is working on %s", agent.Role, string(task.Type))
+	taskWorkLabel := userFacingTaskLabel(task)
+	thinkingContent := fmt.Sprintf("%s is analyzing %s and preparing the next executable step.", agent.Role, taskWorkLabel)
 	if task.Description != "" {
-		thinkingContent = fmt.Sprintf("%s agent is analyzing: %s", agent.Role, task.Description)
+		thinkingContent = fmt.Sprintf("%s is analyzing %s: %s", agent.Role, taskWorkLabel, task.Description)
 	}
 	am.broadcast(agent.BuildID, &WSMessage{
 		Type:      "agent:thinking",
@@ -4925,13 +5004,13 @@ func (am *AgentManager) executeTask(task *Task) {
 		am.clearTaskExecutionCancel(task.ID)
 		cancel()
 	}()
-	generationMessage := fmt.Sprintf("%s agent is generating code with %s...", agent.Role, agent.Provider)
+	generationMessage := fmt.Sprintf("%s is generating %s with %s.", agent.Role, userFacingTaskLabel(task), agent.Provider)
 	if len(candidateProviders) > 1 {
 		names := make([]string, 0, len(candidateProviders))
 		for _, provider := range candidateProviders {
 			names = append(names, string(provider))
 		}
-		generationMessage = fmt.Sprintf("%s agent is generating %d candidates with %s...", agent.Role, len(candidateProviders), strings.Join(names, " and "))
+		generationMessage = fmt.Sprintf("%s is generating %d candidates for %s with %s.", agent.Role, len(candidateProviders), userFacingTaskLabel(task), strings.Join(names, " and "))
 	}
 	am.broadcast(agent.BuildID, &WSMessage{
 		Type:      "agent:generating",
@@ -19131,7 +19210,7 @@ Rules:
 
 	if am.spendTracker != nil && response.Usage != nil {
 		projectID := build.ProjectID
-		if _, spendErr := am.spendTracker.RecordSpend(spend.RecordSpendInput{
+		am.recordBuildSpend(build, agent, spend.RecordSpendInput{
 			UserID:       build.UserID,
 			ProjectID:    projectID,
 			BuildID:      agent.BuildID,
@@ -19145,9 +19224,7 @@ Rules:
 			OutputTokens: response.Usage.CompletionTokens,
 			PowerMode:    string(build.PowerMode),
 			Status:       "success",
-		}); spendErr != nil {
-			log.Printf("spend: failed to record intervention spend for build %s agent %s: %v", agent.BuildID, agent.ID, spendErr)
-		}
+		}, "", "build_intervention")
 	}
 
 	content := strings.TrimSpace(response.Content)
@@ -26233,7 +26310,7 @@ func (am *AgentManager) runFailureConsensus(
 		} else {
 			if am.spendTracker != nil && resp.Usage != nil {
 				projectID := build.ProjectID
-				if _, spendErr := am.spendTracker.RecordSpend(spend.RecordSpendInput{
+				am.recordBuildSpend(build, agent, spend.RecordSpendInput{
 					UserID:       build.UserID,
 					ProjectID:    projectID,
 					BuildID:      build.ID,
@@ -26247,9 +26324,7 @@ func (am *AgentManager) runFailureConsensus(
 					OutputTokens: resp.Usage.CompletionTokens,
 					PowerMode:    string(build.PowerMode),
 					Status:       "success",
-				}); spendErr != nil {
-					log.Printf("spend: failed to record failure consensus spend for build %s provider %s: %v", build.ID, provider, spendErr)
-				}
+				}, "", "failure_consensus")
 			}
 			var decision consensusDecision = fallbackDecision
 			var rationale string
@@ -26673,7 +26748,7 @@ func (am *AgentManager) completeTruncatedFiles(
 
 		if am.spendTracker != nil && resp.Usage != nil {
 			projectID := build.ProjectID
-			if _, spendErr := am.spendTracker.RecordSpend(spend.RecordSpendInput{
+			am.recordBuildSpend(build, agent, spend.RecordSpendInput{
 				UserID:       build.UserID,
 				ProjectID:    projectID,
 				BuildID:      build.ID,
@@ -26687,9 +26762,7 @@ func (am *AgentManager) completeTruncatedFiles(
 				OutputTokens: resp.Usage.CompletionTokens,
 				PowerMode:    string(build.PowerMode),
 				Status:       "success",
-			}); spendErr != nil {
-				log.Printf("spend: failed to record chunked continuation spend for build %s: %v", build.ID, spendErr)
-			}
+			}, task.ID, string(task.Type))
 		}
 
 		continuation := stripCodeFences(strings.TrimSpace(resp.Content))

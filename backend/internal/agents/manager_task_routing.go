@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -572,7 +571,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 			"routing_stage":      waterfallStage,
 			"routing_reason":     waterfallReason,
 			"routing_power_mode": string(callPowerMode),
-			"content":            fmt.Sprintf("%s routed %s to %s with %s (%s).", agent.Role, task.Type, provider, firstNonEmptyString(model, "default model"), waterfallReason),
+			"content":            fmt.Sprintf("%s routed %s to %s with %s (%s).", agent.Role, userFacingTaskLabel(task), provider, firstNonEmptyString(model, "default model"), waterfallReason),
 		},
 	})
 
@@ -645,9 +644,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 			PowerMode:    powerMode,
 			Status:       "success",
 		}
-		if _, err := am.spendTracker.RecordSpend(si); err != nil {
-			log.Printf("spend: failed to record agent spend for build %s agent %s: %v", agent.BuildID, agent.ID, err)
-		}
+		am.recordBuildSpend(build, agent, si, task.ID, string(task.Type))
 	}
 
 	output := am.parseTaskOutput(task.Type, response.Content)

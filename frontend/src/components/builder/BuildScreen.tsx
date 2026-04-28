@@ -22,6 +22,7 @@ import {
   MessageSquare,
   Copy,
   Check,
+  DollarSign,
 } from "lucide-react";
 import { ProviderStatusBar } from "./ProviderStatusBar";
 import { LiveActivityFeed } from "./LiveActivityFeed";
@@ -302,6 +303,9 @@ interface BuildScreenProps {
   rollbackCheckpointId: string | null;
   patchBundleActionId?: string | null;
   promptProposalActionId?: string | null;
+  currentBuildSpend: number;
+  currentBuildSpendEvents: number;
+  buildStalled: boolean;
   chatInput: string;
   setChatInput: (v: string) => void;
   plannerSendMode: BuildMessageTargetMode;
@@ -412,6 +416,9 @@ interface BuildHeaderProps {
   onDownload: () => void;
   onOpenPlannerConsole: () => void;
   createdProjectId: number | null;
+  currentBuildSpend: number;
+  currentBuildSpendEvents: number;
+  buildStalled: boolean;
 }
 
 const BuildHeader: React.FC<BuildHeaderProps> = ({
@@ -431,8 +438,12 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
   onDownload,
   onOpenPlannerConsole,
   createdProjectId,
+  currentBuildSpend,
+  currentBuildSpendEvents,
+  buildStalled,
 }) => {
   const { status, progress } = buildState;
+  const isFailureStatus = status === "failed" || status === "cancelled";
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle"
   );
@@ -440,7 +451,7 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
   const statusColor =
     status === "completed"
       ? "text-green-400 bg-green-500/10 border-green-500/30"
-      : status === "failed"
+      : isFailureStatus
       ? "text-red-400 bg-red-500/10 border-red-500/30"
       : buildPaused
       ? "text-amber-400 bg-amber-500/10 border-amber-500/30"
@@ -449,8 +460,10 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
   const statusText =
     status === "completed"
       ? "Completed"
-      : status === "failed"
-      ? "Failed"
+      : isFailureStatus
+      ? status === "cancelled"
+        ? "Stopped"
+        : "Failed"
       : buildPaused
       ? "Paused"
       : humanize(status);
@@ -522,20 +535,20 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
 
   return (
     <div
-      className="shrink-0 flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-0 border-b border-gray-900 bg-black/60"
-      style={{ minHeight: "56px" }}
+      className="shrink-0 flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-0 border-b border-sky-500/20 bg-slate-950/95 shadow-[0_1px_0_rgba(56,189,248,0.08)]"
+      style={{ minHeight: "60px" }}
     >
       {/* Title + status */}
       <div className="flex-1 min-w-0 flex items-center gap-2 sm:gap-3">
         <div className="min-w-0">
           <div
-            className="text-xs sm:text-sm font-semibold text-gray-200 truncate select-text"
+            className="text-xs sm:text-sm font-semibold text-slate-50 truncate select-text"
             title={desc}
           >
             {desc}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-[11px] text-gray-600 font-mono">
-            <span>{phaseLabel}</span>
+          <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-[11px] text-slate-300 font-mono">
+            <span className="uppercase tracking-[0.18em] text-sky-300/90">{phaseLabel}</span>
             {gateStatusText && (
               <span
                 className={cn(
@@ -559,22 +572,50 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
       </div>
 
       {/* Progress bar (mobile: show inline, smaller) */}
-      <div className="flex items-center gap-2 w-24 sm:w-44">
-        <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+      <div className="flex items-center gap-2 w-28 sm:w-52" aria-label={`Build progress ${progress}%`}>
+        <div className="relative flex-1 h-2.5 rounded-full bg-slate-800/95 overflow-hidden ring-1 ring-sky-300/15">
           <div
             className={cn(
               "h-full rounded-full transition-all duration-500",
               status === "completed"
-                ? "bg-green-500"
-                : status === "failed"
-                ? "bg-red-500"
-                : "bg-gradient-to-r from-red-600 to-orange-500"
+                ? "bg-gradient-to-r from-emerald-300 via-green-400 to-cyan-300 shadow-[0_0_18px_rgba(52,211,153,0.7)]"
+                : isFailureStatus
+                ? "bg-gradient-to-r from-rose-400 via-red-400 to-orange-300 shadow-[0_0_18px_rgba(251,113,133,0.55)]"
+                : buildStalled
+                ? "bg-gradient-to-r from-yellow-200 via-amber-300 to-yellow-500 shadow-[0_0_20px_rgba(250,204,21,0.76)]"
+                : "bg-gradient-to-r from-cyan-300 via-sky-400 to-blue-500 shadow-[0_0_20px_rgba(56,189,248,0.78)]"
             )}
             style={{ width: `${Math.min(100, progress)}%` }}
           />
+          {isBuildActive && !isFailureStatus && (
+            <div className="absolute inset-y-0 left-0 w-16 animate-pulse bg-white/20 blur-sm" />
+          )}
         </div>
-        <span className="text-[10px] font-mono text-gray-500 w-8 text-right">
+        <span className="text-[11px] font-mono font-bold text-cyan-100 w-9 text-right tabular-nums">
           {progress}%
+        </span>
+      </div>
+
+      {buildStalled && !isFailureStatus && (
+        <span className="rounded border border-yellow-300/45 bg-yellow-300/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-100">
+          No recent heartbeat
+        </span>
+      )}
+
+      <div
+        className="flex items-center gap-1.5 rounded-lg border border-cyan-300/35 bg-cyan-400/10 px-2.5 py-1.5 shadow-[0_0_16px_rgba(34,211,238,0.14)]"
+        aria-label={`Current build spend ${currentBuildSpend.toFixed(4)} dollars`}
+        title="Current build spend resets for every build and only includes spend events from this build."
+      >
+        <DollarSign className="h-3.5 w-3.5 text-cyan-200" />
+        <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200">
+          Build
+        </span>
+        <span className="font-mono text-xs font-black text-cyan-50 tabular-nums">
+          ${currentBuildSpend.toFixed(4)}
+        </span>
+        <span className="hidden lg:inline text-[10px] text-slate-400">
+          {currentBuildSpendEvents} call{currentBuildSpendEvents === 1 ? "" : "s"}
         </span>
       </div>
 
@@ -638,7 +679,7 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
             type="button"
             onClick={onOpenPlannerConsole}
             aria-label="Steer Build"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-700/60 text-red-200 hover:bg-red-950/40 text-xs font-semibold uppercase tracking-wide"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-400/60 bg-sky-500/10 text-sky-100 hover:bg-sky-500/20 text-xs font-semibold uppercase tracking-wide"
           >
             <MessageSquare className="w-3 h-3" />
             Steer
@@ -738,17 +779,17 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
       : "Message the planner...");
 
   return (
-    <div className="shrink-0 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 sm:py-2.5 border-t border-gray-900 bg-black/60">
+    <div className="shrink-0 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 sm:py-2.5 border-t border-sky-500/20 bg-slate-950/95">
       {/* Mode toggle */}
-      <div className="flex rounded-lg overflow-hidden border border-gray-800 shrink-0">
+      <div className="flex rounded-lg overflow-hidden border border-sky-500/25 bg-slate-900/70 shrink-0">
         <button
           onClick={() => setPlannerSendMode("lead")}
           aria-label="Lead Planner"
           className={cn(
             "px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors",
             plannerSendMode === "lead"
-              ? "bg-red-700 text-white"
-              : "bg-transparent text-gray-600 hover:text-gray-400"
+              ? "bg-sky-500 text-slate-950"
+              : "bg-transparent text-slate-400 hover:text-sky-200"
           )}
         >
           Lead
@@ -760,8 +801,8 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
           className={cn(
             "px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors",
             plannerSendMode === "all_agents"
-              ? "bg-cyan-700 text-white"
-              : "bg-transparent text-gray-600 hover:text-gray-400 disabled:opacity-30"
+              ? "bg-cyan-400 text-slate-950"
+              : "bg-transparent text-slate-400 hover:text-cyan-200 disabled:opacity-30"
           )}
         >
           All
@@ -775,13 +816,13 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
         onChange={(e) => setChatInput(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && !pending && onSend()}
         placeholder={placeholder}
-        className="flex-1 min-w-0 bg-gray-950/80 border border-gray-800 rounded-xl px-3 sm:px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-red-700/60 focus:ring-1 focus:ring-red-900/30 transition-all"
+        className="flex-1 min-w-0 bg-slate-950/90 border border-sky-500/20 rounded-xl px-3 sm:px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-300/70 focus:ring-1 focus:ring-cyan-400/25 transition-all"
       />
 
       <button
         onClick={onSend}
         disabled={!chatInput.trim() || pending}
-        className="shrink-0 px-3 sm:px-4 py-2.5 bg-red-700 hover:bg-red-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center gap-2"
+        className="shrink-0 px-3 sm:px-4 py-2.5 bg-sky-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-sm font-bold disabled:opacity-40 flex items-center gap-2 shadow-[0_0_18px_rgba(56,189,248,0.28)]"
       >
         {pending ? (
           <span className="inline-flex gap-0.5">
@@ -997,7 +1038,7 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
 
   return (
     <div
-      className="shrink-0 flex items-center gap-0.5 sm:gap-1 px-2 sm:px-3 py-1 sm:py-1.5 border-t border-gray-900 bg-black/80 overflow-x-auto"
+      className="shrink-0 flex items-center gap-0.5 sm:gap-1 px-2 sm:px-3 py-1 sm:py-1.5 border-t border-sky-500/20 bg-slate-950/95 overflow-x-auto"
       style={{ WebkitOverflowScrolling: "touch" }}
     >
       {/* Preview — special, always direct action */}
@@ -1013,10 +1054,10 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
         className={cn(
           "flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all disabled:cursor-not-allowed",
           previewAvailable
-            ? "bg-cyan-700/80 hover:bg-cyan-600 text-white shadow-[0_0_12px_rgba(34,211,238,0.2)]"
+            ? "bg-sky-500 hover:bg-cyan-400 text-slate-950 font-bold shadow-[0_0_12px_rgba(34,211,238,0.28)]"
             : previewPending
-            ? "border border-gray-800 bg-gray-950/70 text-gray-500 disabled:opacity-75"
-            : "text-gray-600 hover:text-gray-300 hover:bg-gray-900 disabled:opacity-50"
+            ? "border border-sky-500/20 bg-slate-950/80 text-slate-400 disabled:opacity-75"
+            : "text-slate-400 hover:text-sky-200 hover:bg-sky-500/10 disabled:opacity-50"
         )}
       >
         <Eye className="w-3.5 h-3.5" />
@@ -1041,10 +1082,10 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
             className={cn(
               "relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all",
               isActive
-                ? "bg-red-700/80 text-white"
+                ? "bg-sky-500 text-slate-950"
                 : urgent
-                ? "text-amber-400 hover:text-amber-300 hover:bg-amber-900/20"
-                : "text-gray-500 hover:text-gray-300 hover:bg-gray-900"
+                ? "text-cyan-200 hover:text-cyan-100 hover:bg-cyan-500/10"
+                : "text-slate-400 hover:text-sky-200 hover:bg-sky-500/10"
             )}
           >
             <Icon className="w-3.5 h-3.5" />
@@ -1054,8 +1095,8 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
                 className={cn(
                   "ml-0.5 px-1.5 py-px rounded-full text-[9px] font-bold",
                   urgent
-                    ? "bg-amber-500/20 text-amber-300"
-                    : "bg-gray-700 text-gray-300"
+                    ? "bg-cyan-500/20 text-cyan-100"
+                    : "bg-slate-700 text-slate-200"
                 )}
               >
                 {badge}
@@ -1072,7 +1113,7 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
       <button
         onClick={onStartOver}
         disabled={isBuildActive || isStartingOver}
-        className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs text-gray-600 hover:text-gray-400 hover:bg-gray-900 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs text-slate-500 hover:text-sky-200 hover:bg-sky-500/10 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed transition-all"
       >
         <ChevronLeft className="w-3.5 h-3.5" />
         <span className="hidden sm:inline">Back to Setup</span>
@@ -1927,6 +1968,9 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     rollbackCheckpointId,
     patchBundleActionId,
     promptProposalActionId,
+    currentBuildSpend,
+    currentBuildSpendEvents,
+    buildStalled,
     chatInput,
     setChatInput,
     plannerSendMode,
@@ -2033,6 +2077,9 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         onDownload={onDownload}
         onOpenPlannerConsole={openPlannerConsole}
         createdProjectId={createdProjectId}
+        currentBuildSpend={currentBuildSpend}
+        currentBuildSpendEvents={currentBuildSpendEvents}
+        buildStalled={buildStalled}
       />
 
       {/* Row 2: Provider Status Bar */}
@@ -2064,7 +2111,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
       />
 
       {/* Row 4: Live Activity Feed (flex-1) */}
-      <div className="relative flex-1 min-h-0 overflow-hidden">
+      <div className="relative flex-1 min-h-0 overflow-hidden border-t border-sky-500/10">
         <LiveActivityFeed
           aiThoughts={aiThoughts}
           chatMessages={chatMessages}

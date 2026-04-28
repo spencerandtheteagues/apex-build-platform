@@ -124,7 +124,9 @@ func (t *SpendTracker) getOrSetSpendTotal(userID uint, period, key string, loade
 
 // GetDailySpend returns the total billed cost and event count for a user on a given day.
 func (t *SpendTracker) GetDailySpend(userID uint, day time.Time) (float64, int, error) {
-	dayKey := day.Format("2006-01-02")
+	start := time.Date(day.UTC().Year(), day.UTC().Month(), day.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 1)
+	dayKey := start.Format("2006-01-02")
 	return t.getOrSetSpendTotal(userID, "daily", dayKey, func() (float64, int, error) {
 		var result struct {
 			Total float64
@@ -132,7 +134,7 @@ func (t *SpendTracker) GetDailySpend(userID uint, day time.Time) (float64, int, 
 		}
 		err := t.db.Model(&SpendEvent{}).
 			Select("COALESCE(SUM(billed_cost), 0) as total, COUNT(*) as count").
-			Where("user_id = ? AND day_key = ?", userID, dayKey).
+			Where("user_id = ? AND created_at >= ? AND created_at < ?", userID, start, end).
 			Scan(&result).Error
 		if err != nil {
 			return 0, 0, fmt.Errorf("spend: daily query failed: %w", err)
@@ -143,7 +145,10 @@ func (t *SpendTracker) GetDailySpend(userID uint, day time.Time) (float64, int, 
 
 // GetMonthlySpend returns the total billed cost and event count for a user in a given month.
 func (t *SpendTracker) GetMonthlySpend(userID uint, month time.Time) (float64, int, error) {
-	monthKey := month.Format("2006-01")
+	monthUTC := month.UTC()
+	start := time.Date(monthUTC.Year(), monthUTC.Month(), 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	monthKey := start.Format("2006-01")
 	return t.getOrSetSpendTotal(userID, "monthly", monthKey, func() (float64, int, error) {
 		var result struct {
 			Total float64
@@ -151,7 +156,7 @@ func (t *SpendTracker) GetMonthlySpend(userID uint, month time.Time) (float64, i
 		}
 		err := t.db.Model(&SpendEvent{}).
 			Select("COALESCE(SUM(billed_cost), 0) as total, COUNT(*) as count").
-			Where("user_id = ? AND month_key = ?", userID, monthKey).
+			Where("user_id = ? AND created_at >= ? AND created_at < ?", userID, start, end).
 			Scan(&result).Error
 		if err != nil {
 			return 0, 0, fmt.Errorf("spend: monthly query failed: %w", err)
@@ -198,11 +203,11 @@ func (t *SpendTracker) GetBreakdown(opts BreakdownOpts) ([]SpendBreakdownItem, e
 
 	query := t.db.Model(&SpendEvent{}).
 		Select(
-			groupCol+` as "key", `+
-				"COALESCE(SUM(billed_cost), 0) as billed_cost, "+
-				"COALESCE(SUM(raw_cost), 0) as raw_cost, "+
-				"COALESCE(SUM(input_tokens), 0) as input_tokens, "+
-				"COALESCE(SUM(output_tokens), 0) as output_tokens, "+
+			groupCol + ` as "key", ` +
+				"COALESCE(SUM(billed_cost), 0) as billed_cost, " +
+				"COALESCE(SUM(raw_cost), 0) as raw_cost, " +
+				"COALESCE(SUM(input_tokens), 0) as input_tokens, " +
+				"COALESCE(SUM(output_tokens), 0) as output_tokens, " +
 				"COUNT(*) as count").
 		Group(groupCol).
 		Order("billed_cost DESC")
@@ -235,6 +240,20 @@ func (t *SpendTracker) GetBuildSpend(buildID string) (float64, []SpendEvent, err
 	var events []SpendEvent
 	if err := t.db.Where("build_id = ?", buildID).Order("created_at ASC").Find(&events).Error; err != nil {
 		return 0, nil, fmt.Errorf("spend: build query failed: %w", err)
+	}
+
+	var total float64
+	for _, e := range events {
+		total += e.BilledCost
+	}
+	return total, events, nil
+}
+
+// GetUserBuildSpend returns build spend scoped to one authenticated user.
+func (t *SpendTracker) GetUserBuildSpend(userID uint, buildID string) (float64, []SpendEvent, error) {
+	var events []SpendEvent
+	if err := t.db.Where("user_id = ? AND build_id = ?", userID, buildID).Order("created_at ASC").Find(&events).Error; err != nil {
+		return 0, nil, fmt.Errorf("spend: user build query failed: %w", err)
 	}
 
 	var total float64
