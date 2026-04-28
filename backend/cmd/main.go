@@ -1585,6 +1585,7 @@ func setupRoutes(
 
 			// Build/Agent endpoints (the core of APEX.BUILD)
 			buildHandler.RegisterRoutes(protected)
+			buildHandler.RegisterCleanupRoutes(protected)
 
 			// Autonomous Agent endpoints (AI-driven build, test, deploy)
 			autonomousHandler.RegisterRoutes(protected)

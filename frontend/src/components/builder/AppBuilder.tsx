@@ -2020,7 +2020,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [rollbackCheckpointId, setRollbackCheckpointId] = useState<string | null>(null)
   const [isStartingOver, setIsStartingOver] = useState(false)
   const plannerInputRef = useRef<HTMLInputElement | null>(null)
-  const { user, currentProject, createProject, setCurrentProject, addNotification } = useStore()
+  const { user, currentProject, createProject, setCurrentProject, clearCurrentProject, addNotification } = useStore()
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
@@ -5836,6 +5836,32 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       return
     }
 
+    // Hard reset every build-scoped piece of state BEFORE the API call so the
+    // UI can never show leftover agents, files, chat, or project links from
+    // any previous build while the new build is being created. Without this,
+    // re-using a similar prompt visibly "pulls up the old build" during the
+    // preflight + create window because buildState/currentProject/localStorage
+    // still point at the prior build.
+    if (wsRef.current) {
+      try { wsRef.current.close() } catch { /* ignore */ }
+      wsRef.current = null
+    }
+    wsBuildIdRef.current = null
+    isBuildingRef.current = false
+    buildStateRef.current = null
+    setBuildState(null)
+    clearCurrentProject()
+    setCreatedProjectId(null)
+    setIsCreatingProject(false)
+    clearActiveBuildId()
+    clearLastWorkflowBuildId()
+    try {
+      // Drop any cached telemetry from prior builds so a recycled prompt
+      // can't surface stale thoughts before the new WebSocket connects.
+      clearStoredValue(BUILD_TELEMETRY_STORAGE_KEY)
+    } catch { /* localStorage unavailable, ignore */ }
+    resetCurrentBuildSpend()
+
     setIsBuilding(true)
     setGeneratedFiles([])
     setAiThoughts([])
@@ -5843,7 +5869,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setProposedEdits([])
     setShowDiffReview(true)
     setIsPreparingPreview(false)
-    setCreatedProjectId(null)
+    setPlatformReadiness(null)
+    setRollbackCheckpointId(null)
+    setUpgradePrompt(null)
+    setBuildActionPending(null)
     wsReconnectAttempts.current = 0
     previewPreparedRef.current = false
 

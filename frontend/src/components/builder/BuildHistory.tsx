@@ -18,6 +18,7 @@ import {
   FolderOpen,
   Trash2,
   Square,
+  AlertTriangle,
 } from 'lucide-react'
 
 interface BuildHistoryProps {
@@ -32,6 +33,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
   const [actionError, setActionError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [actingBuildId, setActingBuildId] = useState<string | null>(null)
+  const [deletingAll, setDeletingAll] = useState(false)
 
   const loadBuilds = useCallback(async () => {
     if (!userId) {
@@ -120,10 +122,58 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
       setActionError(null)
       await apiService.deleteBuild(build.build_id)
       await loadBuilds()
-    } catch (err) {
-      setActionError('Unable to remove that build right now.')
+    } catch (err: any) {
+      // If the backend rejected because the snapshot looks active (409),
+      // try a force-delete to clean up stale active snapshots.
+      if (err?.response?.status === 409) {
+        const forceConfirmed = window.confirm(
+          'This build is still marked active and cannot be removed normally.\n\n' +
+          'Force-remove it? This permanently deletes the build history entry even if the server thinks it is still running.'
+        )
+        if (forceConfirmed) {
+          try {
+            await apiService.forceDeleteBuild(build.build_id)
+            await loadBuilds()
+            setActingBuildId(null)
+            return
+          } catch (forceErr: any) {
+            setActionError(forceErr?.response?.data?.error || 'Force removal failed.')
+            setActingBuildId(null)
+            return
+          }
+        }
+      }
+      setActionError(err?.response?.data?.error || 'Unable to remove that build right now.')
     } finally {
       setActingBuildId(null)
+    }
+  }
+
+  const handleDeleteAll = async () => {
+    const confirmed = window.confirm(
+      'DELETE ALL BUILDS\n\n' +
+      'This will permanently erase every build in your history, including active and recent ones. ' +
+      'You cannot undo this.\n\n' +
+      'Are you sure?'
+    )
+    if (!confirmed) return
+
+    // Double-confirm with typed input is too heavy; a second dialog adds enough friction.
+    const doubleConfirmed = window.confirm(
+      'Final confirmation: every single build will be gone forever.\n\n' +
+      'Press OK to proceed.'
+    )
+    if (!doubleConfirmed) return
+
+    try {
+      setDeletingAll(true)
+      setActionError(null)
+      const result = await apiService.deleteAllBuilds()
+      setBuilds([])
+    } catch (err: any) {
+      setActionError(err?.response?.data?.error || 'Unable to delete all builds right now.')
+    } finally {
+      setDeletingAll(false)
     }
   }
 
@@ -201,9 +251,25 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
         <span className="text-xs text-gray-600 ml-auto">{builds.length} builds</span>
       </div>
 
-      <p className="mb-4 text-sm text-gray-500">
-        The builder now opens to a fresh prompt by default. Previous runs stay saved here, and you can click any build to reopen its workflow or code when you actually want it.
-      </p>
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <p className="text-sm text-gray-500 flex-1">
+          The builder now opens to a fresh prompt by default. Previous runs stay saved here, and you can click any build to reopen its workflow or code when you actually want it.
+        </p>
+        <button
+          type="button"
+          onClick={() => { void handleDeleteAll() }}
+          disabled={deletingAll}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-900/50 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:bg-red-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Delete every build in your history"
+        >
+          {deletingAll ? (
+            <div className="w-3.5 h-3.5 border-2 border-red-300/50 border-t-red-100 rounded-full animate-spin" />
+          ) : (
+            <AlertTriangle className="w-3.5 h-3.5" />
+          )}
+          Delete All
+        </button>
+      </div>
 
       {actionError ? (
         <div className="mb-4 rounded-xl border border-red-900/40 bg-red-950/20 px-4 py-3 text-sm text-red-200">

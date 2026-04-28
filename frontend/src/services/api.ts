@@ -838,6 +838,15 @@ export class ApiService {
     await this.client.delete(`/builds/${buildId}`)
   }
 
+  async forceDeleteBuild(buildId: string): Promise<void> {
+    await this.client.post(`/builds/${buildId}/force-delete`)
+  }
+
+  async deleteAllBuilds(): Promise<{ status: string; deleted_count: number; deleted_at: string; deleted_builds: string[] }> {
+    const response = await this.client.delete('/builds', { params: { confirm: 'DELETE_ALL' } })
+    return response.data
+  }
+
   async startFullStackPreview(data: {
     project_id: number
     entry_point?: string
