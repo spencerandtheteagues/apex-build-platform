@@ -100,6 +100,12 @@ func isHighSignalMatch(normalized string, tmpl *AppTemplate) bool {
 		"ai-saas": {
 			"ai saas", "ai wrapper", "llm app", "openai app", "anthropic app",
 			"byok", "chatgpt wrapper", "claude wrapper", "ai tool factory",
+			// Single-word high-confidence signals for AI generation tools
+			"chatbot", "llm", "openai", "anthropic", "ollama", "deepseek",
+		},
+		"saas-dashboard": {
+			"admin panel", "admin dashboard", "management system", "control center",
+			"internal tool", "operations dashboard",
 		},
 		"crm": {"crm", "sales pipeline", "customer relationship"},
 		"marketplace": {"marketplace", "two-sided", "buyer seller"},
@@ -130,17 +136,22 @@ var templateAISaaS = &AppTemplate{
 	Name:     "AI SaaS Tool Factory",
 	Category: "AI SaaS / AI Wrapper",
 	Priority: 1,
+	// Keywords are intentionally AI-specific — no generic "saas", "dashboard",
+	// "admin", or "dashboard" terms here to avoid collision with template #2.
+	// Rule: #1 fires when AI/LLM generation is the core product.
+	//       #2 fires when managing business data through a dashboard is the core product.
 	Keywords: []string{
-		"ai", "llm", "openai", "anthropic", "claude", "gpt", "gemini", "grok",
-		"ollama", "deepseek", "prompt", "chatbot", "chat bot", "ai tool",
-		"ai app", "ai saas", "ai wrapper", "language model", "generative",
-		"summarize", "summarizer", "summarization", "resume", "proposal",
+		"llm", "openai", "anthropic", "claude", "gpt", "gemini", "grok",
+		"ollama", "deepseek", "chatbot", "chat bot", "ai tool",
+		"ai app", "ai saas", "ai wrapper", "language model", "generative ai",
+		"summarizer", "summarization",
 		"content generator", "content generation", "copy generator",
 		"document analyzer", "document analysis", "pdf analyzer", "pdf analysis",
-		"code review", "code reviewer", "ai assistant", "ai agent",
-		"token", "byok", "bring your own key", "api key", "model selector",
-		"provider", "usage tracking", "cost tracking", "ai credits",
-		"image generation", "text generation", "text to", "to text",
+		"code reviewer", "ai assistant", "ai agent",
+		"byok", "bring your own key", "model selector",
+		"token usage", "cost tracking", "ai credits",
+		"image generation", "text generation",
+		"prompt optimizer", "prompt tool", "prompt engineer",
 	},
 	ArchitectureContext: `
 ACTIVE TEMPLATE: AI SaaS Tool Factory
@@ -298,29 +309,223 @@ G. MONETIZATION DEFAULTS
 
 var templateSaaSDashboard = &AppTemplate{
 	ID:       "saas-dashboard",
-	Name:     "SaaS Dashboard",
-	Category: "SaaS / Admin",
+	Name:     "SaaS Dashboard / Admin Panel",
+	Category: "Dashboard / Admin",
 	Priority: 5,
+	// No "saas" standalone — that would collide with template #1.
+	// This template fires on dashboard/admin/CRUD/workspace signals.
+	// Template #1 fires when AI generation is the core product.
+	// Template #2 fires when managing business data through a dashboard is the core product.
 	Keywords: []string{
-		"saas", "dashboard", "admin panel", "admin dashboard", "startup app",
-		"user management", "analytics dashboard", "multi-tenant", "workspace",
-		"organization", "subscription", "stripe billing", "metrics dashboard",
-		"kpi", "reporting", "onboarding flow", "settings page",
+		"dashboard", "admin panel", "admin dashboard", "management system",
+		"control center", "internal tool", "operations app", "operations dashboard",
+		"customer management", "project management", "task management",
+		"business portal", "team dashboard", "client dashboard",
+		"analytics dashboard", "reporting", "reports",
+		"crud", "records", "roles", "permissions", "rbac",
+		"workspace", "organization", "company account",
+		"audit log", "audit trail", "activity feed",
+		"team management", "member management", "invite",
+		"data table", "searchable", "filterable", "paginated",
+		"billing", "settings", "onboarding",
+		"clients", "accounts", "leads", "cases", "students", "patients",
+		"jobs", "work orders", "deliverables", "invoices",
 	},
 	ArchitectureContext: `
-ACTIVE TEMPLATE: SaaS Dashboard
-=================================
-This build uses the SaaS Dashboard blueprint: multi-tenant auth, org/workspace
-model, dashboard shell, CRUD resources, charts, Stripe billing, and admin role.
+ACTIVE TEMPLATE: SaaS Dashboard / Admin Panel Blueprint
+========================================================
+This build uses the SaaS Dashboard / Admin Panel blueprint. The following
+stable architecture MUST be implemented regardless of the specific business domain.
 
-Required: auth (signup/login/invite), workspace/org model, dashboard with charts,
-at least one CRUD resource, Stripe billing placeholders, role-based access (admin/member),
-settings page, responsive layout.
+NOTE: This template is for apps where managing business data through dashboards,
+tables, forms, reports, teams, and permissions is the core product. If the core
+product is AI generation, use the AI SaaS Tool Factory blueprint instead.
+
+REQUIRED SUBSYSTEMS — all must be present and functional:
+
+1. AUTHENTICATION
+   - Sign up / log in / forgot password
+   - Protected routes — unauthenticated users redirect to login
+   - Onboarding flow (workspace creation on first login)
+
+2. WORKSPACE / ORGANIZATION MODEL
+   - Every user belongs to one or more workspaces
+   - Every data query MUST filter by workspace_id — no cross-workspace data leakage
+   - Workspace switcher in the app shell if multi-workspace
+   - Workspace settings: name, slug, timezone, currency, date format
+
+3. ROLE-BASED ACCESS CONTROL (RBAC) — 5 default roles:
+   - owner: full control including billing and workspace deletion
+   - admin: manage team, settings, and all records
+   - manager: create and update operational records, view reports
+   - member: create and update assigned work
+   - viewer: read-only
+   CRITICAL: permission checks MUST be server-side on every mutating API route.
+   Never rely solely on UI hiding to enforce permissions.
+
+4. DASHBOARD
+   - Stat cards for key business metrics (count-based and value-based)
+   - At least one chart (line, bar, or donut) using Recharts or similar
+   - Recent activity feed
+   - All metrics scoped to current workspace
+   - Loading skeletons while data fetches
+
+5. DATA TABLES — every list view must have ALL of these:
+   - Server-side search (text filter)
+   - Column sorting
+   - Status/category filters
+   - Pagination (page size + total count)
+   - Row actions (view, edit, archive/delete)
+   - Loading skeleton state
+   - Empty state with CTA
+   - Error state with retry
+   - MOBILE: desktop table becomes stacked record cards on small screens
+     NEVER a horizontally scrolling crushed table on mobile
+
+6. CRUD MODULES with RECORD DETAIL PAGES
+   - List page → detail page → edit form for every major entity
+   - Soft delete (archive) by default — set archived_at, exclude from default queries
+   - Related records shown on detail page
+
+7. AUDIT LOGS — mandatory on every mutation
+   - Every create, update, and archive/delete action records:
+     workspace_id, actor_id, action, entity_type, entity_id,
+     before_json, after_json, ip_address, created_at
+   - Audit log page with search, filter by entity type, pagination
+   - Before/after detail drawer on each log entry
+
+8. ACTIVITY FEED
+   - Human-readable activity messages on the dashboard and record detail pages
+   - actor performed action on entity at time
+
+9. TEAM MANAGEMENT
+   - List members with name/email/role/status
+   - Invite by email with role selection
+   - Change member role (owner/admin only)
+   - Remove member (owner/admin only)
+   - Pending invite list with cancel option
+
+10. NOTIFICATIONS
+    - Notification bell in topbar with unread count
+    - Dropdown list of recent notifications
+    - Mark as read / mark all as read
+    - Types: task_assigned, task_due_soon, project_due_soon,
+      member_invited, plan_limit_warning, billing_issue
+
+11. BILLING PAGE (when the generated app has SaaS monetization)
+    - Current plan with usage meters
+    - Available plan cards
+    - Plan limits enforced server-side (not just hidden in UI)
+    - Invoice history
+
+12. SETTINGS PAGE — separate save action per section
+    - Workspace profile (name, slug, logo, timezone, currency)
+    - Team defaults
+    - Notification preferences
+    - Security (allowed domains, session timeout, 2FA placeholder)
+    - Danger zone (transfer ownership, archive/delete workspace)
+
+DATABASE TABLES REQUIRED:
+  users, workspaces, workspace_members, workspace_invites,
+  [domain entities — customized per prompt],
+  activity_events, audit_logs, notifications,
+  billing_customers, usage_rollups, workspace_settings
+
+TECH STACK:
+- Frontend: React + TypeScript + Tailwind CSS + Recharts (charts)
+- Backend: Express + TypeScript (or user's requested stack)
+- Database: PostgreSQL with real typed tables (NOT generic JSONB resource blobs)
+- Auth: JWT (bcryptjs + jsonwebtoken)
+
+NON-NEGOTIABLES:
+- Every protected page must require authentication
+- Every workspace-scoped query must filter by workspace_id
+- Every mutating API route must check workspace membership AND role permissions
+- Every create/update/archive must produce an audit log entry
+- Mobile tables must render as stacked cards, not crushed desktop tables
+- Soft delete (archived_at) not hard delete for business records
+- Plan limits enforced server-side when billing is included
+- Build must compile without TypeScript errors
 `,
 	CustomizationRules: `
-Customize domain, color scheme, CRUD entities, chart types, and KPI cards
-specifically for the user's described business. Never produce a generic "App" dashboard.
+CUSTOMIZATION MANDATE — EVERY BUILD MUST BE DOMAIN-SPECIFIC:
+=============================================================
+The SaaS Dashboard blueprint is a skeleton. Everything visible must be
+customized for the business the user described. Generic "Customers / Projects /
+Tasks" is only used when the user gives no domain signals.
+
+A. DOMAIN LANGUAGE — rename modules and fields to match the business
+   Examples:
+   | User's domain        | Customers →  | Projects →       | Tasks →       |
+   |----------------------|--------------|------------------|---------------|
+   | Contractor           | Clients      | Jobs             | Work Orders   |
+   | Real estate          | Leads        | Properties       | Showings      |
+   | Agency               | Clients      | Client Projects  | Deliverables  |
+   | Fitness coaching     | Members      | Programs         | Sessions      |
+   | Medical office       | Patients     | Appointments     | Follow-ups    |
+   | Legal / law firm     | Clients      | Cases            | Case Tasks    |
+   | School admin         | Students     | Classes          | Assignments   |
+   | SaaS product admin   | Accounts     | Subscriptions    | Support Tickets|
+   | Construction         | Clients      | Jobs             | Work Orders   |
+   Use domain language EVERYWHERE: nav, page titles, forms, tables, empty
+   states, activity feed messages, audit log labels.
+
+B. DATA MODEL — generate real typed tables for the domain
+   Start from the default schema, then rename/extend the business entities.
+   NEVER force every app to use generic customers/projects/tasks names.
+   Generate the correct tables with the correct field names and types.
+
+C. DASHBOARD WIDGETS — pick metrics that make sense for the business
+   Contractor: active jobs, pending estimates, unpaid invoices, revenue this month
+   SaaS: active accounts, MRR, trial users, churn risk, open tickets
+   Agency: active clients, projects in progress, deliverables due, pending approvals
+   School: total students, active classes, assignments due, attendance rate
+
+D. NAVIGATION — match the app's workflow
+   Include only the modules the app actually uses.
+   Order navigation by frequency of use, not alphabetically.
+
+E. ROLES — adapt role names and permissions to the domain
+   Contractor: Owner / Office Admin / Project Manager / Field Worker / Viewer
+   Agency: Owner / Admin / Account Manager / Designer / Client Viewer
+   School: Administrator / Teacher / Staff / Student Viewer / Parent Viewer
+   SaaS: Owner / Admin / Support Agent / Analyst / Viewer
+
+F. VISUAL IDENTITY — derive theme from the prompt's industry and tone
+   Enterprise / B2B → clean light theme, blue primary
+   Technical / ops tool → dark operator theme
+   Premium / executive → executive graphite
+   Friendly / startup / education → startup fresh greens/blues
+   NEVER produce a generic blue-on-white default for every build.
+
+G. WORKFLOW ACTIONS — add domain-specific action buttons
+   Don't just generate static CRUD. Add obvious workflow actions:
+   "Convert estimate to job", "Mark invoice paid", "Complete task",
+   "Assign teammate", "Approve deliverable", "Close ticket",
+   "Archive client" — whatever the domain naturally needs.
+
+H. BILLING — only include if the prompt signals SaaS monetization
+   Include billing for: subscription / plans / paid users / Stripe / upgrade
+   Skip or hide billing for: internal tools / private dashboards / school apps
+
+I. COMPLEXITY SCALING
+   Simple (1-2 modules, no billing, no complex permissions) → deliver core fast
+   Medium (3-5 modules, teams, reports, audit logs) → full template
+   High (billing, RBAC, multiple workflows, integrations) → full template + extras
+
+J. INFER — never stop with questions when defaults are obvious
+   "Build me a dashboard for my business" → clean B2B theme, classic sidebar,
+   Customers / Projects / Tasks / Reports / Team / Settings, Owner/Admin/Member/Viewer
 `,
+	AcceptanceChecks: []string{
+		"dashboard-auth: login, signup, and protected route redirect all function",
+		"dashboard-workspace: every data query is scoped to workspace_id",
+		"dashboard-rbac: mutating API routes check membership and role server-side",
+		"dashboard-audit: every create/update/archive produces an audit_logs row",
+		"dashboard-tables: list pages have search, sort, filter, pagination, empty state, loading state",
+		"dashboard-mobile: tables render as stacked cards at mobile viewport, not overflow tables",
+		"dashboard-soft-delete: archive/delete sets archived_at rather than hard-deleting",
+	},
 }
 
 var templateCRM = &AppTemplate{
