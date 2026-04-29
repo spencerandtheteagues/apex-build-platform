@@ -68,7 +68,7 @@ const PLAN_CONFIG: Record<string, {
     icon: <Rocket size={18} />,
     tagline: 'Full-stack development unlocked',
     bestFor: 'Early-stage teams shipping their first real app.',
-    features: ['Backend + API generation', 'Database-backed apps', 'Auth + deployment', 'Publish to production', 'BYOK (bring your own keys)'],
+    features: ['Everything in Free', 'Full-stack backend + APIs', 'Database, auth & deployment', 'GitHub import/export', '$12/mo in managed AI credits'],
   },
   pro: {
     color: '#38bdf8',
@@ -79,7 +79,7 @@ const PLAN_CONFIG: Record<string, {
     icon: <ShieldCheck size={18} />,
     tagline: 'Serious shipping, every week',
     bestFor: 'Founders & operators shipping production app changes weekly.',
-    features: ['Everything in Builder', 'Access to latest Ollama cloud models for high-quality, lower-cost builds', 'Longer autonomous runs', 'Max power mode access', 'Priority for heavy workflows'],
+    features: ['Everything in Builder', 'Latest Ollama cloud models — high quality, lower cost', 'BYOK + budget caps', 'Max power mode & longer autonomous runs', '$40/mo in managed AI credits'],
   },
   team: {
     color: '#67e8f9',
@@ -90,7 +90,7 @@ const PLAN_CONFIG: Record<string, {
     icon: <Users size={18} />,
     tagline: 'Shared team credit runway',
     bestFor: 'Collaborative product teams with heavier workloads.',
-    features: ['Everything in Pro', 'Shared team workspace', 'Largest included credit runway', 'Multi-seat delivery', 'Team billing management'],
+    features: ['Everything in Pro', 'Shared team workspace & billing', 'Admin controls & shared secrets', 'Multi-seat delivery', '$110/mo in managed AI credits'],
   },
   enterprise: {
     color: '#a855f7',

@@ -1816,9 +1816,9 @@ const Pricing = ({ onGetStarted }: LandingProps) => (
       <div className="pricing-grid">
         {([
           { name: 'Free', price: '$0', features: ['$5 trial credits included', 'Static frontend experiments', 'Prompt-to-UI exploration'] },
-          { name: 'Builder', price: '$24', features: ['Full-stack builds', 'GitHub import/export', 'Live preview and IDE', '$12 managed credits/mo'] },
-          { name: 'Pro', price: '$49', regularPrice: '$79', promo: 'Launch Special', promoSub: 'First 3 months, then $79/mo', features: ['BYOK controls', 'Budget caps', 'Advanced verification', 'Latest Ollama cloud models — high quality, lower cost', '$40 managed credits/mo'], featured: true },
-          { name: 'Team', price: '$149', features: ['Collaboration', 'Shared secrets', 'Admin controls', '$110 managed credits/mo'] },
+          { name: 'Builder', price: '$24', features: ['Everything in Free', 'Full-stack backend + APIs', 'Database, auth & deployment', 'GitHub import/export', '$12/mo in managed AI credits'] },
+          { name: 'Pro', price: '$49', regularPrice: '$79', promo: 'Launch Special', promoSub: 'First 3 months, then $79/mo', features: ['Everything in Builder', 'Latest Ollama cloud models — high quality, lower cost', 'BYOK + budget caps', 'Max power mode & longer autonomous runs', '$40/mo in managed AI credits'], featured: true },
+          { name: 'Team', price: '$149', features: ['Everything in Pro', 'Shared team workspace & billing', 'Admin controls & shared secrets', 'Multi-seat delivery', '$110/mo in managed AI credits'] },
         ] as Array<{ name: string; price: string; regularPrice?: string; promo?: string; promoSub?: string; features: string[]; featured?: boolean }>).map(({ name, price, regularPrice, promo, promoSub, features, featured }) => (
           <motion.article key={name} className={`launch-card price-card ${featured ? 'featured' : ''}`} {...fadeUp}>
             {promo && (
