@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -48,6 +49,7 @@ func newDockerPreviewBackendRuntimeFromEnv() (*dockerPreviewBackendRuntime, erro
 	if err := rt.checkDocker(); err != nil {
 		return nil, err
 	}
+	rt.cleanupOrphanedPreviewContainers()
 	return rt, nil
 }
 
@@ -191,6 +193,68 @@ func (r *dockerPreviewBackendRuntime) checkDocker() error {
 	return nil
 }
 
+func (r *dockerPreviewBackendRuntime) cleanupOrphanedPreviewContainers() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := r.dockerCommandContext(
+		ctx,
+		"ps",
+		"-aq",
+		"--filter", "label=apex.backend-preview=true",
+	).CombinedOutput()
+	if err != nil {
+		return
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return
+	}
+	args := append([]string{"rm", "-f"}, ids...)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cleanupCancel()
+	_ = r.dockerCommandContext(cleanupCtx, args...).Run()
+}
+
+func (r *dockerPreviewBackendRuntime) IsPortAvailable(port int) bool {
+	if port <= 0 {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := r.dockerCommandContext(
+		ctx,
+		"ps",
+		"--filter", fmt.Sprintf("label=apex.preview-port=%d", port),
+		"--format", "{{.ID}}",
+	).CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) != "" {
+		return false
+	}
+
+	host := r.previewConnectHostname()
+	if host == "" {
+		return true
+	}
+	conn, dialErr := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 200*time.Millisecond)
+	if dialErr == nil {
+		_ = conn.Close()
+		return false
+	}
+	return true
+}
+
+func (r *dockerPreviewBackendRuntime) previewConnectHostname() string {
+	host := strings.TrimSpace(r.connectHost)
+	if host == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(host); err == nil && parsed.Scheme != "" {
+		host = parsed.Hostname()
+	}
+	return strings.TrimSpace(host)
+}
+
 func (r *dockerPreviewBackendRuntime) dockerEnv() []string {
 	env := append([]string(nil), os.Environ()...)
 	if r.dockerContext != "" && envValue(env, "DOCKER_CONTEXT") == "" {
@@ -236,10 +300,7 @@ EXPOSE 9100
 }
 
 func (r *dockerPreviewBackendRuntime) readyURL(port int) string {
-	host := strings.TrimSpace(r.connectHost)
-	if parsed, err := url.Parse(host); err == nil && parsed.Scheme != "" {
-		host = parsed.Hostname()
-	}
+	host := r.previewConnectHostname()
 	if host == "" {
 		host = "localhost"
 	}

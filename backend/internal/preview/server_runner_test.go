@@ -2,6 +2,7 @@ package preview
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"apex-build/pkg/models"
@@ -9,6 +10,36 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+type fakePortCheckingRuntime struct {
+	unavailable map[int]bool
+}
+
+func (f *fakePortCheckingRuntime) StartProcess(*ProcessStartConfig) (*ProcessHandle, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (f *fakePortCheckingRuntime) Name() string {
+	return "fake-port-checker"
+}
+
+func (f *fakePortCheckingRuntime) IsPortAvailable(port int) bool {
+	return !f.unavailable[port]
+}
+
+func TestServerRunnerAllocatePortUsesRuntimeAvailability(t *testing.T) {
+	t.Parallel()
+
+	runner := NewServerRunnerWithRuntime(nil, &fakePortCheckingRuntime{
+		unavailable: map[int]bool{9100: true, 9101: true},
+	})
+
+	port := runner.allocatePort(42)
+
+	if port != 9102 {
+		t.Fatalf("port = %d, want 9102", port)
+	}
+}
 
 func TestDetectNodeServerCommandPrefersDevServer(t *testing.T) {
 	t.Parallel()

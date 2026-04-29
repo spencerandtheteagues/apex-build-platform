@@ -136,6 +136,10 @@ type RuntimeBackend interface {
 	Name() string
 }
 
+type runtimePortAvailabilityChecker interface {
+	IsPortAvailable(port int) bool
+}
+
 // ProcessStartConfig holds the command configuration for starting a process.
 type ProcessStartConfig struct {
 	Command string
@@ -984,6 +988,9 @@ func (sr *ServerRunner) releasePort(projectID uint) {
 }
 
 func (sr *ServerRunner) isPortAvailable(port int) bool {
+	if checker, ok := sr.runtime.(runtimePortAvailabilityChecker); ok {
+		return checker.IsPortAvailable(port)
+	}
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return false
