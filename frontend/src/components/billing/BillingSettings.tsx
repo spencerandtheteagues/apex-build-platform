@@ -609,16 +609,36 @@ export function BillingSettings() {
                     <div className="flex items-center gap-2">
                       <span style={{ color: cfg.color }}>{cfg.icon}</span>
                       <span className="text-base font-bold text-white">{plan.name}</span>
+                      {plan.type === 'pro' && currentPlanType === 'free' && (
+                        <span style={{
+                          background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                          color: '#fff',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '2px 7px',
+                          borderRadius: '999px',
+                          letterSpacing: '0.05em',
+                          textTransform: 'uppercase',
+                        }}>Launch Special</span>
+                      )}
                     </div>
                     <div className="mt-4 flex items-end gap-2">
                       <span
                         className="font-mono text-3xl font-black"
                         style={{ color: cfg.color, filter: isCurrent ? `drop-shadow(0 0 10px ${cfg.glow})` : 'none' }}
                       >
-                        {priceStr}
+                        {plan.type === 'pro' && currentPlanType === 'free' ? '$49' : priceStr}
                       </span>
                       {plan.monthly_price_cents > 0 && <span className="pb-1 text-xs text-gray-500">/mo</span>}
+                      {plan.type === 'pro' && currentPlanType === 'free' && (
+                        <span className="pb-1 text-sm text-gray-500 line-through">$79</span>
+                      )}
                     </div>
+                    {plan.type === 'pro' && currentPlanType === 'free' && (
+                      <div className="mt-1 text-xs font-semibold" style={{ color: '#c4b5fd' }}>
+                        First 3 months, then $79/mo
+                      </div>
+                    )}
                     {plan.monthly_credits_usd > 0 && (
                       <div className="mt-2 text-xs font-semibold text-emerald-300">
                         + ${plan.monthly_credits_usd}/mo in credits included
@@ -648,27 +668,31 @@ export function BillingSettings() {
                     </div>
                   ) : (
                     <button
-                      onClick={() => void handleUpgrade(plan)}
-                      disabled={upgradeLoading === plan.type}
+                      onClick={() => plan.type === 'pro' && currentPlanType === 'free' ? void handlePromoUpgrade() : void handleUpgrade(plan)}
+                      disabled={upgradeLoading === plan.type || upgradeLoading === 'pro_promo'}
                       className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-bold transition disabled:opacity-60"
                       style={{
-                        borderColor: cfg.border,
-                        background: `linear-gradient(135deg, ${cfg.color}22, ${cfg.color}44)`,
-                        color: cfg.color,
-                        boxShadow: `0 0 18px ${cfg.glow}`,
+                        borderColor: plan.type === 'pro' && currentPlanType === 'free' ? 'rgba(168,85,247,0.6)' : cfg.border,
+                        background: plan.type === 'pro' && currentPlanType === 'free'
+                          ? 'linear-gradient(135deg, #6366f1, #a855f7)'
+                          : `linear-gradient(135deg, ${cfg.color}22, ${cfg.color}44)`,
+                        color: '#fff',
+                        boxShadow: plan.type === 'pro' && currentPlanType === 'free' ? '0 0 18px rgba(168,85,247,0.4)' : `0 0 18px ${cfg.glow}`,
                       }}
                     >
-                      {upgradeLoading === plan.type ? (
+                      {(upgradeLoading === plan.type || (plan.type === 'pro' && upgradeLoading === 'pro_promo')) ? (
                         <>
                           <Loader2 size={14} className="animate-spin" />
                           {(subscription?.status === 'active' || subscription?.status === 'trialing') && currentPlanType !== 'free' ? 'Switching…' : 'Redirecting…'}
                         </>
                       ) : (
                         <>
-                          <CreditCard size={14} />
-                          {(subscription?.status === 'active' || subscription?.status === 'trialing') && currentPlanType !== 'free'
-                            ? `Switch to ${plan.name}`
-                            : `Upgrade to ${plan.name}`}
+                          {plan.type === 'pro' && currentPlanType === 'free' ? <Zap size={14} /> : <CreditCard size={14} />}
+                          {plan.type === 'pro' && currentPlanType === 'free'
+                            ? 'Claim Launch Special'
+                            : (subscription?.status === 'active' || subscription?.status === 'trialing') && currentPlanType !== 'free'
+                              ? `Switch to ${plan.name}`
+                              : `Upgrade to ${plan.name}`}
                         </>
                       )}
                     </button>

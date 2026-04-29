@@ -1814,20 +1814,42 @@ const Pricing = ({ onGetStarted }: LandingProps) => (
         </p>
       </motion.div>
       <div className="pricing-grid">
-        {[
-          ['Free', '$0', ['Static frontend experiments', 'Prompt-to-UI exploration', 'Upgrade required for backend/auth/billing']],
-          ['Builder', '$24', ['Full-stack builds', 'GitHub import/export', 'Live preview and IDE', '$12 managed credits/mo']],
-          ['Pro', '$79', ['BYOK controls', 'Budget caps', 'Advanced verification', '$40 managed credits/mo'], true],
-          ['Team', '$149', ['Collaboration', 'Shared secrets', 'Admin controls', '$110 managed credits/mo']],
-        ].map(([name, price, features, featured]) => (
-          <motion.article key={name as string} className={`launch-card price-card ${featured ? 'featured' : ''}`} {...fadeUp}>
+        {([
+          { name: 'Free', price: '$0', features: ['Static frontend experiments', 'Prompt-to-UI exploration', 'Upgrade required for backend/auth/billing'] },
+          { name: 'Builder', price: '$24', features: ['Full-stack builds', 'GitHub import/export', 'Live preview and IDE', '$12 managed credits/mo'] },
+          { name: 'Pro', price: '$49', regularPrice: '$79', promo: 'Launch Special', promoSub: 'First 3 months, then $79/mo', features: ['BYOK controls', 'Budget caps', 'Advanced verification', '$40 managed credits/mo'], featured: true },
+          { name: 'Team', price: '$149', features: ['Collaboration', 'Shared secrets', 'Admin controls', '$110 managed credits/mo'] },
+        ] as Array<{ name: string; price: string; regularPrice?: string; promo?: string; promoSub?: string; features: string[]; featured?: boolean }>).map(({ name, price, regularPrice, promo, promoSub, features, featured }) => (
+          <motion.article key={name} className={`launch-card price-card ${featured ? 'featured' : ''}`} {...fadeUp}>
+            {promo && (
+              <div style={{
+                background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                color: '#fff',
+                fontSize: '11px',
+                fontWeight: 700,
+                padding: '4px 12px',
+                borderRadius: '999px',
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                display: 'inline-block',
+                marginBottom: '8px',
+              }}>{promo}</div>
+            )}
             <h3>{name}</h3>
-            <span className="price">{price}</span>
-            <button className="launch-btn launch-btn-primary" onClick={() => onGetStarted('register', String(name).toLowerCase())}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+              <span className="price">{price}</span>
+              {regularPrice && (
+                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '16px', textDecoration: 'line-through' }}>{regularPrice}</span>
+              )}
+            </div>
+            {promoSub && (
+              <p style={{ color: '#c4b5fd', fontSize: '12px', margin: '2px 0 8px', fontStyle: 'italic' }}>{promoSub}</p>
+            )}
+            <button className="launch-btn launch-btn-primary" onClick={() => onGetStarted('register', name.toLowerCase())}>
               Select {name}
             </button>
             <ul>
-              {(features as string[]).map((feature) => (
+              {features.map((feature) => (
                 <li key={feature}><CheckCircle2 width={16} height={16} /> {feature}</li>
               ))}
             </ul>
