@@ -204,9 +204,14 @@ func main() {
 		})
 	}
 
-	// One-shot admin promotion: if ADMIN_PROMOTE_EMAIL is set, grant that user
-	// is_admin + is_super_admin on startup. Clear the env var after it fires once.
-	if promoteEmail := strings.TrimSpace(os.Getenv("ADMIN_PROMOTE_EMAIL")); promoteEmail != "" {
+	// One-shot admin promotion: ADMIN_PROMOTE_EMAIL may be a comma-separated list.
+	// Grants is_admin + is_super_admin to each email on startup.
+	// Clear the env var after the deploy so it doesn't re-fire unnecessarily.
+	for _, promoteEmail := range strings.Split(os.Getenv("ADMIN_PROMOTE_EMAIL"), ",") {
+		promoteEmail = strings.TrimSpace(promoteEmail)
+		if promoteEmail == "" {
+			continue
+		}
 		res := database.DB.Exec(
 			`UPDATE users SET is_admin = true, is_super_admin = true WHERE email = ?`,
 			promoteEmail,
