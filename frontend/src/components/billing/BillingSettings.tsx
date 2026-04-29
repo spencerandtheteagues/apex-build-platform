@@ -57,7 +57,7 @@ const PLAN_CONFIG: Record<string, {
     icon: <Star size={18} />,
     tagline: 'Static websites & UI mockups',
     bestFor: 'Landing pages, portfolios, and frontend prototypes.',
-    features: ['Static frontend builds', 'One-time $5 managed trial', 'UI mockups & prototypes', 'Honest free tier — no surprises'],
+    features: ['$5 trial credits included', 'Static frontend builds', 'UI mockups & prototypes', 'No credit card required'],
   },
   builder: {
     color: '#3b82f6',
