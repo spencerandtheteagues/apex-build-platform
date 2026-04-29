@@ -127,9 +127,14 @@ write_secret_file() {
     return
   fi
 
-  if printf '%s' "$value" | base64 -d > "$tmp" 2>/dev/null && grep -q 'BEGIN OPENSSH PRIVATE KEY\|^# .*SSH-\|^ssh-' "$tmp"; then
-    mv "$tmp" "$target"
-    return
+  if printf '%s' "$value" | base64 -d > "$tmp" 2>/dev/null; then
+    # Alpine/OpenSSH rejects otherwise valid OpenSSH private keys when the
+    # final line is missing its terminating newline.
+    printf '\n' >> "$tmp"
+    if grep -q 'BEGIN OPENSSH PRIVATE KEY' "$tmp" || grep -q '^# .*SSH-' "$tmp" || grep -q '^ssh-' "$tmp" || grep -q '^|1|' "$tmp"; then
+      mv "$tmp" "$target"
+      return
+    fi
   fi
   rm -f "$tmp"
 

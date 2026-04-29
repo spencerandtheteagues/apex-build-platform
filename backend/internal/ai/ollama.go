@@ -32,6 +32,7 @@ type ollamaRequest struct {
 	Temperature     float32         `json:"temperature,omitempty"`
 	Stream          bool            `json:"stream"`
 	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	Think           *bool           `json:"think,omitempty"`
 	UseContextCache bool            `json:"use_context_cache,omitempty"` // Moonshot direct API only
 }
 
@@ -150,6 +151,7 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		Temperature:     req.Temperature,
 		Stream:          false,
 		ReasoningEffort: o.reasoningEffort(model),
+		Think:           o.thinkEnabled(model),
 		UseContextCache: req.CacheSystemPrompt && o.isMoonshotAPI(),
 	}
 
@@ -205,6 +207,14 @@ func (o *OllamaClient) reasoningEffort(model string) string {
 	// Without this field, Kimi/GLM can spend the whole completion budget in
 	// message.reasoning and return an empty visible message.content.
 	return "none"
+}
+
+func (o *OllamaClient) thinkEnabled(model string) *bool {
+	if strings.TrimSpace(o.apiKey) == "" {
+		return nil
+	}
+	enabled := false
+	return &enabled
 }
 
 // buildMessages creates the message array for Ollama API

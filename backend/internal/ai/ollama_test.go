@@ -63,9 +63,15 @@ func TestOllamaCloudDisablesReasoningByDefault(t *testing.T) {
 	if got := cloudClient.reasoningEffort("kimi-k2.6"); got != "none" {
 		t.Fatalf("cloud reasoningEffort() = %q, want none", got)
 	}
+	if got := cloudClient.thinkEnabled("kimi-k2.6"); got == nil || *got {
+		t.Fatalf("cloud thinkEnabled() = %v, want false pointer", got)
+	}
 
 	localClient := NewOllamaClient("http://localhost:11434", "")
 	if got := localClient.reasoningEffort("deepseek-r1:14b"); got != "" {
 		t.Fatalf("local reasoningEffort() = %q, want empty", got)
+	}
+	if got := localClient.thinkEnabled("deepseek-r1:14b"); got != nil {
+		t.Fatalf("local thinkEnabled() = %v, want nil", got)
 	}
 }
