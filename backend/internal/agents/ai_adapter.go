@@ -982,6 +982,11 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 // GetAvailableProviders returns a list of healthy, available AI providers (Platform default)
 func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 	healthStatus := a.router.GetHealthStatus()
+	configuredProviders := hostedPlatformProviders(a.router.GetConfiguredProviders())
+	if len(healthStatus) == 0 && len(configuredProviders) > 0 {
+		log.Printf("Provider health status not initialized yet; using configured providers during startup grace: %v", configuredProviders)
+		return configuredProviders
+	}
 
 	healthyAvailable, degradedAvailable := partitionPlatformProvidersByHealth(healthStatus)
 	for _, provider := range healthyAvailable {
@@ -1025,9 +1030,7 @@ func (a *AIRouterAdapter) HasConfiguredProviders() bool {
 	if a == nil || a.router == nil {
 		return false
 	}
-
-	healthStatus := a.router.GetHealthStatus()
-	return len(healthStatus) > 0
+	return len(a.router.GetConfiguredProviders()) > 0
 }
 
 func partitionPlatformProvidersByHealth(healthStatus map[ai.AIProvider]bool) ([]ai.AIProvider, []ai.AIProvider) {

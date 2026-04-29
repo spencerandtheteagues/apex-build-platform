@@ -36,6 +36,22 @@ func TestDefaultGenerateTimeout(t *testing.T) {
 	}
 }
 
+func TestAIRouterAdapterConfiguredProvidersDoNotDependOnHealthProbe(t *testing.T) {
+	router := ai.NewAIRouter("", "sk-test-openai", "")
+	adapter := NewAIRouterAdapter(router, nil)
+
+	if !adapter.HasConfiguredProviders() {
+		t.Fatal("expected configured provider before health probe settles")
+	}
+	providers := adapter.GetAvailableProviders()
+	if len(providers) == 0 {
+		t.Fatal("expected startup availability to include configured providers")
+	}
+	if providers[0] != ai.ProviderGPT4 {
+		t.Fatalf("available providers = %v, want gpt4 first", providers)
+	}
+}
+
 func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 	t.Setenv("OLLAMA_API_KEY", "")
 
