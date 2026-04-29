@@ -429,6 +429,20 @@ func TestShouldRunFailureConsensusSkipsProviderOutageFailures(t *testing.T) {
 	}
 }
 
+func TestShouldRunFailureConsensusSkipsSingleProviderDeadlineTimeout(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{PowerMode: PowerBalanced}
+	task := &Task{Type: TaskGenerateFile, RetryCount: 1}
+
+	err := `AI generation failed: claude: failed to make request: Post "https://api.anthropic.com/v1/messages": context deadline exceeded`
+	if !isProviderLevelFailureMessage(err) {
+		t.Fatalf("expected context deadline exceeded to be classified as a provider-level failure")
+	}
+	if am.shouldRunFailureConsensus(build, task, err, "switch_provider") {
+		t.Fatalf("expected provider deadline timeout to use deterministic retry/fallback, not incident consensus")
+	}
+}
+
 type taskRoutingRouter struct {
 	stubAIRouter
 	judgeContent         string

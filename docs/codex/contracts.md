@@ -1,0 +1,481 @@
+# Contracts
+
+## Frontend Preview Phase Execution
+- Source of truth: `backend/internal/agents/manager.go` phase construction and `backend/internal/agents/build_test_artifacts.go` delivery-mode classification.
+- Producers:
+  - Build plans and contracts with `delivery_mode=frontend_preview_only`.
+  - In-memory/mock/no-external-runtime prompts normalized into frontend preview delivery.
+- Transport:
+  - Existing `BuildPlan.DeliveryMode`, `BuildContract.DeliveryMode`, snapshot orchestration state, task status, and build phase fields.
+- Consumers:
+  - Phased task scheduler, build-status UI, preview readiness flow, and final build promotion.
+- Defaults / zero-value behavior:
+  - Full-stack builds keep the architecture/data/backend/integration phases.
+  - Frontend-preview-only builds skip AI architecture/data/backend/test phases after the deterministic scaffold/contract has been frozen, then run frontend implementation and review.
+- Backward compatibility risk:
+  - Low; the payload shape is unchanged and the behavior narrows work only for explicit preview-only contracts.
+- Required tests / validations:
+  - Backend phase-construction tests proving preview-only builds do not schedule architecture/test phases.
+  - Live production smoke proving preview-only FieldOps-style builds leave planning and create files.
+
+## Provider Timeout Recovery
+- Source of truth: `backend/internal/agents/manager.go` provider-failure classification and task retry routing.
+- Producers:
+  - AI provider clients returning transient network/request failures such as `context deadline exceeded`.
+  - Task failure handling and incident-consensus gating.
+- Transport:
+  - Existing task `error`, `retry_strategy`, provider-fallback websocket events, and build phase telemetry.
+- Consumers:
+  - Retry/fallback scheduler, incident consensus, build status polling, and provider panels.
+- Defaults / zero-value behavior:
+  - Provider outages/timeouts use deterministic retry/fallback and skip incident consensus.
+  - Code-generation validation failures can still enter consensus when the retry strategy warrants it.
+- Backward compatibility risk:
+  - Low; no schema changes and fewer provider calls during outage paths.
+- Required tests / validations:
+  - Backend tests for provider-level `context deadline exceeded` classification and skipped failure consensus.
+  - Live production smoke proving provider timeouts no longer strand builds in planning/architecture.
+
+## In-Memory Preview Build Classification
+- Source of truth: `backend/internal/agents/build_spec.go` app-type resolution and `backend/internal/agents/orchestration_contracts.go` intent/contract verification.
+- Producers:
+  - Build requests whose prompt explicitly says data is in memory / mock backend / no database / no external APIs.
+  - Planner bundles that may still label a demo app as `fullstack` because the prompt says “full-stack SaaS”.
+- Transport:
+  - Existing `IntentBrief.AppType`, `BuildPlan.AppType`, `BuildPlan.DeliveryMode`, and `BuildContract` fields.
+- Consumers:
+  - Work-order generation, contract verification, preview readiness gates, and final build promotion.
+- Defaults / zero-value behavior:
+  - Business-domain “jobs” does not imply background job infrastructure.
+  - Explicit backend/API/database/auth/runtime requirements still produce full-stack contracts and remain blocked if the backend contract is missing.
+  - Explicit in-memory/mock/no-external-runtime prompts are normalized to frontend preview contracts when no real backend contract is declared.
+- Backward compatibility risk:
+  - Low; this narrows false-positive backend classification and preserves blocking behavior for real full-stack/runtime prompts.
+- Required tests / validations:
+  - Intent capability tests for business-domain jobs vs background jobs.
+  - Contract verification tests for in-memory full-stack wording and real full-stack missing-backend blockers.
+
+## Ollama Cloud Reasoning Responses
+- Source of truth: `backend/internal/ai/ollama.go`.
+- Producers:
+  - Ollama Cloud OpenAI-compatible `/v1/chat/completions` responses can return visible output in `message.content` and separate thinking in `message.reasoning`, `message.thinking`, or `message.reasoning_content`.
+- Transport:
+  - `ai.AIResponse` keeps existing `content` behavior and adds optional `reasoning` for provider clients that return separated thinking output.
+  - Ollama requests may include `reasoning_effort`, `think`, and `max_tokens` padded with a reasoning reserve.
+- Consumers:
+  - Existing build orchestration still consumes `Content`.
+  - Empty `Content` plus non-empty `Reasoning` becomes a retryable `OLLAMA_REASONING_BUDGET_EXHAUSTED` truncation/budget error instead of looking like a stalled build.
+- Defaults / zero-value behavior:
+  - Local Ollama and Moonshot direct API do not receive Ollama Cloud reasoning controls.
+  - Balanced/Max planner-style calls keep thinking enabled; Fast simple completions can suppress it to avoid wasting output budget.
+- Required tests / validations:
+  - `cd backend && go test ./internal/ai`
+
+## Frontend runtime API/WS routing
+- Source of truth: `frontend/docker-entrypoint.sh` and `frontend/public/config.js`.
+- Producers:
+  - Docker frontend runtime config generation
+  - Render frontend env vars used only for nginx upstream proxy targets
+- Transport:
+  - Browser reads `window.__APEX_CONFIG__.API_URL` and `WS_URL`
+  - nginx proxies `/api/v1` and `/ws` to the configured upstream backend
+- Consumers:
+  - `frontend/src/config/runtime.ts`
+  - `frontend/src/services/api.ts`
+  - `frontend/src/services/websocket.ts`
+- Defaults / zero-value behavior:
+  - Browser defaults are same-origin `/api/v1` and `/ws`
+  - Proxy upstream still falls back to `http://host.docker.internal:8080` when no backend env is provided
+- Backward compatibility risk:
+  - Docker deployments stop depending on cross-origin API/browser wiring
+  - Non-Docker/static deployments may still need explicit absolute runtime config if they do not provide a same-origin proxy
+- Required tests / validations:
+  - shell syntax check for entrypoint
+  - frontend production build
+  - post-deploy browser verification that login and websocket boot use the frontend origin
+
+## Render deployment branch selection
+- Source of truth: `render.yaml`.
+- Producers:
+  - Render blueprint sync for `apex-api` and `apex-frontend`
+- Transport:
+  - `branch` field for each Render web service
+- Consumers:
+  - live `apex-build.dev`
+  - live `api.apex-build.dev`
+- Defaults / zero-value behavior:
+  - both services should deploy from `main`
+- Backward compatibility risk:
+  - low; branch retargeting only affects which already-reviewed code Render deploys
+- Required tests / validations:
+  - compare live HTML/assets after redeploy
+  - verify the custom domain serves the new commit
+
+## Provider model overrides
+- Source of truth: `backend/internal/agents/types.go` `BuildRequest.ProviderModelOverrides` / `Build.ProviderModelOverrides`.
+- Producers:
+  - `frontend/src/components/builder/AppBuilder.tsx` build start payload and live provider-card model changes.
+  - `backend/internal/agents/handlers.go` start-build validation and live override endpoint.
+  - `backend/internal/agents/interaction.go` active build override mutation.
+- Transport:
+  - `POST /api/v1/build/start` `provider_model_overrides`.
+  - `POST /api/v1/build/:id/provider-model`.
+  - Live/status/detail build payloads `provider_model_overrides`.
+  - Snapshot restore context `provider_model_overrides`.
+- Consumers:
+  - `backend/internal/agents/manager.go` agent spawn/provider-switch model selection.
+  - `backend/internal/agents/manager_task_routing.go` generation routing.
+  - `frontend/src/components/builder/ProviderStatusBar.tsx` provider dropdown state.
+- Defaults / zero-value behavior:
+  - Omitted, empty, or `auto` values mean no manual lock for that provider.
+  - Cross-provider model IDs are rejected at the handler boundary.
+  - Manual model overrides win over power-mode defaults and routing-waterfall model picks for that provider until reset to `auto`.
+- Backward compatibility risk:
+  - Additive optional field and endpoint.
+  - Old clients continue to run with zero overrides and existing power-mode behavior.
+- Required tests / validations:
+  - Backend request validation and live override handler tests.
+  - Backend model-selection test proving manual overrides beat routing-waterfall defaults.
+  - Frontend provider-bar interaction test plus typecheck.
+
+## Provider/model ownership in build telemetry
+- Source of truth: `backend/internal/agents/ai_adapter.go` provider power-mode catalog and normalization helpers.
+- Producers:
+  - `AIRouterAdapter.Generate` request construction.
+  - `generateTaskOutputWithProvider` provider route selection and task telemetry.
+  - Gemini client model fallback from `gemini-3.1-pro` to `gemini-3.1-pro-preview`.
+- Transport:
+  - Existing AI request `provider` / `model` values.
+  - Existing build agent state and AI thought telemetry fields.
+- Consumers:
+  - `frontend/src/components/builder/AppBuilder.tsx` provider panels.
+  - BYOK/model selector catalogs and pricing defaults.
+- Defaults / zero-value behavior:
+  - Blank or cross-provider model overrides are replaced with the provider's configured model for the active power mode.
+  - Stale frontend telemetry with a foreign model ID is ignored for the provider card and the configured provider model is displayed.
+  - Gemini max tries `gemini-3.1-pro` first and retries `gemini-3.1-pro-preview` only for model availability/version errors, not auth, quota, or rate-limit failures.
+- Backward compatibility risk:
+  - No schema changes; only stricter interpretation of existing `provider` and `model` strings.
+  - Older snapshots with mismatched telemetry still render, but impossible provider/model labels are not displayed.
+- Required tests / validations:
+  - Backend model selection and normalization tests.
+  - Gemini Pro to Pro Preview fallback test.
+  - Frontend provider panel mismatch tests for Claude/OpenAI and Grok/Gemini.
+
+## Explicit build provider execution
+- Source of truth: `backend/internal/agents/routing_waterfall.go`, `backend/internal/ai/router.go`, and `backend/internal/ai/openai.go`.
+- Producers:
+  - `planRoutingWaterfall` task-level power-mode selection.
+  - `AIRouter.selectProvider` explicit provider choice.
+  - `AIRouter.Generate` primary/fallback provider execution budgets.
+  - `OpenAIClient.Generate` GPT-5 request handling.
+- Transport:
+  - Existing build task `provider`, `model`, and `power_mode` request values.
+  - Existing provider route telemetry event fields.
+- Consumers:
+  - AI provider clients.
+  - Build orchestration retry/fallback paths.
+  - Provider status cards and activity timeline telemetry.
+- Defaults / zero-value behavior:
+  - Max-power builds stay on max-tier models for all routed tasks.
+  - Explicit provider requests still attempt the selected provider unless health status is definitively `auth_error` or `no_credits`.
+  - Fallback attempts reserve time for later providers instead of reusing an exhausted parent deadline.
+  - Explicit GPT-5 model requests fail fast and let outer provider fallback handle recovery rather than silently downgrading to `gpt-4o-mini`.
+- Backward compatibility risk:
+  - No payload shape changes.
+  - Runtime behavior becomes stricter for explicit provider/model requests and max-power builds.
+- Required tests / validations:
+  - Routing waterfall max-lock test.
+  - AI router explicit-provider transient-health test.
+  - AI router fallback-budget test.
+  - OpenAI explicit GPT-5 no-downgrade test.
+
+## Routing waterfall feature flag
+- Source of truth: `defaultBuildOrchestrationFlags` and `routingWaterfallEnabledForBuild`.
+- Producers:
+  - New build orchestration state flag initialization.
+  - Environment variable `APEX_ROUTING_WATERFALL`.
+- Transport:
+  - Existing `BuildOrchestrationFlags.enable_routing_waterfall` snapshot field.
+- Consumers:
+  - `generateTaskOutputWithProvider` power-mode/model route selection.
+  - Build activity telemetry `routing_waterfall_stage` and `routing_waterfall_reason`.
+- Defaults / zero-value behavior:
+  - New builds enable the routing waterfall by default.
+  - Operators can still explicitly disable it with `APEX_ROUTING_WATERFALL=false`.
+  - Existing snapshots with an explicit false flag continue to report disabled.
+- Backward compatibility risk:
+  - No schema change.
+  - Behavior changes for newly initialized builds: routing uses task triage and power caps instead of static fallback.
+- Required tests / validations:
+  - Routing waterfall enabled and explicitly disabled backend tests.
+
+## ValidatedBuildSpec War Room enrichment
+- Source of truth: `backend/internal/agents/validated_build_spec.go` and new War Room helpers in `backend/internal/agents/war_room*.go`
+- Producers:
+  - `compileDraftBuildSpec` (draft pre-lock spec)
+  - `critiqueDraftBuildSpec` + `applyWarRoomCritiqueAdvisories`
+  - `compileWarRoomValidatedBuildSpec`
+- Transport:
+  - Stored in `BuildOrchestrationState.ValidatedBuildSpec`
+  - Passed to task input (`validated_build_spec`) and prompt context
+- Consumers:
+  - `buildTaskPrompt` context packing
+  - work-order acceptance bias (`build_spec.go`)
+- Defaults / zero-value behavior:
+  - If no draft/spec exists, behavior is unchanged.
+  - Advisories are additive and deduped.
+- Backward compatibility risk:
+  - No schema-breaking changes to serialized `ValidatedBuildSpec` fields.
+- Required tests / validations:
+  - `war_room_test.go`
+  - existing validated spec and contract critique test surfaces
+
+## Glass-box orchestration telemetry events
+- Source of truth: `backend/internal/agents/types.go` WS event constants plus `buildActivityEntryForMessageLocked` activity normalization.
+- Producers:
+  - `handlePlanCompletion` for War Room critique and work-order compilation events
+  - `generateTaskOutputWithProvider` for provider/model route selection events
+  - deterministic/provider task verification paths for gate pass/fail events
+  - compile-validator Hydra repair loop for candidate and winner events
+  - patch-bundle recording for review-required patch activity
+- Transport:
+  - Websocket `WSMessage` events
+  - persisted `BuildActivityEntry` timeline snapshots
+- Consumers:
+  - `frontend/src/components/builder/AppBuilder.tsx` websocket handler and telemetry restore
+  - `frontend/src/components/ide/BuildActivityTimeline.tsx` glass-box overlay labels
+  - build details `activity_timeline` response
+- Defaults / zero-value behavior:
+  - Old clients ignore unknown websocket types.
+  - New UI falls back to humanized event labels when optional metadata is omitted.
+- Backward compatibility risk:
+  - Additive event types only; no existing event payloads renamed or repurposed.
+- Required tests / validations:
+  - backend activity capture tests for new event types
+  - frontend restore/label/typecheck coverage
+
+## Provider scorecard outcome recording
+- Source of truth: `recordTaskExecutionOutcome` and `recordProviderTaskOutcome`
+- Producers:
+  - result processor success/failure paths after accepted task results
+  - scoped historical build learning import from completed build snapshots
+- Transport:
+  - in-build `BuildOrchestrationState.ProviderScorecards`
+  - persisted snapshot state via existing build snapshot persistence
+- Consumers:
+  - provider assignment / fallback ranking
+  - orchestration overview provider scorecard UI
+- Defaults / zero-value behavior:
+  - No scorecard update when provider, task shape, or orchestration scorecard flag is absent.
+  - Static default scorecards remain fallback priors; historical import only uses scorecards with observed sample counts.
+- Backward compatibility risk:
+  - Removes duplicate env-gated pre-result observations; does not change serialized scorecard shape.
+  - Historical import reuses existing optional scorecard count fields and does not add new JSON fields.
+- Required tests / validations:
+  - scorecard outcome tests
+  - dual-candidate selected-provider result path
+  - historical build learning scorecard import test
+
+## Provider scorecard observation counts
+- Source of truth: `backend/internal/agents/orchestration_contracts.go` `ProviderScorecard` count fields.
+- Producers:
+  - `recordProviderTaskOutcome`
+  - historical scorecard import/merge in `build_learning.go`
+  - default provider scorecard priors with omitted/zero count fields
+- Transport:
+  - Stored in `BuildOrchestrationState.ProviderScorecards`.
+  - Returned through existing build detail/completed payload `provider_scorecards`.
+- Consumers:
+  - `frontend/src/services/api.ts` `BuildProviderScorecardState`.
+  - orchestration overview and AI telemetry scorecard summaries.
+- Defaults / zero-value behavior:
+  - Missing or zero count fields mean the scorecard is a routing prior, not observed live performance.
+  - Nonzero counts are displayed as sample weight because backend scorecards can combine seeded priors with observed outcomes.
+  - Observed count fields are optional and additive.
+- Backward compatibility risk:
+  - No backend JSON shape change; frontend now types existing optional fields and handles their omission.
+- Required tests / validations:
+  - frontend UI test for observed count labeling.
+  - frontend typecheck/lint.
+
+## Repair memory fingerprint metadata
+- Source of truth: `backend/internal/agents/orchestration_contracts.go` `FailureFingerprint` plus helpers in `backend/internal/agents/repair_memory.go`.
+- Producers:
+  - `appendFailureFingerprint` normalizes additive fingerprint metadata.
+  - `recordTaskExecutionOutcome` attaches repair strategy and patch class metadata when present on task outputs.
+  - compile-validator Hydra winners record successful compile-repair fingerprints with strategy and patch class metadata.
+- Transport:
+  - Stored in `BuildOrchestrationState.FailureFingerprints`.
+  - Persisted through existing build snapshot serialization.
+  - Returned through existing build details fields as optional JSON fields.
+- Consumers:
+  - compile-validator repair prompt context via recent matching successful repair fingerprints.
+  - historical build learning prompt context via repair strategy win-rate summaries.
+  - `frontend/src/services/api.ts` `BuildFailureFingerprintState`.
+  - orchestration overview repair-signal display.
+- Defaults / zero-value behavior:
+  - Old snapshots omit `fingerprint_key`, `repair_strategy`, and `patch_class`; consumers treat them as optional.
+  - No semantic/vector cache is required for existing repair flows to run.
+- Backward compatibility risk:
+  - Additive optional fields only; no existing failure fingerprint field is renamed or repurposed.
+  - `BuildLearningSummary.repair_strategy_win_rates` is an optional additive snapshot/prompt field.
+- Required tests / validations:
+  - repair-memory helper tests
+  - scorecard/failure fingerprint outcome tests
+  - frontend typecheck and lint
+
+## Historical build learning payload
+- Source of truth: `backend/internal/agents/orchestration_contracts.go` `BuildLearningSummary` stored on `BuildOrchestrationState.HistoricalLearning`.
+- Producers:
+  - `deriveHistoricalBuildLearning` and `summarizeHistoricalBuildLearning`
+  - build snapshot/detail response flattening in `buildSnapshotStateResponseFields`
+- Transport:
+  - Stored in snapshot JSON under `orchestration.historical_learning`.
+  - Returned as optional top-level `historical_learning` in build details/completed-build responses.
+- Consumers:
+  - `frontend/src/services/api.ts` `BuildLearningSummaryState`.
+  - `frontend/src/components/builder/AppBuilder.tsx` live/detail hydration state.
+  - `frontend/src/components/builder/buildRestore.ts` terminal restore merge.
+  - orchestration/AI telemetry diagnostic panels.
+- Defaults / zero-value behavior:
+  - Field is omitted when no historical learning exists.
+  - Frontend treats missing field as no learned priors and keeps existing UI fallbacks.
+- Backward compatibility risk:
+  - Additive optional field only; existing nested `orchestration.historical_learning` remains unchanged.
+- Required tests / validations:
+  - backend response-field test for flattening.
+  - frontend restore/UI test or typecheck.
+
+## Patch bundle review actions
+- Source of truth: `backend/internal/agents/orchestration_contracts.go` `PatchBundle` review metadata and manager review helpers.
+- Producers:
+  - `appendPatchBundle` initializes review-required bundles as pending when no review status exists.
+  - Build review endpoints approve/reject a stored patch bundle by ID.
+- Transport:
+  - Build details/status `patch_bundles` payload.
+  - `POST /api/v1/build/:id/patch-bundles/:bundleId/approve`.
+  - `POST /api/v1/build/:id/patch-bundles/:bundleId/reject`.
+  - Review action responses include `status`, `review_status`, `applied`, and the reviewed `patch_bundle`.
+  - Review websocket progress payloads include `status`, `patch_bundle_id`, `patch_bundle`, and `review_status`.
+- Consumers:
+  - `frontend/src/services/api.ts` patch bundle types and review methods.
+  - `AIRepairReviewPanel` direct approve/reject buttons.
+  - `BuildScreen` and `AppBuilder` state refresh after review actions.
+  - Telemetry and orchestration overview panels count only pending review bundles.
+- Defaults / zero-value behavior:
+  - Old review-required bundles with omitted `review_status` are treated as pending.
+  - Non-review-required bundles can omit review metadata.
+  - Approved/rejected review bundles stay in snapshots but are hidden from pending-review UI.
+- Backward compatibility risk:
+  - Additive optional fields only; existing clients can ignore them.
+  - New endpoints reuse existing authenticated build action/session restore semantics.
+- Required tests / validations:
+  - Backend handler test for approve/reject patch bundle state.
+  - Frontend BuildScreen test for direct review actions.
+  - Frontend typecheck.
+
+## Prompt improvement proposals
+- Source of truth: `backend/internal/agents/orchestration_contracts.go` `PromptImprovementProposal` and `BuildLearningSummary.prompt_improvement_proposals`.
+- Producers:
+  - `summarizeHistoricalBuildLearning` derives read-only proposals from recurring failure classes, warning counts, hotspot files, and repair strategy outcomes.
+  - Build review endpoints can mark an existing proposal `approved` or `rejected` with review metadata.
+  - Benchmark endpoint can record deterministic benchmark-gate status, timestamps, and result details for approved proposals.
+  - Benchmark-passed proposals are upserted into an inert `prompt_adoption_candidates` registry.
+  - Prompt-pack draft endpoint can bundle ready adoption candidates into inactive versioned drafts.
+- Transport:
+  - Stored in snapshot JSON under `orchestration.historical_learning.prompt_improvement_proposals`.
+  - Returned through existing optional top-level `historical_learning` build detail/completed payloads.
+  - `POST /api/v1/build/:id/prompt-proposals/:proposalId/approve`.
+  - `POST /api/v1/build/:id/prompt-proposals/:proposalId/reject`.
+  - `POST /api/v1/build/:id/prompt-proposals/:proposalId/benchmark`.
+  - Adoption candidates are returned through `historical_learning.prompt_adoption_candidates`; there is no adoption mutation endpoint yet.
+  - `POST /api/v1/build/:id/prompt-pack-drafts`.
+  - Drafts are returned through `historical_learning.prompt_pack_drafts`.
+  - `POST /api/v1/build/:id/prompt-pack-drafts/:draftId/request-activation` records an admin-only activation request when `APEX_PROMPT_PACK_ACTIVATION_REQUESTS=true`.
+  - Activation requests are persisted in `models.PromptPackActivationRequest`, not in `historical_learning`.
+  - `POST /api/v1/build/:id/prompt-pack-activation-requests/:requestId/activate` materializes a pending request into `models.PromptPackVersion` and `models.PromptPackActivationEvent`.
+  - Registry versions/events are not read by runtime prompt generation.
+- Consumers:
+  - `frontend/src/services/api.ts` `BuildPromptImprovementProposalState`.
+  - `frontend/src/components/ide/AITelemetryOverlay.tsx` learning-priors diagnostics.
+  - `frontend/src/components/builder/OrchestrationOverview.tsx` learning-priors diagnostics.
+  - `frontend/src/components/builder/AppBuilder.tsx` stores returned activation requests separately from `historicalLearning`.
+  - `frontend/src/components/builder/AppBuilder.tsx` stores registry versions/events separately from `historicalLearning`.
+- Defaults / zero-value behavior:
+  - Missing or empty `prompt_improvement_proposals` means there are no reviewable prompt proposals.
+  - Every generated proposal is read-only and includes `requires_approval=true`; no prompt text mutates automatically.
+  - Missing `review_state` is treated as `proposed`; missing review metadata means it has not been reviewed.
+  - Missing `benchmark_status` is treated as not started for approved proposals and not applicable for unapproved/rejected proposals.
+  - Benchmark status is metadata only; passed benchmark checks do not adopt or rewrite any prompt source.
+  - Missing `prompt_adoption_candidates` means no proposal is ready for adoption storage.
+  - Adoption candidates always carry `prompt_mutated=false`; they do not alter live prompt generation.
+  - Prompt-pack drafts carry `inactive_draft`, `activation_ready=false`, and `prompt_mutated=false`.
+  - Missing activation request data means no admin activation request has been recorded in the current client state.
+  - Activation request rows use `pending_admin_activation`, `prompt_mutated=false`, and require a separate future activation job before any prompt source can change.
+  - Registry versions use `active_registry_version`, `prompt_mutated=false`, and `live_prompt_read_enabled=false`.
+  - Registry activation events use `registry_activation`, `prompt_mutated=false`, and `live_prompt_read_enabled=false`.
+- Backward compatibility risk:
+  - Additive optional field only; stale clients ignore it and existing historical learning fields keep their current semantics.
+  - Review/benchmark/draft endpoints mutate only proposal/adoption/draft metadata in the build snapshot state; no runtime prompt source is rewritten.
+  - Activation request endpoint is feature-flagged and admin-gated. It writes a separate request row and does not mutate `historical_learning`.
+  - Registry activation endpoint is feature-flagged and admin-gated. It writes registry/audit rows, updates request status, and does not enable live prompt reads.
+- Required tests / validations:
+  - Backend historical learning test for deterministic proposal generation and approval requirement.
+  - Backend handler tests for approve/reject proposal review state and benchmark-gate recording.
+  - Frontend orchestration overview test for display.
+  - Frontend BuildScreen test for benchmark trigger wiring.
+  - Frontend diagnostics test for adoption-registry display.
+  - Backend handler tests for draft creation from adoption candidates and empty-candidate rejection.
+  - Backend handler tests for activation request feature flag, admin gate, and separate persistence.
+  - Backend handler test for registry version/event materialization without prompt mutation.
+  - Frontend diagnostics test for prompt-pack draft display/action.
+  - Frontend diagnostics test for admin activation request action wiring.
+  - Frontend diagnostics test for registry activation action wiring.
+  - Frontend typecheck/lint.
+
+## Preview canary post-interaction verification
+- Source of truth:
+  - `backend/internal/preview/verifier.go` `VerificationResult`.
+  - `backend/internal/agents/preview_gate.go` `PreviewVerificationResult`.
+- Producers:
+  - Runtime preview verifier records `CanaryPostInteractionChecked` only when the browser canary actually completes the post-click settle check.
+  - Runtime preview verifier records `CanaryPostInteractionHealthy=false` only as meaningful when the checked flag is true.
+- Transport:
+  - `backend/cmd/main.go` `previewVerifierBridge` copies `CanaryPostInteractionChecked` from preview verification into the agent preview gate result.
+- Consumers:
+  - `interactionCriticalSignal` in the agent preview gate.
+  - preview repair detail/hint builders for interaction failures.
+- Defaults / zero-value behavior:
+  - Missing or false `CanaryPostInteractionChecked` means no post-click settle check was proven, so `CanaryPostInteractionHealthy=false` alone is advisory and must not block completion.
+  - Zero visible controls are blocking only when repair hints include an explicit no-visible-controls canary signal.
+- Backward compatibility risk:
+  - Internal additive field only; old zero values now avoid false-positive preview repairs instead of weakening proven critical blank/crash or no-controls failures.
+- Required tests / validations:
+  - Backend preview-gate test proving advisory canary warnings do not block a passing report.
+- Backend preview-gate test proving checked post-click blank and explicit no-controls signals still trigger repair.
+
+## Build provider mode launch routing
+- Source of truth:
+  - `backend/internal/agents/handlers.go` `BuildRequest.ProviderMode`, `PreflightCheck`, and `StartBuild`.
+- Producers:
+  - `frontend/src/components/builder/AppBuilder.tsx` sends `provider_mode: "platform"` for launch preflight and start by default.
+  - Future explicit BYOK launches can still send `provider_mode: "byok"`.
+- Transport:
+  - `POST /api/v1/build/preflight`.
+  - `POST /api/v1/build/start`.
+- Consumers:
+  - Backend preflight provider availability check.
+  - Backend start-build provider availability guard.
+  - Builder provider-status UI and setup-start error rendering.
+- Defaults / zero-value behavior:
+  - Missing or unknown `provider_mode` is treated as `platform`.
+  - Platform mode only considers hosted platform providers and ignores stale user BYOK metadata.
+  - Explicit BYOK mode still filters through `GetAvailableProvidersForUser` and returns `BYOK_PROVIDER_UNAVAILABLE` when user-owned keys are unusable.
+- Backward compatibility risk:
+  - Safe default change: old clients that omit `provider_mode` no longer get blocked by stale BYOK metadata when hosted providers are healthy.
+  - Explicit BYOK behavior is preserved for users who intentionally request BYOK-only routing.
+- Required tests / validations:
+  - Backend preflight tests for platform-vs-BYOK behavior.
+  - Backend start-build tests for BYOK unavailable behavior.
+  - Browser launch smoke verifying platform payload and no provider-unavailable UI.

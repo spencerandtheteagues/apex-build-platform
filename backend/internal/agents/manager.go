@@ -3125,6 +3125,9 @@ func (am *AgentManager) alignAgentProviderToTaskPreference(build *Build, agent *
 	if preferred == "" || preferred == agent.Provider {
 		return
 	}
+	if shouldKeepBalancedOllamaCoordinator(build, agent) {
+		return
+	}
 
 	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
 	available := make(map[ai.AIProvider]bool, len(availableProviders))
@@ -3151,6 +3154,24 @@ func (am *AgentManager) alignAgentProviderToTaskPreference(build *Build, agent *
 			"reason":       "task_preference",
 		},
 	})
+}
+
+func shouldKeepBalancedOllamaCoordinator(build *Build, agent *Agent) bool {
+	if build == nil || agent == nil {
+		return false
+	}
+	if build.PowerMode != PowerBalanced || agent.Provider != ai.ProviderOllama {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(build.ProviderMode), "byok") {
+		return false
+	}
+	switch agent.Role {
+	case RoleLead, RolePlanner, RoleArchitect:
+		return true
+	default:
+		return false
+	}
 }
 
 func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, task *Task) {
@@ -17863,13 +17884,19 @@ func (am *AgentManager) buildExecutionPhasesForBuild(build *Build) (string, []ex
 	for _, ap := range allAgents {
 		switch ap.agent.Role {
 		case RoleArchitect:
-			archAgents = append(archAgents, ap)
+			if !isPreviewOnly {
+				archAgents = append(archAgents, ap)
+			}
 		case RoleFrontend:
 			frontendAgents = append(frontendAgents, ap)
 		case RoleDatabase:
-			dbAgents = append(dbAgents, ap)
+			if !isPreviewOnly {
+				dbAgents = append(dbAgents, ap)
+			}
 		case RoleBackend:
-			backendAgents = append(backendAgents, ap)
+			if !isPreviewOnly {
+				backendAgents = append(backendAgents, ap)
+			}
 		case RoleTesting:
 			if includeTests {
 				testAgents = append(testAgents, ap)
@@ -26869,6 +26896,11 @@ func isProviderLevelFailureMessage(errorMsg string) bool {
 		strings.Contains(msg, "service unavailable") ||
 		strings.Contains(msg, "service temporarily unavailable") ||
 		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "context deadline") ||
+		strings.Contains(msg, "request timed out") ||
+		strings.Contains(msg, "client timeout") ||
+		strings.Contains(msg, "upstream timeout") ||
 		strings.Contains(msg, "connection") ||
 		strings.Contains(msg, "unauthorized") ||
 		strings.Contains(msg, "forbidden") ||

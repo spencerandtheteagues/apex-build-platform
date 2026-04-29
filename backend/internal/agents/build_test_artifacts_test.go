@@ -175,6 +175,7 @@ func TestBuildExecutionPhasesForBuildSkipsTestsWhenFlagOff(t *testing.T) {
 }
 
 func TestBuildExecutionPhasesForBuildSkipsTestsForPreviewOnly(t *testing.T) {
+	t.Setenv("APEX_PARALLEL_MID_PHASE", "false")
 	t.Setenv("APEX_TEST_GENERATION", "true")
 	manager := &AgentManager{
 		builds:      make(map[string]*Build),
@@ -193,6 +194,46 @@ func TestBuildExecutionPhasesForBuildSkipsTestsForPreviewOnly(t *testing.T) {
 		if p.key == "integration" && len(p.agents) > 0 {
 			t.Errorf("expected testing phase to be empty for frontend_preview_only, got %d agents", len(p.agents))
 		}
+	}
+}
+
+func TestBuildExecutionPhasesForBuildSkipsServerAndArchitectureForPreviewOnly(t *testing.T) {
+	t.Setenv("APEX_PARALLEL_MID_PHASE", "false")
+	t.Setenv("APEX_TEST_GENERATION", "true")
+	manager := &AgentManager{
+		builds:      make(map[string]*Build),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	build := &Build{
+		ID: "preview-only-phases",
+		Agents: map[string]*Agent{
+			"architect": {ID: "architect", Role: RoleArchitect, BuildID: "preview-only-phases"},
+			"frontend":  {ID: "frontend", Role: RoleFrontend, BuildID: "preview-only-phases"},
+			"database":  {ID: "database", Role: RoleDatabase, BuildID: "preview-only-phases"},
+			"backend":   {ID: "backend", Role: RoleBackend, BuildID: "preview-only-phases"},
+			"testing":   {ID: "testing", Role: RoleTesting, BuildID: "preview-only-phases"},
+			"reviewer":  {ID: "reviewer", Role: RoleReviewer, BuildID: "preview-only-phases"},
+		},
+		Plan: &BuildPlan{DeliveryMode: "frontend_preview_only"},
+	}
+
+	_, phases := manager.buildExecutionPhasesForBuild(build)
+	active := map[string]int{}
+	for _, phase := range phases {
+		active[phase.key] = len(phase.agents)
+	}
+
+	for _, key := range []string{"architecture", "data_foundation", "backend_services", "integration"} {
+		if active[key] != 0 {
+			t.Fatalf("expected preview-only phase %s to have no agents, got %d", key, active[key])
+		}
+	}
+	if active["frontend_ui"] != 1 {
+		t.Fatalf("expected preview-only frontend phase to run, got %d agents", active["frontend_ui"])
+	}
+	if active["review"] != 1 {
+		t.Fatalf("expected preview-only review phase to run, got %d agents", active["review"])
 	}
 }
 

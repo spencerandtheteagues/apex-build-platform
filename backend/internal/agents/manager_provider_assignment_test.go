@@ -585,3 +585,61 @@ func TestAssignTaskSwitchesAgentProviderToTaskPreferredProvider(t *testing.T) {
 		t.Fatalf("expected provider switch to update model")
 	}
 }
+
+func TestAssignTaskKeepsBalancedOllamaCoordinatorDespiteTaskPreference(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude, ai.ProviderGPT4},
+			hasConfiguredProvider: true,
+		},
+		agents:      map[string]*Agent{},
+		builds:      map[string]*Build{},
+		taskQueue:   make(chan *Task, 1),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+	}
+
+	build := &Build{
+		ID:           "build-balanced-ollama-coordinator",
+		Status:       BuildInProgress,
+		PowerMode:    PowerBalanced,
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+	}
+	agent := &Agent{
+		ID:       "agent-architect-ollama",
+		Role:     RoleArchitect,
+		Provider: ai.ProviderOllama,
+		Model:    "kimi-k2.6:cloud",
+		BuildID:  build.ID,
+		Status:   StatusIdle,
+	}
+	task := &Task{
+		ID:         "task-architect-preferred-claude",
+		Type:       TaskGenerateFile,
+		Status:     TaskPending,
+		MaxRetries: 2,
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				ID:                "wo-architect-preferred-claude",
+				Role:              RoleArchitect,
+				TaskShape:         TaskShapeContract,
+				PreferredProvider: ai.ProviderClaude,
+			},
+		},
+		CreatedAt: time.Now(),
+	}
+	build.Agents[agent.ID] = agent
+	am.agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	if err := am.AssignTask(agent.ID, task); err != nil {
+		t.Fatalf("AssignTask returned error: %v", err)
+	}
+	if agent.Provider != ai.ProviderOllama {
+		t.Fatalf("balanced coordinator provider = %s, want %s", agent.Provider, ai.ProviderOllama)
+	}
+	if agent.Model != "kimi-k2.6:cloud" {
+		t.Fatalf("balanced coordinator model changed to %q", agent.Model)
+	}
+}
