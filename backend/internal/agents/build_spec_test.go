@@ -579,6 +579,55 @@ func TestCreateBuildPlanFromPlanningBundlePrefersInMemoryPreviewIntentOverFullSt
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundleAppliesPrimaryAndSecondaryTemplates(t *testing.T) {
+	t.Parallel()
+
+	description := `Build an AI SaaS prompt optimizer with BYOK, provider routing, token usage tracking,
+generation history, and a model selector. Also include a public landing page and marketing site with
+waitlist signup, lead capture, pricing, testimonials, and a demo request CTA.`
+
+	plan := createBuildPlanFromPlanningBundle("build-layered-templates", description, &TechStack{
+		Frontend: "React",
+		Backend:  "Node.js",
+		Database: "PostgreSQL",
+		Styling:  "Tailwind",
+	}, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "web",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node.js",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-layered-templates",
+			EstimatedTime: 45 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if plan.TemplateID != "ai-saas" {
+		t.Fatalf("expected primary ai-saas template, got %q from detected templates %+v", plan.TemplateID, templateIDs(DetectAppTemplates(description, 0)))
+	}
+	if !slices.Contains(plan.SecondaryTemplateIDs, "landing-page") {
+		t.Fatalf("expected landing-page secondary template, got %+v", plan.SecondaryTemplateIDs)
+	}
+	if plan.AppType != "fullstack" {
+		t.Fatalf("expected runtime template to promote app type to fullstack, got %q", plan.AppType)
+	}
+	if !hasAcceptanceCheckPrefix(plan.Acceptance, "ai-saas-auth") {
+		t.Fatalf("expected AI SaaS acceptance checks, got %+v", plan.Acceptance)
+	}
+	if !hasAcceptanceCheckPrefix(plan.Acceptance, "landing-conversion-goal") {
+		t.Fatalf("expected landing-page acceptance checks, got %+v", plan.Acceptance)
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundleStaticIntentOverridesRequestedBackendAndDatabase(t *testing.T) {
 	t.Parallel()
 
@@ -1995,4 +2044,13 @@ func keys[V any](m map[string]V) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+func hasAcceptanceCheckPrefix(checks []BuildAcceptanceCheck, prefix string) bool {
+	for _, check := range checks {
+		if strings.HasPrefix(check.ID, prefix) || strings.HasPrefix(check.Description, prefix) {
+			return true
+		}
+	}
+	return false
 }

@@ -22449,13 +22449,8 @@ ABSOLUTE RULES:
 	assuranceContext := strings.TrimSpace(apexBuildAssuranceMission)
 	if len(build) > 0 && build[0] != nil {
 		assuranceContext = buildAssurancePromptContext(build[0])
-		if build[0].Plan != nil && build[0].Plan.TemplateID != "" {
-			for _, tmpl := range appTemplateRegistry {
-				if tmpl.ID == build[0].Plan.TemplateID {
-					templateContext = TemplateSystemContext(tmpl, build[0].Description)
-					break
-				}
-			}
+		if build[0].Plan != nil {
+			templateContext = TemplateSystemContextForTemplates(templatesForPlan(build[0].Plan), build[0].Description)
 		}
 	}
 	if len(build) > 0 && build[0] != nil && am.isLocalDevStrictPreviewBuild(build[0]) {

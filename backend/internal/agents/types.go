@@ -567,29 +567,31 @@ func (pm PowerMode) CreditMultiplier() float64 {
 
 // BuildPlan contains the structured plan for building an app
 type BuildPlan struct {
-	ID            string                 `json:"id"`
-	BuildID       string                 `json:"build_id"`
-	AppType       string                 `json:"app_type"` // web, api, fullstack, etc.
-	DeliveryMode  string                 `json:"delivery_mode,omitempty"`
-	TechStack     TechStack              `json:"tech_stack"`
-	Features      []Feature              `json:"features"`
-	DataModels    []DataModel            `json:"data_models"`
-	APIEndpoints  []APIEndpoint          `json:"api_endpoints"`
-	Components    []UIComponent          `json:"components"`
-	Files         []PlannedFile          `json:"files"`
-	ScaffoldFiles []GeneratedFile        `json:"scaffold_files,omitempty"`
-	SpecHash      string                 `json:"spec_hash,omitempty"`
-	ScaffoldID    string                 `json:"scaffold_id,omitempty"`
-	TemplateID    string                 `json:"template_id,omitempty"` // detected app blueprint (e.g. "ai-saas", "crm")
-	Source        string                 `json:"source,omitempty"`
-	Ownership     []BuildOwnership       `json:"ownership,omitempty"`
-	EnvVars       []BuildEnvVar          `json:"env_vars,omitempty"`
-	Acceptance    []BuildAcceptanceCheck `json:"acceptance,omitempty"`
-	WorkOrders    []BuildWorkOrder       `json:"work_orders,omitempty"`
-	APIContract   *BuildAPIContract      `json:"api_contract,omitempty"`
-	Preflight     []BuildPreflightCheck  `json:"preflight,omitempty"`
-	EstimatedTime time.Duration          `json:"estimated_time"`
-	CreatedAt     time.Time              `json:"created_at"`
+	ID            string          `json:"id"`
+	BuildID       string          `json:"build_id"`
+	AppType       string          `json:"app_type"` // web, api, fullstack, etc.
+	DeliveryMode  string          `json:"delivery_mode,omitempty"`
+	TechStack     TechStack       `json:"tech_stack"`
+	Features      []Feature       `json:"features"`
+	DataModels    []DataModel     `json:"data_models"`
+	APIEndpoints  []APIEndpoint   `json:"api_endpoints"`
+	Components    []UIComponent   `json:"components"`
+	Files         []PlannedFile   `json:"files"`
+	ScaffoldFiles []GeneratedFile `json:"scaffold_files,omitempty"`
+	SpecHash      string          `json:"spec_hash,omitempty"`
+	ScaffoldID    string          `json:"scaffold_id,omitempty"`
+	TemplateID    string          `json:"template_id,omitempty"` // detected app blueprint (e.g. "ai-saas", "crm")
+	// SecondaryTemplateIDs are optional supporting blueprints, such as AI SaaS + Landing Page.
+	SecondaryTemplateIDs []string               `json:"secondary_template_ids,omitempty"`
+	Source               string                 `json:"source,omitempty"`
+	Ownership            []BuildOwnership       `json:"ownership,omitempty"`
+	EnvVars              []BuildEnvVar          `json:"env_vars,omitempty"`
+	Acceptance           []BuildAcceptanceCheck `json:"acceptance,omitempty"`
+	WorkOrders           []BuildWorkOrder       `json:"work_orders,omitempty"`
+	APIContract          *BuildAPIContract      `json:"api_contract,omitempty"`
+	Preflight            []BuildPreflightCheck  `json:"preflight,omitempty"`
+	EstimatedTime        time.Duration          `json:"estimated_time"`
+	CreatedAt            time.Time              `json:"created_at"`
 }
 
 type BuildOwnership struct {

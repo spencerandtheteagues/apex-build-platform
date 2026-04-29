@@ -427,22 +427,28 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 	appType := resolveBuildAppType(description, requested, bundle)
 	stack := resolveBuildTechStack(description, requested, appType, bundle)
 
-	// Detect app template — overrides appType to fullstack for AI SaaS and other
-	// template categories that always require a backend.
-	detectedTemplate := DetectAppTemplate(description)
-	if detectedTemplate != nil && explicitRuntimeFreePreviewIntent(description) && templateRequiresRuntime(detectedTemplate) {
+	// Detect app templates. The first match is the primary blueprint; the second
+	// match, when present, is a supporting blueprint for layered apps such as
+	// "AI SaaS with a landing page" or "marketplace with booking".
+	detectedTemplates := DetectAppTemplates(description, 2)
+	if explicitRuntimeFreePreviewIntent(description) {
 		// Explicit runtime-free preview instructions ("all data in memory", "no
 		// database", "no external APIs") are a stronger contract than a broad
-		// template match. Otherwise a vertical demo app with dashboard language can
-		// inherit auth/database acceptance checks that it explicitly opted out of.
-		detectedTemplate = nil
+		// runtime template match. Otherwise a vertical demo app with dashboard
+		// language can inherit auth/database checks it explicitly opted out of.
+		filtered := detectedTemplates[:0]
+		for _, tmpl := range detectedTemplates {
+			if !templateRequiresRuntime(tmpl) {
+				filtered = append(filtered, tmpl)
+			}
+		}
+		detectedTemplates = filtered
 	}
-	if detectedTemplate != nil {
-		switch detectedTemplate.ID {
-		case "ai-saas", "saas-dashboard", "crm", "client-portal", "marketplace",
-			"booking", "inventory", "project-management", "community":
-			if appType == "web" {
+	if len(detectedTemplates) > 0 {
+		for _, tmpl := range detectedTemplates {
+			if templateRequiresRuntime(tmpl) && appType == "web" {
 				appType = "fullstack"
+				break
 			}
 		}
 	}
@@ -459,8 +465,8 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 	preflight := convertPreflightChecks(bundle)
 	acceptance := append([]BuildAcceptanceCheck(nil), scaffold.Acceptance...)
 	acceptance = append(acceptance, deriveAcceptanceChecks(appType, stack)...)
-	if detectedTemplate != nil {
-		for _, check := range detectedTemplate.AcceptanceChecks {
+	for _, tmpl := range detectedTemplates {
+		for _, check := range tmpl.AcceptanceChecks {
 			acceptance = append(acceptance, BuildAcceptanceCheck{
 				ID:          check,
 				Description: check,
@@ -493,10 +499,16 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 		ScaffoldFiles: scaffoldFiles,
 		ScaffoldID:    scaffold.ID,
 		TemplateID: func() string {
-			if detectedTemplate != nil {
-				return detectedTemplate.ID
+			if len(detectedTemplates) > 0 {
+				return detectedTemplates[0].ID
 			}
 			return ""
+		}(),
+		SecondaryTemplateIDs: func() []string {
+			if len(detectedTemplates) <= 1 {
+				return nil
+			}
+			return templateIDs(detectedTemplates[1:])
 		}(),
 		Source:        "autonomous_planner_v1",
 		Ownership:     ownership,
@@ -1101,13 +1113,41 @@ func explicitStaticWebIntent(description string) bool {
 	if containsAnyAffirmedTerm(normalized, []string{
 		normalizeDetectionText("frontend only"),
 		normalizeDetectionText("static"),
-		normalizeDetectionText("landing page"),
-		normalizeDetectionText("marketing site"),
-		normalizeDetectionText("marketing website"),
 		normalizeDetectionText("brochure site"),
 		normalizeDetectionText("single page"),
 	}) {
 		return true
+	}
+
+	if containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("landing page"),
+		normalizeDetectionText("marketing site"),
+		normalizeDetectionText("marketing website"),
+	}) {
+		// Landing/marketing pages are often secondary surfaces for full products.
+		// Treat them as static only when the prompt is not also asking for a real app.
+		if !containsAnyAffirmedTerm(normalized, []string{
+			normalizeDetectionText("full-stack"),
+			normalizeDetectionText("full stack"),
+			normalizeDetectionText("saas app"),
+			normalizeDetectionText("ai saas"),
+			normalizeDetectionText("dashboard"),
+			normalizeDetectionText("admin panel"),
+			normalizeDetectionText("auth"),
+			normalizeDetectionText("login"),
+			normalizeDetectionText("database"),
+			normalizeDetectionText("backend"),
+			normalizeDetectionText("api"),
+			normalizeDetectionText("client portal"),
+			normalizeDetectionText("marketplace"),
+			normalizeDetectionText("booking"),
+			normalizeDetectionText("crm"),
+			normalizeDetectionText("inventory"),
+			normalizeDetectionText("project management"),
+			normalizeDetectionText("community platform"),
+		}) {
+			return true
+		}
 	}
 
 	for _, marker := range []string{" no backend ", " without backend "} {

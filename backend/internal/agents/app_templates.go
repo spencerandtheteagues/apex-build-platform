@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -43,13 +45,24 @@ var appTemplateRegistry = []*AppTemplate{
 	templateBooking,
 	templateInventory,
 	templateProjectManagement,
-	templateLandingPage,
 	templateCommunity,
+	templateLandingPage,
 }
 
 // DetectAppTemplate returns the best-matching template for a build description,
 // or nil if no template matches with sufficient confidence.
 func DetectAppTemplate(description string) *AppTemplate {
+	matches := DetectAppTemplates(description, 1)
+	if len(matches) == 0 {
+		return nil
+	}
+	return matches[0]
+}
+
+// DetectAppTemplates returns the strongest matching templates for a build
+// description. The first result is the primary blueprint; later results are
+// optional secondary blueprints used for layered apps such as AI SaaS + Landing Page.
+func DetectAppTemplates(description string, maxTemplates int) []*AppTemplate {
 	normalized := strings.ToLower(strings.TrimSpace(description))
 	if normalized == "" {
 		return nil
@@ -60,7 +73,7 @@ func DetectAppTemplate(description string) *AppTemplate {
 		score int
 	}
 
-	var candidates []scored
+	candidates := make([]scored, 0, len(appTemplateRegistry))
 	for _, tmpl := range appTemplateRegistry {
 		if !templateEligibleForDescription(normalized, tmpl) {
 			continue
@@ -80,21 +93,48 @@ func DetectAppTemplate(description string) *AppTemplate {
 		return nil
 	}
 
-	// Pick highest score; break ties with Priority (lower wins).
-	best := candidates[0]
-	for _, c := range candidates[1:] {
-		if c.score > best.score || (c.score == best.score && c.tmpl.Priority < best.tmpl.Priority) {
-			best = c
+	filtered := candidates[:0]
+	for _, c := range candidates {
+		// Require at least 2 keyword matches OR exactly 1 match on a high-signal keyword
+		// to avoid false-positives on vague prompts.
+		if c.score >= 2 || isHighSignalMatch(normalized, c.tmpl) {
+			filtered = append(filtered, c)
 		}
 	}
-
-	// Require at least 2 keyword matches OR exactly 1 match on a high-signal keyword
-	// to avoid false-positives on vague prompts.
-	if best.score < 2 && !isHighSignalMatch(normalized, best.tmpl) {
+	if len(filtered) == 0 {
 		return nil
 	}
-
-	return best.tmpl
+	landingSupportMode := false
+	for _, c := range filtered {
+		if c.tmpl.ID != "landing-page" && c.score >= 2 {
+			landingSupportMode = true
+			break
+		}
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		// Landing pages are supporting surfaces when a product/app template also
+		// matches. Keep them primary only for standalone marketing-site prompts.
+		if landingSupportMode && filtered[i].tmpl.ID != filtered[j].tmpl.ID {
+			if filtered[i].tmpl.ID == "landing-page" {
+				return false
+			}
+			if filtered[j].tmpl.ID == "landing-page" {
+				return true
+			}
+		}
+		if filtered[i].score != filtered[j].score {
+			return filtered[i].score > filtered[j].score
+		}
+		return filtered[i].tmpl.Priority < filtered[j].tmpl.Priority
+	})
+	if maxTemplates <= 0 || maxTemplates > len(filtered) {
+		maxTemplates = len(filtered)
+	}
+	out := make([]*AppTemplate, 0, maxTemplates)
+	for _, c := range filtered[:maxTemplates] {
+		out = append(out, c.tmpl)
+	}
+	return out
 }
 
 func templateEligibleForDescription(normalized string, tmpl *AppTemplate) bool {
@@ -203,6 +243,21 @@ func isHighSignalMatch(normalized string, tmpl *AppTemplate) bool {
 			"purchase order system", "fulfillment system", "ecommerce operations",
 			"pick and pack", "stock movements", "stock ledger", "reorder points",
 		},
+		"project-management": {
+			"project management", "task management", "task tracker", "kanban board",
+			"sprint planning", "agile sprints", "project tracker", "work management",
+			"team collaboration", "milestone tracking", "client-visible projects",
+		},
+		"community": {
+			"social network", "community platform", "discussion forum", "creator community",
+			"content sharing platform", "private member community", "direct messages",
+			"moderation queue", "user profiles", "community feed",
+		},
+		"landing-page": {
+			"landing page", "marketing site", "waitlist", "coming soon", "product launch page",
+			"lead capture", "email capture", "newsletter signup", "demo request",
+			"sales funnel", "conversion page", "startup waitlist",
+		},
 	}
 	for _, kw := range highSignal[tmpl.ID] {
 		if strings.Contains(normalized, kw) {
@@ -220,6 +275,71 @@ func TemplateSystemContext(tmpl *AppTemplate, userDescription string) string {
 	}
 	return "\n\n" + strings.TrimSpace(tmpl.ArchitectureContext) +
 		"\n\n" + strings.TrimSpace(tmpl.CustomizationRules)
+}
+
+// TemplateSystemContextForTemplates injects the selected primary blueprint and
+// any secondary blueprints into agent prompts. Keep the template list narrow:
+// one primary plus one supporting template is enough to handle common layered
+// apps without flooding the planner with unrelated blueprint text.
+func TemplateSystemContextForTemplates(templates []*AppTemplate, userDescription string) string {
+	if len(templates) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, tmpl := range templates {
+		if tmpl == nil {
+			continue
+		}
+		role := "PRIMARY"
+		if i > 0 {
+			role = "SECONDARY"
+		}
+		b.WriteString(fmt.Sprintf("\n\n%s APP BLUEPRINT: %s (%s)\n", role, tmpl.Name, tmpl.ID))
+		b.WriteString(strings.TrimSpace(tmpl.ArchitectureContext))
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(tmpl.CustomizationRules))
+	}
+	return b.String()
+}
+
+func templatesForPlan(plan *BuildPlan) []*AppTemplate {
+	if plan == nil {
+		return nil
+	}
+	ids := make([]string, 0, 1+len(plan.SecondaryTemplateIDs))
+	if id := strings.TrimSpace(plan.TemplateID); id != "" {
+		ids = append(ids, id)
+	}
+	ids = append(ids, plan.SecondaryTemplateIDs...)
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(ids))
+	out := make([]*AppTemplate, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		for _, tmpl := range appTemplateRegistry {
+			if tmpl.ID == id {
+				out = append(out, tmpl)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func templateIDs(templates []*AppTemplate) []string {
+	ids := make([]string, 0, len(templates))
+	for _, tmpl := range templates {
+		if tmpl != nil && strings.TrimSpace(tmpl.ID) != "" {
+			ids = append(ids, tmpl.ID)
+		}
+	}
+	return ids
 }
 
 // ----- Template #1: AI SaaS Tool Factory -----
@@ -398,7 +518,7 @@ G. MONETIZATION DEFAULTS
 	},
 }
 
-// ----- Templates #2–#10 (detection-ready; full architecture content to be added) -----
+// ----- Templates #2–#10: production blueprints with routing constraints -----
 
 var templateSaaSDashboard = &AppTemplate{
 	ID:       "saas-dashboard",
@@ -1913,74 +2033,492 @@ Always use domain vocabulary in:
 
 var templateProjectManagement = &AppTemplate{
 	ID:       "project-management",
-	Name:     "Project Management",
-	Category: "Productivity",
+	Name:     "Project Management / Task Management / Collaboration",
+	Category: "Project Management / Task Management / Collaboration",
 	Priority: 4,
 	Keywords: []string{
 		"project management", "task management", "task tracker", "kanban",
-		"trello", "asana", "jira", "sprint", "backlog", "milestone",
-		"project tracker", "todo list", "task board", "work management",
-		"team tasks", "assign", "assignee", "due date", "priority",
+		"kanban board", "task board", "project tracker", "work management",
+		"team collaboration", "team tasks", "collaboration", "trello", "asana",
+		"jira", "sprint", "sprints", "agile", "backlog", "milestone",
+		"milestones", "deliverables", "assign", "assignee", "due date",
+		"priority", "subtasks", "checklists", "dependencies", "time tracking",
+		"client-visible projects", "construction project tracking", "content calendar",
 	},
 	ArchitectureContext: `
-ACTIVE TEMPLATE: Project Management
-=====================================
-Required: projects, tasks with status/assignee/due date, at least one view
-(Kanban board or list), comments on tasks, notifications placeholder, member
-management, role-based permissions.
-`,
-	CustomizationRules: `
-Customize status names, project types, and visual identity for the specific
-context (software dev / construction / agency / personal / school).
-`,
-}
+ACTIVE TEMPLATE: Project Management / Task Management / Collaboration Blueprint
+==============================================================================
 
-var templateLandingPage = &AppTemplate{
-	ID:       "landing-page",
-	Name:     "Landing Page / Waitlist",
-	Category: "Marketing",
-	Priority: 2,
-	Keywords: []string{
-		"landing page", "marketing site", "waitlist", "coming soon",
-		"product page", "launch page", "startup page", "website",
-		"lead capture", "email capture", "newsletter", "sign up page",
-		"hero section", "pricing page", "testimonials",
-	},
-	ArchitectureContext: `
-ACTIVE TEMPLATE: Landing Page / Waitlist
-=========================================
-Required: hero, problem/solution section, feature highlights, social proof
-placeholder, pricing section, FAQ, waitlist/contact form with email capture,
-analytics placeholder (gtag), mobile-responsive, SEO meta tags.
+STEP 0 — CLASSIFY PROJECT MANAGEMENT MODE BEFORE SCHEMA DESIGN
+Pick exactly one mode:
+  simple_task_manager          — tasks, statuses, assignees, due dates, simple dashboard
+  team_project_management      — workspaces, projects, project members, tasks, comments
+  agency_project_delivery      — clients, deliverables, approvals, milestones, time tracking
+  software_kanban              — epics, stories/tasks, backlog, board, releases
+  agile_sprints                — backlog, sprints, velocity, story points, retrospectives placeholder
+  operations_workflow          — recurring operational work, checklists, SLAs, handoffs
+  client_visible_projects      — internal vs client-visible tasks, comments, files
+  construction_project_tracking — jobs, phases, crews, punch lists, site notes
+  content_calendar             — campaigns, drafts, approvals, publishing dates
+
+Mode drives entity naming, workflow states, dashboard metrics, board layout,
+mobile behavior, and whether sprints/time tracking/client visibility are primary.
+
+SUBSYSTEM 1 — AUTH + WORKSPACE
+workspaces(id, name, slug, owner_id, default_timezone, default_currency, project_mode, status)
+workspace_members(workspace_id, user_id, role: owner|admin|project_manager|member|client_viewer|viewer, status)
+workspace_settings(workspace_id, key, value jsonb)
+Every protected route requires authentication. Every workspace-scoped query filters by workspace_id.
+
+SUBSYSTEM 2 — PROJECTS
+projects(workspace_id, client_id nullable, name, slug, description, status, health, start_date, due_date, completed_at, owner_id, visibility, archived_at)
+Project status: planning | active | on_hold | completed | archived
+Project health: on_track | at_risk | blocked | complete
+Project detail pages show overview, board, list, calendar, timeline placeholder, files, settings, activity, and members.
+
+SUBSYSTEM 3 — PROJECT MEMBERS + ROLES
+project_members(project_id, user_id, role: project_owner|manager|contributor|client_viewer|viewer)
+Project-scoped access must validate project membership or workspace-level permission.
+Client-visible projects must never expose internal-only tasks, comments, attachments, or fields.
+
+SUBSYSTEM 4 — TASKS
+tasks(workspace_id, project_id, parent_task_id nullable, title, description, status_id, priority, assignee_id, reporter_id, start_date, due_date, completed_at, position, estimate_minutes, actual_minutes, client_visible bool, archived_at)
+Task priority: low | medium | high | urgent
+Tasks support subtasks, checklists, labels, assignees, due dates, attachments, comments, mentions, dependencies, and activity history.
+Task lifecycle and status moves are validated server-side.
+
+SUBSYSTEM 5 — STATUSES + BOARDS
+task_statuses(workspace_id, project_id nullable, name, status_key, category: todo|in_progress|review|done|blocked, position, color, is_done)
+Kanban board columns are backed by persisted statuses. Moving a card updates status_id and position server-side.
+Server route for board moves must validate status belongs to same project/workspace and persist ordering.
+Mobile board uses status tabs or stacked status sections, not a crushed horizontal desktop board.
+
+SUBSYSTEM 6 — SUBTASKS + CHECKLISTS
+subtasks(workspace_id, task_id, title, status, assignee_id, due_date, position, completed_at)
+task_checklist_items(task_id, title, checked, position, completed_by, completed_at)
+Completing all required checklist items can optionally enable task completion.
+
+SUBSYSTEM 7 — DEPENDENCIES
+task_dependencies(workspace_id, predecessor_task_id, successor_task_id, dependency_type: blocks|relates_to)
+Dependency creation must reject self-dependencies, cross-project dependencies unless explicitly allowed, and circular dependency chains.
+Blocked tasks show dependency warnings on board/list/detail.
+
+SUBSYSTEM 8 — LABELS + MILESTONES
+task_labels(workspace_id, name, color)
+task_label_assignments(task_id, label_id)
+milestones(workspace_id, project_id, name, due_date, status, description)
+Milestone progress = done tasks / total linked tasks. Overdue milestone indicators appear on dashboard.
+
+SUBSYSTEM 9 — SPRINTS + BACKLOG (ONLY WHEN MODE NEEDS IT)
+sprints(workspace_id, project_id, name, goal, start_date, end_date, status: planned|active|completed|cancelled)
+backlog is a task list filtered to unscheduled or unassigned sprint tasks.
+Sprint completion locks sprint metrics and creates activity/audit records.
+
+SUBSYSTEM 10 — COMMENTS, MENTIONS, ATTACHMENTS
+comments(workspace_id, task_id, author_id, body, visibility: internal|client, archived_at)
+mentions are parsed server-side and create notifications for mentioned members.
+attachments(workspace_id, task_id, comment_id nullable, uploaded_by, file_name, mime_type, size_bytes, storage_key, visibility)
+Attachment downloads validate workspace/project/task access before returning a URL.
+
+SUBSYSTEM 11 — TIME TRACKING (WHEN REQUESTED OR MODE BENEFITS)
+time_entries(workspace_id, task_id, user_id, minutes, description, started_at, ended_at, billable bool)
+Reports show total time by project, member, task status, and date range.
+
+SUBSYSTEM 12 — DASHBOARD + REPORTS
+Dashboard widgets should include active projects, tasks due soon, overdue tasks, blocked tasks, completed this week, workload by member, project health, upcoming milestones, recent activity.
+Reports include task throughput, cycle time, work by status, workload by assignee, overdue trend, milestone progress, sprint velocity when enabled, time by project when enabled.
+
+SUBSYSTEM 13 — NOTIFICATIONS + ACTIVITY + AUDIT
+notifications(workspace_id, user_id, type, title, body, entity_type, entity_id, read_at)
+activity_events(workspace_id, actor_id, entity_type, entity_id, action, message, metadata jsonb)
+audit_logs(workspace_id, actor_id, action, entity_type, entity_id, before_json, after_json, ip_address)
+Every create, update, archive, assignment, status move, reorder, dependency change, comment, attachment, milestone, sprint, and time-entry action writes audit_log.
+
+SUBSYSTEM 14 — PAGES
+Auth pages: login, signup, forgot-password, accept-invite, onboarding.
+Core pages: dashboard, projects, project detail, project board, project list, project calendar, project timeline placeholder, backlog/sprints when enabled, tasks, task detail, my work, reports, team, notifications, settings, audit log.
+
+NON-NEGOTIABLES:
+- Every protected route requires auth.
+- Every workspace-scoped query filters by workspace_id.
+- Every project-scoped query validates project membership or workspace-level permission.
+- Every mutating API route checks role permissions server-side.
+- Task moves between statuses and order changes are validated and persisted server-side.
+- Dependency creation prevents circular dependencies.
+- Client-visible data never leaks internal-only tasks, comments, attachments, or fields.
+- Attachments require server-side access checks before download.
+- Every major list has loading, empty, and error states.
+- Mobile task views are card-first and action-focused.
+- Build must compile without TypeScript errors.
 `,
 	CustomizationRules: `
-Derive headline, subhead, feature copy, and visual identity entirely from
-the user's product description. Every landing page must feel product-specific.
+PROJECT MANAGEMENT DOMAIN CUSTOMIZATION — rename entities and workflows to match the user's domain.
+
+Mode-driven vocabulary:
+  simple_task_manager          → Tasks, Lists, My Work, Today
+  team_project_management      → Projects, Tasks, Milestones, Team
+  agency_project_delivery      → Clients, Projects, Deliverables, Approvals, Time
+  software_kanban              → Epics, Stories, Bugs, Backlog, Releases
+  agile_sprints                → Backlog, Sprints, Velocity, Story Points
+  operations_workflow          → Workflows, Requests, SLAs, Handoffs
+  client_visible_projects      → Client Projects, Client Notes, Approval Queue
+  construction_project_tracking → Jobs, Phases, Crews, Punch Lists, Site Notes
+  content_calendar             → Campaigns, Content Items, Reviews, Publish Calendar
+
+Workflow defaults:
+  Software: Backlog → Ready → In Progress → Code Review → QA → Done
+  Agency: Brief → In Progress → Internal Review → Client Review → Approved → Delivered
+  Construction: Planned → Scheduled → In Progress → Inspection → Punch List → Complete
+  Content: Idea → Drafting → Editing → Scheduled → Published
+  Simple: Todo → Doing → Done
+
+Dashboard metrics must match the domain:
+  Software: sprint progress, open bugs, blocked work, velocity, releases at risk
+  Agency: active deliverables, approvals waiting, overdue tasks, billable hours
+  Construction: jobs active, phases delayed, crews assigned, punch items open
+  Content: items scheduled, drafts due, approvals pending, publishing cadence
+
+Visual identity:
+  Technical teams → dense dark or clean graphite with sharp status color coding
+  Agency/client work → polished light or dark executive UI with client-safe language
+  Construction/field ops → rugged professional cards, high-contrast mobile actions
+  Content/calendar → editorial calendar feel with color-coded statuses
+Never ship a generic CRUD admin UI when the domain has clear workflow language.
 `,
+	AcceptanceChecks: []string{
+		"project-compile: app builds and passes TypeScript checks with zero errors",
+		"project-auth-gate: all dashboard/project/task/team/settings routes require authentication",
+		"project-workspace-scope: every API query filters by workspace_id; no cross-workspace data leakage",
+		"project-membership-scope: project detail, task, comment, and attachment APIs validate project membership or workspace-level permission",
+		"project-role-permissions: client_viewer and viewer cannot mutate tasks, comments, files, settings, or statuses",
+		"project-task-create: task create validates title, project_id, status_id, priority, assignee, and due date server-side",
+		"project-task-move: board move validates destination status belongs to the project/workspace and persists both status_id and position",
+		"project-task-order: reordering cards persists deterministic positions and survives reload",
+		"project-dependencies: dependency creation rejects self-dependencies and circular dependency chains",
+		"project-comments: task comments render in chronological order and mentions create notifications",
+		"project-attachments: attachment download route validates task/project access before returning file URL",
+		"project-client-visibility: client-visible mode hides internal-only tasks, comments, attachments, and fields",
+		"project-dashboard: active projects, due soon, overdue, blocked, completed, workload, and milestone metrics load from real data",
+		"project-mobile: board/list/task detail render as usable card-first mobile views without crushed tables",
+		"project-audit-log: create/update/archive/assign/status-move/reorder/dependency/comment/attachment/milestone/sprint/time-entry actions write audit_log rows",
+	},
 }
 
 var templateCommunity = &AppTemplate{
 	ID:       "community",
-	Name:     "Community / Social",
-	Category: "Social",
+	Name:     "Social / Community / Content / Messaging Platform",
+	Category: "Social / Community / Content / Messaging",
 	Priority: 2,
 	Keywords: []string{
-		"community", "social network", "forum", "discussion", "posts",
-		"feed", "followers", "following", "likes", "comments",
-		"niche network", "creator", "members", "groups",
-		"internal social", "company social", "school community",
+		"community", "community platform", "social network", "forum", "discussion",
+		"discussion forum", "posts", "post feed", "feed", "followers", "following",
+		"likes", "comments", "reactions", "bookmarks", "members", "groups",
+		"spaces", "creator", "creator community", "niche network", "content sharing",
+		"direct messages", "messaging", "moderation", "moderation queue",
+		"content reports", "user profiles", "public profiles", "private profiles",
+		"hashtags", "mentions", "internal social", "company social", "school community",
 	},
 	ArchitectureContext: `
-ACTIVE TEMPLATE: Community / Social
-=====================================
-Required: user profiles, post creation/feed, comments, likes/reactions,
-follow system, notifications placeholder, groups or categories,
-moderation tools (report + admin ban), mobile-responsive feed.
-Complexity warning: real-time features need WebSockets — use polling as
-a simpler default unless real-time is explicitly requested.
+ACTIVE TEMPLATE: Social / Community / Content / Messaging Platform Blueprint
+============================================================================
+
+STEP 0 — CLASSIFY SOCIAL/COMMUNITY MODE BEFORE SCHEMA DESIGN
+Pick exactly one mode:
+  social_network              — profiles, follows, feed, reactions, comments
+  community_platform          — communities/spaces, memberships, posts, roles
+  discussion_forum            — categories, threads, replies, moderation
+  creator_community           — creator profile, posts, members, announcements
+  content_sharing_platform    — media/content posts, bookmarks, tags, discovery
+  private_member_community    — gated signup, private feeds, member roles
+  team_social_hub             — internal company/school updates and discussions
+  messaging_first_community   — conversations and DMs are primary
+  local_community_app         — neighborhoods/events/groups/local posts
+
+Mode drives feed type, profile visibility, group taxonomy, moderation depth,
+privacy controls, messaging complexity, notification volume, and mobile layout.
+
+SUBSYSTEM 1 — AUTH + PROFILES
+users(id, email, password_hash/session identity)
+profiles(user_id, username unique, display_name, bio, avatar_url, location, website, visibility: public|private|members_only, status)
+Onboarding collects username, display name, avatar placeholder, interests/topics, and notification preferences.
+Username uniqueness and reserved usernames are validated server-side.
+
+SUBSYSTEM 2 — COMMUNITIES / GROUPS / SPACES
+communities(workspace_id nullable, slug unique, name, description, visibility: public|private|invite_only, rules, owner_id, status)
+community_members(community_id, user_id, role: owner|admin|moderator|member|limited_member|viewer, status)
+Community roles control post/comment/moderation/settings permissions server-side.
+
+SUBSYSTEM 3 — POSTS
+posts(author_id, community_id nullable, title nullable, body, content_type, visibility: public|followers|members|private|community, status: draft|published|hidden|archived, pinned_at, archived_at)
+Posts support rich text rendering, tags/hashtags, mentions, optional media attachments, bookmarks, reactions, and reports.
+Post visibility is enforced server-side on feed, detail, search, profile, and community routes.
+
+SUBSYSTEM 4 — FEEDS
+Feed builders:
+  home feed: eligible public/member posts ranked by recency and engagement
+  following feed: posts by followed users and joined communities
+  community feed: posts scoped to community membership/visibility
+  profile feed: posts visible to current viewer after privacy/block checks
+Feeds use cursor pagination and never leak hidden/private/member-only content.
+
+SUBSYSTEM 5 — COMMENTS + REPLIES
+comments(post_id, parent_comment_id nullable, author_id, body, status: published|hidden|archived, visibility inherited)
+Nested replies optional; simple apps can use one-level replies.
+Comment create validates user can view/post on the parent content and creates notifications for author/mentions.
+
+SUBSYSTEM 6 — REACTIONS, BOOKMARKS, FOLLOWS
+post_reactions(post_id, user_id, reaction_type)
+comment_reactions(comment_id, user_id, reaction_type)
+bookmarks(user_id, post_id)
+follows(follower_id, followed_user_id)
+Reaction/bookmark/follow toggles are idempotent and update counts consistently.
+Blocking/muting rules override feed visibility and notifications.
+
+SUBSYSTEM 7 — MESSAGING (OPTIONAL UNLESS REQUESTED)
+conversations(id, type: direct|group, created_by)
+conversation_members(conversation_id, user_id, role, muted_at, last_read_at)
+messages(conversation_id, sender_id, body, status, created_at)
+Message access checks require membership in the conversation. Use polling by default; WebSocket/realtime only if explicitly requested.
+
+SUBSYSTEM 8 — MODERATION + REPORTING
+content_reports(reporter_id, entity_type: post|comment|user|community, entity_id, reason, details, status: open|reviewing|resolved|dismissed)
+moderation_actions(moderator_id, action, entity_type, entity_id, reason, expires_at nullable)
+Moderation queue shows reported content, reporter, reason, status, and action history.
+Actions include hide post/comment, dismiss report, warn user, suspend user, ban from community, restore content.
+
+SUBSYSTEM 9 — PRIVACY + SAFETY
+blocks(blocker_id, blocked_user_id)
+mutes(user_id, muted_user_id)
+privacy_settings(user_id, key, value)
+Blocked users cannot message, follow, or see restricted profile/feed content. Muted users are removed from feed/notifications.
+Public/private/member-only profile visibility is enforced server-side.
+
+SUBSYSTEM 10 — NOTIFICATIONS + AUDIT
+notifications(user_id, type, title, body, entity_type, entity_id, read_at)
+Notification types: mention, comment, reply, reaction, follow, message, community_invite, report_update, moderation_action.
+audit_logs(actor_id, action, entity_type, entity_id, before_json, after_json, ip_address)
+Every post/comment/community/settings/moderation/privacy/messaging mutation writes audit_log.
+
+SUBSYSTEM 11 — ADMIN / COMMUNITY MANAGER DASHBOARDS
+Admin dashboard: total users, active users, posts, comments, reports open, reports resolved, top communities, recent moderation actions.
+Community manager dashboard: members, pending requests, reported content, pinned posts, activity trend, member growth.
+
+SUBSYSTEM 12 — PAGES
+Public/auth: login, signup, onboarding/profile/interests.
+Social: feed, following, trending placeholder, explore, people, communities, tags, profile, user profile, community pages, post detail, bookmarks, messages if enabled, notifications, moderation, settings.
+Admin: users, communities, posts, reports, moderation actions, settings, audit log.
+
+NON-NEGOTIABLES:
+- Content visibility is enforced server-side, not just hidden in the UI.
+- Feed queries must filter private/member-only/hidden content for the current viewer.
+- Blocking and muting change both visibility and notification behavior.
+- Moderation reports and actions are auditable.
+- Public profile routes never expose private settings, email, auth data, or hidden posts.
+- Messaging routes require conversation membership.
+- Every list/feed has loading, empty, error, and pagination/loader states.
+- Mobile feed and post detail are first-class; no dense desktop-only table layouts.
+- Build must compile without TypeScript errors.
 `,
 	CustomizationRules: `
-Customize feed content type, reaction labels, group taxonomy, and visual
-identity for the specific community context (niche interest / professional / school / internal).
+SOCIAL/COMMUNITY DOMAIN CUSTOMIZATION — match language, content types, and moderation to the community.
+
+Mode-driven vocabulary:
+  social_network            → Profiles, Feed, Following, Explore, Posts
+  community_platform        → Spaces, Members, Discussions, Announcements
+  discussion_forum          → Categories, Threads, Replies, Solved/Locked
+  creator_community         → Creator, Members, Updates, Perks, Announcements
+  content_sharing_platform  → Posts, Collections, Tags, Bookmarks
+  private_member_community  → Members, Member Feed, Invite Requests, Resources
+  team_social_hub           → Teams, Updates, Channels, Recognition
+  messaging_first_community → Inbox, Conversations, Threads, Members
+  local_community_app       → Neighborhoods, Events, Recommendations, Groups
+
+Reaction labels:
+  Professional → Like / Insightful / Helpful
+  Creator/fan → Like / Love / Fire / Saved
+  Forum/support → Helpful / Same issue / Solved
+  Local community → Recommend / Going / Interested
+
+Moderation defaults:
+  Public social apps need reports, block/mute, hidden content, admin queue.
+  Private/member apps need invite approval, member roles, and community rules.
+  Messaging-first apps need conversation membership checks and block enforcement.
+
+Visual identity:
+  Professional network → clean slate/blue with trust-focused layout
+  Creator community → bold creator-led brand with rich cards
+  Forum/support → readable dense discussion UI with status badges
+  Local community → warm civic/community visual language
+  Team social hub → calm internal-product UI with clear notifications
+Never generate a generic CRUD dashboard for social/community prompts.
 `,
+	AcceptanceChecks: []string{
+		"community-compile: app builds and passes TypeScript checks with zero errors",
+		"community-auth-profile: signup/login and onboarding create a profile with unique username validation",
+		"community-profile-privacy: public/private/member-only profile visibility is enforced server-side",
+		"community-feed-visibility: feed APIs filter hidden, private, member-only, blocked, and muted content correctly",
+		"community-post-create: post creation validates author permissions, community membership, visibility, body/media fields, and status",
+		"community-comments: comments/replies validate viewer access to parent post and create notifications for author/mentions",
+		"community-reactions: post/comment reaction toggles are idempotent and keep counts consistent",
+		"community-bookmarks: bookmark toggle persists per-user saves and bookmark list only shows visible posts",
+		"community-follows: follow/unfollow is idempotent and blocked users cannot follow or message each other",
+		"community-groups: community join/leave/member-role routes enforce community visibility and permissions",
+		"community-messaging: message send/read routes require conversation membership when messaging is enabled",
+		"community-moderation: reports enter moderation queue and moderation actions can hide/restore content with audit log rows",
+		"community-admin: admin/moderator dashboards show users, posts, reports, and moderation activity from real data",
+		"community-mobile: mobile feed, post detail, composer, notifications, and messages are usable without desktop tables",
+		"community-audit-log: post/comment/community/settings/moderation/privacy/messaging mutations write audit_log rows",
+	},
+}
+
+var templateLandingPage = &AppTemplate{
+	ID:       "landing-page",
+	Name:     "Landing Page / Marketing Site / Funnel / Waitlist",
+	Category: "Landing Page / Marketing / Funnel",
+	Priority: 2,
+	Keywords: []string{
+		"landing page", "marketing site", "marketing website", "waitlist",
+		"coming soon", "product page", "product launch page", "launch page",
+		"startup page", "website", "sales funnel", "lead capture",
+		"email capture", "newsletter", "newsletter signup", "sign up page",
+		"hero section", "pricing page", "testimonials", "demo request",
+		"contact form", "waitlist form", "lead magnet", "conversion page",
+		"agency website", "local business site", "creator page", "event page",
+		"course funnel", "pre-launch", "beta signup", "early access",
+	},
+	ArchitectureContext: `
+ACTIVE TEMPLATE: Landing Page / Marketing Site / Funnel / Waitlist Blueprint
+============================================================================
+
+STEP 0 — CLASSIFY LANDING PAGE MODE BEFORE SECTION DESIGN
+Pick exactly one mode:
+  saas_landing_page          — explains/sells software, pricing and demo CTA likely
+  startup_waitlist           — early access signup and product preview
+  product_launch_page        — release announcement, product visuals, availability
+  agency_website             — services, case studies, demo/contact CTA
+  local_business_site        — local trust, services, contact/location CTA
+  creator_page               — personal/creator offer, newsletter/community CTA
+  course_or_coaching_funnel  — offer, outcomes, curriculum, testimonials, application CTA
+  newsletter_signup          — editorial promise, sample issues, signup CTA
+  event_registration_page    — event details, schedule, speakers, registration CTA
+  lead_magnet_funnel         — downloadable asset, qualifying fields, thank-you flow
+  investor_demo_page         — concise product thesis, proof, CTA, claim safeguards
+
+Mode drives section order, form fields, CTA routing, proof requirements, SEO copy,
+analytics events, and whether backend lead storage/admin is required.
+
+SUBSYSTEM 1 — PUBLIC MARKETING SHELL
+PublicShell includes marketing header, mobile menu, footer, primary CTA, secondary CTA, legal links, and responsive layout.
+Header nav uses sections/pages that actually exist. CTA buttons route to working anchors/pages/forms.
+Sticky mobile CTA appears after hero on small screens.
+
+SUBSYSTEM 2 — LANDING SECTIONS
+Required section set unless the prompt explicitly narrows scope:
+hero, problem, solution, features, benefits, how it works, use cases, proof/testimonials, pricing when relevant, FAQ, final CTA.
+Every section must use prompt-specific copy. Avoid generic filler like "transform your workflow" unless grounded in the prompt.
+
+SUBSYSTEM 3 — FORMS + LEAD CAPTURE
+Lead capture routes: waitlist, newsletter, contact, demo request, lead magnet, event registration as needed.
+Form submissions validate server-side: email format, required fields, max lengths, spam honeypot, optional rate-limit placeholder.
+Leads store: name, email, company, role, phone optional, source form, UTM params, message/notes, consent, created_at.
+Thank-you pages confirm submission and provide next action.
+
+SUBSYSTEM 4 — UTM + CONVERSION EVENTS
+Capture utm_source, utm_medium, utm_campaign, utm_content, utm_term when present.
+Track placeholder conversion events: hero_cta_clicked, form_started, form_submitted, pricing_cta_clicked, demo_requested, waitlist_joined.
+Analytics provider is a placeholder unless the user provides a provider/key.
+
+SUBSYSTEM 5 — SEO + SOCIAL PREVIEW
+SEO metadata: title, description, canonical, OpenGraph title/description/image placeholder, Twitter card, JSON-LD organization/product/service/event schema as appropriate.
+Sitemap and robots placeholders should be included for app/router stacks that support them.
+Each public page has useful metadata derived from the prompt.
+
+SUBSYSTEM 6 — CLAIM VERIFICATION SAFEGUARDS
+Claims must be categorized as:
+  verified — supported by prompt-provided facts or generated app behavior
+  user_provided — explicitly provided by the user but not independently verified
+  placeholder — illustrative proof/case study/stat that must not be presented as fact
+Do not invent competitor claims, revenue numbers, customer logos, compliance badges, security certifications, or performance guarantees.
+If proof is missing, use honest placeholders like "Add customer proof here" or seed/demo testimonials clearly framed as examples.
+
+SUBSYSTEM 7 — PRICING / PLANS (WHEN RELEVANT)
+Pricing cards are optional and only included when prompt implies paid product/service.
+Pricing CTA routes to demo/contact/waitlist unless real checkout is requested.
+Do not include fake Stripe checkout unless user requests payments and backend is in scope.
+
+SUBSYSTEM 8 — ADMIN / CONTENT / LEAD VIEW (OPTIONAL)
+For full-stack landing apps, include protected admin lead table, content section editor placeholder, claim review panel, analytics summary, settings, audit log.
+For frontend-only/static landing pages, keep forms as local/mock submissions with clear success states and no fake external integrations.
+
+SUBSYSTEM 9 — LEGAL / TRUST
+Include privacy, terms, and cookies placeholder pages when app has forms/tracking.
+Trust/security sections must be accurate and not overstate compliance.
+
+SUBSYSTEM 10 — PAGES
+Public pages: homepage, about optional, pricing optional, features/use-cases optional, blog/case-studies optional, contact, demo/waitlist/newsletter/download thank-you pages, legal pages.
+Admin pages only when backend/admin scope is present: leads, content, settings, audit log.
+
+NON-NEGOTIABLES:
+- One clear primary conversion goal.
+- Hero explains who it is for, what it does, and why it matters.
+- CTA buttons are obvious and route to working destinations.
+- Forms validate server-side or clearly use a local mock when runtime-free/static.
+- UTM parameters are captured when present.
+- SEO title, description, OpenGraph, and canonical metadata are set.
+- Claims do not overstate capability beyond prompt-supported facts.
+- Any performance, pricing, security, compliance, or competitor comparison claim is verified, user-provided, or placeholder.
+- Mobile hero, CTA, forms, pricing, and FAQ are first-class.
+- Build must compile without TypeScript errors.
+`,
+	CustomizationRules: `
+LANDING PAGE CUSTOMIZATION — optimize message, sections, and CTA for the prompt's offer.
+
+Mode-driven sections:
+  SaaS landing page: Hero, Logo Cloud, Problem, Solution, Features, How It Works, Use Cases, Proof, Pricing, FAQ, Final CTA
+  Startup waitlist: Hero, Waitlist Form, Problem, Promise, Feature Preview, Audience, Placeholder Proof, FAQ, Final CTA
+  Product launch: Hero, Launch Announcement, Screenshots, Benefits, Features, Availability/Pricing, FAQ, CTA
+  Agency website: Hero, Services, Process, Case Studies/Proof Placeholders, Testimonials, Pricing/Packages optional, Contact
+  Local business: Hero, Services, Service Area, Trust Badges, Testimonials, Contact/Map Placeholder, FAQ
+  Creator/newsletter: Hero, Sample Content, Audience Promise, Signup, Archive Preview, About Creator, FAQ
+  Event: Hero, Schedule, Speakers, Venue/Online Details, Registration, FAQ
+  Lead magnet: Hero, Asset Preview, Why Download, Form, Thank You Flow, Follow-up CTA
+
+Copy rules:
+  Headline must be specific to the audience and offer.
+  Subhead must explain outcome and mechanism.
+  Feature cards must include concrete nouns from the prompt.
+  Testimonials/case studies/logos are placeholders unless user supplied real proof.
+  Avoid unverifiable superlatives like "best", "#1", "guaranteed", or competitor superiority unless user provided evidence.
+
+CTA routing:
+  Waitlist/building soon → primary CTA goes to waitlist form.
+  SaaS/demo → primary CTA goes to demo request or trial placeholder.
+  Agency/local → primary CTA goes to contact form.
+  Newsletter → primary CTA goes to signup form.
+  Event → primary CTA goes to registration form.
+
+Visual identity:
+  Developer/SaaS → crisp technical UI, product screenshots, code/product motifs
+  Premium B2B → executive dark/graphite or clean slate with strong typography
+  Local service → warm trust-building UI with location/contact prominence
+  Creator/course → personality-forward, editorial, human tone
+  Event → high-energy timeline/schedule visual system
+Never produce the same generic blue SaaS page for every marketing prompt.
+`,
+	AcceptanceChecks: []string{
+		"landing-compile: app builds and passes TypeScript checks with zero errors",
+		"landing-conversion-goal: homepage has one clear primary CTA and secondary CTA does not compete visually",
+		"landing-hero-specificity: hero states target audience, product/service, and outcome using prompt-specific language",
+		"landing-cta-routing: all header, hero, pricing, final, and sticky mobile CTA buttons route to existing anchors/pages/forms",
+		"landing-form-validation: lead/waitlist/contact/demo/newsletter forms validate required fields, email format, and max lengths",
+		"landing-form-success: successful form submission shows a clear thank-you state or routes to a thank-you page",
+		"landing-utm-capture: forms capture UTM parameters when present",
+		"landing-seo: title, description, canonical, OpenGraph, and JSON-LD metadata are present and prompt-specific",
+		"landing-claim-safety: pricing/security/performance/compliance/competitor claims are verified, user-provided, or marked placeholder",
+		"landing-proof-honesty: customer logos, testimonials, metrics, and case studies are not presented as real unless user supplied them",
+		"landing-mobile: hero, CTA, forms, pricing, FAQ, and final CTA are usable and visually polished on mobile",
+		"landing-performance: no heavy unused dashboard/app shell is generated for a marketing-only prompt",
+		"landing-legal: privacy/terms/cookies placeholders exist when forms or tracking placeholders are included",
+		"landing-analytics: conversion event placeholders exist for CTA clicks and form submissions without requiring real external keys",
+	},
 }
