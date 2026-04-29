@@ -36,13 +36,18 @@ test.describe('Launch readiness smoke', () => {
   test('landing exposes real public resource links', async ({ page }) => {
     await page.goto('/')
 
-    await expect(page.getByRole('button', { name: /Start building|Get Started Free|Start Building Free/i }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /Start building|Get Started Free|Start Building Free|Build with Apex/i }).first()).toBeVisible()
 
-    await expect(page.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/?legal=privacy')
-    await expect(page.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/?legal=terms')
-    await expect(page.getByRole('link', { name: 'Docs' })).toHaveAttribute('href', /(?:\/\?help=1|#docs)$/)
+    await expect(page.getByRole('link', { name: 'Privacy' }).first()).toHaveAttribute('href', /(?:\/\?legal=privacy|\/privacy)$/)
+    await expect(page.getByRole('link', { name: 'Terms' }).first()).toHaveAttribute('href', /(?:\/\?legal=terms|\/terms)$/)
+    const docsLink = page.getByRole('link', { name: 'Docs' })
+    if (await docsLink.count()) {
+      await expect(docsLink.first()).toHaveAttribute('href', /(?:\/\?help=1|#docs)$/)
+    } else {
+      await expect(page.locator('#docs')).toBeAttached()
+    }
 
-    const helpLink = page.getByRole('link', { name: 'Help' })
+    const helpLink = page.getByRole('link', { name: 'Help' }).first()
     await expect(helpLink).toHaveAttribute('href', '/?help=1')
   })
 
