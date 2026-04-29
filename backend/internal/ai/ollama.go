@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,8 +51,11 @@ type ollamaResponse struct {
 	Choices []struct {
 		Index   int `json:"index"`
 		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			Reasoning        string `json:"reasoning,omitempty"`
+			Thinking         string `json:"thinking,omitempty"`
+			ReasoningContent string `json:"reasoning_content,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -143,15 +148,17 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 
 	messages := o.buildMessages(req)
 	model := o.getModel(req)
+	reasoningEffort := o.reasoningEffort(req, model)
+	reasoningBudget := o.reasoningTokenBudget(req, reasoningEffort)
 
 	ollamaReq := &ollamaRequest{
 		Model:           model,
 		Messages:        messages,
-		MaxTokens:       o.getMaxTokens(req),
+		MaxTokens:       o.getMaxTokens(req, reasoningBudget),
 		Temperature:     req.Temperature,
 		Stream:          false,
-		ReasoningEffort: o.reasoningEffort(model),
-		Think:           o.thinkEnabled(model),
+		ReasoningEffort: reasoningEffort,
+		Think:           o.thinkEnabled(req, reasoningEffort),
 		UseContextCache: req.CacheSystemPrompt && o.isMoonshotAPI(),
 	}
 
@@ -172,21 +179,51 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	o.updateUsage(resp.Usage.TotalTokens, cost, time.Since(startTime))
 
 	content := ""
-	if len(resp.Choices) > 0 {
-		content = resp.Choices[0].Message.Content
-	}
+	reasoning := ""
+	finishReason := ""
+	content, reasoning, finishReason = extractOllamaChoice(resp)
 
-	meta := map[string]interface{}{"model": resp.Model}
+	meta := map[string]interface{}{
+		"model":                   resp.Model,
+		"finish_reason":           finishReason,
+		"reasoning_effort":        reasoningEffort,
+		"reasoning_budget_tokens": reasoningBudget,
+	}
 	if resp.Usage.PromptCacheHitTokens > 0 {
 		meta["prompt_cache_hit_tokens"] = resp.Usage.PromptCacheHitTokens
 		meta["prompt_cache_miss_tokens"] = resp.Usage.PromptCacheMissTokens
 	}
+	if strings.TrimSpace(reasoning) != "" {
+		meta["reasoning_output_present"] = true
+		meta["reasoning_chars"] = len(reasoning)
+	}
+
+	if strings.TrimSpace(content) == "" && strings.TrimSpace(reasoning) != "" {
+		err := ollamaReasoningBudgetError(finishReason, len(reasoning), resp.Usage.CompletionTokens)
+		return &AIResponse{
+			ID:        req.ID,
+			Provider:  ProviderOllama,
+			Reasoning: reasoning,
+			Metadata:  meta,
+			Error:     err.Error(),
+			Usage: &Usage{
+				PromptTokens:     resp.Usage.PromptTokens,
+				CompletionTokens: resp.Usage.CompletionTokens,
+				TotalTokens:      resp.Usage.TotalTokens,
+				CacheHitTokens:   resp.Usage.PromptCacheHitTokens,
+				Cost:             cost,
+			},
+			Duration:  time.Since(startTime),
+			CreatedAt: time.Now(),
+		}, err
+	}
 
 	return &AIResponse{
-		ID:       req.ID,
-		Provider: ProviderOllama,
-		Content:  content,
-		Metadata: meta,
+		ID:        req.ID,
+		Provider:  ProviderOllama,
+		Content:   content,
+		Reasoning: reasoning,
+		Metadata:  meta,
 		Usage: &Usage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
@@ -199,22 +236,173 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	}, nil
 }
 
-func (o *OllamaClient) reasoningEffort(model string) string {
-	if strings.TrimSpace(o.apiKey) == "" {
-		return ""
-	}
-	// Ollama Cloud exposes reasoning models through the OpenAI-compatible API.
-	// Without this field, Kimi/GLM can spend the whole completion budget in
-	// message.reasoning and return an empty visible message.content.
-	return "none"
+func ollamaReasoningBudgetError(finishReason string, reasoningChars, completionTokens int) error {
+	return fmt.Errorf("OLLAMA_REASONING_BUDGET_EXHAUSTED: model returned reasoning but no visible content; output was truncated before final answer (finish_reason=%s, reasoning_chars=%d, completion_tokens=%d). Increase max_tokens/reasoning budget or lower reasoning_effort", finishReason, reasoningChars, completionTokens)
 }
 
-func (o *OllamaClient) thinkEnabled(model string) *bool {
-	if strings.TrimSpace(o.apiKey) == "" {
+func extractOllamaChoice(resp *ollamaResponse) (content, reasoning, finishReason string) {
+	if resp == nil || len(resp.Choices) == 0 {
+		return "", "", ""
+	}
+	choice := resp.Choices[0]
+	return choice.Message.Content,
+		firstNonEmptyString(choice.Message.Reasoning, choice.Message.Thinking, choice.Message.ReasoningContent),
+		choice.FinishReason
+}
+
+func (o *OllamaClient) reasoningEffort(req *AIRequest, model string) string {
+	if !o.isOllamaCloudAPI() {
+		return ""
+	}
+	mode := strings.ToLower(strings.TrimSpace(req.PowerMode))
+	if override := firstNonEmptyString(
+		os.Getenv("OLLAMA_REASONING_EFFORT_"+strings.ToUpper(firstNonEmptyString(mode, "balanced"))),
+		os.Getenv("OLLAMA_REASONING_EFFORT"),
+	); strings.TrimSpace(override) != "" {
+		return strings.ToLower(strings.TrimSpace(override))
+	}
+
+	switch mode {
+	case "max":
+		return "high"
+	case "balanced", "":
+		if isPlanningOrReasoningCapability(req.Capability) || isReasoningModel(model) {
+			return "medium"
+		}
+		return "low"
+	case "fast":
+		if req.Capability == CapabilityArchitecture {
+			return "low"
+		}
+		return "none"
+	default:
+		if isPlanningOrReasoningCapability(req.Capability) {
+			return "medium"
+		}
+		return "low"
+	}
+}
+
+func (o *OllamaClient) thinkEnabled(req *AIRequest, effort string) *bool {
+	if !o.isOllamaCloudAPI() {
 		return nil
 	}
-	enabled := false
+	enabled := strings.TrimSpace(strings.ToLower(effort)) != "none"
 	return &enabled
+}
+
+func (o *OllamaClient) reasoningTokenBudget(req *AIRequest, effort string) int {
+	if !o.isOllamaCloudAPI() {
+		return 0
+	}
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "" || effort == "none" {
+		return 0
+	}
+
+	base := 2048
+	switch effort {
+	case "low":
+		base = 2048
+	case "medium":
+		base = 4096
+	case "high":
+		base = 8192
+	default:
+		base = 4096
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(req.PowerMode))
+	if override := ollamaPositiveEnv("OLLAMA_REASONING_BUDGET_" + strings.ToUpper(firstNonEmptyString(mode, "balanced"))); override > 0 {
+		base = override
+	} else if override := ollamaPositiveEnv("OLLAMA_REASONING_BUDGET"); override > 0 {
+		base = override
+	}
+
+	promptChars := len(req.Prompt) + len(req.Code)
+	if req.Context != nil {
+		for _, value := range req.Context {
+			if text, ok := value.(string); ok {
+				promptChars += len(text)
+			}
+		}
+	}
+	if promptChars >= 100000 {
+		base *= 2
+	} else if promptChars >= 60000 {
+		base = base * 3 / 2
+	}
+
+	if isPlanningOrReasoningCapability(req.Capability) && base < 4096 {
+		base = 4096
+	}
+
+	floor := firstPositiveInt(ollamaPositiveEnv("OLLAMA_REASONING_BUDGET_FLOOR"), 1024)
+	ceiling := firstPositiveInt(ollamaPositiveEnv("OLLAMA_REASONING_BUDGET_CEILING"), 16384)
+	if ceiling < floor {
+		ceiling = floor
+	}
+	if base < floor {
+		return floor
+	}
+	if base > ceiling {
+		return ceiling
+	}
+	return base
+}
+
+func (o *OllamaClient) isOllamaCloudAPI() bool {
+	if strings.TrimSpace(o.apiKey) == "" || o.isMoonshotAPI() {
+		return false
+	}
+	return strings.Contains(strings.ToLower(o.baseURL), "ollama.com")
+}
+
+func isPlanningOrReasoningCapability(capability AICapability) bool {
+	switch capability {
+	case CapabilityArchitecture, CapabilityDebugging, CapabilityCodeReview, CapabilityRefactoring:
+		return true
+	default:
+		return false
+	}
+}
+
+func isReasoningModel(model string) bool {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(lower, "kimi") ||
+		strings.Contains(lower, "deepseek") ||
+		strings.Contains(lower, "glm") ||
+		strings.Contains(lower, "reason")
+}
+
+func ollamaPositiveEnv(name string) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // buildMessages creates the message array for Ollama API
@@ -510,26 +698,37 @@ func (o *OllamaClient) GetUsage() *ProviderUsage {
 	}
 }
 
-// getMaxTokens determines appropriate max tokens
-func (o *OllamaClient) getMaxTokens(req *AIRequest) int {
+// getMaxTokens determines appropriate max tokens. Ollama reasoning-capable
+// cloud models spend completion tokens on hidden thinking before emitting
+// visible content, so add an explicit reserve instead of suppressing thinking.
+func (o *OllamaClient) getMaxTokens(req *AIRequest, reasoningBudget int) int {
+	visible := 0
 	if req.MaxTokens > 0 {
-		return req.MaxTokens
+		visible = req.MaxTokens
+	} else {
+		switch req.Capability {
+		case CapabilityCodeCompletion:
+			visible = 500
+		case CapabilityCodeGeneration:
+			visible = 4000
+		case CapabilityTesting:
+			visible = 3000
+		case CapabilityRefactoring:
+			visible = 3000
+		case CapabilityCodeReview:
+			visible = 2000
+		case CapabilityArchitecture:
+			visible = 6000
+		default:
+			visible = 2000
+		}
 	}
 
-	switch req.Capability {
-	case CapabilityCodeCompletion:
-		return 500
-	case CapabilityCodeGeneration:
-		return 4000
-	case CapabilityTesting:
-		return 3000
-	case CapabilityRefactoring:
-		return 3000
-	case CapabilityCodeReview:
-		return 2000
-	default:
-		return 2000
+	total := visible + reasoningBudget
+	if total > 32000 {
+		return 32000
 	}
+	return total
 }
 
 // updateUsage updates internal usage statistics

@@ -56,22 +56,109 @@ func TestOllamaBaseURLNormalizesV1Suffix(t *testing.T) {
 	}
 }
 
-func TestOllamaCloudDisablesReasoningByDefault(t *testing.T) {
+func TestOllamaCloudKeepsReasoningForPlanningAndPadsTokenBudget(t *testing.T) {
 	t.Parallel()
 
 	cloudClient := NewOllamaClient("https://ollama.com", "cloud-key")
-	if got := cloudClient.reasoningEffort("kimi-k2.6"); got != "none" {
-		t.Fatalf("cloud reasoningEffort() = %q, want none", got)
+	balancedPlan := &AIRequest{
+		Capability: CapabilityArchitecture,
+		Model:      "kimi-k2.6",
+		MaxTokens:  4000,
+		PowerMode:  "balanced",
 	}
-	if got := cloudClient.thinkEnabled("kimi-k2.6"); got == nil || *got {
-		t.Fatalf("cloud thinkEnabled() = %v, want false pointer", got)
+	effort := cloudClient.reasoningEffort(balancedPlan, "kimi-k2.6:cloud")
+	if effort != "medium" {
+		t.Fatalf("balanced planning reasoningEffort() = %q, want medium", effort)
+	}
+	if got := cloudClient.thinkEnabled(balancedPlan, effort); got == nil || !*got {
+		t.Fatalf("balanced planning thinkEnabled() = %v, want true pointer", got)
+	}
+	budget := cloudClient.reasoningTokenBudget(balancedPlan, effort)
+	if budget != 4096 {
+		t.Fatalf("balanced planning reasoning budget = %d, want 4096", budget)
+	}
+	if got := cloudClient.getMaxTokens(balancedPlan, budget); got != 8096 {
+		t.Fatalf("balanced planning max_tokens = %d, want visible+reasoning budget 8096", got)
+	}
+
+	maxPlan := &AIRequest{
+		Capability: CapabilityArchitecture,
+		Model:      "kimi-k2.6",
+		MaxTokens:  8000,
+		PowerMode:  "max",
+	}
+	effort = cloudClient.reasoningEffort(maxPlan, "kimi-k2.6:cloud")
+	if effort != "high" {
+		t.Fatalf("max planning reasoningEffort() = %q, want high", effort)
+	}
+	budget = cloudClient.reasoningTokenBudget(maxPlan, effort)
+	if budget != 8192 {
+		t.Fatalf("max planning reasoning budget = %d, want 8192", budget)
+	}
+
+	fastCompletion := &AIRequest{
+		Capability: CapabilityCodeCompletion,
+		MaxTokens:  500,
+		PowerMode:  "fast",
+	}
+	effort = cloudClient.reasoningEffort(fastCompletion, "kimi-k2.6:cloud")
+	if effort != "none" {
+		t.Fatalf("fast completion reasoningEffort() = %q, want none", effort)
+	}
+	if got := cloudClient.thinkEnabled(fastCompletion, effort); got == nil || *got {
+		t.Fatalf("fast completion thinkEnabled() = %v, want false pointer", got)
 	}
 
 	localClient := NewOllamaClient("http://localhost:11434", "")
-	if got := localClient.reasoningEffort("deepseek-r1:14b"); got != "" {
+	localReq := &AIRequest{Capability: CapabilityArchitecture, PowerMode: "max"}
+	if got := localClient.reasoningEffort(localReq, "deepseek-r1:14b"); got != "" {
 		t.Fatalf("local reasoningEffort() = %q, want empty", got)
 	}
-	if got := localClient.thinkEnabled("deepseek-r1:14b"); got != nil {
+	if got := localClient.thinkEnabled(localReq, ""); got != nil {
 		t.Fatalf("local thinkEnabled() = %v, want nil", got)
+	}
+}
+
+func TestOllamaExtractsSeparateReasoningOutput(t *testing.T) {
+	t.Parallel()
+
+	var resp ollamaResponse
+	resp.Choices = append(resp.Choices, struct {
+		Index   int `json:"index"`
+		Message struct {
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			Reasoning        string `json:"reasoning,omitempty"`
+			Thinking         string `json:"thinking,omitempty"`
+			ReasoningContent string `json:"reasoning_content,omitempty"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
+	}{FinishReason: "length"})
+	resp.Choices[0].Message.Reasoning = "planning the implementation"
+
+	content, reasoning, finishReason := extractOllamaChoice(&resp)
+	if content != "" {
+		t.Fatalf("content = %q, want empty", content)
+	}
+	if reasoning != "planning the implementation" {
+		t.Fatalf("reasoning = %q, want separate reasoning content", reasoning)
+	}
+	if finishReason != "length" {
+		t.Fatalf("finishReason = %q, want length", finishReason)
+	}
+}
+
+func TestOllamaReasoningBudgetErrorIsClassifiedAsTruncation(t *testing.T) {
+	t.Parallel()
+
+	err := ollamaReasoningBudgetError("length", 128, 64)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"OLLAMA_REASONING_BUDGET_EXHAUSTED", "truncated", "completion_tokens=64"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
 	}
 }

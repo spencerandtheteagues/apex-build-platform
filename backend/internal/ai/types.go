@@ -69,6 +69,7 @@ type AIResponse struct {
 	ID             string                 `json:"id"`
 	Provider       AIProvider             `json:"provider"`
 	Content        string                 `json:"content"`
+	Reasoning      string                 `json:"reasoning,omitempty"`
 	Usage          *Usage                 `json:"usage,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	Error          string                 `json:"error,omitempty"`
