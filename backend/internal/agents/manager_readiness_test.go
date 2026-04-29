@@ -2457,6 +2457,85 @@ func TestParseMissingDependenciesByVerificationScope(t *testing.T) {
 	}
 }
 
+func TestApplyDeterministicManifestDependencyRepairScansCurrentGeneratedImports(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-manifest-current-import-scan",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": { "build": "vite build", "dev": "vite" },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10",
+    "typescript": "^5.6.3"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/App.tsx",
+				Content: `import React from "react";
+import { BrowserRouter } from "react-router-dom";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Search } from "lucide-react";
+import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+import { v4 as uuidv4 } from "uuid";
+
+export default function App() {
+  return <BrowserRouter><Dialog.Root><Search />{clsx(twMerge(uuidv4()))}</Dialog.Root></BrowserRouter>;
+}
+`,
+				IsNew: true,
+			},
+			{
+				Path:    "tailwind.config.js",
+				Content: `module.exports = { plugins: [require("tailwindcss-animate")] };`,
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification dependency check failed: source imports "react-router-dom" but package.json does not declare dependency "react-router-dom"`},
+		"missing dependency",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected manifest repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+	manifest := byPath["package.json"]
+	for _, pkg := range []string{"react-router-dom", "@radix-ui/react-dialog", "lucide-react", "clsx", "tailwind-merge", "uuid", "tailwindcss-animate"} {
+		if !strings.Contains(manifest, `"`+pkg+`"`) {
+			t.Fatalf("expected manifest repair to include %s, got %s", pkg, manifest)
+		}
+	}
+}
+
 func TestValidatePreviewManifestToolingDependencies(t *testing.T) {
 	t.Parallel()
 
@@ -3331,6 +3410,23 @@ export default function App() {
 
 	if issues := validateGeneratedLocalModuleImports(files, ""); len(issues) != 0 {
 		t.Fatalf("expected @ alias to resolve into src tree, got %+v", issues)
+	}
+}
+
+func TestLocalImportResolutionCandidatesForAliasStayInSrcTree(t *testing.T) {
+	t.Parallel()
+
+	candidates := localImportResolutionCandidates("src/App.tsx", "@/components/Dashboard")
+	if len(candidates) == 0 {
+		t.Fatal("expected candidates for @ alias")
+	}
+	if candidates[0] != "src/components/Dashboard.tsx" {
+		t.Fatalf("expected first alias candidate in src tree, got %q from %+v", candidates[0], candidates)
+	}
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate, "components/") {
+			t.Fatalf("alias resolver must not fall back to stale root components path, got %+v", candidates)
+		}
 	}
 }
 

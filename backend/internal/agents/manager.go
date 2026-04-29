@@ -8269,6 +8269,32 @@ func patchManifestDependenciesJSON(content string, pkgs []string) (string, []str
 	return string(updated), added
 }
 
+func missingManifestDependenciesForGeneratedFiles(files []GeneratedFile, manifestPath string, manifest previewManifest, seeded []string) []string {
+	missing := append([]string(nil), seeded...)
+	prefix := strings.TrimSuffix(filepath.ToSlash(sanitizeFilePath(manifestPath)), "package.json")
+	missing = append(missing, parseMissingDependencyNamesFromIssues(validatePreviewManifestToolingDependencies(manifest))...)
+	missing = append(missing, parseMissingDependencyNamesFromIssues(validateGeneratedImportDependencies(files, prefix, manifest))...)
+
+	signals := inspectGeneratedPackageSignals(files, prefix)
+	if signals.hasNodeTests && manifestUsesVitest(manifest) && (signals.usesTestingLibrary || signals.usesJestDOM) && !manifestDeclaresDependency(manifest, "jsdom") {
+		missing = append(missing, "jsdom")
+	}
+	if signals.usesVitestConfigImport && !manifestDeclaresDependency(manifest, "vitest") {
+		missing = append(missing, "vitest")
+	}
+	if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
+		missing = append(missing, "@testing-library/react")
+	}
+	if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
+		missing = append(missing, "@testing-library/jest-dom")
+	}
+	if signals.usesJestGlobals && !manifestDeclaresDependency(manifest, "jest") {
+		missing = append(missing, "jest")
+	}
+
+	return dedupeStrings(missing)
+}
+
 type generatedFilePatchPlan struct {
 	filesByPath  map[string]GeneratedFile
 	orderedPaths []string
@@ -9956,7 +9982,15 @@ func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build,
 		if strings.TrimSpace(content) == "" {
 			continue
 		}
-		updated, added := patchManifestDependenciesJSON(content, r.pkgs)
+		pkgs := append([]string(nil), r.pkgs...)
+		var manifest previewManifest
+		if err := json.Unmarshal([]byte(content), &manifest); err == nil {
+			if manifest.Scripts == nil {
+				manifest.Scripts = map[string]string{}
+			}
+			pkgs = missingManifestDependenciesForGeneratedFiles(files, r.path, manifest, pkgs)
+		}
+		updated, added := patchManifestDependenciesJSON(content, pkgs)
 		if len(added) == 0 {
 			continue
 		}
@@ -23909,7 +23943,7 @@ type previewManifest struct {
 }
 
 var npmPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
-var generatedImportPathPattern = regexp.MustCompile(`(?m)(?:^|\s)(?:import\s+(?:type\s+)?(?:[^'"]+\s+from\s+)?|export\s+[^'"]+\s+from\s+|import\s*\(|require\()\s*['"]([^'"]+)['"]`)
+var generatedImportPathPattern = regexp.MustCompile(`(?m)(?:^|[^A-Za-z0-9_$])(?:import\s+(?:type\s+)?(?:[^'"]+\s+from\s+)?|export\s+[^'"]+\s+from\s+|import\s*\(|require\()\s*['"]([^'"]+)['"]`)
 var integrationTemplateParamPattern = regexp.MustCompile(`\$\{[^}]+\}`)
 var integrationNamedParamPattern = regexp.MustCompile(`:[A-Za-z_][A-Za-z0-9_]*`)
 var integrationBraceParamPattern = regexp.MustCompile(`\{[^}]+\}`)
@@ -24218,10 +24252,10 @@ func localImportResolutionCandidates(importerPath string, spec string) []string 
 	switch {
 	case strings.HasPrefix(spec, "@/"):
 		base = strings.TrimPrefix(spec, "@/")
-		bases = append(bases, filepath.ToSlash(filepath.Join("src", base)), base)
+		bases = append(bases, filepath.ToSlash(filepath.Join("src", base)))
 	case strings.HasPrefix(spec, "~/"):
 		base = strings.TrimPrefix(spec, "~/")
-		bases = append(bases, filepath.ToSlash(filepath.Join("src", base)), base)
+		bases = append(bases, filepath.ToSlash(filepath.Join("src", base)))
 	case strings.HasPrefix(spec, "."):
 		base = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(importerPath), spec)))
 		bases = append(bases, base)
@@ -24262,7 +24296,7 @@ func localImportResolutionCandidates(importerPath string, spec string) []string 
 				candidates = append(candidates, withoutExt+sourceExt)
 			}
 		}
-		return dedupeStrings(candidates)
+		return dedupeStringsPreserveOrder(candidates)
 	}
 
 	exts := []string{".tsx", ".ts", ".jsx", ".js", ".mts", ".cts", ".mjs", ".cjs", ".json"}
@@ -24280,7 +24314,7 @@ func localImportResolutionCandidates(importerPath string, spec string) []string 
 			candidates = append(candidates, filepath.ToSlash(filepath.Join(candidateBase, "index"+ext)))
 		}
 	}
-	return dedupeStrings(candidates)
+	return dedupeStringsPreserveOrder(candidates)
 }
 
 func validateGeneratedLocalModuleImports(files []GeneratedFile, prefix string) []string {

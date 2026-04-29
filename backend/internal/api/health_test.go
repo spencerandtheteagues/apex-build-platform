@@ -93,6 +93,44 @@ func TestFeatureReadinessReturnsDegradedSummaryWithHealthyCriticalServices(t *te
 	require.Equal(t, startup.PhaseReady, payload.Phase)
 }
 
+func TestFeatureReadinessAPIV1RouteShape(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+
+	server := NewServer(
+		&db.Database{DB: gormDB},
+		auth.NewAuthService("test-jwt-secret-with-sufficient-length-1234567890"),
+		ai.NewAIRouter("", "", ""),
+		nil,
+	)
+	registry := startup.NewRegistry()
+	registry.MarkReady("primary_database", startup.TierCritical, "Database connected", nil)
+	registry.MarkReady("auth_service", startup.TierCritical, "Auth initialized", nil)
+	registry.SetPhase(startup.PhaseReady)
+	server.SetReadinessRegistry(registry)
+
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	v1.GET("/health/features", server.FeatureReadiness)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/health/features", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var payload struct {
+		Status string `json:"status"`
+		Ready  bool   `json:"ready"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Equal(t, "healthy", payload.Status)
+	require.True(t, payload.Ready)
+}
+
 func TestDeepHealthStaysHealthyWhenOnlyOptionalServicesAreDegraded(t *testing.T) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
