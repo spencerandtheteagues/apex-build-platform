@@ -170,6 +170,18 @@ func planningProviderAttemptTimeout(provider ai.AIProvider, mode PowerMode, useP
 
 	// Managed cloud planning must fail over quickly; a stuck lead planner blocks
 	// every downstream work order and makes the build appear dead at 0-20%.
+	if provider == ai.ProviderOllama && usePlatformKeys {
+		switch mode {
+		case PowerMax:
+			return 45 * time.Second
+		case PowerBalanced:
+			return 35 * time.Second
+		default:
+			return 25 * time.Second
+		}
+	}
+
+	// BYOK/local Ollama can legitimately be slower and may have no cloud fallback.
 	if provider == ai.ProviderOllama && !usePlatformKeys {
 		switch mode {
 		case PowerMax:
@@ -183,11 +195,11 @@ func planningProviderAttemptTimeout(provider ai.AIProvider, mode PowerMode, useP
 
 	switch mode {
 	case PowerMax:
-		return 90 * time.Second
+		return 65 * time.Second
 	case PowerBalanced:
-		return 75 * time.Second
+		return 55 * time.Second
 	default:
-		return 60 * time.Second
+		return 45 * time.Second
 	}
 }
 

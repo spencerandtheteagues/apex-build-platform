@@ -1009,6 +1009,17 @@ func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 	return nil
 }
 
+// GetConfiguredProviders returns configured platform provider clients without
+// filtering by health. This is intentionally separate from GetAvailableProviders
+// so normal assignment stays health-aware while emergency planner fallback can
+// still recover from stale health probes.
+func (a *AIRouterAdapter) GetConfiguredProviders() []ai.AIProvider {
+	if a == nil || a.router == nil {
+		return nil
+	}
+	return a.router.GetConfiguredProviders()
+}
+
 // HasConfiguredProviders reports whether any platform/BYOK provider client is configured.
 func (a *AIRouterAdapter) HasConfiguredProviders() bool {
 	if a == nil || a.router == nil {

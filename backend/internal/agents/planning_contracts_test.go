@@ -80,14 +80,55 @@ func TestPlanningProviderAttemptTimeoutUsesShortManagedCloudCaps(t *testing.T) {
 	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "")
 	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_SECONDS", "")
 
-	if got := planningProviderAttemptTimeout(ai.ProviderOllama, PowerMax, true); got != 90*time.Second {
-		t.Fatalf("managed ollama max planning timeout = %s, want 90s", got)
+	if got := planningProviderAttemptTimeout(ai.ProviderOllama, PowerMax, true); got != 45*time.Second {
+		t.Fatalf("managed ollama max planning timeout = %s, want 45s", got)
 	}
 	if got := planningProviderAttemptTimeout(ai.ProviderOllama, PowerBalanced, false); got != 120*time.Second {
 		t.Fatalf("BYOK/local ollama balanced planning timeout = %s, want 120s", got)
 	}
+	if got := planningProviderAttemptTimeout(ai.ProviderClaude, PowerBalanced, true); got != 55*time.Second {
+		t.Fatalf("balanced cloud fallback planning timeout = %s, want 55s", got)
+	}
 	t.Setenv("APEX_PLANNING_OLLAMA_TIMEOUT_SECONDS", "240")
 	if got := planningProviderAttemptTimeout(ai.ProviderOllama, PowerBalanced, false); got != 4*time.Minute {
 		t.Fatalf("ollama planning timeout override = %s, want 4m", got)
+	}
+}
+
+type configuredPlanningProviderRouter struct {
+	stubAIRouter
+	configured []ai.AIProvider
+}
+
+func (r *configuredPlanningProviderRouter) GetConfiguredProviders() []ai.AIProvider {
+	return append([]ai.AIProvider(nil), r.configured...)
+}
+
+func TestPlanningProviderOrderIncludesConfiguredPlatformFallbacks(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &configuredPlanningProviderRouter{
+			stubAIRouter: stubAIRouter{
+				providers:             []ai.AIProvider{ai.ProviderOllama},
+				hasConfiguredProvider: true,
+			},
+			configured: []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini},
+		},
+	}
+	build := &Build{
+		ID:           "planning-fallbacks",
+		ProviderMode: "platform",
+		PowerMode:    PowerMax,
+	}
+	task := &Task{ID: "plan", Type: TaskPlan}
+
+	got := am.planningProviderOrder(build, task, ai.ProviderOllama)
+	want := []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini}
+	if len(got) < len(want) {
+		t.Fatalf("planning providers = %v, want at least %v", got, want)
+	}
+	for i, provider := range want {
+		if got[i] != provider {
+			t.Fatalf("planning providers = %v, want prefix %v", got, want)
+		}
 	}
 }

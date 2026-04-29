@@ -40,6 +40,41 @@ type AIRouter struct {
 	healthStatus map[AIProvider]string // "ok", "no_credits", "auth_error", "timeout", "error", "unknown"
 }
 
+// GetConfiguredProviders returns provider clients that exist in this router,
+// independent of their last health-check result. Callers should use this only
+// for emergency fallback paths where a stale health probe must not block work.
+func (r *AIRouter) GetConfiguredProviders() []AIProvider {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	preferred := []AIProvider{
+		ProviderOllama,
+		ProviderClaude,
+		ProviderGPT4,
+		ProviderGemini,
+		ProviderGrok,
+		ProviderDeepSeek,
+		ProviderGLM,
+	}
+	out := make([]AIProvider, 0, len(r.clients))
+	seen := make(map[AIProvider]bool, len(r.clients))
+	for _, provider := range preferred {
+		if _, ok := r.clients[provider]; ok {
+			out = append(out, provider)
+			seen[provider] = true
+		}
+	}
+	for provider := range r.clients {
+		if !seen[provider] {
+			out = append(out, provider)
+		}
+	}
+	return out
+}
+
 // GetDefaultProvider returns the configured default provider for a capability.
 // Falls back to Claude if no explicit mapping exists.
 func (r *AIRouter) GetDefaultProvider(capability AICapability) AIProvider {

@@ -154,7 +154,27 @@ func (am *AgentManager) planningProviderOrder(build *Build, task *Task, primary 
 	for _, provider := range am.rankedFallbackProvidersForTask(build, task, RoleLead, tried) {
 		providers = append(providers, provider)
 	}
+	if am.buildUsesPlatformKeys(build) {
+		for _, provider := range am.configuredPlatformPlanningFallbackProviders() {
+			providers = append(providers, provider)
+		}
+	}
 	return compactPlanningProviders(primary, providers)
+}
+
+type configuredProviderLister interface {
+	GetConfiguredProviders() []ai.AIProvider
+}
+
+func (am *AgentManager) configuredPlatformPlanningFallbackProviders() []ai.AIProvider {
+	if am == nil || am.aiRouter == nil {
+		return nil
+	}
+	lister, ok := am.aiRouter.(configuredProviderLister)
+	if !ok {
+		return nil
+	}
+	return hostedPlatformProviders(lister.GetConfiguredProviders())
 }
 
 func planningDescriptionForBuild(build *Build) string {

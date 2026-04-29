@@ -95,6 +95,10 @@ services:
         sync: false  # Ollama Cloud / OpenAI-compatible proxy API key (e.g. Together AI, Fireworks)
       - key: OLLAMA_BASE_URL
         sync: false  # Optional: override default Ollama Cloud URL (default: https://ollama.com/v1)
+      - key: NEON_API_KEY
+        sync: false  # Optional: enables managed Neon Postgres orchestration for external deployments.
+      - key: NEON_ORG_ID
+        sync: false  # Optional: scopes Neon project creation to a specific organization.
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
