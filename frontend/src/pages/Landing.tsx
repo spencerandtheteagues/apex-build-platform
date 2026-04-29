@@ -1817,7 +1817,7 @@ const Pricing = ({ onGetStarted }: LandingProps) => (
         {([
           { name: 'Free', price: '$0', features: ['$5 trial credits included', 'Static frontend experiments', 'Prompt-to-UI exploration'] },
           { name: 'Builder', price: '$24', features: ['Full-stack builds', 'GitHub import/export', 'Live preview and IDE', '$12 managed credits/mo'] },
-          { name: 'Pro', price: '$49', regularPrice: '$79', promo: 'Launch Special', promoSub: 'First 3 months, then $79/mo', features: ['BYOK controls', 'Budget caps', 'Advanced verification', '$40 managed credits/mo'], featured: true },
+          { name: 'Pro', price: '$49', regularPrice: '$79', promo: 'Launch Special', promoSub: 'First 3 months, then $79/mo', features: ['BYOK controls', 'Budget caps', 'Advanced verification', 'Latest Ollama cloud models — high quality, lower cost', '$40 managed credits/mo'], featured: true },
           { name: 'Team', price: '$149', features: ['Collaboration', 'Shared secrets', 'Admin controls', '$110 managed credits/mo'] },
         ] as Array<{ name: string; price: string; regularPrice?: string; promo?: string; promoSub?: string; features: string[]; featured?: boolean }>).map(({ name, price, regularPrice, promo, promoSub, features, featured }) => (
           <motion.article key={name} className={`launch-card price-card ${featured ? 'featured' : ''}`} {...fadeUp}>

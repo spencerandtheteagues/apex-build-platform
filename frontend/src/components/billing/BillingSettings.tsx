@@ -79,7 +79,7 @@ const PLAN_CONFIG: Record<string, {
     icon: <ShieldCheck size={18} />,
     tagline: 'Serious shipping, every week',
     bestFor: 'Founders & operators shipping production app changes weekly.',
-    features: ['Everything in Builder', 'Longer autonomous runs', 'Higher included credits', 'Max power mode access', 'Priority for heavy workflows'],
+    features: ['Everything in Builder', 'Access to latest Ollama cloud models for high-quality, lower-cost builds', 'Longer autonomous runs', 'Max power mode access', 'Priority for heavy workflows'],
   },
   team: {
     color: '#67e8f9',
