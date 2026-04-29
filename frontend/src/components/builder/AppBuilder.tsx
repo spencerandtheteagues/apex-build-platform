@@ -486,7 +486,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
   balanced: {
     claude: { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
     gpt4: { id: 'gpt-4.1', name: 'GPT-4.1' },
-    gemini: { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
+    gemini: { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     grok: { id: 'grok-3', name: 'Grok 3' },
     ollama: { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
   },
@@ -632,8 +632,10 @@ const canonicalizeModelId = (model?: string) => {
   if (value.startsWith('kimi-k2.6') || value.startsWith('kimi-k2')) return 'kimi-k2.6'
   if (value.startsWith('glm-5.1:cloud')) return 'glm-5.1:cloud'
   if (value.startsWith('glm-5.1')) return 'glm-5.1'
-  if (value.startsWith('qwen-3.6-27b:cloud')) return 'qwen-3.6-27b:cloud'
-  if (value.startsWith('qwen-3.6-27b')) return 'qwen-3.6-27b'
+  if (value.startsWith('qwen3.5:cloud') || value.startsWith('qwen-3.5:cloud')) return 'qwen3.5:cloud'
+  if (value.startsWith('qwen3.5') || value.startsWith('qwen-3.5')) return 'qwen3.5'
+  if (value.startsWith('qwen-3.6-27b:cloud')) return 'qwen3.5:cloud'
+  if (value.startsWith('qwen-3.6-27b')) return 'qwen3.5'
   if (value.startsWith('devstral-small-24b:cloud') || value.startsWith('devstral-24b:cloud')) return 'devstral-small-24b:cloud'
   if (value.startsWith('devstral-small-24b') || value.startsWith('devstral-24b')) return 'devstral-small-24b'
   if (value.startsWith('deepseek-v4-flash:cloud')) return 'deepseek-v4-flash:cloud'
@@ -727,11 +729,23 @@ const normalizeProviderModelOverrides = (
   return normalized
 }
 
+const constrainProviderModelForPowerMode = (
+  provider: SupportedBuildProvider,
+  model: string,
+  mode: 'fast' | 'balanced' | 'max'
+) => {
+  if (mode === 'balanced' && model === POWER_MODE_MODEL_CATALOG.max[provider].id) {
+    return POWER_MODE_MODEL_CATALOG.balanced[provider].id
+  }
+  return model
+}
+
 const serializeProviderModelOverrides = (
-  overrides: Record<SupportedBuildProvider, string>
+  overrides: Record<SupportedBuildProvider, string>,
+  mode: 'fast' | 'balanced' | 'max'
 ): Record<string, string> | undefined => {
   const serialized = MODEL_PANEL_ORDER.reduce<Record<string, string>>((acc, provider) => {
-    const model = canonicalizeModelId(overrides[provider])
+    const model = constrainProviderModelForPowerMode(provider, canonicalizeModelId(overrides[provider]), mode)
     if (model && model !== 'auto' && modelBelongsToProvider(provider, model)) {
       acc[provider] = model
     }
@@ -6166,7 +6180,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         tech_stack: techStackOverride || undefined,
         diff_mode: false,
         role_assignments: roleConfigMode === 'manual' ? roleAssignments : undefined,
-        provider_model_overrides: serializeProviderModelOverrides(providerModelOverrides),
+        provider_model_overrides: serializeProviderModelOverrides(providerModelOverrides, powerMode),
         wireframe_image: wireframeImage || undefined,
       })
 
@@ -6189,7 +6203,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         checkpoints: [],
         description: appDescription,
         powerMode,
-        providerModelOverrides: normalizeProviderModelOverrides(serializeProviderModelOverrides(providerModelOverrides)),
+        providerModelOverrides: normalizeProviderModelOverrides(serializeProviderModelOverrides(providerModelOverrides, powerMode)),
         currentPhase: 'Planning',
         qualityGateRequired: true,
         qualityGateStatus: 'pending',

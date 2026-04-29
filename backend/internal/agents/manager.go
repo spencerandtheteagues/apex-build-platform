@@ -758,7 +758,7 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		Description:            effectiveDescription,
 		TechStack:              req.TechStack,
 		RoleAssignments:        req.RoleAssignments,
-		ProviderModelOverrides: normalizeProviderModelOverridesMap(req.ProviderModelOverrides),
+		ProviderModelOverrides: normalizeProviderModelOverridesForPowerMode(req.ProviderModelOverrides, powerMode),
 		Agents:                 make(map[string]*Agent),
 		Tasks:                  make([]*Task, 0),
 		Checkpoints:            make([]*Checkpoint, 0),
@@ -955,7 +955,10 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	}
 
 	if !useOllama {
-		if selected := am.selectLeadProvider(availableProviders); selected != "" {
+		if usePlatformKeys && build.PowerMode == PowerBalanced && providerListContains(availableProviders, ai.ProviderOllama) {
+			leadProvider = ai.ProviderOllama
+			useOllama = true
+		} else if selected := am.selectLeadProvider(availableProviders); selected != "" {
 			leadProvider = selected
 		}
 	}
@@ -1039,7 +1042,9 @@ func (am *AgentManager) StartBuild(buildID string) error {
 
 	build.mu.Lock()
 	build.Tasks = append(build.Tasks, planTask)
+	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
+	am.persistBuildSnapshot(build, nil)
 
 	// Broadcast agent working
 	am.broadcast(buildID, &WSMessage{
@@ -2617,6 +2622,9 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		if am.buildUsesPlatformKeys(build) {
 			switch role {
 			case RolePlanner, RoleArchitect:
+				if build != nil && build.PowerMode == PowerBalanced && available[ai.ProviderOllama] {
+					return ai.ProviderOllama
+				}
 				if available[ai.ProviderClaude] {
 					return ai.ProviderClaude
 				}
@@ -2705,7 +2713,9 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 			if !assigned {
 				switch role {
 				case RolePlanner, RoleArchitect:
-					if available[ai.ProviderClaude] {
+					if build != nil && build.PowerMode == PowerBalanced && available[ai.ProviderOllama] {
+						assignments[role] = ai.ProviderOllama
+					} else if available[ai.ProviderClaude] {
 						assignments[role] = ai.ProviderClaude
 					}
 				case RoleReviewer:
@@ -18933,7 +18943,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 			maxTokens = restoreContext.MaxTokensPerRequest
 		}
 		roleAssignments = cloneStringMap(restoreContext.RoleAssignments)
-		providerModelOverrides = normalizeProviderModelOverridesMap(restoreContext.ProviderModelOverrides)
+		providerModelOverrides = normalizeProviderModelOverridesForPowerMode(restoreContext.ProviderModelOverrides, powerMode)
 		phasedPipelineComplete = restoreContext.PhasedPipelineComplete
 		diffMode = restoreContext.DiffMode
 		techStack = cloneTechStack(restoreContext.TechStack)
@@ -20871,7 +20881,9 @@ func shouldPersistBuildSnapshotMessage(msgType WSMessageType) bool {
 		WSBuildFSMAllSteps, WSBuildFSMValidationPass, WSBuildFSMValidationFail,
 		WSBuildFSMRetryExhausted, WSBuildFSMRollbackDone, WSBuildFSMRollbackFail,
 		WSBuildFSMFatalError, WSBuildFSMCancelled,
-		"agent:retrying", "agent:verification_failed", "agent:coordination_failed", WSAgentError,
+		WSAgentWorking, WSAgentThinking, WSAgentCompleted, WSAgentError,
+		"agent:generating", "agent:generation_failed", "agent:provider_fallback",
+		"agent:provider_switched", "agent:retrying", "agent:verification_failed", "agent:coordination_failed",
 		WSGlassWarRoomCritiqueStarted, WSGlassWarRoomCritiqueResolved,
 		WSGlassWorkOrderCompiled, WSGlassProviderRouteSelected,
 		WSGlassDeterministicGatePassed, WSGlassDeterministicGateFailed,

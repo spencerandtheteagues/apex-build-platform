@@ -43,6 +43,25 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 	},
 }
 
+var flagshipModelsByProvider = map[ai.AIProvider]map[string]bool{
+	ai.ProviderClaude: {
+		"claude-opus-4-7": true,
+	},
+	ai.ProviderGPT4: {
+		"gpt-5.4-codex": true,
+	},
+	ai.ProviderGemini: {
+		"gemini-3.1-pro":         true,
+		"gemini-3.1-pro-preview": true,
+		"gemini-3-pro-preview":   true,
+	},
+	ai.ProviderGrok: {
+		"grok-4.20-0309-reasoning":     true,
+		"grok-4.20-0309-non-reasoning": true,
+		"grok-4.20-multi-agent-0309":   true,
+	},
+}
+
 // selectModelForPowerMode returns the best model ID for a given provider and power mode
 func selectModelForPowerMode(provider ai.AIProvider, mode PowerMode) string {
 	if mode == "" {
@@ -157,9 +176,23 @@ func canonicalizeProviderModelAlias(provider ai.AIProvider, model string) string
 func normalizeModelForProvider(provider ai.AIProvider, model string, mode PowerMode) string {
 	model = canonicalizeProviderModelAlias(provider, model)
 	if modelBelongsToProvider(provider, model) {
-		return model
+		return constrainModelForPowerMode(provider, model, mode)
 	}
 	return selectModelForPowerMode(provider, mode)
+}
+
+func constrainModelForPowerMode(provider ai.AIProvider, model string, mode PowerMode) string {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return trimmed
+	}
+	if mode != PowerBalanced {
+		return trimmed
+	}
+	if flagshipModelsByProvider[provider][strings.ToLower(trimmed)] {
+		return selectModelForPowerMode(provider, PowerBalanced)
+	}
+	return trimmed
 }
 
 func normalizeExecutionModelForProvider(provider ai.AIProvider, model string, mode PowerMode, usePlatformKeys bool) string {
@@ -201,6 +234,17 @@ func normalizeProviderModelOverridesMap(overrides map[string]string) map[string]
 	return normalized
 }
 
+func normalizeProviderModelOverridesForPowerMode(overrides map[string]string, mode PowerMode) map[string]string {
+	normalized := normalizeProviderModelOverridesMap(overrides)
+	if len(normalized) == 0 {
+		return nil
+	}
+	for provider, model := range normalized {
+		normalized[provider] = constrainModelForPowerMode(ai.AIProvider(provider), model, mode)
+	}
+	return normalized
+}
+
 func providerModelOverrideForBuildLocked(build *Build, provider ai.AIProvider) string {
 	if build == nil {
 		return ""
@@ -218,18 +262,15 @@ func providerModelOverrideForBuild(build *Build, provider ai.AIProvider) string 
 }
 
 func selectBuildModelForProviderLocked(build *Build, provider ai.AIProvider) string {
-	if override := providerModelOverrideForBuildLocked(build, provider); override != "" {
-		if build != nil && provider == ai.ProviderOllama && strings.TrimSpace(strings.ToLower(build.ProviderMode)) != "byok" {
-			return qualifyOllamaCloudModel(override)
-		}
-		return override
-	}
-	if build != nil && provider == ai.ProviderOllama && strings.TrimSpace(strings.ToLower(build.ProviderMode)) != "byok" {
-		return defaultOllamaModelForMode()
-	}
 	mode := PowerFast
 	if build != nil && build.PowerMode != "" {
 		mode = build.PowerMode
+	}
+	if override := providerModelOverrideForBuildLocked(build, provider); override != "" {
+		return normalizeExecutionModelForProvider(provider, override, mode, build != nil && strings.TrimSpace(strings.ToLower(build.ProviderMode)) != "byok")
+	}
+	if build != nil && provider == ai.ProviderOllama && strings.TrimSpace(strings.ToLower(build.ProviderMode)) != "byok" {
+		return defaultOllamaModelForMode()
 	}
 	return selectModelForPowerMode(provider, mode)
 }
@@ -287,8 +328,10 @@ func qualifyOllamaCloudModel(model string) string {
 		return "glm-5.1:cloud"
 	case "deepseek", "deepseek-v4", "deepseek-v4-flash":
 		return "deepseek-v4-flash:cloud"
-	case "qwen", "qwen-3.6-27b":
-		return "qwen-3.6-27b:cloud"
+	case "deepseek-v4-pro":
+		return "deepseek-v4-pro:cloud"
+	case "qwen", "qwen3.5", "qwen-3.5", "qwen-3.6-27b":
+		return "qwen3.5:cloud"
 	case "devstral", "devstral-24b", "devstral-small-24b":
 		return "devstral-small-24b:cloud"
 	default:

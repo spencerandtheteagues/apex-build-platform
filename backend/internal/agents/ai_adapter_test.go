@@ -104,6 +104,30 @@ func TestNormalizeProviderModelOverrideUpgradesClaudeOpusMaxAlias(t *testing.T) 
 	}
 }
 
+func TestNormalizeExecutionModelForProvider_DowngradesFlagshipOverridesInBalanced(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		provider ai.AIProvider
+		model    string
+		want     string
+	}{
+		{name: "claude opus", provider: ai.ProviderClaude, model: "claude-opus-4-7", want: "claude-sonnet-4-6"},
+		{name: "openai codex", provider: ai.ProviderGPT4, model: "gpt-5.4-codex", want: "gpt-4.1"},
+		{name: "gemini pro", provider: ai.ProviderGemini, model: "gemini-3.1-pro-preview", want: "gemini-2.5-pro"},
+		{name: "grok reasoning", provider: ai.ProviderGrok, model: "grok-4.20-0309-reasoning", want: "grok-3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeExecutionModelForProvider(tt.provider, tt.model, PowerBalanced, true); got != tt.want {
+				t.Fatalf("balanced %s execution model = %q, want %q", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCreateBuildNormalizesUnavailableOpenAIProviderModelOverride(t *testing.T) {
 	manager := &AgentManager{
 		builds: make(map[string]*Build),
@@ -126,6 +150,37 @@ func TestCreateBuildNormalizesUnavailableOpenAIProviderModelOverride(t *testing.
 	}
 	if _, exists := build.ProviderModelOverrides["gemini"]; exists {
 		t.Fatalf("auto override should not be persisted, got %+v", build.ProviderModelOverrides)
+	}
+}
+
+func TestCreateBuildDowngradesFlagshipOverridesInBalanced(t *testing.T) {
+	manager := &AgentManager{
+		builds: make(map[string]*Build),
+	}
+
+	build, err := manager.CreateBuild(1, "owner", &BuildRequest{
+		Description: "Build a production-ready operations dashboard",
+		PowerMode:   PowerBalanced,
+		ProviderModelOverrides: map[string]string{
+			"gpt4":   "gpt-5.4-codex",
+			"claude": "claude-opus-4-7",
+			"gemini": "gemini-3.1-pro-preview",
+			"grok":   "grok-4.20-0309-reasoning",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBuild returned error: %v", err)
+	}
+	want := map[string]string{
+		"gpt4":   "gpt-4.1",
+		"claude": "claude-sonnet-4-6",
+		"gemini": "gemini-2.5-pro",
+		"grok":   "grok-3",
+	}
+	for provider, wantModel := range want {
+		if got := build.ProviderModelOverrides[provider]; got != wantModel {
+			t.Fatalf("balanced stored override %s = %q, want %q; overrides=%+v", provider, got, wantModel, build.ProviderModelOverrides)
+		}
 	}
 }
 
@@ -188,6 +243,9 @@ func TestNormalizeExecutionModelForProvider_QualifiesManagedOllamaCloudOverrides
 	}
 	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "deepseek-v4", PowerFast, true); got != "deepseek-v4-flash:cloud" {
 		t.Fatalf("managed deepseek execution model = %q, want deepseek-v4-flash:cloud", got)
+	}
+	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "qwen-3.6-27b", PowerBalanced, true); got != "qwen3.5:cloud" {
+		t.Fatalf("managed qwen execution model = %q, want qwen3.5:cloud", got)
 	}
 	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "gemini-3-flash-preview:cloud", PowerFast, true); got != "gemini-3-flash-preview:cloud" {
 		t.Fatalf("managed ollama-hosted gemini execution model = %q, want gemini-3-flash-preview:cloud", got)

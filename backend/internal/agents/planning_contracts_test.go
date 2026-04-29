@@ -194,3 +194,54 @@ func TestPlanningProviderOrderIncludesConfiguredPlatformFallbacks(t *testing.T) 
 		}
 	}
 }
+
+func TestPlanningProviderOrderPrefersOllamaForBalancedPlatformPlanning(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &configuredPlanningProviderRouter{
+			stubAIRouter: stubAIRouter{
+				providers:             []ai.AIProvider{ai.ProviderClaude, ai.ProviderOllama, ai.ProviderGPT4},
+				hasConfiguredProvider: true,
+			},
+			configured: []ai.AIProvider{ai.ProviderClaude, ai.ProviderOllama, ai.ProviderGPT4},
+		},
+	}
+	build := &Build{
+		ID:           "planning-balanced-ollama",
+		ProviderMode: "platform",
+		PowerMode:    PowerBalanced,
+	}
+	task := &Task{ID: "plan", Type: TaskPlan}
+
+	got := am.planningProviderOrder(build, task, ai.ProviderClaude)
+	wantPrefix := []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude, ai.ProviderGPT4}
+	if len(got) < len(wantPrefix) {
+		t.Fatalf("planning providers = %v, want at least %v", got, wantPrefix)
+	}
+	for i, provider := range wantPrefix {
+		if got[i] != provider {
+			t.Fatalf("planning providers = %v, want prefix %v", got, wantPrefix)
+		}
+	}
+}
+
+func TestPlanningRouteCandidatesExpandBalancedOllamaCloudModelFallbacks(t *testing.T) {
+	t.Setenv("APEX_BALANCED_OLLAMA_PLANNING_MODELS", "")
+
+	got := planningRouteCandidates([]ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude}, PowerBalanced, true)
+	want := []planningRouteCandidate{
+		{provider: ai.ProviderOllama, model: "kimi-k2.6:cloud"},
+		{provider: ai.ProviderOllama, model: "glm-5.1:cloud"},
+		{provider: ai.ProviderOllama, model: "deepseek-v4-pro:cloud"},
+		{provider: ai.ProviderOllama, model: "deepseek-v4-flash:cloud"},
+		{provider: ai.ProviderOllama, model: "qwen3.5:cloud"},
+		{provider: ai.ProviderClaude},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("planning routes = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("planning routes = %+v, want %+v", got, want)
+		}
+	}
+}

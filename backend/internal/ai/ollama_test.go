@@ -44,6 +44,8 @@ func TestOllamaCloudNormalizesKimiAlias(t *testing.T) {
 		{model: "kimi-k2.6", want: "kimi-k2.6:cloud"},
 		{model: "glm-5.1", want: "glm-5.1:cloud"},
 		{model: "deepseek-v4", want: "deepseek-v4-flash:cloud"},
+		{model: "deepseek-v4-pro", want: "deepseek-v4-pro:cloud"},
+		{model: "qwen-3.6-27b", want: "qwen3.5:cloud"},
 	}
 	for _, tt := range tests {
 		req := &AIRequest{

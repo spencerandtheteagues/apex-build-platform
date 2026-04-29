@@ -812,7 +812,7 @@ func GetAvailableModels() map[string][]ModelInfo {
 		"ollama": {
 			{ID: "kimi-k2.6", Name: "Kimi K2.6", Speed: "fast", CostTier: "low", Description: "Default conductor/cloud-capable model"},
 			{ID: "glm-5.1", Name: "GLM-5.1", Speed: "fast", CostTier: "low", Description: "Fast open-model coding route"},
-			{ID: "qwen-3.6-27b", Name: "Qwen 3.6 27B", Speed: "fast", CostTier: "low", Description: "Efficient coding model"},
+			{ID: "qwen3.5", Name: "Qwen 3.5", Speed: "fast", CostTier: "low", Description: "Latest Qwen cloud large route"},
 			{ID: "devstral-small-24b", Name: "Devstral Small 24B", Speed: "medium", CostTier: "low", Description: "Agentic coding model"},
 			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", Speed: "fast", CostTier: "low", Description: "Budget reasoning/coding route"},
 		},

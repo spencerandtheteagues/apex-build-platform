@@ -108,7 +108,7 @@ const PROVIDERS: ProviderConfig[] = [
     models: [
       { id: 'kimi-k2.6', name: 'Kimi K2.6', speed: 'fast', cost: 'low', description: 'Default conductor/cloud model' },
       { id: 'glm-5.1', name: 'GLM-5.1', speed: 'fast', cost: 'low', description: 'Fast open-model coding route' },
-      { id: 'qwen-3.6-27b', name: 'Qwen 3.6 27B', speed: 'fast', cost: 'low', description: 'Efficient coding model' },
+      { id: 'qwen3.5', name: 'Qwen 3.5', speed: 'fast', cost: 'low', description: 'Latest Qwen cloud large route' },
       { id: 'devstral-small-24b', name: 'Devstral Small 24B', speed: 'medium', cost: 'low', description: 'Agentic coding model' },
       { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', speed: 'fast', cost: 'low', description: 'Budget reasoning/coding route' },
     ],

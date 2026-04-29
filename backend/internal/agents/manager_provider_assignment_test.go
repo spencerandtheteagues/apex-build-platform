@@ -451,7 +451,7 @@ func TestAssignProvidersToRolesForBuild_UsesSpecialistRoutingInPlatformModeWithO
 		PowerMode:    PowerBalanced,
 	}
 
-	roles := []AgentRole{RoleArchitect, RoleFrontend, RoleBackend, RoleTesting, RoleReviewer, RoleSolver}
+	roles := []AgentRole{RolePlanner, RoleArchitect, RoleFrontend, RoleBackend, RoleTesting, RoleReviewer, RoleSolver}
 	assignments := am.assignProvidersToRolesForBuild(build, []ai.AIProvider{
 		ai.ProviderClaude,
 		ai.ProviderGPT4,
@@ -461,7 +461,8 @@ func TestAssignProvidersToRolesForBuild_UsesSpecialistRoutingInPlatformModeWithO
 	}, roles)
 
 	want := map[AgentRole]ai.AIProvider{
-		RoleArchitect: ai.ProviderClaude,
+		RolePlanner:   ai.ProviderOllama,
+		RoleArchitect: ai.ProviderOllama,
 		RoleFrontend:  ai.ProviderGPT4,
 		RoleBackend:   ai.ProviderGPT4,
 		RoleTesting:   ai.ProviderGemini,

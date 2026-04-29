@@ -144,12 +144,22 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 
 func (am *AgentManager) planningProviderOrder(build *Build, task *Task, primary ai.AIProvider) []ai.AIProvider {
 	providers := []ai.AIProvider{primary}
+	preferredPrimary := primary
 	if am == nil || build == nil {
 		return compactPlanningProviders(primary, providers)
 	}
+	if build.PowerMode == PowerBalanced && am.buildUsesPlatformKeys(build) {
+		available := am.getCurrentlyAvailableProvidersForBuild(build)
+		if providerListContains(available, ai.ProviderOllama) {
+			providers = []ai.AIProvider{ai.ProviderOllama, primary}
+			preferredPrimary = ai.ProviderOllama
+		}
+	}
 	tried := map[ai.AIProvider]bool{}
-	if primary != "" {
-		tried[primary] = true
+	for _, provider := range providers {
+		if provider != "" {
+			tried[provider] = true
+		}
 	}
 	for _, provider := range am.rankedFallbackProvidersForTask(build, task, RoleLead, tried) {
 		providers = append(providers, provider)
@@ -159,7 +169,7 @@ func (am *AgentManager) planningProviderOrder(build *Build, task *Task, primary 
 			providers = append(providers, provider)
 		}
 	}
-	return compactPlanningProviders(primary, providers)
+	return compactPlanningProviders(preferredPrimary, providers)
 }
 
 type configuredProviderLister interface {

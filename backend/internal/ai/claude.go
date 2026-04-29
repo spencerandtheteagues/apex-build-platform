@@ -27,7 +27,7 @@ type claudeRequest struct {
 	Model       string          `json:"model"`
 	MaxTokens   int             `json:"max_tokens"`
 	Messages    []claudeMessage `json:"messages"`
-	Temperature float32         `json:"temperature,omitempty"`
+	Temperature *float32        `json:"temperature,omitempty"`
 	// System is either a plain string or []claudeSystemContent (for cache_control support).
 	System interface{} `json:"system,omitempty"`
 }
@@ -69,7 +69,7 @@ type claudeVisionRequest struct {
 	Model       string                `json:"model"`
 	MaxTokens   int                   `json:"max_tokens"`
 	Messages    []claudeVisionMessage `json:"messages"`
-	Temperature float32               `json:"temperature,omitempty"`
+	Temperature *float32              `json:"temperature,omitempty"`
 	System      string                `json:"system,omitempty"`
 }
 
@@ -148,7 +148,7 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 				Content: userPrompt,
 			},
 		},
-		Temperature: req.Temperature,
+		Temperature: claudeTemperaturePtr(model, req.Temperature),
 		System:      system,
 	}
 
@@ -258,6 +258,26 @@ func normalizeClaudeModelAlias(model string) string {
 	default:
 		return strings.TrimSpace(model)
 	}
+}
+
+func claudeSupportsTemperature(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(normalized, "claude-opus-4-7"):
+		return false
+	default:
+		return true
+	}
+}
+
+func claudeTemperaturePtr(model string, temperature float32) *float32 {
+	if !claudeSupportsTemperature(model) {
+		return nil
+	}
+	if temperature <= 0 {
+		return nil
+	}
+	return &temperature
 }
 
 // buildSystemPrompt creates capability-specific system prompts

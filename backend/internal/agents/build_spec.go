@@ -46,6 +46,11 @@ type plannerRouterAdapter struct {
 	lastModel       string
 }
 
+type planningRouteCandidate struct {
+	provider ai.AIProvider
+	model    string
+}
+
 func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts autonomous.AIOptions) (string, error) {
 	if a == nil || a.router == nil {
 		return "", fmt.Errorf("planning router is not configured")
@@ -55,9 +60,15 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 	if len(providers) == 0 {
 		providers = []ai.AIProvider{ai.ProviderClaude}
 	}
+	routes := planningRouteCandidates(providers, a.powerMode, a.usePlatformKeys)
+	if len(routes) == 0 {
+		routes = []planningRouteCandidate{{provider: ai.ProviderClaude}}
+	}
 
 	var lastErr error
-	for idx, provider := range providers {
+	var previous planningRouteCandidate
+	for idx, route := range routes {
+		provider := route.provider
 		if err := ctx.Err(); err != nil {
 			if lastErr != nil {
 				return "", lastErr
@@ -66,7 +77,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		}
 
 		if idx > 0 {
-			a.broadcastPlanningProviderFallback(providers[idx-1], provider, lastErr)
+			a.broadcastPlanningProviderFallback(previous, route, lastErr)
 		}
 
 		attemptCtx := ctx
@@ -76,7 +87,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 			attemptCtx, cancel = context.WithTimeout(ctx, attemptTimeout)
 		}
 
-		a.broadcastPlanningProviderAttempt(provider, idx+1, len(providers), attemptTimeout)
+		a.broadcastPlanningProviderAttempt(route, idx+1, len(routes), attemptTimeout)
 
 		type planningGenerateResult struct {
 			resp *ai.AIResponse
@@ -92,6 +103,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 				SystemPrompt:            opts.SystemPrompt,
 				RoleHint:                string(RolePlanner),
 				PowerMode:               a.powerMode,
+				ModelOverride:           route.model,
 				UsePlatformKeys:         a.usePlatformKeys,
 				DisableProviderFallback: true,
 			})
@@ -114,7 +126,8 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
 			}
-			a.broadcastPlanningProviderFailure(provider, err, idx+1, len(providers))
+			a.broadcastPlanningProviderFailure(route, err, idx+1, len(routes))
+			previous = route
 			continue
 		}
 		if resp == nil {
@@ -122,7 +135,8 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
 			}
-			a.broadcastPlanningProviderFailure(provider, lastErr, idx+1, len(providers))
+			a.broadcastPlanningProviderFailure(route, lastErr, idx+1, len(routes))
+			previous = route
 			continue
 		}
 		if strings.TrimSpace(resp.Content) == "" {
@@ -130,7 +144,8 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
 			}
-			a.broadcastPlanningProviderFailure(provider, lastErr, idx+1, len(providers))
+			a.broadcastPlanningProviderFailure(route, lastErr, idx+1, len(routes))
+			previous = route
 			continue
 		}
 
@@ -173,6 +188,45 @@ func compactPlanningProviders(primary ai.AIProvider, providers []ai.AIProvider) 
 		add(provider)
 	}
 	return out
+}
+
+func planningRouteCandidates(providers []ai.AIProvider, mode PowerMode, usePlatformKeys bool) []planningRouteCandidate {
+	out := make([]planningRouteCandidate, 0, len(providers))
+	for _, provider := range providers {
+		if provider == "" {
+			continue
+		}
+		if provider == ai.ProviderOllama && usePlatformKeys && mode == PowerBalanced {
+			for _, model := range ollamaBalancedPlanningModelFallbacks() {
+				out = append(out, planningRouteCandidate{provider: provider, model: model})
+			}
+			continue
+		}
+		out = append(out, planningRouteCandidate{provider: provider})
+	}
+	return out
+}
+
+func ollamaBalancedPlanningModelFallbacks() []string {
+	if raw := strings.TrimSpace(os.Getenv("APEX_BALANCED_OLLAMA_PLANNING_MODELS")); raw != "" {
+		parts := strings.Split(raw, ",")
+		models := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if model := strings.TrimSpace(part); model != "" {
+				models = append(models, qualifyOllamaCloudModel(model))
+			}
+		}
+		if len(models) > 0 {
+			return models
+		}
+	}
+	return []string{
+		"kimi-k2.6:cloud",
+		"glm-5.1:cloud",
+		"deepseek-v4-pro:cloud",
+		"deepseek-v4-flash:cloud",
+		"qwen3.5:cloud",
+	}
 }
 
 func planningProviderAttemptTimeout(provider ai.AIProvider, mode PowerMode, usePlatformKeys bool) time.Duration {
@@ -254,15 +308,16 @@ func isContextDeadlineError(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded")
 }
 
-func (a *plannerRouterAdapter) broadcastPlanningProviderAttempt(provider ai.AIProvider, attempt int, total int, timeout time.Duration) {
-	if a == nil || a.manager == nil || a.buildID == "" || provider == "" {
+func (a *plannerRouterAdapter) broadcastPlanningProviderAttempt(route planningRouteCandidate, attempt int, total int, timeout time.Duration) {
+	if a == nil || a.manager == nil || a.buildID == "" || route.provider == "" {
 		return
 	}
 	timeoutLabel := "provider timeout"
 	if timeout > 0 {
 		timeoutLabel = timeout.Round(time.Second).String()
 	}
-	content := fmt.Sprintf("Lead planner is requesting a structured build plan from %s (attempt %d/%d, timeout %s).", provider, attempt, total, timeoutLabel)
+	model := firstNonEmptyString(route.model, warRoomModelOverrideForProvider(route.provider, a.powerMode, a.usePlatformKeys))
+	content := fmt.Sprintf("Lead planner is requesting a structured build plan from %s using %s (attempt %d/%d, timeout %s).", route.provider, firstNonEmptyString(model, "default model"), attempt, total, timeoutLabel)
 	a.manager.broadcast(a.buildID, &WSMessage{
 		Type:      WSAgentWorking,
 		BuildID:   a.buildID,
@@ -272,8 +327,8 @@ func (a *plannerRouterAdapter) broadcastPlanningProviderAttempt(provider ai.AIPr
 			"task_id":          a.taskID,
 			"task_type":        string(TaskPlan),
 			"agent_role":       string(RoleLead),
-			"provider":         string(provider),
-			"model":            warRoomModelOverrideForProvider(provider, a.powerMode, a.usePlatformKeys),
+			"provider":         string(route.provider),
+			"model":            model,
 			"planning_attempt": attempt,
 			"planning_total":   total,
 			"content":          content,
@@ -282,14 +337,15 @@ func (a *plannerRouterAdapter) broadcastPlanningProviderAttempt(provider ai.AIPr
 	})
 }
 
-func (a *plannerRouterAdapter) broadcastPlanningProviderFailure(provider ai.AIProvider, err error, attempt int, total int) {
-	if a == nil || a.manager == nil || a.buildID == "" || provider == "" {
+func (a *plannerRouterAdapter) broadcastPlanningProviderFailure(route planningRouteCandidate, err error, attempt int, total int) {
+	if a == nil || a.manager == nil || a.buildID == "" || route.provider == "" {
 		return
 	}
 	errText := ""
 	if err != nil {
 		errText = err.Error()
 	}
+	model := firstNonEmptyString(route.model, warRoomModelOverrideForProvider(route.provider, a.powerMode, a.usePlatformKeys))
 	a.manager.broadcast(a.buildID, &WSMessage{
 		Type:      "agent:generation_failed",
 		BuildID:   a.buildID,
@@ -299,12 +355,13 @@ func (a *plannerRouterAdapter) broadcastPlanningProviderFailure(provider ai.AIPr
 			"task_id":     a.taskID,
 			"task_type":   string(TaskPlan),
 			"agent_role":  string(RoleLead),
-			"provider":    string(provider),
+			"provider":    string(route.provider),
+			"model":       model,
 			"attempt":     attempt,
 			"max_retries": total,
 			"recoverable": attempt < total,
 			"error":       errText,
-			"content":     fmt.Sprintf("Lead planner did not receive a usable plan from %s on attempt %d/%d; rotating if another provider is available.", provider, attempt, total),
+			"content":     fmt.Sprintf("Lead planner did not receive a usable plan from %s using %s on attempt %d/%d; rotating if another route is available.", route.provider, firstNonEmptyString(model, "default model"), attempt, total),
 		},
 	})
 }
@@ -331,8 +388,8 @@ func (a *plannerRouterAdapter) broadcastPlanningProviderSuccess(provider ai.AIPr
 	})
 }
 
-func (a *plannerRouterAdapter) broadcastPlanningProviderFallback(failed ai.AIProvider, next ai.AIProvider, err error) {
-	if a == nil || a.manager == nil || a.buildID == "" || next == "" {
+func (a *plannerRouterAdapter) broadcastPlanningProviderFallback(failed planningRouteCandidate, next planningRouteCandidate, err error) {
+	if a == nil || a.manager == nil || a.buildID == "" || next.provider == "" {
 		return
 	}
 	reason := "planning_provider_rotation"
@@ -343,6 +400,8 @@ func (a *plannerRouterAdapter) broadcastPlanningProviderFallback(failed ai.AIPro
 			reason = "planning_provider_timeout"
 		}
 	}
+	nextModel := firstNonEmptyString(next.model, warRoomModelOverrideForProvider(next.provider, a.powerMode, a.usePlatformKeys))
+	failedModel := firstNonEmptyString(failed.model, warRoomModelOverrideForProvider(failed.provider, a.powerMode, a.usePlatformKeys))
 	a.manager.broadcast(a.buildID, &WSMessage{
 		Type:      "agent:provider_fallback",
 		BuildID:   a.buildID,
@@ -351,11 +410,15 @@ func (a *plannerRouterAdapter) broadcastPlanningProviderFallback(failed ai.AIPro
 		Data: map[string]any{
 			"task_id":           a.taskID,
 			"task_type":         string(TaskPlan),
-			"failed_provider":   string(failed),
-			"fallback_provider": string(next),
+			"failed_provider":   string(failed.provider),
+			"failed_model":      failedModel,
+			"fallback_provider": string(next.provider),
+			"fallback_model":    nextModel,
+			"provider":          string(next.provider),
+			"model":             nextModel,
 			"reason":            reason,
 			"original_error":    errText,
-			"content":           fmt.Sprintf("Lead planner did not receive a usable plan from %s in time; rotating to %s and continuing the same planning task.", failed, next),
+			"content":           fmt.Sprintf("Lead planner did not receive a usable plan from %s/%s in time; rotating to %s/%s and continuing the same planning task.", failed.provider, firstNonEmptyString(failedModel, "default"), next.provider, firstNonEmptyString(nextModel, "default")),
 		},
 	})
 }

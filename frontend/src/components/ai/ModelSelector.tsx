@@ -69,7 +69,7 @@ const FALLBACK_MODELS: Record<string, ModelInfo[]> = {
   ollama: [
     { id: 'kimi-k2.6', name: 'Kimi K2.6', speed: 'variable', cost_tier: 'free', description: 'Default conductor/local max model' },
     { id: 'glm-5.1', name: 'GLM-5.1', speed: 'variable', cost_tier: 'free', description: 'Fast local/open-weight coding model' },
-    { id: 'qwen-3.6-27b', name: 'Qwen 3.6 27B', speed: 'variable', cost_tier: 'free', description: 'Efficient local coding model' },
+    { id: 'qwen3.5', name: 'Qwen 3.5', speed: 'variable', cost_tier: 'free', description: 'Latest Qwen local/cloud route' },
     { id: 'devstral-small-24b', name: 'Devstral Small 24B', speed: 'variable', cost_tier: 'free', description: 'Agentic coding model' },
     { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', speed: 'variable', cost_tier: 'free', description: 'Budget local/cloud model' },
   ],

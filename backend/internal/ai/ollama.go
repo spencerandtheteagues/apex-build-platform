@@ -532,8 +532,10 @@ func (o *OllamaClient) normalizeModelAlias(model string) string {
 			return "glm-5.1:cloud"
 		case "deepseek", "deepseek-v4", "deepseek-v4-flash":
 			return "deepseek-v4-flash:cloud"
-		case "qwen", "qwen-3.6-27b":
-			return "qwen-3.6-27b:cloud"
+		case "deepseek-v4-pro":
+			return "deepseek-v4-pro:cloud"
+		case "qwen", "qwen3.5", "qwen-3.5", "qwen-3.6-27b":
+			return "qwen3.5:cloud"
 		case "devstral", "devstral-24b", "devstral-small-24b":
 			return "devstral-small-24b:cloud"
 		}

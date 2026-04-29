@@ -258,6 +258,44 @@ func TestWarRoomMaxUsesOnlyFlagshipModelOverrides(t *testing.T) {
 	}
 }
 
+func TestWarRoomBalancedDoesNotUseFlagshipModelOverrides(t *testing.T) {
+	router := &warRoomProbeRouter{}
+	am := &AgentManager{aiRouter: router, ctx: context.Background()}
+
+	am.runWarRoomLLMDebate(
+		"build-war-room-balanced-non-flagship",
+		42,
+		true,
+		PowerBalanced,
+		&ValidatedBuildSpec{AppType: "fullstack", DeliveryMode: "full_stack_preview"},
+		&BuildContract{AppType: "fullstack", DeliveryMode: "full_stack_preview"},
+	)
+
+	calls := router.snapshotCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 War Room calls, got %+v", calls)
+	}
+	wantModels := map[ai.AIProvider]string{
+		ai.ProviderClaude: selectModelForPowerMode(ai.ProviderClaude, PowerBalanced),
+		ai.ProviderGPT4:   selectModelForPowerMode(ai.ProviderGPT4, PowerBalanced),
+	}
+	for _, call := range calls {
+		want := wantModels[call.provider]
+		if want == "" {
+			t.Fatalf("unexpected War Room provider in balanced mode: %+v", call)
+		}
+		if call.opts.PowerMode != PowerBalanced {
+			t.Fatalf("expected balanced power mode for %+v", call)
+		}
+		if call.opts.ModelOverride != want {
+			t.Fatalf("expected balanced non-flagship model %q for %s, got %q", want, call.provider, call.opts.ModelOverride)
+		}
+		if flagshipModelsByProvider[call.provider][call.opts.ModelOverride] {
+			t.Fatalf("balanced War Room used flagship model for %+v", call)
+		}
+	}
+}
+
 func containsCritiqueIssue(values []buildSpecCritiqueIssue, code string) bool {
 	for _, value := range values {
 		if value.Code == code {

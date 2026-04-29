@@ -1857,33 +1857,48 @@ func (h *BuildHandler) GetAgents(c *gin.Context) {
 		return
 	}
 
-	build, err := h.manager.GetBuild(buildID)
-	if err == nil {
-		if uid != build.UserID {
-			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-			return
-		}
-
-		build.mu.RLock()
-		defer build.mu.RUnlock()
-
-		agents := make([]*Agent, 0, len(build.Agents))
-		for _, agent := range build.Agents {
-			agents = append(agents, agent)
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"build_id": buildID,
-			"agents":   agents,
-			"count":    len(agents),
-			"live":     true,
-		})
+	build, snapshot, restored, err := h.loadReadableBuild(buildID, uid)
+	if err != nil {
+		writeBuildLookupError(c, err, nil)
 		return
 	}
+	if build != nil {
+		payload, readErr := captureTimedLiveBuildRead(readableBuildStateTimeout, func() liveBuildReadPayload {
+			h.manager.selfHealReadableActiveBuild(build)
 
-	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
-	if snapErr != nil {
-		writeBuildLookupError(c, snapErr, err)
+			build.mu.RLock()
+			agents := orderedBuildAgents(build.Agents)
+			ownerID := build.UserID
+			build.mu.RUnlock()
+
+			return liveBuildReadPayload{
+				ownerID: ownerID,
+				response: gin.H{
+					"build_id":               buildID,
+					"agents":                 agents,
+					"count":                  len(agents),
+					"live":                   true,
+					"restored_from_snapshot": restored,
+				},
+			}
+		})
+		if readErr == nil {
+			if uid != payload.ownerID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+				return
+			}
+			c.JSON(http.StatusOK, payload.response)
+			return
+		}
+		log.Printf("Build %s: live agents read timed out after %s; falling back to snapshot", buildID, readableBuildStateTimeout)
+		snapshot, err = h.getBuildSnapshot(uid, buildID)
+		if err != nil {
+			writeBuildLookupError(c, err, readErr)
+			return
+		}
+	}
+	if snapshot == nil {
+		writeBuildLookupError(c, errBuildActionNotFound, errBuildActionNotFound)
 		return
 	}
 
@@ -1905,35 +1920,54 @@ func (h *BuildHandler) GetTasks(c *gin.Context) {
 		return
 	}
 
-	build, err := h.manager.GetBuild(buildID)
-	if err == nil {
-		if uid != build.UserID {
-			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-			return
-		}
-
-		build.mu.RLock()
-		defer build.mu.RUnlock()
-
-		tasksByStatus := make(map[string][]*Task)
-		for _, task := range build.Tasks {
-			status := string(task.Status)
-			tasksByStatus[status] = append(tasksByStatus[status], task)
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"build_id":        buildID,
-			"tasks":           build.Tasks,
-			"tasks_by_status": tasksByStatus,
-			"total":           len(build.Tasks),
-			"live":            true,
-		})
+	build, snapshot, restored, err := h.loadReadableBuild(buildID, uid)
+	if err != nil {
+		writeBuildLookupError(c, err, nil)
 		return
 	}
+	if build != nil {
+		payload, readErr := captureTimedLiveBuildRead(readableBuildStateTimeout, func() liveBuildReadPayload {
+			h.manager.selfHealReadableActiveBuild(build)
 
-	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
-	if snapErr != nil {
-		writeBuildLookupError(c, snapErr, err)
+			build.mu.RLock()
+			tasks := append([]*Task(nil), build.Tasks...)
+			tasksByStatus := make(map[string][]*Task)
+			for _, task := range tasks {
+				status := string(task.Status)
+				tasksByStatus[status] = append(tasksByStatus[status], task)
+			}
+			ownerID := build.UserID
+			build.mu.RUnlock()
+
+			return liveBuildReadPayload{
+				ownerID: ownerID,
+				response: gin.H{
+					"build_id":               buildID,
+					"tasks":                  tasks,
+					"tasks_by_status":        tasksByStatus,
+					"total":                  len(tasks),
+					"live":                   true,
+					"restored_from_snapshot": restored,
+				},
+			}
+		})
+		if readErr == nil {
+			if uid != payload.ownerID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+				return
+			}
+			c.JSON(http.StatusOK, payload.response)
+			return
+		}
+		log.Printf("Build %s: live tasks read timed out after %s; falling back to snapshot", buildID, readableBuildStateTimeout)
+		snapshot, err = h.getBuildSnapshot(uid, buildID)
+		if err != nil {
+			writeBuildLookupError(c, err, readErr)
+			return
+		}
+	}
+	if snapshot == nil {
+		writeBuildLookupError(c, errBuildActionNotFound, errBuildActionNotFound)
 		return
 	}
 
