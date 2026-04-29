@@ -971,11 +971,11 @@ func resolveBuildTechStack(description string, requested *TechStack, appType str
 		stack.Extras = dedupeStrings(append(stack.Extras, requested.Extras...))
 	}
 
-	if appType == "web" && explicitStaticWebIntent(description) {
+	if appType == "web" && (explicitStaticWebIntent(description) || explicitInMemoryPreviewIntent(description)) {
 		// Explicit static/frontend-only intent must win over remembered or UI-
 		// selected backend/database defaults. Otherwise the planner can leak
-		// server-side work orders into a free static build even when the user
-		// clearly said "no backend" / "no database".
+		// server-side work orders into a preview build even when the user
+		// clearly said "no backend" / "no database" / "in memory".
 		stack.Backend = ""
 		stack.Database = ""
 	}
@@ -1006,6 +1006,9 @@ func resolveBuildTechStack(description string, requested *TechStack, appType str
 
 func resolveBuildAppType(description string, requested *TechStack, bundle *autonomous.PlanningBundle) string {
 	if explicitStaticWebIntent(description) {
+		return "web"
+	}
+	if explicitInMemoryPreviewIntent(description) && (requested == nil || strings.TrimSpace(requested.Backend) == "") {
 		return "web"
 	}
 
@@ -1073,6 +1076,36 @@ func explicitStaticWebIntent(description string) bool {
 		}
 	}
 	return false
+}
+
+func explicitInMemoryPreviewIntent(description string) bool {
+	normalized := normalizeDetectionText(description)
+	if normalized == "" {
+		return false
+	}
+
+	memoryOnly := containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("all data stored in memory"),
+		normalizeDetectionText("data stored in memory"),
+		normalizeDetectionText("fully in memory"),
+		normalizeDetectionText("in memory mock backend"),
+		normalizeDetectionText("in memory mock"),
+		normalizeDetectionText("mock backend"),
+		normalizeDetectionText("local state only"),
+		normalizeDetectionText("client side state"),
+	})
+	if !memoryOnly {
+		return false
+	}
+
+	noRuntimeDependency := strings.Contains(normalized, " no database ") ||
+		strings.Contains(normalized, " no external api ") ||
+		strings.Contains(normalized, " no external apis ") ||
+		strings.Contains(normalized, " no real api key ") ||
+		strings.Contains(normalized, " no real api keys ") ||
+		strings.Contains(normalized, " zero external dependencies ")
+
+	return noRuntimeDependency
 }
 
 func convertPlannedFeatures(bundle *autonomous.PlanningBundle) []Feature {

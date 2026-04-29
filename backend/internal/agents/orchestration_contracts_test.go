@@ -62,6 +62,44 @@ func TestCompileIntentBriefFromRequestHonorsNegatedBackendRequirements(t *testin
 	}
 }
 
+func TestCompileIntentBriefFromRequestDoesNotTreatDomainJobsAsBackgroundJobs(t *testing.T) {
+	req := &BuildRequest{
+		Description: "Build Apex FieldOps AI with 7 jobs, job pipeline kanban columns, job detail pages, crews, customers, estimate builder, all data stored in memory, no database, no external APIs, and no real API keys needed.",
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+	}
+
+	brief := compileIntentBriefFromRequest(req, "platform")
+	if brief == nil {
+		t.Fatal("expected intent brief")
+	}
+	if brief.AppType != "web" {
+		t.Fatalf("app type = %q, want web for explicit in-memory preview prompt", brief.AppType)
+	}
+	if capabilityRequired(brief, CapabilityJobs) {
+		t.Fatalf("did not expect background jobs capability for contractor job-domain prompt, got %+v", brief.RequiredCapabilities)
+	}
+	if capabilityRequired(brief, CapabilityAPI) || capabilityRequired(brief, CapabilityDatabase) {
+		t.Fatalf("did not expect backend/database capabilities for explicit in-memory prompt, got %+v", brief.RequiredCapabilities)
+	}
+}
+
+func TestCompileIntentBriefFromRequestTreatsBackgroundJobsAsRuntimeCapability(t *testing.T) {
+	req := &BuildRequest{
+		Description: "Build a fullstack operations platform with a job queue, background jobs, cron scheduling, and queue workers.",
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+	}
+
+	brief := compileIntentBriefFromRequest(req, "platform")
+	if brief == nil {
+		t.Fatal("expected intent brief")
+	}
+	if !capabilityRequired(brief, CapabilityJobs) {
+		t.Fatalf("expected background jobs capability, got %+v", brief.RequiredCapabilities)
+	}
+}
+
 func TestCompileIntentBriefFromRequestDoesNotTreatCleanFileStructureAsUploadStorage(t *testing.T) {
 	req := &BuildRequest{
 		Description: "Build a polished frontend-only client dashboard called PulseBoard using React 18, Vite, and Tailwind CSS with a responsive dark modern UI that works well in the preview pane, a dashboard home with KPI cards, trend widgets, an activity feed, and a highlighted primary action, a clients page with searchable cards, filters, empty states, and detail panels, a projects page with kanban-style status columns and clear progress visuals, a settings page with profile, notifications, and theme sections, realistic seed content in the UI so the preview feels complete immediately, strong loading, empty, and error states, reusable components and a clean file structure, and no backend, no database, and no fake API requirements in this free-tier preview pass.",
@@ -612,6 +650,90 @@ func TestVerifyAndNormalizeBuildContractFillsPersistentDataAcceptance(t *testing
 	}
 	if !hasSurface(verified.AcceptanceBySurface, SurfaceData) {
 		t.Fatalf("expected data acceptance fallback for persistent schema, got %+v", verified.AcceptanceBySurface)
+	}
+}
+
+func TestVerifyAndNormalizeBuildContractNormalizesInMemoryFullStackPromptToFrontendPreview(t *testing.T) {
+	t.Parallel()
+
+	intent := &IntentBrief{
+		NormalizedRequest:    "Build a complete production-ready full-stack SaaS web app called Apex FieldOps AI. All data stored in memory. No database, no external APIs, no real API keys needed. Include contractor jobs, job pipeline, estimates, crews, settings, and simulated AI panels.",
+		AppType:              "web",
+		RequiredCapabilities: nil,
+	}
+	contract := &BuildContract{
+		ID:           "contract-in-memory-fullstack",
+		BuildID:      "build-in-memory-fullstack",
+		AppType:      "fullstack",
+		DeliveryMode: "full_stack_preview",
+		RoutePageMap: []ContractRoute{{Path: "/", File: "src/App.tsx", Surface: SurfaceFrontend}},
+		RuntimeContract: RuntimeCommandContract{
+			FrontendBuild:   "npm run build",
+			FrontendPreview: "npm run preview -- --host 0.0.0.0",
+			BackendInstall:  "npm install",
+			BackendBuild:    "npm run build",
+			BackendStart:    "npm run start",
+		},
+		AcceptanceBySurface: deriveAcceptanceBySurfaceFromAppType("fullstack"),
+		VerificationGates:   deriveVerificationGatesFromAppType("fullstack"),
+		TruthBySurface: map[string][]TruthTag{
+			string(SurfaceFrontend):    {TruthScaffolded},
+			string(SurfaceBackend):     {TruthScaffolded, TruthNeedsBackendRuntime},
+			string(SurfaceIntegration): {TruthPartiallyWired},
+			string(SurfaceDeployment):  {TruthScaffolded},
+		},
+	}
+
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected corrected contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected in-memory full-stack wording to verify as frontend preview, got blockers %v", report.Blockers)
+	}
+	if verified.AppType != "web" {
+		t.Fatalf("expected corrected app type web, got %q", verified.AppType)
+	}
+	if verified.DeliveryMode != "frontend_preview_only" {
+		t.Fatalf("expected frontend_preview_only delivery, got %q", verified.DeliveryMode)
+	}
+	if verified.APIContract != nil || verified.RuntimeContract.BackendStart != "" || verified.RuntimeContract.BackendBuild != "" {
+		t.Fatalf("expected backend runtime to be stripped, got api=%+v runtime=%+v", verified.APIContract, verified.RuntimeContract)
+	}
+	if hasSurface(verified.AcceptanceBySurface, SurfaceBackend) || hasSurface(verified.AcceptanceBySurface, SurfaceIntegration) {
+		t.Fatalf("expected backend/integration acceptance to be stripped, got %+v", verified.AcceptanceBySurface)
+	}
+	if _, exists := verified.TruthBySurface[string(SurfaceBackend)]; exists {
+		t.Fatalf("expected backend truth surface to be stripped, got %+v", verified.TruthBySurface)
+	}
+}
+
+func TestVerifyAndNormalizeBuildContractStillBlocksRealFullStackWithoutBackendContract(t *testing.T) {
+	t.Parallel()
+
+	intent := &IntentBrief{
+		NormalizedRequest:    "Build a full-stack SaaS with real API endpoints, backend auth, Postgres persistence, and dashboard pages.",
+		AppType:              "fullstack",
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAPI, CapabilityAuth, CapabilityDatabase},
+	}
+	contract := &BuildContract{
+		ID:                  "contract-real-fullstack-missing-backend",
+		BuildID:             "build-real-fullstack-missing-backend",
+		AppType:             "fullstack",
+		DeliveryMode:        "full_stack_preview",
+		RoutePageMap:        []ContractRoute{{Path: "/", File: "src/App.tsx", Surface: SurfaceFrontend}},
+		RuntimeContract:     deriveRuntimeContractFromAppType("fullstack"),
+		AcceptanceBySurface: deriveAcceptanceBySurfaceFromAppType("fullstack"),
+		VerificationGates:   deriveVerificationGatesFromAppType("fullstack"),
+	}
+
+	_, report := verifyAndNormalizeBuildContract(intent, contract)
+	if report.Status != VerificationBlocked {
+		t.Fatalf("expected real fullstack missing backend contract to block, got status=%q warnings=%v", report.Status, report.Warnings)
+	}
+	joined := strings.Join(report.Blockers, " | ")
+	if !strings.Contains(joined, "frontend/backend integration requested without backend runtime contract") {
+		t.Fatalf("expected backend runtime blocker, got %v", report.Blockers)
 	}
 }
 

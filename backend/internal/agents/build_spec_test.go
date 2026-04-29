@@ -530,6 +530,47 @@ func TestCreateBuildPlanFromPlanningBundlePrefersStaticIntentOverPlannerFullstac
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundlePrefersInMemoryPreviewIntentOverFullStackWording(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a complete production-ready full-stack SaaS web app called Apex FieldOps AI using React, TypeScript, Tailwind, and shadcn/ui. All data stored in memory. No database, no external APIs, no real API keys needed. Include 7 jobs, job pipeline, estimate builder, crew management, settings, and simulated AI panels."
+	plan := createBuildPlanFromPlanningBundle("build-in-memory-preview", description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node.js",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-in-memory-preview",
+			EstimatedTime: 20 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if plan.AppType != "web" {
+		t.Fatalf("expected explicit in-memory preview intent to override planner fullstack app type, got %q", plan.AppType)
+	}
+	if plan.TechStack.Backend != "" || plan.TechStack.Database != "" {
+		t.Fatalf("expected backend/database to be stripped for in-memory preview, got %+v", plan.TechStack)
+	}
+	if plan.APIContract != nil || len(plan.APIEndpoints) != 0 {
+		t.Fatalf("expected no API contract/endpoints for in-memory preview, got api=%+v endpoints=%+v", plan.APIContract, plan.APIEndpoints)
+	}
+	if plan.ScaffoldID != "frontend/react-vite-spa" {
+		t.Fatalf("expected frontend scaffold, got %q", plan.ScaffoldID)
+	}
+	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+		t.Fatalf("expected in-memory preview plan to omit backend work order, got %+v", wo)
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundleStaticIntentOverridesRequestedBackendAndDatabase(t *testing.T) {
 	t.Parallel()
 

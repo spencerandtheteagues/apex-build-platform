@@ -923,6 +923,11 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 	corrected := *contract
 	now := time.Now().UTC()
 
+	if shouldNormalizeInMemoryContractToFrontendPreview(intent, corrected) {
+		normalizeInMemoryContractToFrontendPreview(&corrected)
+		report.Warnings = append(report.Warnings, "normalized explicit in-memory/no-external-runtime request to frontend preview contract")
+	}
+
 	if strings.TrimSpace(corrected.DeliveryMode) == "" {
 		corrected.DeliveryMode = defaultDeliveryModeForAppType(corrected.AppType)
 		if strings.TrimSpace(corrected.DeliveryMode) != "" {
@@ -1023,6 +1028,139 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 	corrected.VerificationBlockers = nil
 	report.ConfidenceScore = 0.88
 	return &corrected, report
+}
+
+func shouldNormalizeInMemoryContractToFrontendPreview(intent *IntentBrief, contract BuildContract) bool {
+	if intent == nil || !explicitInMemoryPreviewIntent(intent.NormalizedRequest) {
+		return false
+	}
+	if intentHasExplicitBackendRuntimeRequirement(intent.NormalizedRequest, nil) {
+		return false
+	}
+	return strings.TrimSpace(contract.AppType) == "" ||
+		strings.EqualFold(strings.TrimSpace(contract.AppType), "web") ||
+		strings.EqualFold(strings.TrimSpace(contract.AppType), "fullstack")
+}
+
+func normalizeInMemoryContractToFrontendPreview(contract *BuildContract) {
+	if contract == nil {
+		return
+	}
+	contract.AppType = "web"
+	contract.DeliveryMode = "frontend_preview_only"
+	contract.APIContract = nil
+	contract.BackendResourceMap = nil
+	contract.AuthContract = nil
+	contract.EnvVarContract = filterInMemoryPreviewEnvVars(contract.EnvVarContract)
+	contract.RuntimeContract.BackendInstall = ""
+	contract.RuntimeContract.BackendBuild = ""
+	contract.RuntimeContract.BackendStart = ""
+	contract.AcceptanceBySurface = filterContractAcceptanceSurfaces(contract.AcceptanceBySurface, SurfaceFrontend, SurfaceDeployment, SurfaceGlobal)
+	contract.VerificationGates = filterContractVerificationGates(contract.VerificationGates, SurfaceFrontend, SurfaceDeployment, SurfaceGlobal)
+	contract.TruthBySurface = filterFrontendPreviewTruthBySurface(contract.TruthBySurface)
+}
+
+func filterInMemoryPreviewEnvVars(vars []BuildEnvVar) []BuildEnvVar {
+	if len(vars) == 0 {
+		return nil
+	}
+	out := make([]BuildEnvVar, 0, len(vars))
+	for _, env := range vars {
+		name := strings.ToUpper(strings.TrimSpace(env.Name))
+		if name == "" {
+			continue
+		}
+		switch {
+		case strings.Contains(name, "API_KEY"),
+			strings.Contains(name, "SECRET"),
+			strings.Contains(name, "TOKEN"),
+			strings.Contains(name, "DATABASE"),
+			strings.Contains(name, "POSTGRES"),
+			strings.Contains(name, "MYSQL"),
+			strings.Contains(name, "SQLITE"),
+			strings.Contains(name, "STRIPE"),
+			strings.Contains(name, "BILLING"),
+			strings.Contains(name, "OPENAI"),
+			strings.Contains(name, "ANTHROPIC"),
+			strings.Contains(name, "GEMINI"),
+			strings.Contains(name, "GROK"),
+			strings.Contains(name, "XAI"),
+			strings.Contains(name, "OLLAMA"):
+			continue
+		}
+		out = append(out, env)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func filterContractAcceptanceSurfaces(acceptance []SurfaceAcceptanceContract, allowed ...ContractSurface) []SurfaceAcceptanceContract {
+	if len(acceptance) == 0 {
+		return nil
+	}
+	allowedSet := map[ContractSurface]bool{}
+	for _, surface := range allowed {
+		allowedSet[surface] = true
+	}
+	out := make([]SurfaceAcceptanceContract, 0, len(acceptance))
+	for _, item := range acceptance {
+		if allowedSet[item.Surface] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func filterContractVerificationGates(gates []SurfaceVerificationGate, allowed ...ContractSurface) []SurfaceVerificationGate {
+	if len(gates) == 0 {
+		return nil
+	}
+	allowedSet := map[ContractSurface]bool{}
+	for _, surface := range allowed {
+		allowedSet[surface] = true
+	}
+	out := make([]SurfaceVerificationGate, 0, len(gates))
+	for _, item := range gates {
+		if allowedSet[item.Surface] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func filterFrontendPreviewTruthBySurface(truth map[string][]TruthTag) map[string][]TruthTag {
+	if len(truth) == 0 {
+		return nil
+	}
+	out := make(map[string][]TruthTag, len(truth))
+	allowedSurfaces := map[string]bool{
+		string(SurfaceFrontend):   true,
+		string(SurfaceDeployment): true,
+		string(SurfaceGlobal):     true,
+	}
+	for surface, tags := range truth {
+		if !allowedSurfaces[surface] {
+			continue
+		}
+		filtered := make([]TruthTag, 0, len(tags))
+		for _, tag := range tags {
+			switch tag {
+			case TruthBlocked, TruthNeedsApproval, TruthNeedsExternalAPI, TruthNeedsBackendRuntime, TruthNeedsSecrets:
+				continue
+			default:
+				filtered = append(filtered, tag)
+			}
+		}
+		if normalized := normalizeTruthTags(filtered); len(normalized) > 0 {
+			out[surface] = normalized
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func mergeRuntimeContractDefaults(runtime RuntimeCommandContract, defaults RuntimeCommandContract) (RuntimeCommandContract, bool) {
@@ -1577,6 +1715,9 @@ func inferIntentAppType(description string, stack *TechStack) string {
 			return "web"
 		}
 	}
+	if explicitInMemoryPreviewIntent(description) {
+		return "web"
+	}
 	normalized := normalizeDetectionText(description)
 	dashboardWithRuntimeSignals := containsAffirmedTerm(normalized, normalizeDetectionText("dashboard")) &&
 		containsAnyAffirmedTerm(normalized, []string{
@@ -1615,13 +1756,57 @@ func inferIntentAppType(description string, stack *TechStack) string {
 	}
 }
 
+func intentHasExplicitBackendRuntimeRequirement(description string, stack *TechStack) bool {
+	if stack != nil && strings.TrimSpace(stack.Backend) != "" {
+		return true
+	}
+	normalized := normalizeDetectionText(description)
+	if normalized == "" {
+		return false
+	}
+	return containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("real backend"),
+		normalizeDetectionText("backend runtime"),
+		normalizeDetectionText("backend server"),
+		normalizeDetectionText("backend endpoint"),
+		normalizeDetectionText("backend endpoints"),
+		normalizeDetectionText("server side"),
+		normalizeDetectionText("api endpoint"),
+		normalizeDetectionText("api endpoints"),
+		normalizeDetectionText("api route"),
+		normalizeDetectionText("api routes"),
+		normalizeDetectionText("backend api"),
+		normalizeDetectionText("rest api"),
+		normalizeDetectionText("graphql api"),
+		normalizeDetectionText("webhook"),
+		normalizeDetectionText("database"),
+		normalizeDetectionText("postgres"),
+		normalizeDetectionText("mysql"),
+		normalizeDetectionText("sqlite"),
+		normalizeDetectionText("supabase"),
+		normalizeDetectionText("auth"),
+		normalizeDetectionText("login"),
+		normalizeDetectionText("signup"),
+		normalizeDetectionText("oauth"),
+		normalizeDetectionText("stripe"),
+		normalizeDetectionText("billing"),
+		normalizeDetectionText("payment"),
+		normalizeDetectionText("subscription"),
+		normalizeDetectionText("serverless function"),
+	})
+}
+
 func detectRequiredCapabilities(description string, stack *TechStack) []CapabilityRequirement {
 	normalized := normalizeDetectionText(description)
 	caps := []CapabilityRequirement{}
 	if stack != nil && strings.TrimSpace(stack.Backend) != "" {
 		caps = append(caps, CapabilityAPI)
 	} else if containsAnyAffirmedTerm(normalized, []string{
-		normalizeDetectionText("api"),
+		normalizeDetectionText("api endpoint"),
+		normalizeDetectionText("api route"),
+		normalizeDetectionText("backend api"),
+		normalizeDetectionText("rest api"),
+		normalizeDetectionText("graphql api"),
 		normalizeDetectionText("backend"),
 		normalizeDetectionText("server"),
 		normalizeDetectionText("webhook"),
@@ -1636,7 +1821,7 @@ func detectRequiredCapabilities(description string, stack *TechStack) []Capabili
 		{CapabilityAuth, []string{"auth", "login", "signup", "session", "oauth"}},
 		{CapabilityDatabase, []string{"database", "postgres", "mysql", "sqlite", "record", "persist"}},
 		{CapabilityStorage, []string{"upload", "uploads", "storage", "file storage", "s3", "blob", "bucket", "object store"}},
-		{CapabilityJobs, []string{"queue", "job", "worker", "cron", "background"}},
+		{CapabilityJobs, []string{"background job", "background jobs", "job queue", "queue worker", "worker", "cron", "scheduled task", "async job", "background processing"}},
 		{CapabilityBilling, []string{"stripe", "billing", "payment", "subscription"}},
 		{CapabilitySearch, []string{"search", "filter", "query"}},
 		{CapabilityRealtime, []string{"realtime", "real-time", "stream", "websocket", "socket"}},
