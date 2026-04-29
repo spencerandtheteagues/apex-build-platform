@@ -277,6 +277,28 @@ func TestHandleReviewCompletionLinksFixTaskToTriggerTask(t *testing.T) {
 	}
 }
 
+func TestHandleReviewCompletionDoesNotTreatNegatedCriticalFindingAsBlocker(t *testing.T) {
+	manager := &AgentManager{}
+	sourceTask := &Task{ID: "review-clean", Type: TaskReview, Status: TaskCompleted}
+	build := &Build{
+		ID:          "review-clean-build",
+		Description: "Clean review should not loop into repair",
+		Status:      BuildReviewing,
+		Tasks:       []*Task{sourceTask},
+	}
+
+	manager.handleReviewCompletion(build, sourceTask, &TaskOutput{
+		Messages: []string{
+			"No critical issues found. Remaining notes are non-critical visual polish only.",
+			"No security vulnerabilities, injection, XSS, or authentication bypass concerns were found.",
+		},
+	})
+
+	if len(build.Tasks) != 1 {
+		t.Fatalf("expected clean review to avoid follow-on fix task, got %d tasks", len(build.Tasks))
+	}
+}
+
 func TestHandleReviewCompletionSkipsFixTaskWhileValidationRecoveryActive(t *testing.T) {
 	manager := &AgentManager{
 		subscribers: make(map[string][]chan *WSMessage),

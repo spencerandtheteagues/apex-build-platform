@@ -2510,7 +2510,8 @@ func (h *BuildHandler) shouldPreferLiveCompletedBuildResponse(snapshot *models.C
 		return true
 	}
 	if snapshotRepresentsSuccess && !liveRepresentsSuccess {
-		return false
+		return liveUpdatedAt.After(snapshot.UpdatedAt) &&
+			(liveStatus == BuildFailed || liveStatus == BuildCancelled)
 	}
 
 	return snapshot.UpdatedAt.Before(liveUpdatedAt)

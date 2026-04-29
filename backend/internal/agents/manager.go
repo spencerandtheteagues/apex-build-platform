@@ -7309,6 +7309,66 @@ func (am *AgentManager) handleTestCompletion(build *Build, sourceTask *Task, out
 	build.mu.Unlock()
 }
 
+func reviewMessageIndicatesCriticalIssue(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+
+	// Review agents often include assurance lines such as "no critical issues"
+	// or "non-critical polish only". Treating those as blockers creates costly
+	// review/fix loops after verification has already passed.
+	negatedCriticalPatterns := []string{
+		"no critical",
+		"no blocker",
+		"no blocking",
+		"no security vulnerability",
+		"no security vulnerabilities",
+		"no vulnerabilities",
+		"no injection",
+		"no xss",
+		"no authentication bypass",
+		"without critical",
+		"not critical",
+		"non-critical",
+		"noncritical",
+		"0 critical",
+		"zero critical",
+		"critical issues fixed",
+		"critical issues resolved",
+		"critical issues addressed",
+		"all critical issues fixed",
+		"all critical issues resolved",
+		"all critical issues addressed",
+	}
+	for _, pattern := range negatedCriticalPatterns {
+		if strings.Contains(lower, pattern) {
+			return false
+		}
+	}
+
+	actionablePatterns := []string{
+		"severity: critical",
+		"critical:",
+		"critical -",
+		"critical issue",
+		"critical bug",
+		"critical defect",
+		"critical failure",
+		"critical security",
+		"security vulnerability",
+		"injection",
+		"xss",
+		"authentication bypass",
+	}
+	for _, pattern := range actionablePatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 // handleReviewCompletion processes code review results and creates fix tasks for critical issues
 func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, output *TaskOutput) {
 	if output == nil {
@@ -7318,10 +7378,7 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 	// Parse review output for critical issues
 	hasCritical := false
 	for _, msg := range output.Messages {
-		lower := strings.ToLower(msg)
-		if strings.Contains(lower, "critical") || strings.Contains(lower, "security vulnerability") ||
-			strings.Contains(lower, "injection") || strings.Contains(lower, "xss") ||
-			strings.Contains(lower, "authentication bypass") {
+		if reviewMessageIndicatesCriticalIssue(msg) {
 			hasCritical = true
 			break
 		}
@@ -16069,6 +16126,27 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 // runBuildFinalization is the manager-owned terminal pipeline for readiness
 // checks, deterministic repairs, solver recovery, and final persistence.
 func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildCompletionSnapshot) {
+	if build == nil {
+		return
+	}
+
+	rerunAfterFinalization := false
+	build.mu.Lock()
+	if build.FinalizationInProgress {
+		build.mu.Unlock()
+		return
+	}
+	build.FinalizationInProgress = true
+	build.mu.Unlock()
+	defer func() {
+		build.mu.Lock()
+		build.FinalizationInProgress = false
+		build.mu.Unlock()
+		if rerunAfterFinalization {
+			am.checkBuildCompletion(build)
+		}
+	}()
+
 	build.mu.Lock()
 	now := time.Now()
 	build.UpdatedAt = now
@@ -16134,6 +16212,7 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 			}
 			build.mu.Unlock()
 			if am.applyDeterministicValidationRepairs(build, readinessErrors, errorSummary, now) {
+				rerunAfterFinalization = true
 				return
 			}
 			if am.launchFinalValidationSolverRecovery(build, allFiles, readinessErrors, errorSummary, now) {
@@ -16156,11 +16235,12 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 		} else {
 			build.mu.Lock()
 			if build.Status != BuildFailed && build.Status != BuildCancelled {
-				build.Status = BuildCompleted
-				build.Progress = 100
+				if build.Progress < 99 {
+					build.Progress = 99
+				}
 				build.Error = ""
-				build.CompletedAt = &now
-				status = build.Status
+				build.CompletedAt = nil
+				status = BuildCompleted
 				progress = build.Progress
 				buildError = ""
 			} else {
@@ -16173,9 +16253,31 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 			// a loadable interactive preview before declaring the build complete.
 			// Returns true if a repair was queued and finalization should stop here.
 			if am.runPreviewVerificationGate(build, allFiles, &status, &buildError, now) {
+				build.mu.RLock()
+				rerunAfterFinalization = build.Status == BuildTesting
+				build.mu.RUnlock()
 				return
 			}
-			if status != BuildCompleted {
+			if status == BuildCompleted {
+				build.mu.Lock()
+				if build.Status != BuildFailed && build.Status != BuildCancelled {
+					build.Status = BuildCompleted
+					build.Progress = 100
+					build.Error = ""
+					build.CompletedAt = &now
+					build.UpdatedAt = now
+					status = build.Status
+					progress = build.Progress
+					buildError = ""
+				} else {
+					status = build.Status
+					progress = build.Progress
+					if strings.TrimSpace(build.Error) != "" {
+						buildError = build.Error
+					}
+				}
+				build.mu.Unlock()
+			} else {
 				build.mu.RLock()
 				status = build.Status
 				progress = build.Progress

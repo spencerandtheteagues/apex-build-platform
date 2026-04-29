@@ -516,6 +516,7 @@ type Build struct {
 	UpdatedAt                   time.Time             `json:"updated_at"`
 	CompletedAt                 *time.Time            `json:"completed_at,omitempty"`
 	Error                       string                `json:"error,omitempty"`
+	FinalizationInProgress      bool                  `json:"-"`
 
 	mu sync.RWMutex
 }

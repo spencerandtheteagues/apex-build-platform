@@ -345,6 +345,9 @@ func TestRuntimeVerifierDefaultTimeouts(t *testing.T) {
 	if got := httpOnly.runtimeInstallTimeout(httpOnly.runtimeTotalTimeout()); got != 90*time.Second {
 		t.Fatalf("expected default HTTP-only install timeout to be 90s, got %s", got)
 	}
+	if got := httpOnly.runtimeServerReadyTimeout(httpOnly.runtimeTotalTimeout(), httpOnly.runtimeInstallTimeout(httpOnly.runtimeTotalTimeout())); got != 45*time.Second {
+		t.Fatalf("expected default HTTP-only server-ready timeout to be 45s, got %s", got)
+	}
 
 	withBrowser := &RuntimeVerifier{browser: &BrowserVerifier{chromePath: "/usr/bin/chromium-browser"}}
 	if got := withBrowser.runtimeTotalTimeout(); got != 180*time.Second {
@@ -352,6 +355,9 @@ func TestRuntimeVerifierDefaultTimeouts(t *testing.T) {
 	}
 	if got := withBrowser.runtimeInstallTimeout(withBrowser.runtimeTotalTimeout()); got != 120*time.Second {
 		t.Fatalf("expected browser install timeout to be 120s, got %s", got)
+	}
+	if got := withBrowser.runtimeServerReadyTimeout(withBrowser.runtimeTotalTimeout(), withBrowser.runtimeInstallTimeout(withBrowser.runtimeTotalTimeout())); got != 60*time.Second {
+		t.Fatalf("expected browser server-ready timeout to be 60s, got %s", got)
 	}
 }
 
@@ -361,6 +367,7 @@ func TestRuntimeVerifierCustomTimeouts(t *testing.T) {
 	rv := &RuntimeVerifier{
 		totalTimeout:   42 * time.Second,
 		installTimeout: 17 * time.Second,
+		readyTimeout:   13 * time.Second,
 	}
 	if got := rv.runtimeTotalTimeout(); got != 42*time.Second {
 		t.Fatalf("expected custom total timeout to be preserved, got %s", got)
@@ -368,8 +375,20 @@ func TestRuntimeVerifierCustomTimeouts(t *testing.T) {
 	if got := rv.runtimeInstallTimeout(rv.runtimeTotalTimeout()); got != 17*time.Second {
 		t.Fatalf("expected custom install timeout to be preserved, got %s", got)
 	}
+	if got := rv.runtimeServerReadyTimeout(rv.runtimeTotalTimeout(), rv.runtimeInstallTimeout(rv.runtimeTotalTimeout())); got != 13*time.Second {
+		t.Fatalf("expected custom server-ready timeout to be preserved, got %s", got)
+	}
 	if got := formatRuntimeTimeout(rv.runtimeInstallTimeout(rv.runtimeTotalTimeout())); got != "17s" {
 		t.Fatalf("expected formatted install timeout 17s, got %q", got)
+	}
+}
+
+func TestRuntimeVerifierServerReadyTimeoutEnvOverride(t *testing.T) {
+	t.Setenv("APEX_PREVIEW_SERVER_READY_TIMEOUT_SECONDS", "75")
+
+	rv := &RuntimeVerifier{}
+	if got := rv.runtimeServerReadyTimeout(150*time.Second, 90*time.Second); got != 75*time.Second {
+		t.Fatalf("expected env server-ready timeout 75s, got %s", got)
 	}
 }
 

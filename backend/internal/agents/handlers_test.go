@@ -2209,6 +2209,84 @@ func TestGetCompletedBuildPrefersLiveTerminalSuccessOverStaleFailedSnapshotEvenW
 	}
 }
 
+func TestGetCompletedBuildPrefersNewerLiveTerminalFailureOverStaleSuccessSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	createdAt := time.Now().Add(-2 * time.Minute).UTC()
+	staleSuccessCompletedAt := createdAt.Add(90 * time.Second)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "terminal-preview-failure-lag",
+		UserID:      1,
+		Description: "Preview failure should not be hidden by stale success",
+		Status:      string(BuildCompleted),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    100,
+		Error:       "",
+		FilesJSON:   "[]",
+		CreatedAt:   createdAt,
+		UpdatedAt:   createdAt.Add(95 * time.Second),
+		CompletedAt: &staleSuccessCompletedAt,
+	}).Error; err != nil {
+		t.Fatalf("create stale success snapshot: %v", err)
+	}
+
+	liveFailedAt := createdAt.Add(110 * time.Second)
+	liveBuild := &Build{
+		ID:          "terminal-preview-failure-lag",
+		UserID:      1,
+		Status:      BuildFailed,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Description: "Preview failure should not be hidden by stale success",
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		Progress:    99,
+		Error:       "Preview verification failed after repair attempt (boot_failed): Vite dev server did not become ready",
+		CreatedAt:   createdAt,
+		UpdatedAt:   liveFailedAt,
+		CompletedAt: &liveFailedAt,
+	}
+
+	am := &AgentManager{
+		builds:      map[string]*Build{liveBuild.ID: liveBuild},
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderGemini},
+			userProviders: []ai.AIProvider{ai.ProviderGemini},
+		},
+		db: db,
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/builds/terminal-preview-failure-lag", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected completed build 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal completed build response: %v", err)
+	}
+	if body["status"] != "failed" {
+		t.Fatalf("expected live failed status to win over stale success, got %v", body["status"])
+	}
+	if body["progress"] != float64(99) {
+		t.Fatalf("expected live failure progress 99, got %v", body["progress"])
+	}
+	if !strings.Contains(fmt.Sprint(body["error"]), "Preview verification failed") {
+		t.Fatalf("expected live preview error, got %v", body["error"])
+	}
+	if body["live"] != true {
+		t.Fatalf("expected live=true for in-memory terminal build, got %v", body["live"])
+	}
+}
+
 func TestSnapshotReadEndpointsFallbackToPersistedState(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{

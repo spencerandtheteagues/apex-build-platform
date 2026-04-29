@@ -54,6 +54,7 @@ type RuntimeVerifier struct {
 	canary         runtimeCanaryTester   // nil = interaction canary disabled
 	totalTimeout   time.Duration
 	installTimeout time.Duration
+	readyTimeout   time.Duration
 }
 
 // NewRuntimeVerifier creates a RuntimeVerifier with HTTP checks only.
@@ -174,10 +175,16 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	// ── 5. Wait for port ready ───────────────────────────────────────────
 	stop := make(chan struct{})
 	defer close(stop)
-	if !waitForTCPPort(port, 20*time.Second, stop) {
+	readyTimeout := rv.runtimeServerReadyTimeout(totalTimeout, installTimeout)
+	if deadline, ok := bootCtx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 && remaining < readyTimeout {
+			readyTimeout = remaining
+		}
+	}
+	if !waitForTCPPort(port, readyTimeout, stop) {
 		serverLogs := truncateLog(viteStderr.String(), 1500)
 		return rv.rtFailWithLogs("boot_failed",
-			fmt.Sprintf("Vite dev server did not become ready on port %d within 20 s", port),
+			fmt.Sprintf("Vite dev server did not become ready on port %d within %s", port, formatRuntimeTimeout(readyTimeout)),
 			"Check vite.config.ts for syntax errors. Ensure all imports resolve. Common cause: missing or misconfigured entry point.",
 			start, serverLogs,
 		)
@@ -410,6 +417,34 @@ func (rv *RuntimeVerifier) runtimeInstallTimeout(total time.Duration) time.Durat
 		return total
 	}
 	return total - 30*time.Second
+}
+
+func (rv *RuntimeVerifier) runtimeServerReadyTimeout(total, install time.Duration) time.Duration {
+	if rv.readyTimeout > 0 {
+		return rv.readyTimeout
+	}
+	if seconds := strings.TrimSpace(os.Getenv("APEX_PREVIEW_SERVER_READY_TIMEOUT_SECONDS")); seconds != "" {
+		if parsed, err := strconv.Atoi(seconds); err == nil && parsed > 0 {
+			return time.Duration(parsed) * time.Second
+		}
+	}
+
+	target := 45 * time.Second
+	if total >= 180*time.Second {
+		target = 60 * time.Second
+	}
+
+	remaining := total - install
+	if remaining <= 0 {
+		return 5 * time.Second
+	}
+	if remaining < target {
+		if remaining < 5*time.Second {
+			return 5 * time.Second
+		}
+		return remaining
+	}
+	return target
 }
 
 func formatRuntimeTimeout(timeout time.Duration) string {

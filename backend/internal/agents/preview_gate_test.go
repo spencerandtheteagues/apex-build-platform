@@ -8,12 +8,16 @@ import (
 )
 
 type stubPreviewVerifier struct {
-	result *PreviewVerificationResult
-	files  []VerifiableFile
+	result   *PreviewVerificationResult
+	files    []VerifiableFile
+	onVerify func([]VerifiableFile)
 }
 
 func (s *stubPreviewVerifier) VerifyBuildFiles(ctx context.Context, files []VerifiableFile, isFullStack bool) *PreviewVerificationResult {
 	s.files = append([]VerifiableFile(nil), files...)
+	if s.onVerify != nil {
+		s.onVerify(s.files)
+	}
 	return s.result
 }
 
@@ -132,6 +136,72 @@ func TestRunPreviewVerificationGateTerminalFailureDropsProgressBelowCompletion(t
 	}
 	if buildError == "" {
 		t.Fatal("expected build error to be populated")
+	}
+}
+
+func TestRunBuildFinalizationDoesNotMarkCompletedBeforePreviewPasses(t *testing.T) {
+	now := time.Now().UTC()
+	build := &Build{
+		ID:                      "finalize-preview-order",
+		UserID:                  1,
+		Status:                  BuildReviewing,
+		Mode:                    ModeFull,
+		PowerMode:               PowerBalanced,
+		Description:             "Build a previewable React app",
+		Progress:                97,
+		PhasedPipelineComplete:  true,
+		CompileValidationPassed: true,
+		Agents:                  map[string]*Agent{},
+		Tasks: []*Task{
+			{
+				ID:     "frontend",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{Files: []GeneratedFile{
+					{Path: "package.json", Content: `{"scripts":{"dev":"vite","build":"vite build"},"dependencies":{"@vitejs/plugin-react":"latest","vite":"latest","typescript":"latest","react":"latest","react-dom":"latest"}}`},
+					{Path: "index.html", Content: `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`},
+					{Path: "src/main.tsx", Content: `import React from "react"; import { createRoot } from "react-dom/client"; import App from "./App"; createRoot(document.getElementById("root")!).render(<App />);`},
+					{Path: "src/App.tsx", Content: `export default function App(){ return <main>Ready</main>; }`},
+					{Path: "README.md", Content: `# Ready`},
+				}},
+			},
+		},
+		Checkpoints: []*Checkpoint{},
+		CreatedAt:   now.Add(-time.Minute),
+		UpdatedAt:   now,
+	}
+
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		builds:      map[string]*Build{build.ID: build},
+		subscribers: map[string][]chan *WSMessage{},
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{Passed: true},
+			onVerify: func([]VerifiableFile) {
+				build.mu.RLock()
+				status := build.Status
+				progress := build.Progress
+				completedAt := build.CompletedAt
+				build.mu.RUnlock()
+				if status == BuildCompleted || progress == 100 || completedAt != nil {
+					t.Fatalf("preview verifier observed premature completion: status=%s progress=%d completedAt=%v", status, progress, completedAt)
+				}
+			},
+		},
+	}
+
+	manager.runBuildFinalization(build, manager.buildCompletionSnapshot(build))
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if build.Status != BuildCompleted {
+		t.Fatalf("expected build to complete after preview pass, got %s", build.Status)
+	}
+	if build.Progress != 100 {
+		t.Fatalf("expected progress 100 after preview pass, got %d", build.Progress)
+	}
+	if build.CompletedAt == nil {
+		t.Fatal("expected completed_at after preview pass")
 	}
 }
 
