@@ -55,3 +55,17 @@ func TestOllamaBaseURLNormalizesV1Suffix(t *testing.T) {
 		t.Fatalf("baseURL = %q, want https://ollama.com", got)
 	}
 }
+
+func TestOllamaCloudDisablesReasoningByDefault(t *testing.T) {
+	t.Parallel()
+
+	cloudClient := NewOllamaClient("https://ollama.com", "cloud-key")
+	if got := cloudClient.reasoningEffort("kimi-k2.6"); got != "none" {
+		t.Fatalf("cloud reasoningEffort() = %q, want none", got)
+	}
+
+	localClient := NewOllamaClient("http://localhost:11434", "")
+	if got := localClient.reasoningEffort("deepseek-r1:14b"); got != "" {
+		t.Fatalf("local reasoningEffort() = %q, want empty", got)
+	}
+}

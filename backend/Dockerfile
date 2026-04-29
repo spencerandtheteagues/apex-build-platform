@@ -115,15 +115,23 @@ chmod 700 "$ssh_dir"
 write_secret_file() {
   value="$1"
   target="$2"
+  tmp="${target}.tmp"
+
+  if printf '%s' "$value" | grep -q 'BEGIN OPENSSH PRIVATE KEY'; then
+    printf '%s\n' "$value" > "$target"
+    return
+  fi
 
   if printf '%s' "$value" | grep -q '\\n'; then
     printf '%b\n' "$value" > "$target"
     return
   fi
 
-  if printf '%s' "$value" | base64 -d > "$target" 2>/dev/null; then
+  if printf '%s' "$value" | base64 -d > "$tmp" 2>/dev/null && grep -q 'BEGIN OPENSSH PRIVATE KEY\|^# .*SSH-\|^ssh-' "$tmp"; then
+    mv "$tmp" "$target"
     return
   fi
+  rm -f "$tmp"
 
   printf '%s\n' "$value" > "$target"
 }

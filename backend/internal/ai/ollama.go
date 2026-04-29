@@ -31,6 +31,7 @@ type ollamaRequest struct {
 	MaxTokens       int             `json:"max_tokens,omitempty"`
 	Temperature     float32         `json:"temperature,omitempty"`
 	Stream          bool            `json:"stream"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
 	UseContextCache bool            `json:"use_context_cache,omitempty"` // Moonshot direct API only
 }
 
@@ -148,6 +149,7 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		MaxTokens:       o.getMaxTokens(req),
 		Temperature:     req.Temperature,
 		Stream:          false,
+		ReasoningEffort: o.reasoningEffort(model),
 		UseContextCache: req.CacheSystemPrompt && o.isMoonshotAPI(),
 	}
 
@@ -193,6 +195,16 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		Duration:  time.Since(startTime),
 		CreatedAt: time.Now(),
 	}, nil
+}
+
+func (o *OllamaClient) reasoningEffort(model string) string {
+	if strings.TrimSpace(o.apiKey) == "" {
+		return ""
+	}
+	// Ollama Cloud exposes reasoning models through the OpenAI-compatible API.
+	// Without this field, Kimi/GLM can spend the whole completion budget in
+	// message.reasoning and return an empty visible message.content.
+	return "none"
 }
 
 // buildMessages creates the message array for Ollama API
