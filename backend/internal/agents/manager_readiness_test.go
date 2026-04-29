@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -3046,6 +3047,21 @@ func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder
 	}
 }
 
+func TestParseMissingDependencyNamesFromTypeScriptCannotFindModule(t *testing.T) {
+	t.Parallel()
+
+	got := parseMissingDependencyNamesFromIssues([]string{
+		`Preview verification build failed: node_modules/@testing-library/react/types/index.d.ts(9,8): error TS2307: Cannot find module '@testing-library/dom' or its corresponding type declarations.`,
+		`Preview verification build failed: src/App.tsx(4,29): error TS2307: Cannot find module 'react-router-dom' or its corresponding type declarations.`,
+		`Preview verification build failed: src/App.tsx(5,36): error TS2307: Cannot find module '@/components/pages/Dashboard' or its corresponding type declarations.`,
+	})
+
+	want := []string{"@testing-library/dom", "react-router-dom"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("expected external missing modules %v, got %v", want, got)
+	}
+}
+
 func TestApplyDeterministicValidationRepairsCreatesAliasModuleAfterRecoveryCap(t *testing.T) {
 	t.Parallel()
 
@@ -3111,6 +3127,9 @@ export default function App(){ return <React.Suspense fallback={null}><Pipeline 
 	}
 	if strings.TrimSpace(byPath["src/components/pages/Pipeline.tsx"]) == "" {
 		t.Fatalf("expected aliased src module placeholder to be created, got files %+v", files)
+	}
+	if !strings.Contains(byPath["src/components/pages/Pipeline.tsx"], "export default Pipeline") {
+		t.Fatalf("expected React.lazy placeholder to provide default export, got %q", byPath["src/components/pages/Pipeline.tsx"])
 	}
 	if strings.Contains(byPath["src/App.tsx"], "components/pages/Pipeline.cjs") {
 		t.Fatalf("repair must not rewrite alias import to stale root cjs placeholder, got %q", byPath["src/App.tsx"])
@@ -5481,7 +5500,7 @@ func TestApplyDeterministicPreValidationNormalizationRepairsStaticReactViteBuild
 	if !strings.Contains(manifest, `"preview": "vite preview"`) {
 		t.Fatalf("expected preview script to be added, got %s", manifest)
 	}
-	for _, needle := range []string{`"vitest"`, `"@testing-library/react"`, `"@testing-library/jest-dom"`, `"jsdom"`} {
+	for _, needle := range []string{`"vitest"`, `"@testing-library/react"`, `"@testing-library/dom"`, `"@testing-library/jest-dom"`, `"jsdom"`} {
 		if !strings.Contains(manifest, needle) {
 			t.Fatalf("expected %s in normalized package.json, got %s", needle, manifest)
 		}

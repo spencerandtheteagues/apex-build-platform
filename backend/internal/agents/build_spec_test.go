@@ -566,6 +566,14 @@ func TestCreateBuildPlanFromPlanningBundlePrefersInMemoryPreviewIntentOverFullSt
 	if plan.ScaffoldID != "frontend/react-vite-spa" {
 		t.Fatalf("expected frontend scaffold, got %q", plan.ScaffoldID)
 	}
+	if plan.TemplateID != "" {
+		t.Fatalf("expected runtime-free preview prompt not to inherit runtime template %q", plan.TemplateID)
+	}
+	for _, check := range plan.Acceptance {
+		if strings.HasPrefix(check.ID, "ai-saas-") || strings.HasPrefix(check.ID, "dashboard-") {
+			t.Fatalf("did not expect runtime template acceptance checks for in-memory FieldOps build, got %+v", check)
+		}
+	}
 	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
 		t.Fatalf("expected in-memory preview plan to omit backend work order, got %+v", wo)
 	}

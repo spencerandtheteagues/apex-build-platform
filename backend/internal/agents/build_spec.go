@@ -430,6 +430,13 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 	// Detect app template — overrides appType to fullstack for AI SaaS and other
 	// template categories that always require a backend.
 	detectedTemplate := DetectAppTemplate(description)
+	if detectedTemplate != nil && explicitRuntimeFreePreviewIntent(description) && templateRequiresRuntime(detectedTemplate) {
+		// Explicit runtime-free preview instructions ("all data in memory", "no
+		// database", "no external APIs") are a stronger contract than a broad
+		// template match. Otherwise a vertical demo app with dashboard language can
+		// inherit auth/database acceptance checks that it explicitly opted out of.
+		detectedTemplate = nil
+	}
 	if detectedTemplate != nil {
 		switch detectedTemplate.ID {
 		case "ai-saas", "saas-dashboard", "crm", "client-portal", "marketplace",
@@ -485,7 +492,7 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 		Files:         files,
 		ScaffoldFiles: scaffoldFiles,
 		ScaffoldID:    scaffold.ID,
-		TemplateID:    func() string {
+		TemplateID: func() string {
 			if detectedTemplate != nil {
 				return detectedTemplate.ID
 			}
@@ -1079,6 +1086,10 @@ func resolveBuildAppType(description string, requested *TechStack, bundle *auton
 		return "fullstack"
 	}
 	return "fullstack"
+}
+
+func explicitRuntimeFreePreviewIntent(description string) bool {
+	return explicitStaticWebIntent(description) || explicitInMemoryPreviewIntent(description)
 }
 
 func explicitStaticWebIntent(description string) bool {

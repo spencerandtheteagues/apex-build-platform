@@ -8061,8 +8061,12 @@ func dependencyVersionHint(pkg string) string {
 		return "^5.6.3"
 	case "vitest":
 		return "^2.1.5"
+	case "@testing-library/dom":
+		return "^10.4.0"
 	case "@testing-library/react":
 		return "^16.0.1"
+	case "@testing-library/user-event":
+		return "^14.5.2"
 	case "@testing-library/jest-dom":
 		return "^6.6.3"
 	case "jsdom":
@@ -8363,6 +8367,9 @@ func missingManifestDependenciesForGeneratedFiles(files []GeneratedFile, manifes
 	}
 	if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
 		missing = append(missing, "@testing-library/react")
+	}
+	if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/dom") {
+		missing = append(missing, "@testing-library/dom")
 	}
 	if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
 		missing = append(missing, "@testing-library/jest-dom")
@@ -10543,7 +10550,9 @@ func parseProviderBlockedTestingDependencyNames(blockers []string) []string {
 
 	known := []string{
 		"@testing-library/jest-dom",
+		"@testing-library/dom",
 		"@testing-library/react",
+		"@testing-library/user-event",
 		"@types/jest",
 		"jest-environment-jsdom",
 		"identity-obj-proxy",
@@ -10647,6 +10656,9 @@ func (am *AgentManager) applyDeterministicProviderBlockedTestingManifestRepair(b
 		}
 		if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
 			pkgs = append(pkgs, "@testing-library/react")
+		}
+		if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/dom") {
+			pkgs = append(pkgs, "@testing-library/dom")
 		}
 		if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
 			pkgs = append(pkgs, "@testing-library/jest-dom")
@@ -10854,10 +10866,8 @@ func missingLocalModulePlaceholderContent(targetPath string, binding generatedIm
 				b.WriteString(fmt.Sprintf("export const %s: any = {};\n", name))
 			}
 		}
-		if strings.TrimSpace(binding.DefaultImport) != "" {
-			b.WriteString("\n")
-			b.WriteString(fmt.Sprintf("export default %s;\n", componentName))
-		}
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("export default %s;\n", componentName))
 		return b.String()
 	}
 
@@ -12555,6 +12565,7 @@ func parseMissingDependencyNamesFromIssues(issues []string) []string {
 		return nil
 	}
 	reMissing := regexp.MustCompile(`does not declare dependency "([^"]+)"`)
+	reTSMissing := regexp.MustCompile(`Cannot find module ['"]([^'"]+)['"]`)
 	seen := map[string]bool{}
 	pkgs := make([]string, 0, len(issues))
 	for _, issue := range issues {
@@ -12564,6 +12575,18 @@ func parseMissingDependencyNamesFromIssues(issues []string) []string {
 				continue
 			}
 			pkg := canonicalGeneratedDependencyName(match[1])
+			if pkg == "" || seen[pkg] {
+				continue
+			}
+			seen[pkg] = true
+			pkgs = append(pkgs, pkg)
+		}
+		matches = reTSMissing.FindAllStringSubmatch(strings.TrimSpace(issue), -1)
+		for _, match := range matches {
+			if len(match) != 2 {
+				continue
+			}
+			pkg := packageNameFromImportPath(match[1])
 			if pkg == "" || seen[pkg] {
 				continue
 			}
@@ -13346,6 +13369,9 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 		if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
 			missingPkgs = append(missingPkgs, "@testing-library/react")
 		}
+		if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/dom") {
+			missingPkgs = append(missingPkgs, "@testing-library/dom")
+		}
 		if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
 			missingPkgs = append(missingPkgs, "@testing-library/jest-dom")
 		}
@@ -13374,6 +13400,9 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 			}
 			if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
 				missingPkgs = append(missingPkgs, "@testing-library/react")
+			}
+			if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/dom") {
+				missingPkgs = append(missingPkgs, "@testing-library/dom")
 			}
 			if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
 				missingPkgs = append(missingPkgs, "@testing-library/jest-dom")
