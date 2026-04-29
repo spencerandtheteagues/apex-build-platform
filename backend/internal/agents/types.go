@@ -580,6 +580,7 @@ type BuildPlan struct {
 	ScaffoldFiles []GeneratedFile        `json:"scaffold_files,omitempty"`
 	SpecHash      string                 `json:"spec_hash,omitempty"`
 	ScaffoldID    string                 `json:"scaffold_id,omitempty"`
+	TemplateID    string                 `json:"template_id,omitempty"` // detected app blueprint (e.g. "ai-saas", "crm")
 	Source        string                 `json:"source,omitempty"`
 	Ownership     []BuildOwnership       `json:"ownership,omitempty"`
 	EnvVars       []BuildEnvVar          `json:"env_vars,omitempty"`

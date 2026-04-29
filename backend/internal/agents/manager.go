@@ -22416,9 +22416,18 @@ ABSOLUTE RULES:
 
 	localStrictStackLock := ""
 	localStrictScopeHint := ""
+	templateContext := ""
 	assuranceContext := strings.TrimSpace(apexBuildAssuranceMission)
 	if len(build) > 0 && build[0] != nil {
 		assuranceContext = buildAssurancePromptContext(build[0])
+		if build[0].Plan != nil && build[0].Plan.TemplateID != "" {
+			for _, tmpl := range appTemplateRegistry {
+				if tmpl.ID == build[0].Plan.TemplateID {
+					templateContext = TemplateSystemContext(tmpl, build[0].Description)
+					break
+				}
+			}
+		}
 	}
 	if len(build) > 0 && build[0] != nil && am.isLocalDevStrictPreviewBuild(build[0]) {
 		localStrictStackLock = `
@@ -22452,7 +22461,7 @@ Summarize progress concisely. Coordinate agent outputs into a cohesive applicati
 FULL-STACK DELIVERY RULE:
 - Freeze the contract early, deliver the frontend/UI shell first, then fill backend and data behind that interface.
 - Keep user-facing updates in plain English.
-- At each major step, make it obvious what section is active now, what comes next, and whether anything is blocked.` + "\n\n" + assuranceContext + techHint + baseRules,
+- At each major step, make it obvious what section is active now, what comes next, and whether anything is blocked.` + "\n\n" + assuranceContext + templateContext + techHint + baseRules,
 
 		RolePlanner: `You are the Planning Agent — an expert software architect and product designer who creates detailed, actionable build plans.
 Your job: decompose the app into a precise file-by-file implementation plan AND define the visual design direction.
@@ -22531,7 +22540,7 @@ EXAMPLE PLAN FOR A TASK MANAGER APP:
 3. Database: tasks + users schema, seed data
 4. Backend: auth routes, task CRUD, validation
 5. Testing: API contract verification, frontend/backend integration check
-6. Reviewer: security, types, missing error states` + "\n\n" + assuranceContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
+6. Reviewer: security, types, missing error states` + "\n\n" + assuranceContext + templateContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
 		RoleArchitect: `You are the Architect Agent — a senior systems architect who designs production-grade software architectures.
 Your job: make concrete technology decisions and produce a concise implementation blueprint for the coding agents.
@@ -22577,7 +22586,7 @@ env_vars:
   - PORT=3001
   (list all environment variables with example values)
 </api_contract>
-This contract will be shared with Frontend and Backend agents to ensure they connect correctly.` + "\n\n" + assuranceContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
+This contract will be shared with Frontend and Backend agents to ensure they connect correctly.` + "\n\n" + assuranceContext + templateContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
 		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, distinctive, production-ready interfaces.
 You specialize in modern React with TypeScript, Vite, and Tailwind CSS.

@@ -426,6 +426,19 @@ func (a *plannerRouterAdapter) broadcastPlanningProviderFallback(failed planning
 func createBuildPlanFromPlanningBundle(buildID string, description string, requested *TechStack, bundle *autonomous.PlanningBundle) *BuildPlan {
 	appType := resolveBuildAppType(description, requested, bundle)
 	stack := resolveBuildTechStack(description, requested, appType, bundle)
+
+	// Detect app template — overrides appType to fullstack for AI SaaS and other
+	// template categories that always require a backend.
+	detectedTemplate := DetectAppTemplate(description)
+	if detectedTemplate != nil {
+		switch detectedTemplate.ID {
+		case "ai-saas", "saas-dashboard", "crm", "client-portal", "marketplace",
+			"booking", "inventory", "project-management", "community":
+			if appType == "web" {
+				appType = "fullstack"
+			}
+		}
+	}
 	scaffold := selectBuildScaffold(appType, stack)
 
 	features := convertPlannedFeatures(bundle)
@@ -439,6 +452,16 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 	preflight := convertPreflightChecks(bundle)
 	acceptance := append([]BuildAcceptanceCheck(nil), scaffold.Acceptance...)
 	acceptance = append(acceptance, deriveAcceptanceChecks(appType, stack)...)
+	if detectedTemplate != nil {
+		for _, check := range detectedTemplate.AcceptanceChecks {
+			acceptance = append(acceptance, BuildAcceptanceCheck{
+				ID:          check,
+				Description: check,
+				Owner:       RoleReviewer,
+				Required:    true,
+			})
+		}
+	}
 	ownership := buildOwnershipMap(scaffold)
 	workOrders := buildWorkOrders(appType, stack, scaffold, ownership, acceptance)
 	scaffoldFiles := scaffoldBootstrapFiles(scaffold, description, stack)
@@ -462,6 +485,12 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 		Files:         files,
 		ScaffoldFiles: scaffoldFiles,
 		ScaffoldID:    scaffold.ID,
+		TemplateID:    func() string {
+			if detectedTemplate != nil {
+				return detectedTemplate.ID
+			}
+			return ""
+		}(),
 		Source:        "autonomous_planner_v1",
 		Ownership:     ownership,
 		EnvVars:       envVars,
