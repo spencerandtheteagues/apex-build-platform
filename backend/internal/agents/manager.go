@@ -25524,6 +25524,10 @@ func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, a
 				firstHTTPFailure = fmt.Sprintf("%s returned HTTP %d", healthPath, resp.StatusCode)
 			}
 		}
+		// Server is up and responding with a client error — no point retrying.
+		if firstHTTPFailure != "" {
+			return firstHTTPFailure, false
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 

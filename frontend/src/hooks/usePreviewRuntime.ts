@@ -70,7 +70,7 @@ export function usePreviewRuntime({
         setBackendPreviewAvailable(response.data.backend_preview_available !== false)
         setBackendPreviewReason(response.data.backend_preview_reason || '')
         if (previewSandboxRequired) {
-          setUseSandbox(true)
+          setUseSandbox(previewDockerAvailable && !previewSandboxDegraded)
         }
       } catch {
         setDockerAvailable(false)
@@ -167,11 +167,12 @@ export function usePreviewRuntime({
     const maxRetries = 3
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       try {
+        const requestedSandbox = useSandbox && dockerAvailable && !sandboxDegraded
         let data: any
         try {
           data = await apiService.startFullStackPreview({
             project_id: projectId,
-            sandbox: useSandbox,
+            sandbox: requestedSandbox,
             start_backend: Boolean(serverDetection?.has_backend),
             require_backend: false,
             backend_entry_file: serverDetection?.entry_file,
@@ -184,14 +185,14 @@ export function usePreviewRuntime({
           }
           const response = await apiService.client.post('/preview/start', {
             project_id: projectId,
-            sandbox: useSandbox,
+            sandbox: requestedSandbox,
           })
           data = response.data
         }
 
         if (activeProjectIdRef.current !== requestProjectId) return
 
-        const actualSandbox = typeof data.sandbox === 'boolean' ? data.sandbox : useSandbox
+        const actualSandbox = typeof data.sandbox === 'boolean' ? data.sandbox : requestedSandbox
         setStatus(data.preview)
         setPreviewUrl(data.proxy_url || data.preview?.url || data.url || '')
         setIframeLoading(true)
@@ -234,7 +235,7 @@ export function usePreviewRuntime({
     if (activeProjectIdRef.current === requestProjectId) {
       setLoading(false)
     }
-  }, [clearDevTools, onServerStatusHint, projectId, serverDetection, setError, useSandbox])
+  }, [clearDevTools, dockerAvailable, onServerStatusHint, projectId, sandboxDegraded, serverDetection, setError, useSandbox])
 
   useEffect(() => {
     const activeForCurrentProject = status?.active && status.project_id === projectId

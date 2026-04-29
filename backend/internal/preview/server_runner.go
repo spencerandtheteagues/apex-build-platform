@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -449,6 +450,7 @@ func (sr *ServerRunner) DetectServer(ctx context.Context, projectID uint) (*Serv
 func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*ServerProcess, error) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
+	detectedFramework := ""
 
 	// Check if already running
 	if proc, exists := sr.processes[config.ProjectID]; exists {
@@ -467,6 +469,7 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 			metrics.RecordPreviewBackendStart("detect_failed")
 			return nil, fmt.Errorf("failed to detect server: %w", err)
 		}
+		detectedFramework = detection.Framework
 		if !detection.HasBackend {
 			metrics.RecordPreviewBackendStart("no_backend_detected")
 			return nil, fmt.Errorf("no backend server detected in project")
@@ -501,62 +504,6 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		}
 	}
 
-	// Build command and args based on server type
-	var cmdName string
-	var args []string
-
-	switch {
-	case config.Command == "npm":
-		cmdName = "npm"
-		args = []string{"run", "start"}
-
-	case strings.HasPrefix(config.Command, "npm run "):
-		cmdName = "npm"
-		args = strings.Fields(strings.TrimPrefix(config.Command, "npm "))
-
-	case config.Command == "npx next dev":
-		cmdName = "npx"
-		args = []string{"next", "dev"}
-
-	case config.Command == "node":
-		cmdName = "node"
-		args = []string{config.EntryFile}
-
-	case config.Command == "python":
-		cmdName = "python3"
-		args = []string{config.EntryFile}
-
-	case config.Command == "uvicorn":
-		// FastAPI: python3 -m uvicorn main:app --host 0.0.0.0 --port 9100
-		// Use "python3 -m uvicorn" instead of bare "uvicorn" so it works
-		// even when pip install used --user and ~/.local/bin isn't in PATH.
-		module := strings.TrimSuffix(config.EntryFile, ".py")
-		module = strings.ReplaceAll(module, "/", ".")
-		cmdName = "python3"
-		args = []string{"-m", "uvicorn", module + ":app", "--host", "0.0.0.0", "--port", fmt.Sprintf("%d", port)}
-
-	case config.Command == "go run":
-		cmdName = "go"
-		if config.EntryFile != "" {
-			args = []string{"run", config.EntryFile}
-		} else {
-			args = []string{"run", "."}
-		}
-
-	case config.Command == "cargo run":
-		cmdName = "cargo"
-		args = []string{"run"}
-
-	default:
-		// Custom command
-		parts := strings.Fields(config.Command)
-		if len(parts) == 0 {
-			return nil, fmt.Errorf("invalid command: %s", config.Command)
-		}
-		cmdName = parts[0]
-		args = append(parts[1:], config.EntryFile)
-	}
-
 	// Build environment variables
 	env := os.Environ()
 	env = append(env, fmt.Sprintf("PORT=%d", port))
@@ -569,6 +516,13 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		for k, v := range config.EnvVars {
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
 		}
+	}
+
+	// Build command and args based on server type.
+	cmdName, args, cmdErr := buildServerCommand(config.Command, config.EntryFile, detectedFramework, port)
+	if cmdErr != nil {
+		sr.releasePort(config.ProjectID)
+		return nil, cmdErr
 	}
 
 	// Start process via runtime backend
@@ -764,9 +718,6 @@ func detectNodeServerCommand(packageJSON string) (string, bool) {
 		if strings.Contains(strings.ToLower(strings.TrimSpace(scripts["dev"])), "next") {
 			return "npm run dev", true
 		}
-		if strings.Contains(strings.ToLower(strings.TrimSpace(scripts["start"])), "next") {
-			return "npm", true
-		}
 		return "npx next dev", true
 	}
 	if len(scripts) == 0 {
@@ -782,6 +733,70 @@ func detectNodeServerCommand(packageJSON string) (string, bool) {
 		return "npm run serve", true
 	}
 	return "", false
+}
+
+func buildServerCommand(command string, entryFile string, framework string, port int) (string, []string, error) {
+	nextRuntime := strings.EqualFold(strings.TrimSpace(framework), "next") || isNextRuntimeEntry(entryFile)
+
+	switch {
+	case command == "npm":
+		if nextRuntime {
+			return "npx", []string{"next", "dev", "--hostname", "0.0.0.0", "--port", strconv.Itoa(port)}, nil
+		}
+		return "npm", []string{"run", "start"}, nil
+
+	case strings.HasPrefix(command, "npm run "):
+		args := strings.Fields(strings.TrimPrefix(command, "npm "))
+		if nextRuntime && len(args) >= 2 && args[0] == "run" {
+			args = append(args, "--", "--hostname", "0.0.0.0", "--port", strconv.Itoa(port))
+		}
+		return "npm", args, nil
+
+	case command == "npx next dev":
+		return "npx", []string{"next", "dev", "--hostname", "0.0.0.0", "--port", strconv.Itoa(port)}, nil
+
+	case command == "node":
+		return "node", []string{entryFile}, nil
+
+	case command == "python":
+		return "python3", []string{entryFile}, nil
+
+	case command == "uvicorn":
+		// FastAPI: python3 -m uvicorn main:app --host 0.0.0.0 --port 9100
+		// Use "python3 -m uvicorn" instead of bare "uvicorn" so it works
+		// even when pip install used --user and ~/.local/bin isn't in PATH.
+		module := strings.TrimSuffix(entryFile, ".py")
+		module = strings.ReplaceAll(module, "/", ".")
+		return "python3", []string{"-m", "uvicorn", module + ":app", "--host", "0.0.0.0", "--port", fmt.Sprintf("%d", port)}, nil
+
+	case command == "go run":
+		if entryFile != "" {
+			return "go", []string{"run", entryFile}, nil
+		}
+		return "go", []string{"run", "."}, nil
+
+	case command == "cargo run":
+		return "cargo", []string{"run"}, nil
+
+	default:
+		// Custom command
+		parts := strings.Fields(command)
+		if len(parts) == 0 {
+			return "", nil, fmt.Errorf("invalid command: %s", command)
+		}
+		return parts[0], append(parts[1:], entryFile), nil
+	}
+}
+
+func isNextRuntimeEntry(entryFile string) bool {
+	switch filepath.ToSlash(strings.TrimSpace(entryFile)) {
+	case "app/page.tsx", "app/page.ts", "app/page.jsx", "app/page.js",
+		"src/app/page.tsx", "src/app/page.ts", "src/app/page.jsx", "src/app/page.js",
+		"pages/index.tsx", "pages/index.ts", "pages/index.jsx", "pages/index.js":
+		return true
+	default:
+		return false
+	}
 }
 
 func packageJSONHasDependency(packageJSON string, depName string) bool {

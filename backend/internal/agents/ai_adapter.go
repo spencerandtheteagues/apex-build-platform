@@ -534,6 +534,9 @@ For code files, use this exact format:
 
 	if response == nil || response.Content == "" {
 		plDone(0, 0, 0, 0, fmt.Errorf("empty response"))
+		if a.byokManager != nil && reservation != nil {
+			_ = a.byokManager.FinalizeCredits(reservation, 0)
+		}
 		log.Printf("AI generation returned empty response")
 		return nil, fmt.Errorf("AI generation returned empty response")
 	}

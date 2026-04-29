@@ -273,10 +273,36 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 		nextEnvVars := mergePreviewEnvVars(req.EnvVars, req.BackendEnvVars)
 		previewStatus, serverStatus, startErr := h.startFrameworkRuntimePreview(c, req.ProjectID, nextEnvVars)
 		if startErr != nil {
-			metrics.RecordPreviewStart("fullstack", "error", false)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"success": false,
-				"error":   startErr.Error(),
+			if req.RequireBackend {
+				metrics.RecordPreviewStart("fullstack", "error", false)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"success": false,
+					"error":   startErr.Error(),
+				})
+				return
+			}
+
+			fallbackStatus, fallbackSandbox, fallbackErr := h.startFrontendPreviewFallback(c, req.ProjectID, req.EntryPoint, req.Framework, req.EnvVars, req.Sandbox)
+			if fallbackErr != nil {
+				metrics.RecordPreviewStart("fullstack", "error", fallbackSandbox)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"success": false,
+					"error":   fmt.Sprintf("%s; frontend preview fallback also failed: %v", startErr.Error(), fallbackErr),
+				})
+				return
+			}
+			metrics.RecordPreviewStart("fullstack", "degraded", fallbackSandbox)
+			c.JSON(http.StatusOK, gin.H{
+				"success":          true,
+				"preview":          fallbackStatus,
+				"server":           serverStatus,
+				"proxy_url":        fallbackStatus.URL,
+				"degraded":         true,
+				"diagnostics":      gin.H{"preview_started": true, "runtime_preview": "next", "runtime_error": startErr.Error(), "frontend_fallback": true},
+				"message":          "Next.js runtime preview fell back to frontend bundle preview",
+				"sandbox":          fallbackSandbox,
+				"sandbox_degraded": h.sandboxFallbackActive() && !fallbackSandbox,
+				"runtime_preview":  false,
 			})
 			return
 		}
@@ -1010,7 +1036,7 @@ func previewPublicBase(c *gin.Context) (string, string) {
 }
 
 func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
-	base := h.buildProxyBaseURL(c, projectID)
+	base := previewRootURL(h.buildProxyBaseURL(c, projectID))
 	token := h.issuePreviewAccessToken(c, projectID)
 	if token == "" {
 		return base
@@ -1160,12 +1186,16 @@ func (h *PreviewHandler) buildBackendProxyBaseURL(c *gin.Context, projectID uint
 }
 
 func (h *PreviewHandler) buildBackendProxyURLForBrowser(c *gin.Context, projectID uint) string {
-	base := h.buildBackendProxyBaseURL(c, projectID)
+	base := previewRootURL(h.buildBackendProxyBaseURL(c, projectID))
 	token := h.issuePreviewAccessToken(c, projectID)
 	if token == "" {
 		return base
 	}
 	return base + "?preview_token=" + url.QueryEscape(token)
+}
+
+func previewRootURL(base string) string {
+	return strings.TrimRight(base, "/") + "/"
 }
 
 func backendProxyTargetURL(serverStatus *preview.ServerStatus) (*url.URL, error) {
@@ -1496,6 +1526,9 @@ func (h *PreviewHandler) sandboxFallbackActive() bool {
 func (h *PreviewHandler) resolveRequestedPreviewSandbox(requested bool) (bool, error) {
 	if requested {
 		if h.factory == nil || !h.factory.IsDockerAvailable() {
+			if h.sandboxFallbackActive() {
+				return false, nil
+			}
 			return false, fmt.Errorf("secure preview mode requires Docker container previews, but Docker preview is not available")
 		}
 		return true, nil
@@ -1612,6 +1645,37 @@ func (h *PreviewHandler) startFrameworkRuntimePreview(c *gin.Context, projectID 
 		LastAccess: time.Now(),
 	}
 	return status, serverStatus, nil
+}
+
+func (h *PreviewHandler) startFrontendPreviewFallback(c *gin.Context, projectID uint, entryPoint string, framework string, envVars map[string]string, requestedSandbox bool) (*preview.PreviewStatus, bool, error) {
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(requestedSandbox)
+	if sandboxErr != nil {
+		return nil, useSandbox, sandboxErr
+	}
+
+	config := &preview.PreviewConfig{
+		ProjectID:  projectID,
+		EntryPoint: entryPoint,
+		Framework:  framework,
+		EnvVars:    envVars,
+	}
+
+	var status *preview.PreviewStatus
+	var err error
+	if h.factory != nil {
+		status, err = h.factory.StartPreview(c.Request.Context(), config, useSandbox)
+	} else {
+		if useSandbox {
+			return nil, useSandbox, fmt.Errorf("sandbox preview is required but not configured")
+		}
+		status, err = h.server.StartPreview(c.Request.Context(), config)
+	}
+	if err != nil {
+		return nil, useSandbox, err
+	}
+	status.URL = h.buildProxyURL(c, projectID)
+	h.setPreviewAccessCookie(c, projectID)
+	return status, useSandbox, nil
 }
 
 func (h *PreviewHandler) runtimePreviewStatus(projectID uint) *preview.PreviewStatus {

@@ -436,6 +436,84 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 	}
 }
 
+func TestESBuildBundlerWrapsNextAppRouterPageForPreview(t *testing.T) {
+	cache := NewBundleCache(DefaultCacheConfig())
+	defer cache.Close()
+
+	bundler := NewESBuildBundler(cache)
+	if !bundler.IsAvailable() {
+		t.Skip("esbuild not available, skipping integration test")
+	}
+
+	files := ProjectFiles{
+		ProjectID: 4,
+		Files: map[string]string{
+			"package.json": `{
+  "name": "fieldops-next",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "next": "^15.3.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}`,
+			"app/layout.tsx": `import React from "react";
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return <main className="layout">{children}</main>;
+}`,
+			"app/page.tsx": `import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+export default function Page() {
+  const pathname = usePathname();
+  return <section><h1>Apex FieldOps AI</h1><p>{pathname}</p><Link href="/jobs">Jobs</Link></section>;
+}`,
+		},
+		PackageJSON: &PackageJSON{
+			Name: "fieldops-next",
+			Type: "module",
+			Dependencies: map[string]string{
+				"next":      "^15.3.2",
+				"react":     "^18.3.1",
+				"react-dom": "^18.3.1",
+			},
+		},
+	}
+
+	config := BundleConfig{
+		EntryPoint: "app/page.tsx",
+		Format:     "iife",
+		Minify:     false,
+		SourceMap:  false,
+		Target:     []string{"es2020"},
+		Framework:  "next",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := bundler.BundleFromFiles(ctx, files.ProjectID, files, config)
+	if err != nil {
+		t.Fatalf("Bundle failed: %v", err)
+	}
+
+	if !result.Success {
+		for _, e := range result.Errors {
+			t.Logf("Bundle error: %s (file: %s, line: %d)", e.Message, e.File, e.Line)
+		}
+		t.Fatal("expected Next app-router preview wrapper bundle to succeed")
+	}
+
+	output := string(result.OutputJS)
+	if !containsStr(output, "Apex FieldOps AI") {
+		t.Fatalf("expected bundled output to contain Next page content, got %q", output)
+	}
+	if containsStr(output, "next/navigation") || containsStr(output, "next/link") {
+		t.Fatalf("expected Next imports to resolve through preview shims, got %q", output)
+	}
+}
+
 func TestESBuildBundlerMapsImportMetaEnvForPreviewRuntime(t *testing.T) {
 	cache := NewBundleCache(DefaultCacheConfig())
 	defer cache.Close()

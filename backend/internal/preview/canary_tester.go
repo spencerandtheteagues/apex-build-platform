@@ -229,10 +229,16 @@ func (ct *CanaryTester) RunCanaryInteractions(ctx context.Context, pageURL strin
 	var baselineErrors canaryRuntimeErrorPayload
 	var postErrors canaryRuntimeErrorPayload
 	var mount canaryMountPayload
-	_ = json.Unmarshal([]byte(harnessJSON), &interaction)
+	if err := json.Unmarshal([]byte(harnessJSON), &interaction); err != nil {
+		log.Printf("[canary] build probe at %s: failed to parse harness JSON: %v", pageURL, err)
+		return &CanaryResult{Skipped: true, Duration: time.Since(start)}
+	}
+	if err := json.Unmarshal([]byte(settledMountJSON), &mount); err != nil {
+		log.Printf("[canary] build probe at %s: failed to parse mount JSON: %v", pageURL, err)
+		return &CanaryResult{Skipped: true, Duration: time.Since(start)}
+	}
 	_ = json.Unmarshal([]byte(baselineErrorsJSON), &baselineErrors)
 	_ = json.Unmarshal([]byte(postErrorsJSON), &postErrors)
-	_ = json.Unmarshal([]byte(settledMountJSON), &mount)
 
 	result := deriveCanaryResult(interaction, mount, settledVisible, baselineErrors.Errors, postErrors.Errors, time.Since(start))
 	emitCanaryProbeTelemetry(pageURL, result)

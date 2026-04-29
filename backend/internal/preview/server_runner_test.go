@@ -110,6 +110,52 @@ func TestDetectNodeServerCommandRunsNextEvenWhenScriptsAreMissing(t *testing.T) 
 	}
 }
 
+func TestDetectNodeServerCommandIgnoresNextStartForPreview(t *testing.T) {
+	t.Parallel()
+
+	command, ok := detectNodeServerCommand(`{
+		"scripts": {
+			"start": "next start"
+		},
+		"dependencies": {
+			"next": "^15.3.2",
+			"react": "^18.3.0",
+			"react-dom": "^18.3.0"
+		}
+	}`)
+	if !ok {
+		t.Fatal("expected next server command")
+	}
+	if command != "npx next dev" {
+		t.Fatalf("command = %q, want npx next dev", command)
+	}
+}
+
+func TestBuildServerCommandPinsNextDevHostAndPort(t *testing.T) {
+	t.Parallel()
+
+	cmd, args, err := buildServerCommand("npm run dev", "app/page.tsx", "next", 9123)
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+	if cmd != "npm" {
+		t.Fatalf("cmd = %q, want npm", cmd)
+	}
+	want := []string{"run", "dev", "--", "--hostname", "0.0.0.0", "--port", "9123"}
+	if fmt.Sprint(args) != fmt.Sprint(want) {
+		t.Fatalf("args = %#v, want %#v", args, want)
+	}
+
+	cmd, args, err = buildServerCommand("npx next dev", "app/page.tsx", "next", 9124)
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+	want = []string{"next", "dev", "--hostname", "0.0.0.0", "--port", "9124"}
+	if cmd != "npx" || fmt.Sprint(args) != fmt.Sprint(want) {
+		t.Fatalf("cmd/args = %q %#v, want npx %#v", cmd, args, want)
+	}
+}
+
 func TestDetectServerPrefersDevServerForTypescriptBackend(t *testing.T) {
 	t.Parallel()
 

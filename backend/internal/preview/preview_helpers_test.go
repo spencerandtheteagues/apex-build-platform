@@ -1,13 +1,21 @@
 package preview
 
 import (
+	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"apex-build/internal/bundler"
+	"apex-build/pkg/models"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestNormalizePreviewPath(t *testing.T) {
@@ -189,4 +197,109 @@ func TestPreviewWebSocketOriginAllowsSandboxedProxyOrigin(t *testing.T) {
 	if !ps.upgrader.CheckOrigin(req) {
 		t.Fatal("expected preview websocket origin check to allow null origin from sandboxed preview iframes")
 	}
+}
+
+func TestStartPreviewSkipsOccupiedPortAndReturnsReachableURL(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve occupied port: %v", err)
+	}
+	defer occupied.Close()
+	basePort := occupied.Addr().(*net.TCPAddr).Port
+
+	db := newPreviewTestDB(t, 101)
+	ps := NewPreviewServer(db)
+	ps.basePort = basePort
+
+	status, err := ps.StartPreview(context.Background(), &PreviewConfig{
+		ProjectID:  101,
+		EntryPoint: "index.html",
+		Framework:  "vanilla",
+	})
+	if err != nil {
+		t.Fatalf("start preview: %v", err)
+	}
+	defer ps.StopPreview(context.Background(), 101)
+	if status.Port == basePort {
+		t.Fatalf("preview reused occupied port %d", basePort)
+	}
+	if !strings.HasPrefix(status.URL, "http://127.0.0.1:") {
+		t.Fatalf("preview URL = %q, want loopback URL", status.URL)
+	}
+
+	resp, err := http.Get(status.URL) //nolint:gosec // Local preview test endpoint.
+	if err != nil {
+		t.Fatalf("GET preview URL: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("preview status = %d body=%s", resp.StatusCode, string(body))
+	}
+	if !strings.Contains(string(body), "Preview booted") {
+		t.Fatalf("preview body = %q", string(body))
+	}
+}
+
+func TestGetPreviewStatusRemovesUnreachableSession(t *testing.T) {
+	db := newPreviewTestDB(t, 102)
+	ps := NewPreviewServer(db)
+
+	status, err := ps.StartPreview(context.Background(), &PreviewConfig{
+		ProjectID:  102,
+		EntryPoint: "index.html",
+		Framework:  "vanilla",
+	})
+	if err != nil {
+		t.Fatalf("start preview: %v", err)
+	}
+	session := ps.sessions[102]
+	if session == nil || session.server == nil {
+		t.Fatal("expected preview session")
+	}
+	_ = session.server.Close()
+	waitForPreviewPortClosed(t, status.Port)
+
+	next := ps.GetPreviewStatus(102)
+	if next.Active {
+		t.Fatalf("unreachable preview still reported active: %+v", next)
+	}
+	if _, exists := ps.sessions[102]; exists {
+		t.Fatal("expected unreachable preview session to be removed")
+	}
+}
+
+func newPreviewTestDB(t *testing.T, projectID uint) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.File{}); err != nil {
+		t.Fatalf("migrate files: %v", err)
+	}
+	if err := db.Create(&models.File{
+		ProjectID: projectID,
+		Path:      "index.html",
+		Name:      "index.html",
+		Type:      "file",
+		Content:   "<!doctype html><html><body><main>Preview booted</main></body></html>",
+	}).Error; err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	return db
+}
+
+func waitForPreviewPortClosed(t *testing.T, port int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 50*time.Millisecond)
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("preview port %d remained reachable", port)
 }

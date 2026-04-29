@@ -312,6 +312,28 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		}
 	}
 	if !installPassed {
+		// The last repair attempt may have fixed the manifest without getting a
+		// verification pass (the loop gives maxAttempts repairs but only
+		// maxAttempts-1 post-repair installs). Run one final install to confirm.
+		finalOut, finalErr := cvRunCommand(ctx, tmpDir, cvInstallTimeout,
+			"npm", "install", "--legacy-peer-deps", "--prefer-offline", "--no-audit", "--no-fund")
+		if finalErr == nil {
+			installPassed = true
+		} else {
+			skip, summary := classifyNodeInstallFailure(finalOut, finalErr)
+			if skip {
+				result.SkipReason = fmt.Sprintf("npm install skipped (env/host issue): %s", summary)
+				log.Printf("[compile_validator] build %s: %s", build.ID, result.SkipReason)
+				return result
+			}
+			result.FinalErrors = []ParsedBuildError{{
+				File:    "package.json",
+				Message: fmt.Sprintf("npm install failed: %s", summary),
+				Source:  "install",
+			}}
+		}
+	}
+	if !installPassed {
 		cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
 		am.cvBroadcastResult(build, false, result.FinalErrors)
 		return result

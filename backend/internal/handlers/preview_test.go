@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -96,6 +97,14 @@ func (f *fakePreviewRuntime) StartProcess(cfg *preview.ProcessStartConfig) (*pre
 	}, nil
 }
 
+type failingPreviewRuntime struct{}
+
+func (f *failingPreviewRuntime) Name() string { return "failing" }
+
+func (f *failingPreviewRuntime) StartProcess(*preview.ProcessStartConfig) (*preview.ProcessHandle, error) {
+	return nil, fmt.Errorf("simulated runtime start failure")
+}
+
 func TestPreviewHandlerRejectsExplicitSandboxWithoutDocker(t *testing.T) {
 	useSandbox, err := (&PreviewHandler{}).resolveRequestedPreviewSandbox(true)
 	require.Error(t, err)
@@ -107,6 +116,7 @@ func TestPreviewHandlerStartPreviewFallsBackWhenSandboxRequiredButDockerUnavaila
 
 	body, err := json.Marshal(map[string]any{
 		"project_id": projectID,
+		"sandbox":    true,
 	})
 	require.NoError(t, err)
 
@@ -121,6 +131,57 @@ func TestPreviewHandlerStartPreviewFallsBackWhenSandboxRequiredButDockerUnavaila
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
 	require.Contains(t, recorder.Body.String(), `"sandbox":false`)
+}
+
+func TestPreviewHandlerFullStackNextFallsBackToFrontendPreviewWhenRuntimeFails(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+	handler.serverRunner = preview.NewServerRunnerWithRuntime(handler.db, &failingPreviewRuntime{})
+
+	files := []models.File{
+		{
+			ProjectID: projectID,
+			Path:      "package.json",
+			Name:      "package.json",
+			Type:      "file",
+			Content: `{
+				"scripts": {"dev": "next dev", "build": "next build", "start": "next start"},
+				"dependencies": {"next": "^15.3.2", "react": "^18.3.1", "react-dom": "^18.3.1"}
+			}`,
+		},
+		{
+			ProjectID: projectID,
+			Path:      "app/page.tsx",
+			Name:      "page.tsx",
+			Type:      "file",
+			Content:   `export default function Page() { return <main>Apex FieldOps AI</main> }`,
+		},
+	}
+	require.NoError(t, handler.db.Create(&files).Error)
+
+	body, err := json.Marshal(map[string]any{
+		"project_id":      projectID,
+		"framework":       "next",
+		"entry_point":     "app/page.tsx",
+		"start_backend":   true,
+		"require_backend": false,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/preview/fullstack/start", bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Request.Host = "apex-build.dev"
+	context.Set("user_id", uint(1))
+	context.Set("bypass_billing", true)
+
+	handler.StartFullStackPreview(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.Contains(t, recorder.Body.String(), `"degraded":true`)
+	require.Contains(t, recorder.Body.String(), `"frontend_fallback":true`)
+	require.Contains(t, recorder.Body.String(), `/api/v1/preview/proxy/`+strconv.FormatUint(uint64(projectID), 10)+`/`)
 }
 
 func TestPreviewHandlerStartServerNotBlockedBySecureModeFallback(t *testing.T) {
@@ -205,7 +266,7 @@ func TestPreviewHandlerBuildProxyURLUsesForwardedPublicOrigin(t *testing.T) {
 	context.Request.Header.Set("X-Forwarded-Proto", "https, http")
 
 	url := handler.buildProxyURL(context, projectID)
-	require.Equal(t, "https://preview.apex-build.dev/api/v1/preview/proxy/"+strconv.FormatUint(uint64(projectID), 10), url)
+	require.Equal(t, "https://preview.apex-build.dev/api/v1/preview/proxy/"+strconv.FormatUint(uint64(projectID), 10)+"/", url)
 }
 
 func TestPreviewHandlerBuildBackendProxyURLUsesForwardedPublicOrigin(t *testing.T) {

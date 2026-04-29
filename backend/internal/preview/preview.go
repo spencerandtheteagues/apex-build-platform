@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -206,14 +207,31 @@ func (ps *PreviewServer) StartPreview(ctx context.Context, config *PreviewConfig
 
 	// Check if session already exists
 	if session, exists := ps.sessions[config.ProjectID]; exists {
-		session.mu.Lock()
-		session.LastAccess = time.Now()
-		session.mu.Unlock()
-		return ps.getStatus(session), nil
+		if !ps.sessionListenerHealthy(session) {
+			log.Printf("[preview] Removing stale preview session for project %d on port %d", config.ProjectID, session.Port)
+			ps.removeSessionLocked(config.ProjectID, session)
+		} else {
+			session.mu.Lock()
+			session.LastAccess = time.Now()
+			session.mu.Unlock()
+			return ps.getStatus(session), nil
+		}
 	}
 
-	// Assign a port
-	port := ps.assignPort(config.ProjectID)
+	// Reserve and bind a listener before reporting success. Previously this
+	// returned an active session before ListenAndServe had proven the port was
+	// usable, which made the UI show "preview ready" for a dead runtime.
+	port, listener, err := ps.assignListener(config.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	listenerClosed := false
+	defer func() {
+		if !listenerClosed {
+			_ = listener.Close()
+			ps.releasePort(config.ProjectID)
+		}
+	}()
 
 	// Create new session
 	session := &PreviewSession{
@@ -238,17 +256,18 @@ func (ps *PreviewServer) StartPreview(ctx context.Context, config *PreviewConfig
 	mux.HandleFunc("/__apex_ws", ps.createWebSocketHandler(session))
 
 	session.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    listener.Addr().String(),
 		Handler: mux,
 	}
 
 	// Start server in background
 	go func() {
-		if err := session.server.ListenAndServe(); err != http.ErrServerClosed {
-			// Log error but don't crash
-			fmt.Printf("Preview server for project %d stopped: %v\n", config.ProjectID, err)
+		if serveErr := session.server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
+			log.Printf("Preview server for project %d stopped: %v\n", config.ProjectID, serveErr)
+			ps.removeFailedSession(config.ProjectID, session)
 		}
 	}()
+	listenerClosed = true
 
 	ps.sessions[config.ProjectID] = session
 
@@ -299,10 +318,16 @@ func (ps *PreviewServer) StopPreview(ctx context.Context, projectID uint) error 
 // GetPreviewStatus returns the status of a preview session
 func (ps *PreviewServer) GetPreviewStatus(projectID uint) *PreviewStatus {
 	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-
 	session, exists := ps.sessions[projectID]
+	ps.mu.RUnlock()
 	if !exists {
+		return &PreviewStatus{
+			ProjectID: projectID,
+			Active:    false,
+		}
+	}
+	if !ps.sessionListenerHealthy(session) {
+		ps.removeFailedSession(projectID, session)
 		return &PreviewStatus{
 			ProjectID: projectID,
 			Active:    false,
@@ -459,13 +484,18 @@ func (ps *PreviewServer) HotReload(projectID uint, filePath string, content stri
 
 // Helper methods
 
-func (ps *PreviewServer) assignPort(projectID uint) int {
+func (ps *PreviewServer) assignListener(projectID uint) (int, net.Listener, error) {
 	ps.portMu.Lock()
 	defer ps.portMu.Unlock()
 
 	// Check if already assigned
 	if port, exists := ps.portMap[projectID]; exists {
-		return port
+		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			delete(ps.portMap, projectID)
+		} else {
+			return port, listener, nil
+		}
 	}
 
 	// Find next available port
@@ -475,18 +505,58 @@ func (ps *PreviewServer) assignPort(projectID uint) int {
 		usedPorts[p] = true
 	}
 
-	for usedPorts[port] {
+	for {
+		if usedPorts[port] {
+			port++
+			continue
+		}
+		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err == nil {
+			ps.portMap[projectID] = port
+			return port, listener, nil
+		}
 		port++
+		if port > ps.basePort+2000 {
+			return 0, nil, fmt.Errorf("failed to reserve preview port near %d", ps.basePort)
+		}
 	}
-
-	ps.portMap[projectID] = port
-	return port
 }
 
 func (ps *PreviewServer) releasePort(projectID uint) {
 	ps.portMu.Lock()
 	defer ps.portMu.Unlock()
 	delete(ps.portMap, projectID)
+}
+
+func (ps *PreviewServer) sessionListenerHealthy(session *PreviewSession) bool {
+	if session == nil || session.server == nil || session.Port <= 0 {
+		return true
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", session.Port), 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func (ps *PreviewServer) removeFailedSession(projectID uint, session *PreviewSession) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.removeSessionLocked(projectID, session)
+}
+
+func (ps *PreviewServer) removeSessionLocked(projectID uint, session *PreviewSession) {
+	if current, exists := ps.sessions[projectID]; exists && current != session {
+		return
+	}
+	if session != nil {
+		session.stopOnce.Do(func() {
+			close(session.stopChan)
+		})
+	}
+	ps.releasePort(projectID)
+	delete(ps.sessions, projectID)
 }
 
 func (ps *PreviewServer) getStatus(session *PreviewSession) *PreviewStatus {
@@ -497,7 +567,7 @@ func (ps *PreviewServer) getStatus(session *PreviewSession) *PreviewStatus {
 		ProjectID:  session.ProjectID,
 		Active:     true,
 		Port:       session.Port,
-		URL:        fmt.Sprintf("http://localhost:%d", session.Port),
+		URL:        fmt.Sprintf("http://127.0.0.1:%d", session.Port),
 		StartedAt:  session.StartedAt,
 		LastAccess: session.LastAccess,
 		Clients:    len(session.Clients),
@@ -790,7 +860,7 @@ func (ps *PreviewServer) frameworkRuntimePrelude(session *PreviewSession) string
 	}
 
 	switch framework {
-	case "react":
+	case "react", "next":
 		return `<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>`
 	case "vue":

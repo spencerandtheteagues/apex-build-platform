@@ -331,6 +331,40 @@ describe('LivePreview', () => {
     expect(startApiButton.disabled).toBe(true)
   })
 
+  it('uses process fallback when production sandbox is required but Docker is degraded', async () => {
+    const mockGet = apiService.client.get as any
+    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/preview/docker/status') {
+        return {
+          data: {
+            available: false,
+            sandbox_required: true,
+            sandbox_degraded: true,
+            backend_preview_available: true,
+            backend_preview_reason: 'Server Docker is unavailable, so preview is using process fallback mode',
+          }
+        }
+      }
+      if (url === '/preview/bundler/status') return { data: { available: true } }
+      if (url.startsWith('/preview/status/')) return { data: { preview: { active: false }, sandbox_degraded: true } }
+      if (url.startsWith('/preview/server/detect/')) return { data: { has_backend: false } }
+      if (url.startsWith('/preview/server/status/')) return { data: { server: null } }
+      if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+
+    render(<LivePreview projectId={808} autoStart className="h-96" />)
+
+    await waitFor(() => {
+      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({
+        project_id: 808,
+        sandbox: false,
+      }))
+    })
+  })
+
   it('renders the preview iframe with same-origin sandbox support', async () => {
     const mockStartFullStack = (apiService as any).startFullStackPreview as any
     const mockGet = apiService.client.get as any

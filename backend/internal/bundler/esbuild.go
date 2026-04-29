@@ -44,6 +44,7 @@ func NewESBuildBundler(cache *BundleCache) *ESBuildBundler {
 		tempDir: os.TempDir(),
 		supportedFrameworks: map[string]bool{
 			"react":   true,
+			"next":    true,
 			"vue":     true,
 			"vanilla": true,
 			"preact":  true,
@@ -224,7 +225,7 @@ func (b *ESBuildBundler) buildArgs(config BundleConfig, outputDir string) ([]str
 
 	// Framework-specific settings
 	switch strings.ToLower(config.Framework) {
-	case "react":
+	case "react", "next":
 		args = append(args, "--jsx=automatic")
 		if config.JSXImportSource != "" {
 			args = append(args, fmt.Sprintf("--jsx-import-source=%s", config.JSXImportSource))
@@ -502,6 +503,9 @@ func (b *ESBuildBundler) BundleFromFiles(ctx context.Context, projectID uint, fi
 
 	// Update config to use the temp directory
 	config.ProjectPath = bundleDir
+	if err := b.prepareNextPreviewEntry(bundleDir, files, &config); err != nil {
+		return nil, fmt.Errorf("failed to prepare Next.js preview entry: %w", err)
+	}
 	if err := b.prepareFrameworkShims(bundleDir, &config); err != nil {
 		return nil, fmt.Errorf("failed to prepare framework shims: %w", err)
 	}
@@ -551,11 +555,81 @@ func (b *ESBuildBundler) prepareFrameworkShims(bundleDir string, config *BundleC
 	}
 
 	switch strings.ToLower(config.Framework) {
-	case "react":
+	case "react", "next":
 		return b.prepareReactShims(bundleDir, config)
 	default:
 		return nil
 	}
+}
+
+func (b *ESBuildBundler) prepareNextPreviewEntry(bundleDir string, files ProjectFiles, config *BundleConfig) error {
+	if config == nil || strings.ToLower(strings.TrimSpace(config.Framework)) != "next" {
+		return nil
+	}
+	entry := strings.TrimSpace(config.EntryPoint)
+	if !isNextPreviewPageEntry(entry) {
+		return nil
+	}
+
+	pageImport := "./" + strings.TrimSuffix(entry, filepath.Ext(entry))
+	layoutImport := ""
+	for _, candidate := range nextPreviewLayoutCandidates(entry) {
+		if _, ok := files.Files[candidate]; ok {
+			layoutImport = "./" + strings.TrimSuffix(candidate, filepath.Ext(candidate))
+			break
+		}
+	}
+
+	var source strings.Builder
+	source.WriteString("import React from 'react';\n")
+	source.WriteString("import { createRoot } from 'react-dom/client';\n")
+	source.WriteString("import Page from '")
+	source.WriteString(pageImport)
+	source.WriteString("';\n")
+	if layoutImport != "" {
+		source.WriteString("import Layout from '")
+		source.WriteString(layoutImport)
+		source.WriteString("';\n")
+	}
+	source.WriteString("const root = document.getElementById('root') || document.body.appendChild(document.createElement('div'));\n")
+	if layoutImport != "" {
+		source.WriteString("createRoot(root).render(React.createElement(Layout, null, React.createElement(Page)));\n")
+	} else {
+		source.WriteString("createRoot(root).render(React.createElement(Page));\n")
+	}
+
+	entryPath := filepath.Join(bundleDir, ".apex-next-preview-entry.tsx")
+	if err := os.WriteFile(entryPath, []byte(source.String()), 0644); err != nil {
+		return err
+	}
+	config.EntryPoint = ".apex-next-preview-entry.tsx"
+	config.Framework = "next"
+	if config.JSXImportSource == "" {
+		config.JSXImportSource = "react"
+	}
+	return nil
+}
+
+func isNextPreviewPageEntry(entry string) bool {
+	switch filepath.ToSlash(strings.TrimSpace(entry)) {
+	case "app/page.tsx", "app/page.ts", "app/page.jsx", "app/page.js",
+		"src/app/page.tsx", "src/app/page.ts", "src/app/page.jsx", "src/app/page.js",
+		"pages/index.tsx", "pages/index.ts", "pages/index.jsx", "pages/index.js":
+		return true
+	default:
+		return false
+	}
+}
+
+func nextPreviewLayoutCandidates(entry string) []string {
+	entry = filepath.ToSlash(strings.TrimSpace(entry))
+	if strings.HasPrefix(entry, "src/app/") {
+		return []string{"src/app/layout.tsx", "src/app/layout.ts", "src/app/layout.jsx", "src/app/layout.js"}
+	}
+	if strings.HasPrefix(entry, "app/") {
+		return []string{"app/layout.tsx", "app/layout.ts", "app/layout.jsx", "app/layout.js"}
+	}
+	return nil
 }
 
 func (b *ESBuildBundler) prepareReactShims(bundleDir string, config *BundleConfig) error {
@@ -651,6 +725,65 @@ export function jsx(type, props, key) {
 export const jsxs = jsx;
 export const jsxDEV = jsx;
 `,
+		"next-link.js": `import React from "./react.js";
+export default function Link(props) {
+  const { href = "#", children, ...rest } = props || {};
+  return React.createElement("a", { href: typeof href === "string" ? href : "#", ...rest }, children);
+}
+`,
+		"next-image.js": `import React from "./react.js";
+export default function Image(props) {
+  const { src = "", alt = "", width, height, ...rest } = props || {};
+  const normalizedSrc = typeof src === "string" ? src : (src && src.src) || "";
+  return React.createElement("img", { src: normalizedSrc, alt, width, height, ...rest });
+}
+`,
+		"next-navigation.js": `export function useRouter() {
+  return { push(){}, replace(){}, back(){}, forward(){}, refresh(){}, prefetch(){ return Promise.resolve(); } };
+}
+export function usePathname() { return "/"; }
+export function useSearchParams() { return new URLSearchParams(globalThis.location ? globalThis.location.search : ""); }
+export function useParams() { return {}; }
+export function redirect() {}
+export function notFound() {}
+`,
+		"next-head.js": `import React from "./react.js";
+export default function Head(props) {
+  return React.createElement(React.Fragment, null, props && props.children);
+}
+`,
+		"next-script.js": `export default function Script() { return null; }
+`,
+		"next-dynamic.js": `import React from "./react.js";
+export default function dynamic(loader) {
+  return function DynamicComponent(props) {
+    const [Component, setComponent] = React.useState(null);
+    React.useEffect(() => {
+      Promise.resolve(typeof loader === "function" ? loader() : loader).then((mod) => {
+        setComponent(() => mod && (mod.default || mod));
+      });
+    }, []);
+    return Component ? React.createElement(Component, props) : null;
+  };
+}
+`,
+		"next-router.js": `export function useRouter() {
+  return { pathname: "/", query: {}, asPath: "/", push(){}, replace(){}, back(){}, prefetch(){ return Promise.resolve(); } };
+}
+export default { useRouter };
+`,
+		"next-font-google.js": `function fontShim() { return { className: "", style: {}, variable: "" }; }
+export const Inter = fontShim;
+export const Roboto = fontShim;
+export const Poppins = fontShim;
+export const Montserrat = fontShim;
+export const Manrope = fontShim;
+export const Geist = fontShim;
+export const Orbitron = fontShim;
+export const Space_Grotesk = fontShim;
+export const JetBrains_Mono = fontShim;
+export default fontShim;
+`,
 	}
 
 	for name, content := range shims {
@@ -665,6 +798,14 @@ export const jsxDEV = jsx;
 		"react-dom/client":      "./.apex-shims/react-dom-client.js",
 		"react/jsx-runtime":     "./.apex-shims/react-jsx-runtime.js",
 		"react/jsx-dev-runtime": "./.apex-shims/react-jsx-runtime.js",
+		"next/link":             "./.apex-shims/next-link.js",
+		"next/image":            "./.apex-shims/next-image.js",
+		"next/navigation":       "./.apex-shims/next-navigation.js",
+		"next/router":           "./.apex-shims/next-router.js",
+		"next/head":             "./.apex-shims/next-head.js",
+		"next/script":           "./.apex-shims/next-script.js",
+		"next/dynamic":          "./.apex-shims/next-dynamic.js",
+		"next/font/google":      "./.apex-shims/next-font-google.js",
 	}
 
 	for from, to := range aliases {
@@ -827,9 +968,9 @@ func ValidateConfig(config BundleConfig) []string {
 		errors = append(errors, fmt.Sprintf("invalid format '%s': must be one of esm, iife, cjs", config.Format))
 	}
 
-	validFrameworks := map[string]bool{"react": true, "vue": true, "vanilla": true, "preact": true, "solid": true}
+	validFrameworks := map[string]bool{"react": true, "next": true, "vue": true, "vanilla": true, "preact": true, "solid": true}
 	if config.Framework != "" && !validFrameworks[strings.ToLower(config.Framework)] {
-		errors = append(errors, fmt.Sprintf("invalid framework '%s': must be one of react, vue, vanilla, preact, solid", config.Framework))
+		errors = append(errors, fmt.Sprintf("invalid framework '%s': must be one of react, next, vue, vanilla, preact, solid", config.Framework))
 	}
 
 	return errors

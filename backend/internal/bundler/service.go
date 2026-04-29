@@ -379,7 +379,7 @@ func (s *Service) applyFrameworkDefaults(config BundleConfig) BundleConfig {
 
 	// Framework-specific defaults
 	switch strings.ToLower(config.Framework) {
-	case "react":
+	case "react", "next":
 		config.Define["process.env.NODE_ENV"] = `"development"`
 		if config.JSXImportSource == "" {
 			config.JSXImportSource = "react"
