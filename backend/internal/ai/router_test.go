@@ -113,3 +113,53 @@ func TestGeneratePreservesTimeForFallbackProvider(t *testing.T) {
 		t.Fatalf("fallback calls = %d, want 1", fallbackCalls)
 	}
 }
+
+func TestGenerateCanDisableInternalFallback(t *testing.T) {
+	t.Parallel()
+
+	primaryCalls := 0
+	fallbackCalls := 0
+
+	router := &AIRouter{
+		clients: map[AIProvider]AIClient{
+			ProviderGPT4: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					primaryCalls++
+					return nil, context.DeadlineExceeded
+				},
+			},
+			ProviderClaude: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					fallbackCalls++
+					return &AIResponse{Provider: ProviderClaude, Content: "fallback should not run"}, nil
+				},
+			},
+		},
+		config: DefaultRouterConfig(),
+		healthStatus: map[AIProvider]string{
+			ProviderGPT4:   "ok",
+			ProviderClaude: "ok",
+		},
+		healthCheck: map[AIProvider]bool{
+			ProviderGPT4:   true,
+			ProviderClaude: true,
+		},
+	}
+
+	_, err := router.Generate(context.Background(), &AIRequest{
+		ID:              "no-internal-fallback",
+		Provider:        ProviderGPT4,
+		Capability:      CapabilityCodeGeneration,
+		Prompt:          "Build a dashboard",
+		DisableFallback: true,
+	})
+	if err == nil {
+		t.Fatal("expected primary provider error")
+	}
+	if primaryCalls != 1 {
+		t.Fatalf("primary calls = %d, want 1", primaryCalls)
+	}
+	if fallbackCalls != 0 {
+		t.Fatalf("fallback calls = %d, want 0 when fallback is disabled", fallbackCalls)
+	}
+}

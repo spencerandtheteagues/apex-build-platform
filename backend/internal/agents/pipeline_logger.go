@@ -3,7 +3,8 @@
 // Every AI call, task execution, compile validation, preview gate decision,
 // repair attempt, and build lifecycle event emits a JSON line tagged
 // [APEX_PIPELINE] to stdout.  Filter with:
-//   render logs <svc> | grep '\[APEX_PIPELINE\]'
+//
+//	render logs <svc> | grep '\[APEX_PIPELINE\]'
 //
 // Enabled by default. Set APEX_PIPELINE_TELEMETRY=false to disable.
 package agents
@@ -109,16 +110,17 @@ func (pl *PipelineLogger) BuildStage(stage, prev string) {
 	})
 }
 
-func (pl *PipelineLogger) BuildEnd(status, failureCategory, failureClass string, durationMS int64, compileAttempts, previewAttempts, readinessAttempts int) {
+func (pl *PipelineLogger) BuildEnd(status, failureCategory, failureClass string, durationMS int64, compileAttempts, compileRepairAttempts, previewAttempts, readinessAttempts int) {
 	pl.emit(plBuild, "end", map[string]any{
-		"status":              status,
-		"failure_category":    failureCategory,
-		"failure_class":       failureClass,
-		"duration_ms":         durationMS,
-		"compile_attempts":    compileAttempts,
-		"preview_attempts":    previewAttempts,
-		"readiness_attempts":  readinessAttempts,
-		"first_pass_success":  compileAttempts == 0 && previewAttempts == 0 && readinessAttempts == 0 && status == "completed",
+		"status":             status,
+		"failure_category":   failureCategory,
+		"failure_class":      failureClass,
+		"duration_ms":        durationMS,
+		"compile_attempts":   compileAttempts,
+		"compile_repairs":    compileRepairAttempts,
+		"preview_attempts":   previewAttempts,
+		"readiness_attempts": readinessAttempts,
+		"first_pass_success": compileRepairAttempts == 0 && previewAttempts == 0 && readinessAttempts == 0 && status == "completed",
 	})
 	pLogEvict(pl.buildID)
 }

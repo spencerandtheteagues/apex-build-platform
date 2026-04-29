@@ -17,8 +17,8 @@ func TestDefaultGenerateTimeout(t *testing.T) {
 		want     time.Duration
 	}{
 		{name: "cloud fast", provider: ai.ProviderClaude, mode: PowerFast, want: 2 * time.Minute},
-		{name: "cloud balanced", provider: ai.ProviderClaude, mode: PowerBalanced, want: 150 * time.Second},
-		{name: "cloud max", provider: ai.ProviderClaude, mode: PowerMax, want: 3 * time.Minute},
+		{name: "cloud balanced", provider: ai.ProviderClaude, mode: PowerBalanced, want: 3 * time.Minute},
+		{name: "cloud max", provider: ai.ProviderClaude, mode: PowerMax, want: 5 * time.Minute},
 		{name: "ollama fast", provider: ai.ProviderOllama, mode: PowerFast, want: 4 * time.Minute},
 		{name: "ollama balanced", provider: ai.ProviderOllama, mode: PowerBalanced, want: 5 * time.Minute},
 		{name: "ollama max", provider: ai.ProviderOllama, mode: PowerMax, want: 6 * time.Minute},
@@ -163,7 +163,7 @@ func TestNormalizeModelForProviderRejectsCrossProviderModel(t *testing.T) {
 	}
 }
 
-func TestSelectBuildModelForProviderLocked_IgnoresManagedOllamaOverride(t *testing.T) {
+func TestSelectBuildModelForProviderLocked_RespectsManagedOllamaOverride(t *testing.T) {
 	t.Setenv("OLLAMA_API_KEY", "managed-key-present")
 
 	build := &Build{
@@ -174,17 +174,26 @@ func TestSelectBuildModelForProviderLocked_IgnoresManagedOllamaOverride(t *testi
 		},
 	}
 
-	if got := selectBuildModelForProviderLocked(build, ai.ProviderOllama); got != "kimi-k2.6:cloud" {
-		t.Fatalf("managed ollama model = %q, want kimi-k2.6:cloud", got)
+	if got := selectBuildModelForProviderLocked(build, ai.ProviderOllama); got != "glm-5.1:cloud" {
+		t.Fatalf("managed ollama model = %q, want glm-5.1:cloud", got)
 	}
 }
 
-func TestNormalizeExecutionModelForProvider_IgnoresManagedOllamaEnvOverride(t *testing.T) {
+func TestNormalizeExecutionModelForProvider_QualifiesManagedOllamaCloudOverrides(t *testing.T) {
 	t.Setenv("OLLAMA_API_KEY", "managed-key-present")
 	t.Setenv("OLLAMA_MODEL_DEFAULT", "glm-5.1")
 
-	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "glm-5.1", PowerFast, true); got != "kimi-k2.6:cloud" {
-		t.Fatalf("managed ollama execution model = %q, want kimi-k2.6:cloud", got)
+	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "glm-5.1", PowerFast, true); got != "glm-5.1:cloud" {
+		t.Fatalf("managed ollama execution model = %q, want glm-5.1:cloud", got)
+	}
+	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "deepseek-v4", PowerFast, true); got != "deepseek-v4-flash:cloud" {
+		t.Fatalf("managed deepseek execution model = %q, want deepseek-v4-flash:cloud", got)
+	}
+	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "gemini-3-flash-preview:cloud", PowerFast, true); got != "gemini-3-flash-preview:cloud" {
+		t.Fatalf("managed ollama-hosted gemini execution model = %q, want gemini-3-flash-preview:cloud", got)
+	}
+	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "auto", PowerFast, true); got != "glm-5.1:cloud" {
+		t.Fatalf("managed auto execution model = %q, want env default glm-5.1:cloud", got)
 	}
 }
 
@@ -264,7 +273,7 @@ func TestPartitionPlatformProvidersByHealth_FallsBackToDegradedWhenNeeded(t *tes
 	}
 }
 
-func TestPartitionPlatformProvidersByHealth_PrefersManagedOllamaFirst(t *testing.T) {
+func TestPartitionPlatformProvidersByHealth_PrefersFlagshipCloudBeforeManagedOllama(t *testing.T) {
 	t.Parallel()
 
 	healthy, degraded := partitionPlatformProvidersByHealth(map[ai.AIProvider]bool{
@@ -274,8 +283,8 @@ func TestPartitionPlatformProvidersByHealth_PrefersManagedOllamaFirst(t *testing
 		ai.ProviderGemini: false,
 	})
 
-	if len(healthy) != 3 || healthy[0] != ai.ProviderOllama {
-		t.Fatalf("healthy providers = %+v, want ollama first", healthy)
+	if len(healthy) != 3 || healthy[0] != ai.ProviderClaude || healthy[1] != ai.ProviderGPT4 || healthy[2] != ai.ProviderOllama {
+		t.Fatalf("healthy providers = %+v, want [claude gpt4 ollama]", healthy)
 	}
 	if len(degraded) != 1 || degraded[0] != ai.ProviderGemini {
 		t.Fatalf("degraded providers = %+v, want [gemini]", degraded)

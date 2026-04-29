@@ -525,18 +525,16 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		waterfallReason = decision.Reason
 	}
 	managedPlatformOllama := provider == ai.ProviderOllama && am.buildUsesPlatformKeys(build)
-	if !managedPlatformOllama {
-		if explicitModel := providerModelOverrideForBuild(build, provider); explicitModel != "" {
-			model = explicitModel
-			waterfallStage = "manual_override"
-			waterfallReason = "provider_model_override"
-		}
+	if explicitModel := providerModelOverrideForBuild(build, provider); explicitModel != "" {
+		model = explicitModel
+		waterfallStage = "manual_override"
+		waterfallReason = "provider_model_override"
 	}
 
 	model = normalizeExecutionModelForProvider(provider, model, callPowerMode, am.buildUsesPlatformKeys(build))
-	if managedPlatformOllama {
+	if managedPlatformOllama && waterfallStage != "manual_override" {
 		waterfallStage = "managed_ollama"
-		waterfallReason = "platform_forces_kimi_cloud"
+		waterfallReason = "platform_ollama_cloud_default"
 	}
 
 	if am.budgetEnforcer != nil {
@@ -598,16 +596,17 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	cacheSystemPrompt := agent.Role == RoleLead || agent.Role == RolePlanner || agent.Role == RoleSolver
 
 	response, err := am.aiRouter.Generate(attemptCtx, provider, prompt, GenerateOptions{
-		UserID:            build.UserID,
-		BuildID:           build.ID,
-		MaxTokens:         maxTokens,
-		Temperature:       temperature,
-		SystemPrompt:      systemPrompt,
-		RoleHint:          string(agent.Role),
-		ModelOverride:     model,
-		PowerMode:         callPowerMode,
-		UsePlatformKeys:   am.buildUsesPlatformKeys(build),
-		CacheSystemPrompt: cacheSystemPrompt,
+		UserID:                  build.UserID,
+		BuildID:                 build.ID,
+		MaxTokens:               maxTokens,
+		Temperature:             temperature,
+		SystemPrompt:            systemPrompt,
+		RoleHint:                string(agent.Role),
+		ModelOverride:           model,
+		PowerMode:               callPowerMode,
+		UsePlatformKeys:         am.buildUsesPlatformKeys(build),
+		CacheSystemPrompt:       cacheSystemPrompt,
+		DisableProviderFallback: true,
 	})
 	if err != nil {
 		return nil, err
@@ -618,7 +617,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 
 	providerUsed := firstNonEmptyProvider(response.Provider, provider)
 	actualProviderUsed := actualProviderForAIResponse(response, providerUsed, provider)
-	modelUsed := firstNonEmptyString(ai.GetModelUsed(response, nil), model)
+	modelUsed := firstNonEmptyString(ai.GetModelUsed(response, &ai.AIRequest{Model: model}), model)
 
 	if am.spendTracker != nil && response.Usage != nil {
 		projectID := build.ProjectID

@@ -443,11 +443,43 @@ func TestPlanningRetryRotatesProviderAfterProviderFailure(t *testing.T) {
 	}
 }
 
-func TestAssignProvidersToRolesForBuild_ForcesOllamaWhenAvailable(t *testing.T) {
+func TestAssignProvidersToRolesForBuild_UsesSpecialistRoutingInPlatformModeWithOllama(t *testing.T) {
 	am := &AgentManager{}
 	build := &Build{
-		ID:           "build-ollama-primary",
+		ID:           "build-platform-specialists",
 		ProviderMode: "platform",
+		PowerMode:    PowerBalanced,
+	}
+
+	roles := []AgentRole{RoleArchitect, RoleFrontend, RoleBackend, RoleTesting, RoleReviewer, RoleSolver}
+	assignments := am.assignProvidersToRolesForBuild(build, []ai.AIProvider{
+		ai.ProviderClaude,
+		ai.ProviderGPT4,
+		ai.ProviderGemini,
+		ai.ProviderGrok,
+		ai.ProviderOllama,
+	}, roles)
+
+	want := map[AgentRole]ai.AIProvider{
+		RoleArchitect: ai.ProviderClaude,
+		RoleFrontend:  ai.ProviderGPT4,
+		RoleBackend:   ai.ProviderGPT4,
+		RoleTesting:   ai.ProviderGemini,
+		RoleReviewer:  ai.ProviderGrok,
+		RoleSolver:    ai.ProviderGemini,
+	}
+	for role, wantProvider := range want {
+		if got := assignments[role]; got != wantProvider {
+			t.Fatalf("%s provider = %s, want %s", role, got, wantProvider)
+		}
+	}
+}
+
+func TestAssignProvidersToRolesForBuild_ForcesOllamaForBYOKWhenAvailable(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{
+		ID:           "build-byok-ollama-primary",
+		ProviderMode: "byok",
 		PowerMode:    PowerBalanced,
 	}
 

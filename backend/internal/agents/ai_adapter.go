@@ -82,6 +82,27 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 	case ai.ProviderGrok:
 		return strings.HasPrefix(normalized, "grok-")
 	case ai.ProviderOllama:
+		if strings.HasSuffix(normalized, ":cloud") {
+			for _, ollamaCloudPrefix := range []string{
+				"deepseek-",
+				"devstral",
+				"gemini-",
+				"gemma",
+				"glm-",
+				"kimi-",
+				"llama",
+				"minimax-",
+				"mistral",
+				"nemotron-",
+				"qwen",
+				"rnj-",
+			} {
+				if strings.HasPrefix(normalized, ollamaCloudPrefix) {
+					return true
+				}
+			}
+			return false
+		}
 		for _, foreignPrefix := range []string{
 			"claude-",
 			"gpt-",
@@ -142,10 +163,11 @@ func normalizeModelForProvider(provider ai.AIProvider, model string, mode PowerM
 }
 
 func normalizeExecutionModelForProvider(provider ai.AIProvider, model string, mode PowerMode, usePlatformKeys bool) string {
+	normalized := normalizeModelForProvider(provider, model, mode)
 	if provider == ai.ProviderOllama && usePlatformKeys {
-		return defaultOllamaModelForMode()
+		return qualifyOllamaCloudModel(normalized)
 	}
-	return normalizeModelForProvider(provider, model, mode)
+	return normalized
 }
 
 func normalizeProviderModelOverride(provider ai.AIProvider, model string) string {
@@ -196,11 +218,14 @@ func providerModelOverrideForBuild(build *Build, provider ai.AIProvider) string 
 }
 
 func selectBuildModelForProviderLocked(build *Build, provider ai.AIProvider) string {
+	if override := providerModelOverrideForBuildLocked(build, provider); override != "" {
+		if build != nil && provider == ai.ProviderOllama && strings.TrimSpace(strings.ToLower(build.ProviderMode)) != "byok" {
+			return qualifyOllamaCloudModel(override)
+		}
+		return override
+	}
 	if build != nil && provider == ai.ProviderOllama && strings.TrimSpace(strings.ToLower(build.ProviderMode)) != "byok" {
 		return defaultOllamaModelForMode()
-	}
-	if override := providerModelOverrideForBuildLocked(build, provider); override != "" {
-		return override
 	}
 	mode := PowerFast
 	if build != nil && build.PowerMode != "" {
@@ -246,6 +271,31 @@ func defaultOllamaModelForMode() string {
 	return "kimi-k2.6"
 }
 
+func qualifyOllamaCloudModel(model string) string {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" || strings.EqualFold(trimmed, "auto") {
+		return defaultOllamaModelForMode()
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, ":cloud") {
+		return trimmed
+	}
+	switch lower {
+	case "kimi", "kimi-k2", "kimi-k2.6":
+		return "kimi-k2.6:cloud"
+	case "glm", "glm-5", "glm-5.1":
+		return "glm-5.1:cloud"
+	case "deepseek", "deepseek-v4", "deepseek-v4-flash":
+		return "deepseek-v4-flash:cloud"
+	case "qwen", "qwen-3.6-27b":
+		return "qwen-3.6-27b:cloud"
+	case "devstral", "devstral-24b", "devstral-small-24b":
+		return "devstral-small-24b:cloud"
+	default:
+		return trimmed
+	}
+}
+
 func clampAIRouterPrompt(prompt string, maxChars int) string {
 	if maxChars <= 0 || len(prompt) <= maxChars {
 		return prompt
@@ -268,11 +318,11 @@ type AIRouterAdapter struct {
 }
 
 var platformProviderPreferenceOrder = []ai.AIProvider{
-	ai.ProviderOllama,
 	ai.ProviderClaude,
 	ai.ProviderGPT4,
 	ai.ProviderGemini,
 	ai.ProviderGrok,
+	ai.ProviderOllama,
 	ai.ProviderDeepSeek,
 	ai.ProviderGLM,
 }
@@ -432,6 +482,7 @@ For code files, use this exact format:
 		PowerMode:         string(opts.PowerMode),
 		Provider:          aiProvider,
 		CacheSystemPrompt: opts.CacheSystemPrompt,
+		DisableFallback:   opts.DisableProviderFallback,
 	}
 	if opts.UserID > 0 {
 		request.UserID = fmt.Sprintf("%d", opts.UserID)

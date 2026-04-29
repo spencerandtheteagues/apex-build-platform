@@ -32,6 +32,7 @@ const PLATFORM_PROVIDERS = [
 ] as const
 
 const OLLAMA_PROVIDER = { id: 'ollama', label: 'Ollama', subtitle: 'Kimi K2.6 Cloud/BYOK', letter: 'O', borderActive: 'border-cyan-500/60', bgActive: 'bg-cyan-500/10', text: 'text-cyan-400', shadow: 'shadow-cyan-500/10' } as const
+type RoutedProviderId = typeof PLATFORM_PROVIDERS[number]['id'] | typeof OLLAMA_PROVIDER['id']
 
 // Default assignments matching backend policy
 const DEFAULT_ASSIGNMENTS: Record<string, string> = {
@@ -56,6 +57,9 @@ interface ModelRoleConfigProps {
   assignments: Record<string, string>
   onAssignmentsChange: (assignments: Record<string, string>) => void
   providerStatuses: Record<string, string>
+  selectedModels?: Record<string, string>
+  modelOptions?: Record<string, Array<{ id: string; name: string }>>
+  onModelSelect?: (provider: RoutedProviderId, model: string) => void
 }
 
 export default function ModelRoleConfig({
@@ -64,6 +68,9 @@ export default function ModelRoleConfig({
   assignments,
   onAssignmentsChange,
   providerStatuses,
+  selectedModels = {},
+  modelOptions = {},
+  onModelSelect,
 }: ModelRoleConfigProps) {
   const visibleProviders = [...PLATFORM_PROVIDERS, OLLAMA_PROVIDER]
 
@@ -182,6 +189,8 @@ export default function ModelRoleConfig({
                 const assignedRoles = ROLE_CATEGORIES.filter(
                   cat => assignments[cat.id] === provider.id
                 )
+                const providerModelOptions = modelOptions[provider.id] || []
+                const selectedModel = selectedModels[provider.id] || 'auto'
 
                 return (
                   <div
@@ -245,6 +254,39 @@ export default function ModelRoleConfig({
                           </button>
                         )
                       })}
+                    </div>
+
+                    <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3">
+                      <label className="mb-2 flex items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+                        <span>{provider.id === 'ollama' ? 'Ollama Cloud Model' : 'Model Override'}</span>
+                        {selectedModel !== 'auto' && (
+                          <span className={cn('rounded-full border px-2 py-0.5 normal-case tracking-normal', provider.borderActive, provider.text)}>
+                            Locked
+                          </span>
+                        )}
+                      </label>
+                      <select
+                        value={selectedModel}
+                        disabled={!available || !onModelSelect}
+                        onChange={(event) => onModelSelect?.(provider.id, event.target.value)}
+                        className={cn(
+                          'w-full rounded-lg border border-slate-700/80 bg-slate-950/90 px-3 py-2 text-sm text-slate-100 outline-none transition-colors',
+                          'focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-400/15',
+                          (!available || !onModelSelect) && 'cursor-not-allowed opacity-50'
+                        )}
+                      >
+                        <option value="auto">Auto — Apex chooses per task</option>
+                        {providerModelOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-[11px] leading-5 text-gray-600">
+                        {provider.id === 'ollama'
+                          ? 'Hosted Ollama Cloud choices include Kimi, GLM, DeepSeek, Qwen, and Devstral routes; BYOK/local endpoints can still use their configured model.'
+                          : 'Leave on Auto unless you want this provider locked to a specific tier for the next build.'}
+                      </p>
                     </div>
                   </div>
                 )

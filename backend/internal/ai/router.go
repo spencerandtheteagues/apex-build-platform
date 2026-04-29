@@ -223,6 +223,9 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 
 	// Check rate limiting
 	if !r.checkRateLimit(provider) {
+		if req.DisableFallback {
+			return nil, fmt.Errorf("rate limit exceeded for provider %s", provider)
+		}
 		// Try fallback providers
 		fallbacks := r.config.FallbackOrder[provider]
 		for _, fallbackProvider := range fallbacks {
@@ -275,6 +278,9 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 
 		// Collect all errors for better reporting
 		failedProviders := []string{fmt.Sprintf("%s: %s", provider, errStr)}
+		if req.DisableFallback {
+			return nil, fmt.Errorf("%s: %s", provider, errStr)
+		}
 
 		// Try fallback providers
 		fallbacks := r.config.FallbackOrder[provider]
@@ -338,13 +344,39 @@ func isTransientError(err error) bool {
 }
 
 func providerAttemptBaseTimeout(provider AIProvider) time.Duration {
+	return providerAttemptBaseTimeoutForMode(provider, "")
+}
+
+func providerAttemptBaseTimeoutForMode(provider AIProvider, mode string) time.Duration {
+	normalizedMode := strings.ToLower(strings.TrimSpace(mode))
 	switch provider {
 	case ProviderGemini:
-		return 70 * time.Second
+		switch normalizedMode {
+		case "max":
+			return 3 * time.Minute
+		case "balanced":
+			return 150 * time.Second
+		default:
+			return 90 * time.Second
+		}
 	case ProviderOllama:
-		return 3 * time.Minute
+		switch normalizedMode {
+		case "max":
+			return 6 * time.Minute
+		case "balanced":
+			return 5 * time.Minute
+		default:
+			return 4 * time.Minute
+		}
 	default:
-		return 90 * time.Second
+		switch normalizedMode {
+		case "max":
+			return 5 * time.Minute
+		case "balanced":
+			return 3 * time.Minute
+		default:
+			return 2 * time.Minute
+		}
 	}
 }
 
@@ -411,14 +443,14 @@ func (r *AIRouter) generateWithAttemptBudget(
 			}
 			budget -= reserve
 		}
-		budget = minDuration(providerAttemptBaseTimeout(provider), budget)
+		budget = minDuration(providerAttemptBaseTimeoutForMode(provider, req.PowerMode), budget)
 		if budget <= 0 {
 			return nil, context.DeadlineExceeded
 		}
 		attemptCtx, cancel = context.WithTimeout(ctx, budget)
 		defer cancel()
 	} else {
-		attemptCtx, cancel = context.WithTimeout(ctx, providerAttemptBaseTimeout(provider))
+		attemptCtx, cancel = context.WithTimeout(ctx, providerAttemptBaseTimeoutForMode(provider, req.PowerMode))
 		defer cancel()
 	}
 

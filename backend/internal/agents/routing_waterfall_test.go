@@ -329,7 +329,7 @@ func TestGenerateTaskOutputWithProviderUsesPerProviderAttemptTimeout(t *testing.
 	}
 }
 
-func TestGenerateTaskOutputWithProvider_ForcesManagedOllamaKimiCloud(t *testing.T) {
+func TestGenerateTaskOutputWithProvider_UsesManagedOllamaCloudDefault(t *testing.T) {
 	t.Setenv("OLLAMA_API_KEY", "managed-key-present")
 	t.Setenv("OLLAMA_MODEL_DEFAULT", "glm-5.1")
 
@@ -364,8 +364,55 @@ func TestGenerateTaskOutputWithProvider_ForcesManagedOllamaKimiCloud(t *testing.
 	if _, err := am.generateTaskOutputWithProvider(context.Background(), build, agent, task, "prompt", "system", ai.ProviderOllama, 1200, 0.1); err != nil {
 		t.Fatalf("generateTaskOutputWithProvider returned error: %v", err)
 	}
-	if router.lastOpts.ModelOverride != "kimi-k2.6:cloud" {
-		t.Fatalf("managed ollama model override = %q, want kimi-k2.6:cloud", router.lastOpts.ModelOverride)
+	if router.lastOpts.ModelOverride != "glm-5.1:cloud" {
+		t.Fatalf("managed ollama model override = %q, want glm-5.1:cloud", router.lastOpts.ModelOverride)
+	}
+}
+
+func TestGenerateTaskOutputWithProvider_RespectsManagedOllamaCloudOverride(t *testing.T) {
+	t.Setenv("OLLAMA_API_KEY", "managed-key-present")
+	t.Setenv("OLLAMA_MODEL_DEFAULT", "kimi-k2.6")
+
+	router := &waterfallProbeRouter{}
+	am := &AgentManager{
+		aiRouter: router,
+		builds:   map[string]*Build{},
+	}
+
+	build := &Build{
+		ID:           "build-managed-ollama-manual-model",
+		UserID:       22,
+		PowerMode:    PowerFast,
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+		ProviderModelOverrides: map[string]string{
+			"ollama": "deepseek-v4",
+		},
+	}
+	agent := &Agent{
+		ID:       "agent-managed-ollama-manual-model",
+		Role:     RoleLead,
+		Provider: ai.ProviderOllama,
+		BuildID:  build.ID,
+		Model:    "kimi-k2.6:cloud",
+	}
+	task := &Task{
+		ID:          "task-managed-ollama-manual-model",
+		Type:        TaskGenerateUI,
+		Description: "Generate UI",
+	}
+	build.Agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	candidate, err := am.generateTaskOutputWithProvider(context.Background(), build, agent, task, "prompt", "system", ai.ProviderOllama, 1200, 0.1)
+	if err != nil {
+		t.Fatalf("generateTaskOutputWithProvider returned error: %v", err)
+	}
+	if router.lastOpts.ModelOverride != "deepseek-v4-flash:cloud" {
+		t.Fatalf("managed ollama model override = %q, want deepseek-v4-flash:cloud", router.lastOpts.ModelOverride)
+	}
+	if candidate.WaterfallReason != "provider_model_override" {
+		t.Fatalf("expected manual override reason, got %+v", candidate)
 	}
 }
 

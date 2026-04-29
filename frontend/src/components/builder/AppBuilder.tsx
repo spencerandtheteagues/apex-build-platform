@@ -457,22 +457,45 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gpt4: { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
     gemini: { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
     grok: { id: 'grok-3-mini', name: 'Grok 3 Mini' },
-    ollama: { id: 'glm-5.1', name: 'GLM-5.1' },
+    ollama: { id: 'glm-5.1:cloud', name: 'GLM-5.1' },
   },
   balanced: {
     claude: { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
     gpt4: { id: 'gpt-4.1', name: 'GPT-4.1' },
     gemini: { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
     grok: { id: 'grok-3', name: 'Grok 3' },
-    ollama: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
+    ollama: { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
   },
   max: {
     claude: { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
     gpt4: { id: 'gpt-5.4-codex', name: 'ChatGPT 5.4 Codex' },
     gemini: { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
     grok: { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' },
-    ollama: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
+    ollama: { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
   },
+}
+
+const ADDITIONAL_PROVIDER_MODEL_OPTIONS: Partial<Record<SupportedBuildProvider, ProviderModelTier[]>> = {
+  ollama: [
+    { id: 'deepseek-v4-flash:cloud', name: 'DeepSeek V4 Flash' },
+    { id: 'deepseek-v4-pro:cloud', name: 'DeepSeek V4 Pro' },
+    { id: 'minimax-m2.7:cloud', name: 'MiniMax M2.7' },
+    { id: 'gemini-3-flash-preview:cloud', name: 'Gemini 3 Flash Preview' },
+    { id: 'gemma4:cloud', name: 'Gemma 4' },
+    { id: 'nemotron-3-super:cloud', name: 'Nemotron 3 Super' },
+    { id: 'qwen3.5:cloud', name: 'Qwen 3.5' },
+    { id: 'glm-5:cloud', name: 'GLM-5' },
+    { id: 'minimax-m2.5:cloud', name: 'MiniMax M2.5' },
+    { id: 'qwen3-coder-next:cloud', name: 'Qwen3 Coder Next' },
+    { id: 'kimi-k2.5:cloud', name: 'Kimi K2.5' },
+    { id: 'glm-4.7:cloud', name: 'GLM-4.7' },
+    { id: 'minimax-m2.1:cloud', name: 'MiniMax M2.1' },
+    { id: 'nemotron-3-nano:cloud', name: 'Nemotron 3 Nano' },
+    { id: 'devstral-small-2:cloud', name: 'Devstral Small 2' },
+    { id: 'rnj-1:cloud', name: 'RNJ-1' },
+    { id: 'deepseek-v3.2:cloud', name: 'DeepSeek V3.2' },
+    { id: 'devstral-2:cloud', name: 'Devstral 2' },
+  ],
 }
 
 const PROVIDER_UI: Record<SupportedBuildProvider, {
@@ -568,6 +591,7 @@ const canonicalizeModelId = (model?: string) => {
   if (value.startsWith('claude-sonnet-4-6')) return 'claude-sonnet-4-6'
   if (value.startsWith('claude-haiku-4-5')) return 'claude-haiku-4-5-20251001'
 
+  if (value.startsWith('gemini-3-flash-preview:cloud')) return 'gemini-3-flash-preview:cloud'
   if (value.startsWith('gemini-3.1-pro-preview')) return 'gemini-3.1-pro-preview'
   if (value.startsWith('gemini-3.1-pro')) return 'gemini-3.1-pro'
   if (value.startsWith('gemini-3-pro')) return 'gemini-3-pro-preview'
@@ -578,10 +602,15 @@ const canonicalizeModelId = (model?: string) => {
   if (value.startsWith('grok-3-mini')) return 'grok-3-mini'
   if (value.startsWith('grok-3')) return 'grok-3'
 
+  if (value.startsWith('kimi-k2.6:cloud') || value.startsWith('kimi-k2:cloud')) return 'kimi-k2.6:cloud'
   if (value.startsWith('kimi-k2.6') || value.startsWith('kimi-k2')) return 'kimi-k2.6'
+  if (value.startsWith('glm-5.1:cloud')) return 'glm-5.1:cloud'
   if (value.startsWith('glm-5.1')) return 'glm-5.1'
+  if (value.startsWith('qwen-3.6-27b:cloud')) return 'qwen-3.6-27b:cloud'
   if (value.startsWith('qwen-3.6-27b')) return 'qwen-3.6-27b'
+  if (value.startsWith('devstral-small-24b:cloud') || value.startsWith('devstral-24b:cloud')) return 'devstral-small-24b:cloud'
   if (value.startsWith('devstral-small-24b') || value.startsWith('devstral-24b')) return 'devstral-small-24b'
+  if (value.startsWith('deepseek-v4-flash:cloud')) return 'deepseek-v4-flash:cloud'
   if (value.startsWith('deepseek-v4-flash')) return 'deepseek-v4-flash'
 
   return value
@@ -667,6 +696,12 @@ const PROVIDER_MODEL_OPTIONS: Record<SupportedBuildProvider, ProviderModelTier[]
     acc[provider] = []
     for (const mode of ['max', 'balanced', 'fast'] as const) {
       const model = POWER_MODE_MODEL_CATALOG[mode][provider]
+      if (!seen.has(model.id)) {
+        seen.add(model.id)
+        acc[provider].push(model)
+      }
+    }
+    for (const model of ADDITIONAL_PROVIDER_MODEL_OPTIONS[provider] || []) {
       if (!seen.has(model.id)) {
         seen.add(model.id)
         acc[provider].push(model)
@@ -6892,6 +6927,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   assignments={roleAssignments}
                   onAssignmentsChange={setRoleAssignments}
                   providerStatuses={providerStatuses}
+                  selectedModels={providerModelOverrides}
+                  modelOptions={PROVIDER_MODEL_OPTIONS}
+                  onModelSelect={handleSelectProviderModel}
                 />
                 <BuildHistory userId={user?.id ?? null} onOpenBuild={openCompletedBuild} />
               </div>
@@ -7270,6 +7308,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 assignments={roleAssignments}
                 onAssignmentsChange={setRoleAssignments}
                 providerStatuses={providerStatuses}
+                selectedModels={providerModelOverrides}
+                modelOptions={PROVIDER_MODEL_OPTIONS}
+                onModelSelect={handleSelectProviderModel}
               />
             </div>
             </div>{/* end grid */}

@@ -204,11 +204,14 @@ func (ct *CanaryTester) RunCanaryInteractions(ctx context.Context, pageURL strin
 			return err
 		}),
 		chromedp.Navigate(pageURL),
-		chromedp.Sleep(1100*time.Millisecond),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return pollBrowserMountContent(ctx, &settledMountJSON)
+		}),
 		chromedp.Evaluate(canaryRuntimeErrorsJS, &baselineErrorsJSON),
 		chromedp.Evaluate(canaryHarnessJS, &harnessJSON),
-		chromedp.Sleep(450*time.Millisecond),
-		chromedp.Evaluate(mountCheckJS, &settledMountJSON),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return pollBrowserMountContent(ctx, &settledMountJSON)
+		}),
 		chromedp.Evaluate(canaryVisibleControlsJS, &settledVisible),
 		chromedp.Evaluate(canaryRuntimeErrorsJS, &postErrorsJSON),
 	)

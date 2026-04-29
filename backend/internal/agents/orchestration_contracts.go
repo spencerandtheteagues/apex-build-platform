@@ -1134,6 +1134,12 @@ func compileWorkOrdersFromPlanWithCost(buildID string, contract *BuildContract, 
 		if frontendPreviewFast && order.Role == RoleFrontend {
 			preferredProvider = ai.ProviderClaude
 		}
+		switch order.Role {
+		case RoleReviewer:
+			preferredProvider = ai.ProviderGrok
+		case RoleSolver:
+			preferredProvider = ai.ProviderGemini
+		}
 		orders = append(orders, WorkOrder{
 			ID:                 uuid.New().String(),
 			BuildID:            buildID,

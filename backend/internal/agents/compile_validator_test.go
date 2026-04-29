@@ -105,6 +105,46 @@ func TestRunCompileValidationLoopSkipsWhenAIRouterNil(t *testing.T) {
 	}
 }
 
+func TestCVSelectInlineRepairProviderPrefersGeminiInPlatformModeWithOllama(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderOllama, ai.ProviderGPT4, ai.ProviderGrok, ai.ProviderGemini},
+			hasConfiguredProvider: true,
+		},
+	}
+	build := &Build{
+		ID:           "compile-repair-platform-routing",
+		ProviderMode: "platform",
+		PowerMode:    PowerBalanced,
+	}
+
+	if got := am.cvSelectInlineRepairProvider(build); got != ai.ProviderGemini {
+		t.Fatalf("cvSelectInlineRepairProvider() = %s, want platform repair provider %s", got, ai.ProviderGemini)
+	}
+}
+
+func TestCVSelectInlineRepairProviderPreservesBYOKOllamaPrimary(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderOllama, ai.ProviderGPT4, ai.ProviderGrok},
+			hasConfiguredProvider: true,
+		},
+	}
+	build := &Build{
+		ID:           "compile-repair-byok-routing",
+		ProviderMode: "byok",
+		PowerMode:    PowerBalanced,
+	}
+
+	if got := am.cvSelectInlineRepairProvider(build); got != ai.ProviderOllama {
+		t.Fatalf("cvSelectInlineRepairProvider() = %s, want BYOK provider %s", got, ai.ProviderOllama)
+	}
+}
+
 func TestCVBroadcastResultRecordsCompileFailureFingerprint(t *testing.T) {
 	am := &AgentManager{
 		builds:      make(map[string]*Build),

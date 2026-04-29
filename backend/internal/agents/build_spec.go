@@ -76,14 +76,15 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		}
 
 		resp, err := a.router.Generate(attemptCtx, provider, prompt, GenerateOptions{
-			UserID:          a.userID,
-			BuildID:         a.buildID,
-			MaxTokens:       opts.MaxTokens,
-			Temperature:     opts.Temperature,
-			SystemPrompt:    opts.SystemPrompt,
-			RoleHint:        string(RolePlanner),
-			PowerMode:       a.powerMode,
-			UsePlatformKeys: a.usePlatformKeys,
+			UserID:                  a.userID,
+			BuildID:                 a.buildID,
+			MaxTokens:               opts.MaxTokens,
+			Temperature:             opts.Temperature,
+			SystemPrompt:            opts.SystemPrompt,
+			RoleHint:                string(RolePlanner),
+			PowerMode:               a.powerMode,
+			UsePlatformKeys:         a.usePlatformKeys,
+			DisableProviderFallback: true,
 		})
 		cancel()
 

@@ -544,6 +544,10 @@ type GenerateOptions struct {
 	// Set true for lead/planner/solver agents whose system prompts are reused
 	// across many calls. Cuts Claude costs 50-80%; enables Moonshot context cache.
 	CacheSystemPrompt bool
+	// DisableProviderFallback pins the low-level router to the selected provider.
+	// Agent orchestration owns scorecard-aware fallback so each provider gets its
+	// own timeout and telemetry instead of sharing one exhausted request deadline.
+	DisableProviderFallback bool
 }
 
 // Message for AI context
@@ -904,31 +908,26 @@ func (am *AgentManager) StartBuild(buildID string) error {
 		return fmt.Errorf("no AI providers available")
 	}
 
-	// Select best provider for lead agent
-	// PRIORITY: Ollama (BYOK/Local) > Claude > GPT > Gemini
-	// If the user has brought their own local model, we MUST use it to avoid platform costs.
+	// Select best provider for lead agent.
+	// BYOK/local Ollama should stay primary to honor user-owned compute. In
+	// platform mode, hosted Ollama is just another managed provider, so use the
+	// capability/scorecard path instead of forcing every build through Kimi.
 	leadProvider := availableProviders[0]
 	useOllama := false
 
-	// Check for Ollama first
-	for _, p := range availableProviders {
-		if p == ai.ProviderOllama {
-			leadProvider = ai.ProviderOllama
-			useOllama = true
-			break
+	if !usePlatformKeys {
+		for _, p := range availableProviders {
+			if p == ai.ProviderOllama {
+				leadProvider = ai.ProviderOllama
+				useOllama = true
+				break
+			}
 		}
 	}
 
-	// If not using Ollama, fall back to standard platform hierarchy
 	if !useOllama {
-		for _, p := range availableProviders {
-			if p == ai.ProviderClaude {
-				leadProvider = ai.ProviderClaude
-				break
-			}
-			if p == ai.ProviderGPT4 && leadProvider != ai.ProviderClaude {
-				leadProvider = ai.ProviderGPT4
-			}
+		if selected := am.selectLeadProvider(availableProviders); selected != "" {
+			leadProvider = selected
 		}
 	}
 
@@ -2566,9 +2565,11 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		available[p] = true
 	}
 
-	// When Ollama/Kimi is available, make it the primary model family across the
-	// build. Other providers remain available later as fallbacks if Ollama fails.
-	if available[ai.ProviderOllama] {
+	// When the user is explicitly using BYOK/local Ollama, keep Ollama primary
+	// across the build to honor owned compute and avoid platform spend. In
+	// platform mode hosted Ollama must not bypass role-specialized scorecard
+	// routing; that reduces first-pass reliability on complex builds.
+	if !am.buildUsesPlatformKeys(build) && available[ai.ProviderOllama] {
 		log.Printf("Assigning providers to roles: %d providers available (forcing ollama across all roles)", len(providers))
 		for _, role := range roles {
 			assignments[role] = ai.ProviderOllama
@@ -2584,6 +2585,22 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 
 	// Helper to pick the first available provider in preference order
 	pick := func(role AgentRole, preferences ...ai.AIProvider) ai.AIProvider {
+		if am.buildUsesPlatformKeys(build) {
+			switch role {
+			case RolePlanner, RoleArchitect:
+				if available[ai.ProviderClaude] {
+					return ai.ProviderClaude
+				}
+			case RoleReviewer:
+				if available[ai.ProviderGrok] {
+					return ai.ProviderGrok
+				}
+			case RoleSolver:
+				if available[ai.ProviderGemini] {
+					return ai.ProviderGemini
+				}
+			}
+		}
 		if preferred := selectProviderByScorecard(build, role, taskShapeForRole(role), providers, scorecards); preferred != "" {
 			return preferred
 		}
@@ -2608,11 +2625,15 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	// Role-to-provider preferences with graceful fallback when a preferred provider is unavailable.
 	for _, role := range roles {
 		switch role {
-		case RolePlanner, RoleArchitect, RoleReviewer:
+		case RolePlanner, RoleArchitect:
 			assignments[role] = pick(role, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok)
-		case RoleBackend, RoleSolver:
+		case RoleReviewer:
+			assignments[role] = pick(role, ai.ProviderGrok, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini)
+		case RoleBackend:
 			// Grok-4.20-reasoning excels at complex backend logic and repair
 			assignments[role] = pick(role, ai.ProviderGrok, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini)
+		case RoleSolver:
+			assignments[role] = pick(role, ai.ProviderGemini, ai.ProviderGPT4, ai.ProviderGrok, ai.ProviderClaude)
 		case RoleFrontend, RoleDatabase:
 			assignments[role] = pick(role, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok)
 		case RoleTesting:
@@ -2654,11 +2675,19 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 			}
 			if !assigned {
 				switch role {
-				case RolePlanner, RoleArchitect, RoleReviewer:
+				case RolePlanner, RoleArchitect:
 					if available[ai.ProviderClaude] {
 						assignments[role] = ai.ProviderClaude
 					}
-				case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
+				case RoleReviewer:
+					if available[ai.ProviderGrok] {
+						assignments[role] = ai.ProviderGrok
+					}
+				case RoleSolver:
+					if available[ai.ProviderGemini] {
+						assignments[role] = ai.ProviderGemini
+					}
+				case RoleFrontend, RoleBackend, RoleDatabase:
 					if available[ai.ProviderGPT4] {
 						assignments[role] = ai.ProviderGPT4
 					}
@@ -2761,13 +2790,6 @@ func (am *AgentManager) assignProvidersToRolesWithOverrides(
 // selectLeadProvider chooses the most capable provider from available options
 // Lead provider handles critical planning, architecture, and decision-making tasks
 func (am *AgentManager) selectLeadProvider(providers []ai.AIProvider) ai.AIProvider {
-	for _, provider := range providers {
-		if provider == ai.ProviderOllama {
-			log.Printf("Provider capability analysis: selected %s as preferred managed/local orchestrator from %v", provider, providers)
-			return provider
-		}
-	}
-
 	// Provider capability ranking (highest to lowest)
 	// Claude: Best for reasoning, planning, architecture decisions
 	// GPT-4: Strong for complex code generation and problem-solving
@@ -15505,6 +15527,7 @@ func deterministicRepairScoringBuild(build *Build) *Build {
 		ProviderModelOverrides:      cloneStringMap(build.ProviderModelOverrides),
 		CompileValidationPassed:     true, // scoring should stay structural and avoid repeated npm/browser probes.
 		CompileValidationAttempts:   build.CompileValidationAttempts,
+		CompileValidationRepairs:    build.CompileValidationRepairs,
 		PhasedPipelineComplete:      build.PhasedPipelineComplete,
 		DiffMode:                    build.DiffMode,
 		SnapshotState:               build.SnapshotState,
@@ -16229,7 +16252,7 @@ completion_finalize:
 		}
 		durationMS := now.Sub(build.CreatedAt).Milliseconds()
 		pLog(build.ID).BuildEnd(string(build.Status), failCat, failClass, durationMS,
-			build.CompileValidationAttempts, build.PreviewVerificationAttempts, build.ReadinessRecoveryAttempts)
+			build.CompileValidationAttempts, build.CompileValidationRepairs, build.PreviewVerificationAttempts, build.ReadinessRecoveryAttempts)
 		build.mu.RUnlock()
 	}
 
@@ -18734,16 +18757,22 @@ func (am *AgentManager) getBuildSessionForUser(buildID string, userID uint, allo
 }
 
 func preferredLeadProviderOrder(availableProviders []ai.AIProvider) []ai.AIProvider {
+	return preferredLeadProviderOrderForBuild(nil, availableProviders)
+}
+
+func preferredLeadProviderOrderForBuild(build *Build, availableProviders []ai.AIProvider) []ai.AIProvider {
 	if len(availableProviders) == 0 {
 		return nil
 	}
 
 	leadProvider := availableProviders[0]
 
-	for _, provider := range availableProviders {
-		if provider == ai.ProviderOllama {
-			leadProvider = ai.ProviderOllama
-			break
+	if build != nil && strings.EqualFold(strings.TrimSpace(build.ProviderMode), "byok") {
+		for _, provider := range availableProviders {
+			if provider == ai.ProviderOllama {
+				leadProvider = ai.ProviderOllama
+				break
+			}
 		}
 	}
 
@@ -18778,7 +18807,7 @@ func (am *AgentManager) activateRestoredLeadAgent(build *Build, availableProvide
 	defer build.mu.Unlock()
 
 	now := time.Now().UTC()
-	for _, provider := range preferredLeadProviderOrder(availableProviders) {
+	for _, provider := range preferredLeadProviderOrderForBuild(build, availableProviders) {
 		for _, agent := range build.Agents {
 			if agent == nil || agent.Role != RoleLead || agent.Provider != provider {
 				continue
@@ -18840,6 +18869,9 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 	requestsUsed := 0
 	readinessRecoveryAttempts := 0
 	previewVerificationAttempts := 0
+	compileValidationPassed := false
+	compileValidationAttempts := 0
+	compileValidationRepairs := 0
 	roleAssignments := map[string]string(nil)
 	providerModelOverrides := map[string]string(nil)
 	phasedPipelineComplete := false
@@ -18854,6 +18886,9 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		requestsUsed = restoreContext.RequestsUsed
 		readinessRecoveryAttempts = restoreContext.ReadinessRecoveryAttempts
 		previewVerificationAttempts = restoreContext.PreviewVerificationAttempts
+		compileValidationPassed = restoreContext.CompileValidationPassed
+		compileValidationAttempts = restoreContext.CompileValidationAttempts
+		compileValidationRepairs = restoreContext.CompileValidationRepairs
 		if restoreContext.MaxAgents > 0 {
 			maxAgents = restoreContext.MaxAgents
 		}
@@ -18905,6 +18940,9 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		RequestsUsed:                requestsUsed,
 		ReadinessRecoveryAttempts:   readinessRecoveryAttempts,
 		PreviewVerificationAttempts: previewVerificationAttempts,
+		CompileValidationPassed:     compileValidationPassed,
+		CompileValidationAttempts:   compileValidationAttempts,
+		CompileValidationRepairs:    compileValidationRepairs,
 		PhasedPipelineComplete:      phasedPipelineComplete,
 		DiffMode:                    diffMode,
 		RoleAssignments:             roleAssignments,
@@ -18978,7 +19016,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 	}
 	if leadAgent == nil {
 		var err error
-		for _, provider := range preferredLeadProviderOrder(availableProviders) {
+		for _, provider := range preferredLeadProviderOrderForBuild(build, availableProviders) {
 			leadAgent, err = am.spawnAgent(build.ID, RoleLead, provider)
 			if err == nil {
 				break

@@ -339,4 +339,37 @@ describe('ModelRoleConfig', () => {
       tester: 'ollama',
     })
   })
+
+  it('shows Ollama Cloud model choices and emits selected model override', () => {
+    const onModelSelect = vi.fn()
+    render(
+      <ModelRoleConfig
+        mode="manual"
+        onModeChange={vi.fn()}
+        assignments={{ architect: 'claude', coder: 'gpt4', tester: 'ollama' }}
+        onAssignmentsChange={vi.fn()}
+        providerStatuses={WITH_OLLAMA}
+        selectedModels={{ ollama: 'deepseek-v4-flash:cloud' }}
+        modelOptions={{
+          ollama: [
+            { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
+            { id: 'glm-5.1:cloud', name: 'GLM-5.1' },
+            { id: 'deepseek-v4-flash:cloud', name: 'DeepSeek V4 Flash' },
+          ],
+        }}
+        onModelSelect={onModelSelect}
+      />
+    )
+
+    expect(screen.getByText('Ollama Cloud Model')).toBeTruthy()
+    expect(screen.getByText('Kimi K2.6')).toBeTruthy()
+    expect(screen.getByText('GLM-5.1')).toBeTruthy()
+    expect(screen.getByText('DeepSeek V4 Flash')).toBeTruthy()
+
+    fireEvent.change(screen.getByDisplayValue('DeepSeek V4 Flash'), {
+      target: { value: 'glm-5.1:cloud' },
+    })
+
+    expect(onModelSelect).toHaveBeenCalledWith('ollama', 'glm-5.1:cloud')
+  })
 })

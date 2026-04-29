@@ -37,13 +37,22 @@ func TestOllamaCloudNormalizesKimiAlias(t *testing.T) {
 	t.Parallel()
 
 	client := NewOllamaClient("https://ollama.com", "cloud-key")
-	req := &AIRequest{
-		Capability: CapabilityCodeGeneration,
-		Model:      "kimi-k2.6",
+	tests := []struct {
+		model string
+		want  string
+	}{
+		{model: "kimi-k2.6", want: "kimi-k2.6:cloud"},
+		{model: "glm-5.1", want: "glm-5.1:cloud"},
+		{model: "deepseek-v4", want: "deepseek-v4-flash:cloud"},
 	}
-
-	if got := client.getModel(req); got != "kimi-k2.6:cloud" {
-		t.Fatalf("getModel() = %q, want kimi-k2.6:cloud", got)
+	for _, tt := range tests {
+		req := &AIRequest{
+			Capability: CapabilityCodeGeneration,
+			Model:      tt.model,
+		}
+		if got := client.getModel(req); got != tt.want {
+			t.Fatalf("getModel(%q) = %q, want %q", tt.model, got, tt.want)
+		}
 	}
 }
 

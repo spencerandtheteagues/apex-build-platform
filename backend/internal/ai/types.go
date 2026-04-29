@@ -57,6 +57,10 @@ type AIRequest struct {
 	// For Claude: uses cache_control ephemeral blocks. For Moonshot direct API: sets use_context_cache.
 	// Cuts orchestrator costs 50-80% when the same system prompt is reused across calls.
 	CacheSystemPrompt bool `json:"cache_system_prompt,omitempty"`
+	// DisableFallback keeps this request pinned to Provider. Higher-level
+	// orchestration paths use this so they can apply scorecard-aware fallback
+	// with correct telemetry instead of burning one request deadline internally.
+	DisableFallback bool `json:"disable_fallback,omitempty"`
 }
 
 // GetCacheKey generates a cache key for the request
@@ -154,35 +158,30 @@ type RouterConfig struct {
 func DefaultRouterConfig() *RouterConfig {
 	return &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
-			// Ollama (kimi-k2.6:cloud) is the primary orchestrator for all capabilities.
-			// Cloud providers are fallback only.
-			CapabilityCodeGeneration:        ProviderOllama,
-			CapabilityNaturalLanguageToCode: ProviderOllama,
-			CapabilityCodeReview:            ProviderOllama,
-			CapabilityCodeCompletion:        ProviderOllama,
-			CapabilityDebugging:             ProviderOllama,
-			CapabilityExplanation:           ProviderOllama,
-			CapabilityRefactoring:           ProviderOllama,
-			CapabilityTesting:               ProviderOllama,
-			CapabilityDocumentation:         ProviderOllama,
-			CapabilityArchitecture:          ProviderOllama,
+			CapabilityCodeGeneration:        ProviderGPT4,
+			CapabilityNaturalLanguageToCode: ProviderClaude,
+			CapabilityCodeReview:            ProviderClaude,
+			CapabilityCodeCompletion:        ProviderGPT4,
+			CapabilityDebugging:             ProviderGrok,
+			CapabilityExplanation:           ProviderClaude,
+			CapabilityRefactoring:           ProviderGPT4,
+			CapabilityTesting:               ProviderGemini,
+			CapabilityDocumentation:         ProviderClaude,
+			CapabilityArchitecture:          ProviderClaude,
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
-			// Ollama (kimi-k2.6:cloud) is the primary orchestrator.
-			// If Ollama fails, fall back to Claude, then GPT4, then Gemini, then Grok.
 			ProviderOllama: {ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok},
-			ProviderClaude: {ProviderOllama, ProviderGPT4, ProviderGemini, ProviderGrok},
-			ProviderGPT4:   {ProviderOllama, ProviderClaude, ProviderGemini, ProviderGrok},
-			ProviderGemini: {ProviderOllama, ProviderClaude, ProviderGPT4, ProviderGrok},
-			ProviderGrok:   {ProviderOllama, ProviderGPT4, ProviderClaude, ProviderGemini},
+			ProviderClaude: {ProviderGPT4, ProviderGemini, ProviderGrok, ProviderOllama},
+			ProviderGPT4:   {ProviderClaude, ProviderGemini, ProviderGrok, ProviderOllama},
+			ProviderGemini: {ProviderClaude, ProviderGPT4, ProviderGrok, ProviderOllama},
+			ProviderGrok:   {ProviderGPT4, ProviderClaude, ProviderGemini, ProviderOllama},
 		},
 		LoadBalancing: map[AIProvider]float64{
-			// Ollama (kimi-k2.6:cloud) is the primary orchestrator — highest weight.
-			ProviderOllama: 0.50,
-			ProviderClaude: 0.15,
-			ProviderGPT4:   0.15,
-			ProviderGrok:   0.10,
-			ProviderGemini: 0.10,
+			ProviderClaude: 0.30,
+			ProviderGPT4:   0.30,
+			ProviderGemini: 0.20,
+			ProviderGrok:   0.15,
+			ProviderOllama: 0.05,
 		},
 		RateLimits: map[AIProvider]int{
 			ProviderClaude: 100,  // requests per minute

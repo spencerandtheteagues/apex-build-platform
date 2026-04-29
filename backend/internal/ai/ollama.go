@@ -522,8 +522,20 @@ func (o *OllamaClient) normalizeModelAlias(model string) string {
 	// hanging or failing after a long timeout instead of using the intended model.
 	if o.apiKey != "" {
 		lower := strings.ToLower(normalized)
-		if (lower == "kimi-k2.6" || lower == "kimi-k2" || lower == "kimi") && !strings.Contains(lower, ":") {
+		if strings.Contains(lower, ":cloud") {
+			return normalized
+		}
+		switch lower {
+		case "kimi", "kimi-k2", "kimi-k2.6":
 			return "kimi-k2.6:cloud"
+		case "glm", "glm-5", "glm-5.1":
+			return "glm-5.1:cloud"
+		case "deepseek", "deepseek-v4", "deepseek-v4-flash":
+			return "deepseek-v4-flash:cloud"
+		case "qwen", "qwen-3.6-27b":
+			return "qwen-3.6-27b:cloud"
+		case "devstral", "devstral-24b", "devstral-small-24b":
+			return "devstral-small-24b:cloud"
 		}
 	}
 

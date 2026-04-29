@@ -26,9 +26,9 @@ func defaultGenerateTimeout(provider ai.AIProvider, mode PowerMode) time.Duratio
 
 	switch mode {
 	case PowerMax:
-		return 3 * time.Minute
+		return 5 * time.Minute
 	case PowerBalanced:
-		return 150 * time.Second
+		return 3 * time.Minute
 	default:
 		return 2 * time.Minute
 	}

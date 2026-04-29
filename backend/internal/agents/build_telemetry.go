@@ -106,7 +106,7 @@ func deriveBuildQualityMetrics(build *Build, allFiles []GeneratedFile, now time.
 		SubscriptionPlan:     strings.TrimSpace(build.SubscriptionPlan),
 		DeliveryMode:         buildCurrentDeliveryMode(build),
 		CanaryCohort:         buildCanaryCohort(build),
-		CompileRepairCount:   build.CompileValidationAttempts,
+		CompileRepairCount:   build.CompileValidationRepairs,
 		ReadinessRepairCount: build.ReadinessRecoveryAttempts,
 		PreviewRepairCount:   build.PreviewVerificationAttempts,
 		FileCount:            len(allFiles),
@@ -125,7 +125,7 @@ func deriveBuildQualityMetrics(build *Build, allFiles []GeneratedFile, now time.
 
 	// First-pass: completed with zero repair attempts.
 	m.FirstPassSuccess = build.Status == BuildCompleted &&
-		build.CompileValidationAttempts == 0 &&
+		build.CompileValidationRepairs == 0 &&
 		build.PreviewVerificationAttempts == 0 &&
 		build.ReadinessRecoveryAttempts == 0
 

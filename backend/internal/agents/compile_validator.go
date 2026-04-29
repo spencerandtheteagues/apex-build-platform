@@ -12,8 +12,8 @@
 //
 // Design principles:
 //   - Never fails a build — if npm is unavailable or installs fail for host/network
-//     reasons, the loop logs and returns silently. Structural validation will still
-//     catch missing-dependency errors through its own repair ladder.
+//     reasons, the loop logs and returns silently. Generated package/manifest
+//     failures are repaired inline before structural validation burns a recovery pass.
 //   - node_modules is never re-installed between repair attempts (huge perf win).
 //   - Errors are parsed into structured ParsedBuildError objects (file+line+col+code)
 //     so the repair AI gets precise context rather than a wall of text.
@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/spend"
 )
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -54,10 +55,11 @@ type ParsedBuildError struct {
 
 // compileLoopResult summarises the outcome of runCompileValidationLoop.
 type compileLoopResult struct {
-	Passed      bool
-	SkipReason  string             // non-empty when the loop was skipped entirely
-	Attempts    int                // repair attempts made
-	FinalErrors []ParsedBuildError // errors still present after all attempts
+	Passed         bool
+	SkipReason     string             // non-empty when the loop was skipped entirely
+	Attempts       int                // validation loop attempts made
+	RepairAttempts int                // inline repair calls attempted
+	FinalErrors    []ParsedBuildError // errors still present after all attempts
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -239,32 +241,79 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		log.Printf("[compile_validator] build %s: %s", build.ID, result.SkipReason)
 		return result
 	}
-	if manifestIssues := cvPackageManifestSanityIssues(*allFiles); len(manifestIssues) > 0 {
-		result.FinalErrors = manifestIssues
-		result.SkipReason = "package.json sanity failed before npm install"
-		log.Printf("[compile_validator] build %s: %s: %v", build.ID, result.SkipReason, manifestIssues)
-		return result
-	}
-
-	// Run npm install once. Failures for environmental reasons (network, node-gyp, etc.)
-	// cause a graceful skip rather than a build failure.
 	ctx := am.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	installOut, installErr := cvRunCommand(ctx, tmpDir, cvInstallTimeout,
-		"npm", "install", "--legacy-peer-deps", "--prefer-offline", "--no-audit", "--no-fund")
-	if installErr != nil {
+	if manifestIssues := cvPackageManifestSanityIssues(*allFiles); len(manifestIssues) > 0 {
+		result.Attempts = 1
+		result.FinalErrors = manifestIssues
+		msgs := make([]string, len(manifestIssues))
+		for i, issue := range manifestIssues {
+			msgs[i] = issue.Message
+		}
+		pLog(build.ID).CompileCheck("package_manifest", len(manifestIssues), msgs)
+		log.Printf("[compile_validator] build %s: package.json sanity failed before npm install: %v", build.ID, manifestIssues)
+		pLog(build.ID).CompileRepairStart("manifest_inline", 0, len(*allFiles))
+		result.RepairAttempts++
+		repaired := am.cvRunInlineRepair(ctx, build, manifestIssues, allFiles, tmpDir)
+		pLog(build.ID).CompileRepairDone("manifest_inline", 0, repaired, len(manifestIssues))
+		if !repaired {
+			cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
+			am.cvBroadcastResult(build, false, manifestIssues)
+			return result
+		}
+		if err := cvRematerializeSourceFiles(*allFiles, tmpDir); err != nil {
+			log.Printf("[compile_validator] build %s: rematerialise failed after manifest repair: %v", build.ID, err)
+		}
+	}
+
+	maxAttempts := maxCompileAttempts(build.PowerMode)
+
+	// Run npm install before compile checks. Environmental failures (network,
+	// node-gyp, missing native toolchain) still skip cleanly, but generated
+	// artifact failures (bad package name/version/peer tree/malformed manifest)
+	// are repaired immediately instead of burning a later readiness recovery pass.
+	installPassed := false
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		installOut, installErr := cvRunCommand(ctx, tmpDir, cvInstallTimeout,
+			"npm", "install", "--legacy-peer-deps", "--prefer-offline", "--no-audit", "--no-fund")
+		if installErr == nil {
+			installPassed = true
+			break
+		}
 		skip, summary := classifyNodeInstallFailure(installOut, installErr)
 		if skip {
 			result.SkipReason = fmt.Sprintf("npm install skipped (env/host issue): %s", summary)
 			log.Printf("[compile_validator] build %s: %s", build.ID, result.SkipReason)
 			return result
 		}
-		// Non-skippable install failure (e.g. hallucinated package name). Surface via
-		// structural validation's repair ladder rather than blocking here.
-		result.SkipReason = fmt.Sprintf("npm install failed: %s", summary)
-		log.Printf("[compile_validator] build %s: %s", build.ID, result.SkipReason)
+
+		installErrors := []ParsedBuildError{{
+			File:    "package.json",
+			Message: fmt.Sprintf("npm install failed: %s", summary),
+			Source:  "install",
+		}}
+		result.Attempts = attempt + 1
+		result.FinalErrors = installErrors
+		pLog(build.ID).CompileCheck("npm_install", len(installErrors), []string{installErrors[0].Message})
+		log.Printf("[compile_validator] build %s attempt %d: npm install failed: %s", build.ID, attempt+1, summary)
+		pLog(build.ID).CompileRepairStart("install_inline", attempt, len(*allFiles))
+		result.RepairAttempts++
+		repaired := am.cvRunInlineRepair(ctx, build, installErrors, allFiles, tmpDir)
+		pLog(build.ID).CompileRepairDone("install_inline", attempt, repaired, len(installErrors))
+		if !repaired {
+			cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
+			am.cvBroadcastResult(build, false, installErrors)
+			return result
+		}
+		if err := cvRematerializeSourceFiles(*allFiles, tmpDir); err != nil {
+			log.Printf("[compile_validator] build %s: rematerialise failed after install repair: %v", build.ID, err)
+		}
+	}
+	if !installPassed {
+		cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
+		am.cvBroadcastResult(build, false, result.FinalErrors)
 		return result
 	}
 
@@ -273,8 +322,6 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 	if cvIsNextJSProject(*allFiles) {
 		cvPrepareNextJSWorkspace(tmpDir)
 	}
-
-	maxAttempts := maxCompileAttempts(build.PowerMode)
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result.Attempts = attempt + 1
@@ -308,6 +355,7 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		if len(tscErrors) > 0 {
 			log.Printf("[compile_validator] build %s attempt %d: tsc found %d error(s)", build.ID, attempt+1, len(tscErrors))
 			pLog(build.ID).CompileRepairStart("tsc_inline", attempt, len(*allFiles))
+			result.RepairAttempts++
 			repaired := am.cvRunInlineRepair(ctx, build, tscErrors, allFiles, tmpDir)
 			pLog(build.ID).CompileRepairDone("tsc_inline", attempt, repaired, len(tscErrors))
 			if repaired {
@@ -319,6 +367,7 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 			}
 			// Couldn't repair — record errors and fall through to structural validation.
 			result.FinalErrors = tscErrors
+			cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
 			am.cvBroadcastResult(build, false, tscErrors)
 			return result
 		}
@@ -328,10 +377,7 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		// DB connections, ports). For Next.js, a clean tsc pass is enough.
 		if cvIsNextJSProject(*allFiles) {
 			result.Passed = true
-			build.mu.Lock()
-			build.CompileValidationPassed = true
-			build.CompileValidationAttempts = result.Attempts
-			build.mu.Unlock()
+			cvSetValidationCounters(build, true, result.Attempts, result.RepairAttempts)
 			log.Printf("[compile_validator] build %s: compile validation passed (Next.js tsc-only) after %d attempt(s)", build.ID, result.Attempts)
 			pLog(build.ID).CompileCheck("nextjs_tsc_pass", 0, nil)
 			am.cvBroadcastResult(build, true, nil)
@@ -349,10 +395,7 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		if len(viteErrors) == 0 {
 			// Build succeeded cleanly.
 			result.Passed = true
-			build.mu.Lock()
-			build.CompileValidationPassed = true
-			build.CompileValidationAttempts = result.Attempts
-			build.mu.Unlock()
+			cvSetValidationCounters(build, true, result.Attempts, result.RepairAttempts)
 			log.Printf("[compile_validator] build %s: compile validation passed after %d attempt(s)", build.ID, result.Attempts)
 			am.cvBroadcastResult(build, true, nil)
 			return result
@@ -360,6 +403,7 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 
 		log.Printf("[compile_validator] build %s attempt %d: vite build found %d error(s)", build.ID, attempt+1, len(viteErrors))
 		pLog(build.ID).CompileRepairStart("vite_inline", attempt, len(*allFiles))
+		result.RepairAttempts++
 		repaired := am.cvRunInlineRepair(ctx, build, viteErrors, allFiles, tmpDir)
 		pLog(build.ID).CompileRepairDone("vite_inline", attempt, repaired, len(viteErrors))
 		if repaired {
@@ -369,13 +413,26 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 			continue
 		}
 		result.FinalErrors = viteErrors
+		cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
 		am.cvBroadcastResult(build, false, viteErrors)
 		return result
 	}
 
 	// Exhausted attempts without passing.
+	cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
 	am.cvBroadcastResult(build, false, result.FinalErrors)
 	return result
+}
+
+func cvSetValidationCounters(build *Build, passed bool, attempts, repairs int) {
+	if build == nil {
+		return
+	}
+	build.mu.Lock()
+	build.CompileValidationPassed = passed
+	build.CompileValidationAttempts = attempts
+	build.CompileValidationRepairs = repairs
+	build.mu.Unlock()
 }
 
 // ─── Compile Checkers ─────────────────────────────────────────────────────────
@@ -901,9 +958,20 @@ func (am *AgentManager) cvSelectInlineRepairProvider(build *Build) ai.AIProvider
 	for _, p := range providers {
 		available[p] = true
 	}
-	// Prefer managed Ollama/Kimi first so inline repair follows the same primary
-	// model family as the active build, then fall back to the cloud providers.
-	for _, preferred := range []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok} {
+	if !am.buildUsesPlatformKeys(build) && available[ai.ProviderOllama] {
+		return ai.ProviderOllama
+	}
+	if am.buildUsesPlatformKeys(build) && available[ai.ProviderGemini] {
+		return ai.ProviderGemini
+	}
+
+	for _, provider := range rankedProvidersForTaskShapeWithCost(TaskShapeRepair, am.providerScorecardsForBuild(build, providers), buildCostSensitivity(build)) {
+		if available[provider] {
+			return provider
+		}
+	}
+
+	for _, preferred := range []ai.AIProvider{ai.ProviderGrok, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderOllama} {
 		if available[preferred] {
 			return preferred
 		}
@@ -954,14 +1022,15 @@ func (am *AgentManager) cvGenerateTaskOutput(
 
 	repairPowerMode := cvRepairPowerMode(build.PowerMode)
 	resp, err := am.aiRouter.Generate(repairCtx, provider, prompt, GenerateOptions{
-		UserID:          build.UserID,
-		BuildID:         build.ID,
-		MaxTokens:       cvRepairTokens(build.PowerMode),
-		Temperature:     strategy.Temperature,
-		SystemPrompt:    compileRepairSystemPrompt,
-		RoleHint:        string(RoleSolver),
-		PowerMode:       repairPowerMode,
-		UsePlatformKeys: build.ProviderMode != "byok",
+		UserID:                  build.UserID,
+		BuildID:                 build.ID,
+		MaxTokens:               cvRepairTokens(build.PowerMode),
+		Temperature:             strategy.Temperature,
+		SystemPrompt:            compileRepairSystemPrompt,
+		RoleHint:                string(RoleSolver),
+		PowerMode:               repairPowerMode,
+		UsePlatformKeys:         build.ProviderMode != "byok",
+		DisableProviderFallback: true,
 	})
 	if err != nil {
 		log.Printf("[compile_validator] build %s: AI repair call failed (%s): %v", build.ID, strategy.Name, err)
@@ -969,6 +1038,23 @@ func (am *AgentManager) cvGenerateTaskOutput(
 	}
 	if resp == nil || strings.TrimSpace(resp.Content) == "" {
 		return nil
+	}
+	if am.spendTracker != nil && resp.Usage != nil {
+		am.recordBuildSpend(build, nil, spend.RecordSpendInput{
+			UserID:       build.UserID,
+			ProjectID:    build.ProjectID,
+			BuildID:      build.ID,
+			AgentID:      "compile-validator",
+			AgentRole:    string(RoleSolver),
+			Provider:     string(actualProviderForAIResponse(resp, provider)),
+			Model:        ai.GetModelUsed(resp, nil),
+			Capability:   "compile_repair",
+			IsBYOK:       build.ProviderMode == "byok",
+			InputTokens:  resp.Usage.PromptTokens,
+			OutputTokens: resp.Usage.CompletionTokens,
+			PowerMode:    string(repairPowerMode),
+			Status:       "success",
+		}, "", "compile_repair")
 	}
 	return am.parseTaskOutput(TaskFix, resp.Content)
 }
