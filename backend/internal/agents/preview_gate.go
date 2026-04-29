@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +67,22 @@ func (am *AgentManager) SetPreviewVerifier(v BuildPreviewVerifier) {
 	am.previewVerifier = v
 }
 
+func previewVerificationGateTimeout(mode PowerMode) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("APEX_PREVIEW_GATE_TIMEOUT_SECONDS")); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	switch mode {
+	case PowerMax:
+		return 4 * time.Minute
+	case PowerBalanced:
+		return 3 * time.Minute
+	default:
+		return 90 * time.Second
+	}
+}
+
 // runPreviewVerificationGate verifies that the generated files would produce a
 // loadable preview. Called from runBuildFinalization after code validation passes.
 //
@@ -92,7 +109,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(am.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(am.ctx, previewVerificationGateTimeout(build.PowerMode))
 	defer cancel()
 
 	pLog(build.ID).PreviewGateStart(len(vFiles), isFS)

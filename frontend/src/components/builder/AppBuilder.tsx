@@ -702,6 +702,7 @@ const getThoughtEventLabel = (thought: AIThought) => {
     case 'agent:coordination_failed':
       return 'Coordination Retry'
     case 'agent:provider_switched':
+    case 'agent:provider_fallback':
       return 'Provider Switch'
     case 'agent:message':
       return 'Directed Message'
@@ -4334,7 +4335,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         break
 
       case 'agent:provider_switched':
-        addSystemMessage(`${data.agent_role || 'Agent'} switched provider: ${data.old_provider || 'unknown'} → ${data.new_provider || 'unknown'}`)
+      case 'agent:provider_fallback': {
+        const oldProvider = data.old_provider || data.failed_provider || data.provider || 'unknown'
+        const newProvider = data.new_provider || data.fallback_provider || 'unknown'
+        const nextModel = data.model || data.new_model
+        addSystemMessage(`${data.agent_role || 'Agent'} switched provider: ${oldProvider} -> ${newProvider}`)
         setBuildState(prev => {
           if (!prev) return null
           return {
@@ -4344,8 +4349,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 ? {
                   ...a,
                   status: 'working' as Agent['status'],
-                  provider: data.new_provider ?? a.provider,
-                  model: data.model ?? a.model,
+                  provider: newProvider ?? a.provider,
+                  model: nextModel ?? a.model,
                 }
                 : a
             )
@@ -4354,15 +4359,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         addAiThought(
           message.agent_id,
           data.agent_role,
-          data.new_provider || data.provider,
-          data.model,
+          newProvider || data.provider,
+          nextModel,
           'action',
-          `${humanizeIdentifier(data.agent_role) || 'Agent'} switched provider from ${humanizeIdentifier(data.old_provider) || 'unknown'} to ${humanizeIdentifier(data.new_provider) || 'unknown'}`,
+          data.content || `${humanizeIdentifier(data.agent_role) || 'Agent'} switched provider from ${humanizeIdentifier(oldProvider) || 'unknown'} to ${humanizeIdentifier(newProvider) || 'unknown'}`,
           {
-            eventType: 'agent:provider_switched',
+            eventType: message.type === 'agent:provider_fallback' ? 'agent:provider_fallback' : 'agent:provider_switched',
           }
         )
         break
+      }
 
       case 'spend:update':
         {

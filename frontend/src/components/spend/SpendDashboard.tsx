@@ -39,12 +39,34 @@ const unwrapApiData = <T,>(payload: any): T => {
   return payload as T
 }
 
-const summaryCardTone: Record<'red' | 'orange' | 'yellow' | 'purple', string> = {
-  red: 'text-red-400',
-  orange: 'text-orange-400',
-  yellow: 'text-yellow-400',
-  purple: 'text-purple-400',
+const summaryCardTone: Record<'sky' | 'cyan' | 'emerald' | 'violet', string> = {
+  sky: 'text-sky-300',
+  cyan: 'text-cyan-300',
+  emerald: 'text-emerald-300',
+  violet: 'text-violet-300',
 }
+
+const meterPalette = [
+  { match: ['gpt4', 'openai', 'chatgpt'], from: '#60a5fa', via: '#38bdf8', to: '#22d3ee', text: 'text-sky-200' },
+  { match: ['claude', 'anthropic'], from: '#8b5cf6', via: '#a78bfa', to: '#c084fc', text: 'text-violet-200' },
+  { match: ['grok', 'xai'], from: '#f472b6', via: '#fb7185', to: '#f97316', text: 'text-rose-200' },
+  { match: ['gemini', 'google'], from: '#22d3ee', via: '#2dd4bf', to: '#34d399', text: 'text-cyan-200' },
+  { match: ['ollama', 'kimi', 'local'], from: '#4ade80', via: '#22c55e', to: '#84cc16', text: 'text-emerald-200' },
+]
+
+const fallbackMeterPalette = [
+  { from: '#38bdf8', via: '#818cf8', to: '#c084fc', text: 'text-sky-200' },
+  { from: '#2dd4bf', via: '#22d3ee', to: '#60a5fa', text: 'text-cyan-200' },
+  { from: '#a78bfa', via: '#f0abfc', to: '#fb7185', text: 'text-violet-200' },
+]
+
+const meterToneForKey = (key: string, index: number) => {
+  const lower = key.toLowerCase()
+  return meterPalette.find((tone) => tone.match.some((needle) => lower.includes(needle)))
+    ?? fallbackMeterPalette[index % fallbackMeterPalette.length]
+}
+
+const formatCurrency = (value: number) => `$${Number(value || 0).toFixed(4)}`
 
 type SummaryCard = {
   label: string
@@ -112,11 +134,14 @@ export const SpendDashboard: React.FC = () => {
   }
 
   const summaryCards: SummaryCard[] = [
-    { label: "Today's Spend", value: summary?.daily_spend ?? 0, icon: DollarSign, color: 'red' },
-    { label: "Monthly Spend", value: summary?.monthly_spend ?? 0, icon: TrendingUp, color: 'orange' },
-    { label: "Today's Requests", value: summary?.daily_count ?? 0, icon: Cpu, color: 'yellow', isCurrency: false },
-    { label: "Monthly Requests", value: summary?.monthly_count ?? 0, icon: BarChart3, color: 'purple', isCurrency: false },
+    { label: "Today's Spend", value: summary?.daily_spend ?? 0, icon: DollarSign, color: 'sky' },
+    { label: "Monthly Spend", value: summary?.monthly_spend ?? 0, icon: TrendingUp, color: 'cyan' },
+    { label: "Today's Requests", value: summary?.daily_count ?? 0, icon: Cpu, color: 'emerald', isCurrency: false },
+    { label: "Monthly Requests", value: summary?.monthly_count ?? 0, icon: BarChart3, color: 'violet', isCurrency: false },
   ]
+
+  const maxBreakdownCost = Math.max(...breakdown.map(item => Number(item.billed_cost || 0)), 0)
+  const totalBreakdownCost = breakdown.reduce((sum, item) => sum + Number(item.billed_cost || 0), 0)
 
   return (
     <div className="min-h-full bg-black p-6 pb-16 md:pb-6">
@@ -124,7 +149,7 @@ export const SpendDashboard: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500">
+            <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-200 via-cyan-300 to-blue-400">
               Spend Dashboard
             </h1>
             <p className="text-gray-400 mt-1">Track your AI usage costs in real-time</p>
@@ -147,26 +172,26 @@ export const SpendDashboard: React.FC = () => {
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {summaryCards.map((card) => (
-            <div key={card.label} className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
+            <div key={card.label} className="bg-slate-950/70 border border-sky-950/80 rounded-xl p-4 shadow-[0_0_30px_rgba(14,165,233,0.06)]">
               <div className="flex items-center gap-2 text-gray-400 text-sm mb-2">
                 <card.icon size={16} className={summaryCardTone[card.color]} />
                 {card.label}
               </div>
               <div className="text-2xl font-bold text-white">
-                {card.isCurrency === false ? card.value.toLocaleString() : `$${card.value.toFixed(4)}`}
+                {card.isCurrency === false ? card.value.toLocaleString() : formatCurrency(card.value)}
               </div>
             </div>
           ))}
         </div>
 
         {/* Breakdown */}
-        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+        <div className="bg-slate-950/70 border border-sky-950/80 rounded-xl p-6 shadow-[0_0_40px_rgba(14,165,233,0.08)]">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-white">Cost Breakdown</h2>
             <select
               value={groupBy}
               onChange={(e) => setGroupBy(e.target.value)}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300"
+              className="bg-slate-900 border border-sky-900/70 rounded-lg px-3 py-1.5 text-sm text-gray-300 focus:border-cyan-400 focus:outline-none"
             >
               <option value="provider">By Provider</option>
               <option value="model">By Model</option>
@@ -177,20 +202,31 @@ export const SpendDashboard: React.FC = () => {
           {breakdown.length === 0 ? (
             <p className="text-gray-500 text-sm">No spend data yet</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {breakdown.map((item, i) => {
-                const maxCost = Math.max(...breakdown.map(b => b.billed_cost), 0.001)
-                const pct = (item.billed_cost / maxCost) * 100
+                const cost = Number(item.billed_cost || 0)
+                const pct = maxBreakdownCost > 0 ? Math.max((cost / maxBreakdownCost) * 100, cost > 0 ? 3 : 0) : 0
+                const sharePct = totalBreakdownCost > 0 ? (cost / totalBreakdownCost) * 100 : 0
+                const tone = meterToneForKey(item.key || 'unknown', i)
                 return (
-                  <div key={i} className="flex items-center gap-3">
-                    <span className="text-sm text-gray-400 w-32 truncate">{item.key || 'Unknown'}</span>
-                    <div className="flex-1 h-6 bg-gray-800 rounded-full overflow-hidden">
+                  <div key={`${item.key || 'unknown'}-${i}`} className="grid grid-cols-[8rem_1fr_6rem_5rem] items-center gap-3">
+                    <span className={`text-sm ${tone.text} w-32 truncate capitalize`}>{item.key || 'Unknown'}</span>
+                    <div
+                      className="relative h-7 overflow-hidden rounded-full border border-sky-900/70 bg-slate-900/90"
+                      aria-label={`${item.key || 'Unknown'} spend meter ${sharePct.toFixed(1)} percent of total spend`}
+                    >
                       <div
-                        className="h-full bg-gradient-to-r from-red-600 to-orange-500 rounded-full transition-all"
-                        style={{ width: `${pct}%` }}
+                        data-testid={`spend-meter-${item.key || i}`}
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${pct}%`,
+                          background: `linear-gradient(90deg, ${tone.from}, ${tone.via}, ${tone.to})`,
+                          boxShadow: `0 0 18px ${tone.to}66`,
+                        }}
                       />
+                      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.12),transparent_35%,rgba(255,255,255,0.08))]" />
                     </div>
-                    <span className="text-sm text-white font-mono w-24 text-right">${item.billed_cost.toFixed(4)}</span>
+                    <span className="text-sm text-white font-mono w-24 text-right">{formatCurrency(cost)}</span>
                     <span className="text-xs text-gray-500 w-20 text-right">{item.count} calls</span>
                   </div>
                 )
@@ -200,7 +236,7 @@ export const SpendDashboard: React.FC = () => {
         </div>
 
         {/* History Table */}
-        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+        <div className="bg-slate-950/70 border border-sky-950/80 rounded-xl p-6 shadow-[0_0_40px_rgba(14,165,233,0.06)]">
           <h2 className="text-lg font-bold text-white mb-4">Recent Activity</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

@@ -4,6 +4,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -139,6 +140,27 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 		}
 	}
 
+	if isNextPreviewFramework(req.Framework) {
+		previewStatus, serverStatus, startErr := h.startFrameworkRuntimePreview(c, req.ProjectID, req.EnvVars)
+		if startErr != nil {
+			metrics.RecordPreviewStart("frontend", "error", false)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": startErr.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success":          true,
+			"preview":          previewStatus,
+			"server":           serverStatus,
+			"proxy_url":        previewStatus.URL,
+			"message":          "Next.js preview started successfully",
+			"sandbox":          false,
+			"sandbox_degraded": h.sandboxFallbackActive(),
+			"runtime_preview":  true,
+		})
+		metrics.RecordPreviewStart("frontend", "success", false)
+		return
+	}
+
 	config := &preview.PreviewConfig{
 		ProjectID:  req.ProjectID,
 		EntryPoint: req.EntryPoint,
@@ -245,6 +267,33 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 		} else {
 			req.EntryPoint = h.detectEntryPoint(req.ProjectID)
 		}
+	}
+
+	if isNextPreviewFramework(req.Framework) {
+		nextEnvVars := mergePreviewEnvVars(req.EnvVars, req.BackendEnvVars)
+		previewStatus, serverStatus, startErr := h.startFrameworkRuntimePreview(c, req.ProjectID, nextEnvVars)
+		if startErr != nil {
+			metrics.RecordPreviewStart("fullstack", "error", false)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   startErr.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success":          true,
+			"preview":          previewStatus,
+			"server":           serverStatus,
+			"proxy_url":        previewStatus.URL,
+			"degraded":         false,
+			"diagnostics":      gin.H{"preview_started": true, "runtime_preview": "next"},
+			"message":          "Next.js full-stack preview started",
+			"sandbox":          false,
+			"sandbox_degraded": h.sandboxFallbackActive(),
+			"runtime_preview":  true,
+		})
+		metrics.RecordPreviewStart("fullstack", "success", false)
+		return
 	}
 
 	previewConfig := &preview.PreviewConfig{
@@ -476,7 +525,7 @@ func (h *PreviewHandler) GetPreviewStatus(c *gin.Context) {
 	// Override URL to proxy
 	if status != nil && status.Active {
 		h.setPreviewAccessCookie(c, uint(projectID))
-		status.URL = h.buildProxyURL(c, uint(projectID))
+		status.URL = h.buildPublicPreviewURL(c, uint(projectID), h.isFrameworkRuntimePreviewActive(uint(projectID)))
 	}
 
 	var serverStatus *preview.ServerStatus
@@ -668,7 +717,7 @@ func (h *PreviewHandler) GetPreviewURL(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":    true,
-		"url":        h.buildProxyURL(c, uint(projectID)),
+		"url":        h.buildPublicPreviewURL(c, uint(projectID), h.isFrameworkRuntimePreviewActive(uint(projectID))),
 		"port":       status.Port,
 		"started_at": status.StartedAt,
 		"sandbox":    activeSandbox,
@@ -1038,7 +1087,43 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 		_, _ = w.Write([]byte(`{"error":"Backend proxy unavailable"}`))
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		h.applyPreviewResponseHeaders(resp.Header, c.GetHeader("Origin"), false)
+		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+		responsePath := ""
+		if resp.Request != nil && resp.Request.URL != nil {
+			responsePath = resp.Request.URL.Path
+		}
+		isHTML := strings.Contains(contentType, "text/html")
+		isJavaScript := isPreviewJavaScriptResponse(contentType, responsePath)
+		h.applyPreviewResponseHeaders(resp.Header, c.GetHeader("Origin"), isHTML)
+		if !isHTML && !isJavaScript {
+			return nil
+		}
+
+		originalBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return readErr
+		}
+		_ = resp.Body.Close()
+
+		previewToken := h.issuePreviewAccessToken(c, uint(projectID))
+		var rewritten string
+		if isHTML {
+			rewritten = h.rewritePreviewHTMLForProxyWithPrefix(
+				string(originalBody),
+				fmt.Sprintf("/api/v1/preview/backend-proxy/%d", projectID),
+				h.buildBackendProxyURL(c, uint(projectID)),
+				previewToken,
+			)
+		} else {
+			rewritten = h.rewritePreviewJavaScriptForProxyWithPrefix(
+				string(originalBody),
+				h.buildBackendProxyBaseURL(c, uint(projectID)),
+				previewToken,
+			)
+		}
+		resp.Body = io.NopCloser(bytes.NewBufferString(rewritten))
+		resp.ContentLength = int64(len(rewritten))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
 		return nil
 	}
 	h.applyPreviewResponseHeaders(c.Writer.Header(), c.GetHeader("Origin"), false)
@@ -1047,8 +1132,21 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 
 // buildBackendProxyURL returns the public URL for the backend proxy for a given project.
 func (h *PreviewHandler) buildBackendProxyURL(c *gin.Context, projectID uint) string {
+	return h.buildBackendProxyBaseURL(c, projectID)
+}
+
+func (h *PreviewHandler) buildBackendProxyBaseURL(c *gin.Context, projectID uint) string {
 	scheme, host := previewPublicBase(c)
 	return fmt.Sprintf("%s://%s/api/v1/preview/backend-proxy/%d", scheme, host, projectID)
+}
+
+func (h *PreviewHandler) buildBackendProxyURLForBrowser(c *gin.Context, projectID uint) string {
+	base := h.buildBackendProxyBaseURL(c, projectID)
+	token := h.issuePreviewAccessToken(c, projectID)
+	if token == "" {
+		return base
+	}
+	return base + "?preview_token=" + url.QueryEscape(token)
 }
 
 func backendProxyTargetURL(serverStatus *preview.ServerStatus) (*url.URL, error) {
@@ -1078,7 +1176,10 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxy(html string, projectID uint)
 }
 
 func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, projectID uint, backendProxyURL string, previewToken string) string {
-	prefix := fmt.Sprintf("/api/v1/preview/proxy/%d", projectID)
+	return h.rewritePreviewHTMLForProxyWithPrefix(html, fmt.Sprintf("/api/v1/preview/proxy/%d", projectID), backendProxyURL, previewToken)
+}
+
+func (h *PreviewHandler) rewritePreviewHTMLForProxyWithPrefix(html string, prefix string, backendProxyURL string, previewToken string) string {
 	replaced := strings.NewReplacer(
 		`src="/`, `src="`+prefix+`/`,
 		`src='/`, `src='`+prefix+`/`,
@@ -1201,7 +1302,8 @@ func (h *PreviewHandler) rewritePreviewJavaScriptForProxy(js string, projectID u
 }
 
 func (h *PreviewHandler) rewritePreviewJavaScriptForProxyWithPrefix(js string, prefix string, previewToken string) string {
-	assetLiteralPattern := regexp.MustCompile(`(["'])((?:/?assets/|\./)[^"'\s)]+?\.(?:js|mjs|css|svg|png|jpe?g|webp|gif|woff2?|ttf|eot)(?:\?[^"'\s)]*)?(?:#[^"'\s)]*)?)(["'])`)
+	assetLiteralPattern := regexp.MustCompile(`(["'])((?:/?assets/|\./|/?_next/)[^"'\s)]+?\.(?:js|mjs|css|svg|png|jpe?g|webp|gif|woff2?|ttf|eot)(?:\?[^"'\s)]*)?(?:#[^"'\s)]*)?)(["'])`)
+	nextBasePattern := regexp.MustCompile(`(["'])(/_next/)(["'])`)
 
 	rewritten := assetLiteralPattern.ReplaceAllStringFunc(js, func(match string) string {
 		parts := assetLiteralPattern.FindStringSubmatch(match)
@@ -1210,6 +1312,13 @@ func (h *PreviewHandler) rewritePreviewJavaScriptForProxyWithPrefix(js string, p
 		}
 		rewritten := rewritePreviewAssetTargetForProxy(parts[2], prefix, previewToken)
 		return parts[1] + rewritten + parts[3]
+	})
+	rewritten = nextBasePattern.ReplaceAllStringFunc(rewritten, func(match string) string {
+		parts := nextBasePattern.FindStringSubmatch(match)
+		if len(parts) != 4 || parts[1] != parts[3] {
+			return match
+		}
+		return parts[1] + strings.TrimRight(prefix, "/") + "/_next/" + parts[3]
 	})
 	return normalizeVitePreloadDependencyMapForProxy(rewritten, prefix)
 }
@@ -1223,7 +1332,9 @@ func rewritePreviewAssetTargetForProxy(target string, prefix string, previewToke
 	}
 
 	rewritten := target
-	if strings.HasPrefix(target, "/assets/") || strings.HasPrefix(target, "assets/") {
+	if strings.HasPrefix(target, "/_next/") || strings.HasPrefix(target, "_next/") {
+		rewritten = prefix + "/" + strings.TrimPrefix(target, "/")
+	} else if strings.HasPrefix(target, "/assets/") || strings.HasPrefix(target, "assets/") {
 		rewritten = prefix + "/" + strings.TrimPrefix(target, "/")
 	} else if strings.HasPrefix(target, "./") {
 		rewritten = strings.TrimRight(prefix, "/") + "/assets/" + strings.TrimPrefix(target, "./")
@@ -1427,6 +1538,100 @@ func (h *PreviewHandler) backendPreviewRuntimeSecure() bool {
 	}
 }
 
+func isNextPreviewFramework(framework string) bool {
+	switch strings.ToLower(strings.TrimSpace(framework)) {
+	case "next", "nextjs", "next.js":
+		return true
+	default:
+		return false
+	}
+}
+
+func mergePreviewEnvVars(primary map[string]string, overlays ...map[string]string) map[string]string {
+	if len(primary) == 0 && len(overlays) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(primary))
+	for key, value := range primary {
+		merged[key] = value
+	}
+	for _, overlay := range overlays {
+		for key, value := range overlay {
+			merged[key] = value
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func (h *PreviewHandler) startFrameworkRuntimePreview(c *gin.Context, projectID uint, envVars map[string]string) (*preview.PreviewStatus, *preview.ServerStatus, error) {
+	if !h.backendPreviewAvailable() {
+		reason := strings.TrimSpace(h.backendPreviewDisabledReason())
+		if reason == "" {
+			reason = "Backend runtime preview is not available"
+		}
+		return nil, nil, errors.New(reason)
+	}
+
+	proc, err := h.serverRunner.Start(context.Background(), &preview.ServerConfig{
+		ProjectID: projectID,
+		EnvVars:   envVars,
+	})
+	if err != nil {
+		return nil, h.serverRunner.GetStatus(projectID), err
+	}
+
+	serverStatus := h.serverRunner.GetStatus(projectID)
+	status := &preview.PreviewStatus{
+		ProjectID:  projectID,
+		Active:     true,
+		Port:       proc.Port,
+		URL:        h.buildPublicPreviewURL(c, projectID, true),
+		StartedAt:  proc.StartedAt,
+		LastAccess: time.Now(),
+	}
+	return status, serverStatus, nil
+}
+
+func (h *PreviewHandler) runtimePreviewStatus(projectID uint) *preview.PreviewStatus {
+	if h == nil || h.serverRunner == nil || !isNextPreviewFramework(h.detectFramework(projectID)) {
+		return nil
+	}
+	serverStatus := h.serverRunner.GetStatus(projectID)
+	if serverStatus == nil || !serverStatus.Running {
+		return nil
+	}
+	startedAt := serverStatus.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	return &preview.PreviewStatus{
+		ProjectID:  projectID,
+		Active:     true,
+		Port:       serverStatus.Port,
+		URL:        serverStatus.URL,
+		StartedAt:  startedAt,
+		LastAccess: time.Now(),
+	}
+}
+
+func (h *PreviewHandler) isFrameworkRuntimePreviewActive(projectID uint) bool {
+	if h == nil || h.serverRunner == nil || !isNextPreviewFramework(h.detectFramework(projectID)) {
+		return false
+	}
+	status := h.serverRunner.GetStatus(projectID)
+	return status != nil && status.Running
+}
+
+func (h *PreviewHandler) buildPublicPreviewURL(c *gin.Context, projectID uint, runtimePreview bool) string {
+	if runtimePreview {
+		return h.buildBackendProxyURLForBrowser(c, projectID)
+	}
+	return h.buildProxyURL(c, projectID)
+}
+
 func (h *PreviewHandler) getPreviewStatus(projectID uint, preferredSandbox bool) (*preview.PreviewStatus, bool) {
 	if h.factory != nil {
 		primary := h.factory.GetPreviewStatus(projectID, preferredSandbox)
@@ -1443,9 +1648,19 @@ func (h *PreviewHandler) getPreviewStatus(projectID uint, preferredSandbox bool)
 		if primary != nil {
 			return primary, preferredSandbox
 		}
+		if runtimeStatus := h.runtimePreviewStatus(projectID); runtimeStatus != nil {
+			return runtimeStatus, false
+		}
 		return fallback, !preferredSandbox
 	}
-	return h.server.GetPreviewStatus(projectID), false
+	status := h.server.GetPreviewStatus(projectID)
+	if status != nil && status.Active {
+		return status, false
+	}
+	if runtimeStatus := h.runtimePreviewStatus(projectID); runtimeStatus != nil {
+		return runtimeStatus, false
+	}
+	return status, false
 }
 
 func (h *PreviewHandler) ensureBackendPreviewAvailable(c *gin.Context) bool {

@@ -247,6 +247,38 @@ func TestRewritePreviewHTMLForProxyWithBackendAppendsPreviewTokenToAssets(t *tes
 	require.NotContains(t, rewritten, "history.replaceState")
 }
 
+func TestRewritePreviewHTMLForBackendRuntimeProxyAppendsPreviewTokenToNextAssets(t *testing.T) {
+	handler, _ := newPreviewHandlerTestFixture(t, false)
+
+	html := `
+<!doctype html>
+<html>
+  <head>
+    <link rel="preload" href="/_next/static/css/app.css" as="style">
+    <link rel="stylesheet" href="/_next/static/css/app.css">
+  </head>
+  <body>
+    <script src="/_next/static/chunks/webpack.js"></script>
+    <script src="/_next/static/chunks/app/page.js"></script>
+  </body>
+</html>`
+
+	prefix := "/api/v1/preview/backend-proxy/99"
+	rewritten := handler.rewritePreviewHTMLForProxyWithPrefix(
+		html,
+		prefix,
+		"https://apex-build.dev/api/v1/preview/backend-proxy/99",
+		"runtime-token",
+	)
+
+	require.Contains(t, rewritten, `href="`+prefix+`/_next/static/css/app.css?preview_token=runtime-token"`)
+	require.Contains(t, rewritten, `src="`+prefix+`/_next/static/chunks/webpack.js?preview_token=runtime-token"`)
+	require.Contains(t, rewritten, `src="`+prefix+`/_next/static/chunks/app/page.js?preview_token=runtime-token"`)
+	require.Contains(t, rewritten, `var _bp="https://apex-build.dev/api/v1/preview/backend-proxy/99";`)
+	require.Contains(t, rewritten, `window.__APEX_BACKEND_URL__=_bp;`)
+	require.Contains(t, rewritten, `window.__APEX_IMPORT_META_ENV__=`)
+}
+
 func TestRewritePreviewJavaScriptForProxyRewritesViteDynamicAssetImports(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, false)
 	relativePrefix := "/api/v1/preview/proxy/" + strconv.FormatUint(uint64(projectID), 10)
@@ -261,6 +293,20 @@ func TestRewritePreviewJavaScriptForProxyRewritesViteDynamicAssetImports(t *test
 	require.Contains(t, rewritten, `"`+relativePrefix+`/assets/existing.js?preview_token=old-token"`)
 	require.NotContains(t, rewritten, `"assets/Dashboard-CVEE8rpR.js"`)
 	require.NotContains(t, rewritten, `"/assets/api-CM3qBsrA.js"`)
+}
+
+func TestRewritePreviewJavaScriptForBackendRuntimeProxyRewritesNextChunks(t *testing.T) {
+	handler, _ := newPreviewHandlerTestFixture(t, false)
+	prefix := "/api/v1/preview/backend-proxy/99"
+
+	js := `self.__next_f.push(["/_next/static/chunks/app/page.js"]);__webpack_require__.p="/_next/";const css="/_next/static/css/app.css";`
+
+	rewritten := handler.rewritePreviewJavaScriptForProxyWithPrefix(js, prefix, "runtime token")
+
+	require.Contains(t, rewritten, `"`+prefix+`/_next/static/chunks/app/page.js?preview_token=runtime+token"`)
+	require.Contains(t, rewritten, `__webpack_require__.p="`+prefix+`/_next/";`)
+	require.Contains(t, rewritten, `"`+prefix+`/_next/static/css/app.css?preview_token=runtime+token"`)
+	require.NotContains(t, rewritten, `"/_next/static/chunks/app/page.js"`)
 }
 
 func TestRewritePreviewJavaScriptForProxyNormalizesRelativeViteChunksToPublicProxyURL(t *testing.T) {
@@ -393,4 +439,21 @@ func TestPreviewHandlerDetectEntryPointFindsNextAppRouterPage(t *testing.T) {
 
 	require.Equal(t, "app/page.tsx", handler.detectEntryPoint(projectID))
 	require.Equal(t, "app/page.tsx", handler.detectBundleEntryPoint(projectID))
+}
+
+func TestMergePreviewEnvVarsOverlaysBackendValues(t *testing.T) {
+	merged := mergePreviewEnvVars(
+		map[string]string{
+			"NEXT_PUBLIC_API_URL": "https://frontend.example/api",
+			"SHARED":              "frontend",
+		},
+		map[string]string{
+			"API_SECRET": "secret",
+			"SHARED":     "backend",
+		},
+	)
+
+	require.Equal(t, "https://frontend.example/api", merged["NEXT_PUBLIC_API_URL"])
+	require.Equal(t, "secret", merged["API_SECRET"])
+	require.Equal(t, "backend", merged["SHARED"])
 }

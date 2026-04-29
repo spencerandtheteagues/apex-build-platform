@@ -5175,12 +5175,12 @@ func (am *AgentManager) executeTask(task *Task) {
 	})
 
 	if task.Type == TaskPlan {
-		// Planning timeout: 2 min for cloud providers, 8 min for Ollama
-		// (Ollama planning routinely takes 3-7 min with two sequential AI calls)
-		planTimeout := 2 * time.Minute
-		if agent.Provider == ai.ProviderOllama {
-			planTimeout = 8 * time.Minute
-		}
+		// Planning is the only single-entrypoint phase. Give the overall task
+		// enough room for bounded provider rotation, while each individual
+		// provider attempt remains capped so a stuck Kimi/Ollama call cannot
+		// hold the build at 0-20% indefinitely.
+		planningProviders := am.planningProviderOrder(build, task, agent.Provider)
+		planTimeout := planningTaskOverallTimeout(build.PowerMode, agent.Provider, planningProviders, am.buildUsesPlatformKeys(build))
 		ctx, cancel := context.WithTimeout(am.ctx, planTimeout)
 		defer cancel()
 		stopHeartbeat := am.startAgentActivityHeartbeat(ctx, agent.BuildID, agent, task, WSAgentWorking, "planning", agent.Provider, agent.Model)

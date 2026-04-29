@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +34,11 @@ type buildScaffold struct {
 type plannerRouterAdapter struct {
 	router          AIRouter
 	provider        ai.AIProvider
+	providers       []ai.AIProvider
+	manager         *AgentManager
+	buildID         string
+	agentID         string
+	taskID          string
 	userID          uint
 	powerMode       PowerMode
 	usePlatformKeys bool
@@ -39,29 +47,202 @@ type plannerRouterAdapter struct {
 }
 
 func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts autonomous.AIOptions) (string, error) {
-	resp, err := a.router.Generate(ctx, a.provider, prompt, GenerateOptions{
-		UserID:          a.userID,
-		MaxTokens:       opts.MaxTokens,
-		Temperature:     opts.Temperature,
-		SystemPrompt:    opts.SystemPrompt,
-		RoleHint:        string(RolePlanner),
-		PowerMode:       a.powerMode,
-		UsePlatformKeys: a.usePlatformKeys,
-	})
-	if err != nil {
-		return "", err
+	if a == nil || a.router == nil {
+		return "", fmt.Errorf("planning router is not configured")
 	}
-	if resp == nil {
-		return "", fmt.Errorf("empty response from planning provider")
+
+	providers := compactPlanningProviders(a.provider, a.providers)
+	if len(providers) == 0 {
+		providers = []ai.AIProvider{ai.ProviderClaude}
 	}
-	a.lastProvider = firstNonEmptyProvider(resp.Provider, a.provider)
-	a.lastModel = firstNonEmptyString(ai.GetModelUsed(resp, nil), a.lastModel)
-	return resp.Content, nil
+
+	var lastErr error
+	for idx, provider := range providers {
+		if err := ctx.Err(); err != nil {
+			if lastErr != nil {
+				return "", lastErr
+			}
+			return "", err
+		}
+
+		if idx > 0 {
+			a.broadcastPlanningProviderFallback(providers[idx-1], provider, lastErr)
+		}
+
+		attemptCtx := ctx
+		cancel := func() {}
+		if timeout := planningProviderAttemptTimeout(provider, a.powerMode, a.usePlatformKeys); timeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+
+		resp, err := a.router.Generate(attemptCtx, provider, prompt, GenerateOptions{
+			UserID:          a.userID,
+			BuildID:         a.buildID,
+			MaxTokens:       opts.MaxTokens,
+			Temperature:     opts.Temperature,
+			SystemPrompt:    opts.SystemPrompt,
+			RoleHint:        string(RolePlanner),
+			PowerMode:       a.powerMode,
+			UsePlatformKeys: a.usePlatformKeys,
+		})
+		cancel()
+
+		if err != nil {
+			lastErr = err
+			if a.manager != nil && a.buildID != "" {
+				a.manager.markProviderTemporaryFailure(a.buildID, provider)
+			}
+			continue
+		}
+		if resp == nil {
+			lastErr = fmt.Errorf("empty response from planning provider %s", provider)
+			if a.manager != nil && a.buildID != "" {
+				a.manager.markProviderTemporaryFailure(a.buildID, provider)
+			}
+			continue
+		}
+		if strings.TrimSpace(resp.Content) == "" {
+			lastErr = fmt.Errorf("empty content from planning provider %s", provider)
+			if a.manager != nil && a.buildID != "" {
+				a.manager.markProviderTemporaryFailure(a.buildID, provider)
+			}
+			continue
+		}
+
+		a.provider = provider
+		a.lastProvider = firstNonEmptyProvider(resp.Provider, provider)
+		a.lastModel = firstNonEmptyString(ai.GetModelUsed(resp, nil), a.lastModel)
+		if a.manager != nil && a.buildID != "" {
+			a.manager.clearProviderTemporaryFailure(a.buildID, provider)
+		}
+		return resp.Content, nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("all planning providers returned no usable response")
+	}
+	return "", lastErr
 }
 
 func (a *plannerRouterAdapter) Analyze(ctx context.Context, content string, instruction string, opts autonomous.AIOptions) (string, error) {
 	prompt := fmt.Sprintf("Content to analyze:\n%s\n\nInstruction: %s", content, instruction)
 	return a.Generate(ctx, prompt, opts)
+}
+
+func compactPlanningProviders(primary ai.AIProvider, providers []ai.AIProvider) []ai.AIProvider {
+	out := make([]ai.AIProvider, 0, len(providers)+1)
+	add := func(provider ai.AIProvider) {
+		if provider == "" {
+			return
+		}
+		for _, existing := range out {
+			if existing == provider {
+				return
+			}
+		}
+		out = append(out, provider)
+	}
+	add(primary)
+	for _, provider := range providers {
+		add(provider)
+	}
+	return out
+}
+
+func planningProviderAttemptTimeout(provider ai.AIProvider, mode PowerMode, usePlatformKeys bool) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS")); raw != "" {
+		if millis, err := strconv.Atoi(raw); err == nil && millis > 0 {
+			return time.Duration(millis) * time.Millisecond
+		}
+	}
+	if raw := strings.TrimSpace(os.Getenv("APEX_PLANNING_PROVIDER_TIMEOUT_SECONDS")); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	if provider == ai.ProviderOllama {
+		if raw := strings.TrimSpace(os.Getenv("APEX_PLANNING_OLLAMA_TIMEOUT_SECONDS")); raw != "" {
+			if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+				return time.Duration(seconds) * time.Second
+			}
+		}
+	}
+
+	// Managed cloud planning must fail over quickly; a stuck lead planner blocks
+	// every downstream work order and makes the build appear dead at 0-20%.
+	if provider == ai.ProviderOllama && !usePlatformKeys {
+		switch mode {
+		case PowerMax:
+			return 150 * time.Second
+		case PowerBalanced:
+			return 120 * time.Second
+		default:
+			return 90 * time.Second
+		}
+	}
+
+	switch mode {
+	case PowerMax:
+		return 90 * time.Second
+	case PowerBalanced:
+		return 75 * time.Second
+	default:
+		return 60 * time.Second
+	}
+}
+
+func planningTaskOverallTimeout(mode PowerMode, primary ai.AIProvider, providers []ai.AIProvider, usePlatformKeys bool) time.Duration {
+	ordered := compactPlanningProviders(primary, providers)
+	if len(ordered) == 0 {
+		ordered = []ai.AIProvider{primary}
+	}
+	total := 30 * time.Second
+	for _, provider := range ordered {
+		total += planningProviderAttemptTimeout(provider, mode, usePlatformKeys)
+	}
+	if total < 2*time.Minute {
+		return 2 * time.Minute
+	}
+	if total > 10*time.Minute {
+		return 10 * time.Minute
+	}
+	return total
+}
+
+func isContextDeadlineError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded")
+}
+
+func (a *plannerRouterAdapter) broadcastPlanningProviderFallback(failed ai.AIProvider, next ai.AIProvider, err error) {
+	if a == nil || a.manager == nil || a.buildID == "" || next == "" {
+		return
+	}
+	reason := "planning_provider_rotation"
+	errText := ""
+	if err != nil {
+		errText = err.Error()
+		if isContextDeadlineError(err) {
+			reason = "planning_provider_timeout"
+		}
+	}
+	a.manager.broadcast(a.buildID, &WSMessage{
+		Type:      "agent:provider_fallback",
+		BuildID:   a.buildID,
+		AgentID:   a.agentID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"task_id":           a.taskID,
+			"task_type":         string(TaskPlan),
+			"failed_provider":   string(failed),
+			"fallback_provider": string(next),
+			"reason":            reason,
+			"original_error":    errText,
+			"content":           fmt.Sprintf("Lead planner did not receive a usable plan from %s in time; rotating to %s and continuing the same planning task.", failed, next),
+		},
+	})
 }
 
 func createBuildPlanFromPlanningBundle(buildID string, description string, requested *TechStack, bundle *autonomous.PlanningBundle) *BuildPlan {

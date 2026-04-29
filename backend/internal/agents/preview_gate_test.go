@@ -17,6 +17,25 @@ func (s *stubPreviewVerifier) VerifyBuildFiles(ctx context.Context, files []Veri
 	return s.result
 }
 
+func TestPreviewVerificationGateTimeoutScalesByPowerMode(t *testing.T) {
+	t.Setenv("APEX_PREVIEW_GATE_TIMEOUT_SECONDS", "")
+
+	if got := previewVerificationGateTimeout(PowerFast); got != 90*time.Second {
+		t.Fatalf("fast timeout = %s, want 90s", got)
+	}
+	if got := previewVerificationGateTimeout(PowerBalanced); got != 3*time.Minute {
+		t.Fatalf("balanced timeout = %s, want 3m", got)
+	}
+	if got := previewVerificationGateTimeout(PowerMax); got != 4*time.Minute {
+		t.Fatalf("max timeout = %s, want 4m", got)
+	}
+
+	t.Setenv("APEX_PREVIEW_GATE_TIMEOUT_SECONDS", "45")
+	if got := previewVerificationGateTimeout(PowerMax); got != 45*time.Second {
+		t.Fatalf("env override timeout = %s, want 45s", got)
+	}
+}
+
 func TestApplyPreviewFenceStripRepairResetsProgressAndAttempts(t *testing.T) {
 	manager := &AgentManager{
 		ctx:         context.Background(),

@@ -235,6 +235,7 @@ const activityCopy = (thought: AIThoughtEntry, providerLabel: string): { summary
       summary = `${actor} hit a coordination issue and is reassigning ${taskLabel}.`
       break
     case 'agent:provider_switched':
+    case 'agent:provider_fallback':
       summary = `${actor} switched provider/model to keep ${taskLabel} moving.`
       break
     case 'agent:generation_failed':
@@ -318,6 +319,7 @@ const eventLabel = (eventType?: string): string => {
     case 'agent:coordination_failed':
       return 'coordination retry'
     case 'agent:provider_switched':
+    case 'agent:provider_fallback':
       return 'provider switch'
     case 'spend:update':
       return 'spend'

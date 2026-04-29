@@ -105,6 +105,11 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 	plannerAdapter := &plannerRouterAdapter{
 		router:          am.aiRouter,
 		provider:        provider,
+		providers:       am.planningProviderOrder(build, task, provider),
+		manager:         am,
+		buildID:         build.ID,
+		agentID:         agent.ID,
+		taskID:          task.ID,
 		userID:          build.UserID,
 		powerMode:       build.PowerMode,
 		usePlatformKeys: am.buildUsesPlatformKeys(build),
@@ -135,6 +140,21 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 		},
 		Plan: plan,
 	}, nil
+}
+
+func (am *AgentManager) planningProviderOrder(build *Build, task *Task, primary ai.AIProvider) []ai.AIProvider {
+	providers := []ai.AIProvider{primary}
+	if am == nil || build == nil {
+		return compactPlanningProviders(primary, providers)
+	}
+	tried := map[ai.AIProvider]bool{}
+	if primary != "" {
+		tried[primary] = true
+	}
+	for _, provider := range am.rankedFallbackProvidersForTask(build, task, RoleLead, tried) {
+		providers = append(providers, provider)
+	}
+	return compactPlanningProviders(primary, providers)
 }
 
 func planningDescriptionForBuild(build *Build) string {

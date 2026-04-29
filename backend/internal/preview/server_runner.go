@@ -277,7 +277,9 @@ func (sr *ServerRunner) DetectServer(ctx context.Context, projectID uint) (*Serv
 			detection.Command = command
 
 			// Detect framework
-			if strings.Contains(content, `"express"`) {
+			if strings.Contains(content, `"next"`) {
+				detection.Framework = "next"
+			} else if strings.Contains(content, `"express"`) {
 				detection.Framework = "express"
 			} else if strings.Contains(content, `"fastify"`) {
 				detection.Framework = "fastify"
@@ -289,8 +291,11 @@ func (sr *ServerRunner) DetectServer(ctx context.Context, projectID uint) (*Serv
 				detection.Framework = "nestjs"
 			}
 
-			// Find entry file — JS first (pre-compiled output), then TypeScript sources
+			// Find entry file — JS first (pre-compiled output), then TypeScript sources.
+			// Next.js preview runs through `next dev`; the entry is diagnostic only.
 			nodeEntries := []string{
+				"app/page.tsx", "app/page.ts", "app/page.jsx", "app/page.js",
+				"src/app/page.tsx", "src/app/page.ts", "src/app/page.jsx", "src/app/page.js",
 				"server.js", "index.js", "app.js", "main.js",
 				"src/server.js", "src/index.js", "src/app.js", "src/main.js",
 				"server/index.js", "server/app.js",
@@ -504,6 +509,10 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 	case strings.HasPrefix(config.Command, "npm run "):
 		cmdName = "npm"
 		args = strings.Fields(strings.TrimPrefix(config.Command, "npm "))
+
+	case config.Command == "npx next dev":
+		cmdName = "npx"
+		args = []string{"next", "dev"}
 
 	case config.Command == "node":
 		cmdName = "node"
@@ -747,6 +756,15 @@ func (sr *ServerRunner) prepareNodeStartArtifacts(workDir string, command string
 
 func detectNodeServerCommand(packageJSON string) (string, bool) {
 	scripts := parsePackageScripts(packageJSON)
+	if packageJSONHasDependency(packageJSON, "next") {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(scripts["dev"])), "next") {
+			return "npm run dev", true
+		}
+		if strings.Contains(strings.ToLower(strings.TrimSpace(scripts["start"])), "next") {
+			return "npm", true
+		}
+		return "npx next dev", true
+	}
 	if len(scripts) == 0 {
 		return "", false
 	}
@@ -760,6 +778,23 @@ func detectNodeServerCommand(packageJSON string) (string, bool) {
 		return "npm run serve", true
 	}
 	return "", false
+}
+
+func packageJSONHasDependency(packageJSON string, depName string) bool {
+	var pkg struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal([]byte(packageJSON), &pkg); err != nil {
+		return strings.Contains(packageJSON, `"`+depName+`"`)
+	}
+	if _, ok := pkg.Dependencies[depName]; ok {
+		return true
+	}
+	if _, ok := pkg.DevDependencies[depName]; ok {
+		return true
+	}
+	return false
 }
 
 func parsePackageScripts(packageJSON string) map[string]string {

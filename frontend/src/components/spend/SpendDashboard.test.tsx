@@ -152,6 +152,22 @@ describe('SpendDashboard', () => {
     })
   })
 
+  it('renders proportional colored meter bars for the breakdown', async () => {
+    mockApiResponses()
+
+    render(<SpendDashboard />)
+
+    await waitFor(() => {
+      const claudeMeter = screen.getByTestId('spend-meter-claude') as HTMLElement
+      const gptMeter = screen.getByTestId('spend-meter-gpt4') as HTMLElement
+
+      expect(claudeMeter.style.width).toBe('100%')
+      expect(gptMeter.style.width).toBe('40%')
+      expect(claudeMeter.style.boxShadow).toContain('#c084fc66')
+      expect(gptMeter.style.boxShadow).toContain('#22d3ee66')
+    })
+  })
+
   it('renders history table', async () => {
     mockApiResponses()
 

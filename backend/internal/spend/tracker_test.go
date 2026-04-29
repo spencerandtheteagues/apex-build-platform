@@ -159,6 +159,37 @@ func TestGetDailySpend_FiltersOtherDays(t *testing.T) {
 	}
 }
 
+func TestGetDailySpend_UsesRecordedDayKeyAcrossLocalTimeBoundary(t *testing.T) {
+	db := testDB(t)
+	tracker := NewSpendTracker(db)
+
+	day := time.Date(2026, 4, 28, 20, 30, 0, 0, time.FixedZone("CDT", -5*60*60))
+	dayKey := day.UTC().Format("2006-01-02")
+	requireDate := time.Date(2026, 4, 29, 1, 30, 0, 0, time.UTC)
+
+	db.Create(&SpendEvent{
+		CreatedAt:  day,
+		UserID:     1,
+		Provider:   "claude",
+		Model:      "claude-opus-4-6",
+		BilledCost: 1.25,
+		DayKey:     dayKey,
+		MonthKey:   requireDate.Format("2006-01"),
+		Status:     "success",
+	})
+
+	total, count, err := tracker.GetDailySpend(1, requireDate)
+	if err != nil {
+		t.Fatalf("GetDailySpend: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected keyed daily spend to include event, got count=%d", count)
+	}
+	if total != 1.25 {
+		t.Fatalf("expected total=1.25, got %f", total)
+	}
+}
+
 func TestGetMonthlySpend_SumsCurrentMonth(t *testing.T) {
 	db := testDB(t)
 	tracker := NewSpendTracker(db)
