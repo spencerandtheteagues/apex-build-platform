@@ -234,7 +234,7 @@ func (s *StripeService) UpdateCustomer(ctx context.Context, customerID, email, n
 }
 
 // CreateCheckoutSession creates a Stripe checkout session for subscription
-func (s *StripeService) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, metadata map[string]string) (*CheckoutSessionResult, error) {
+func (s *StripeService) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, metadata map[string]string, couponID ...string) (*CheckoutSessionResult, error) {
 	if !s.IsConfigured() {
 		return nil, errors.New("stripe is not configured")
 	}
@@ -282,8 +282,15 @@ func (s *StripeService) CreateCheckoutSession(ctx context.Context, customerID, p
 		params.Metadata = metadata
 	}
 
-	// Allow promotion codes
-	params.AllowPromotionCodes = stripe.Bool(true)
+	// Apply coupon if provided (auto-applied, no code entry needed)
+	if len(couponID) > 0 && couponID[0] != "" {
+		params.Discounts = []*stripe.CheckoutSessionDiscountParams{
+			{Coupon: stripe.String(couponID[0])},
+		}
+	} else {
+		// Allow promotion codes only when no coupon is pre-applied
+		params.AllowPromotionCodes = stripe.Bool(true)
+	}
 
 	// Billing address collection
 	params.BillingAddressCollection = stripe.String("auto")

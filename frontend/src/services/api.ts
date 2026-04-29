@@ -2799,6 +2799,7 @@ export class ApiService {
     price_id: string
     success_url?: string
     cancel_url?: string
+    apply_promo?: boolean
   }): Promise<{ success: boolean; data?: { session_id: string; checkout_url: string }; error?: string }> {
     const response = await this.client.post('/billing/checkout', params)
     return response.data

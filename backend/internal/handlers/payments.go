@@ -125,6 +125,7 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 		PriceID    string `json:"price_id" binding:"required"`
 		SuccessURL string `json:"success_url"`
 		CancelURL  string `json:"cancel_url"`
+		ApplyPromo bool   `json:"apply_promo"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -239,7 +240,11 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 		"email":    user.Email,
 	}
 
-	result, err := h.stripeService.CreateCheckoutSession(ctx, customerID, req.PriceID, successURL, cancelURL, metadata)
+	var couponID string
+	if req.ApplyPromo {
+		couponID = os.Getenv("STRIPE_COUPON_PRO_LAUNCH")
+	}
+	result, err := h.stripeService.CreateCheckoutSession(ctx, customerID, req.PriceID, successURL, cancelURL, metadata, couponID)
 	if err != nil {
 		log.Printf("Failed to create checkout session: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{

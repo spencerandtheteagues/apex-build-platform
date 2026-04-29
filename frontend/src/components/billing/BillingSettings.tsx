@@ -301,6 +301,31 @@ export function BillingSettings() {
     }
   }
 
+  const handlePromoUpgrade = async () => {
+    const proPlan = plans.find(p => p.type === 'pro') ?? fallbackPlans.find(p => p.type === 'pro')!
+    if (!proPlan.monthly_price_id || isPlaceholderPriceID(proPlan.monthly_price_id)) {
+      setError('Stripe is not configured in this environment.')
+      return
+    }
+    setUpgradeLoading('pro_promo')
+    setError(null)
+    try {
+      const result = await apiService.createCheckoutSession({
+        price_id: proPlan.monthly_price_id,
+        apply_promo: true,
+      })
+      if (result.success && result.data?.checkout_url) {
+        window.location.href = result.data.checkout_url
+      } else {
+        setError(result.error || 'Failed to start checkout. Please try again.')
+      }
+    } catch (err: any) {
+      setError(err?.response?.data?.error || err?.message || 'Failed to start promo checkout')
+    } finally {
+      setUpgradeLoading(null)
+    }
+  }
+
   const handleManageSubscription = async () => {
     setPortalLoading(true)
     setError(null)
@@ -472,6 +497,75 @@ export function BillingSettings() {
           </div>
         </div>
       </section>
+
+      {currentPlanType === 'free' && (
+        <section>
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(168,85,247,0.18) 100%)',
+            border: '1px solid rgba(168,85,247,0.45)',
+            borderRadius: '12px',
+            padding: '20px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px',
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <div style={{
+                background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                borderRadius: '10px',
+                padding: '8px',
+                flexShrink: 0,
+              }}>
+                <Zap size={20} color="#fff" />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                  <span style={{ color: '#fff', fontWeight: 700, fontSize: '15px' }}>Launch Special — Pro for $49/mo</span>
+                  <span style={{
+                    background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                    color: '#fff',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '999px',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                  }}>Limited time</span>
+                </div>
+                <p style={{ color: '#c4b5fd', fontSize: '13px', margin: 0 }}>
+                  First 3 months at <strong style={{ color: '#e9d5ff' }}>$49/mo</strong>, then $79/mo. Full Pro access from day one — $40/mo in AI credits included.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => void handlePromoUpgrade()}
+              disabled={upgradeLoading === 'pro_promo'}
+              style={{
+                background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '10px 22px',
+                fontWeight: 700,
+                fontSize: '14px',
+                cursor: upgradeLoading === 'pro_promo' ? 'not-allowed' : 'pointer',
+                opacity: upgradeLoading === 'pro_promo' ? 0.7 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              {upgradeLoading === 'pro_promo'
+                ? <><Loader2 size={14} className="animate-spin" /> Processing…</>
+                : <><Zap size={14} /> Claim Offer</>}
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="space-y-4">
         <div>
