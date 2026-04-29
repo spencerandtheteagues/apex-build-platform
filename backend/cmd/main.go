@@ -204,6 +204,20 @@ func main() {
 		})
 	}
 
+	// One-shot admin promotion: if ADMIN_PROMOTE_EMAIL is set, grant that user
+	// is_admin + is_super_admin on startup. Clear the env var after it fires once.
+	if promoteEmail := strings.TrimSpace(os.Getenv("ADMIN_PROMOTE_EMAIL")); promoteEmail != "" {
+		res := database.DB.Exec(
+			`UPDATE users SET is_admin = true, is_super_admin = true WHERE email = ?`,
+			promoteEmail,
+		)
+		if res.Error != nil {
+			log.Printf("WARNING: admin promotion for %s failed: %v", promoteEmail, res.Error)
+		} else {
+			log.Printf("ADMIN_PROMOTE: granted is_admin+is_super_admin to %s (%d row(s) updated)", promoteEmail, res.RowsAffected)
+		}
+	}
+
 	// Initialize authentication service with validated JWT secret
 	// Use the validated secret from secretsConfig for consistency
 	jwtSecret := secretsConfig.JWTSecret
@@ -1481,6 +1495,13 @@ func setupRoutes(
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
+		// Frontend API clients are rooted at /api/v1 in production. Keep the
+		// root health endpoints for infrastructure probes, but mirror the
+		// readiness endpoints here so app-shell health checks do not 404.
+		v1.GET("/health", server.Health)
+		v1.GET("/health/deep", server.DeepHealth)
+		v1.GET("/health/features", server.FeatureReadiness)
+
 		// Authentication routes (no auth required, but rate limited)
 		// SECURITY: Stricter rate limit (10 req/min) to prevent brute force attacks
 		auth := v1.Group("/auth")
