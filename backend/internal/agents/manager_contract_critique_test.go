@@ -156,12 +156,14 @@ func TestHandlePlanCompletionBlocksOnProviderAssistedContractCritique(t *testing
 			},
 			content: `{"summary":"contract critique found blocker","warnings":[],"blockers":["provider critique: explicit callback/session strategy required for auth"],"confidence":0.8}`,
 		},
-		agents:      map[string]*Agent{},
-		builds:      map[string]*Build{},
-		taskQueue:   make(chan *Task, 1),
-		resultQueue: make(chan *TaskResult, 1),
-		subscribers: map[string][]chan *WSMessage{},
-		ctx:         context.Background(),
+		agents:                 map[string]*Agent{},
+		builds:                 map[string]*Build{},
+		taskQueue:              make(chan *Task, 1),
+		resultQueue:            make(chan *TaskResult, 1),
+		subscribers:            map[string][]chan *WSMessage{},
+		ctx:                    context.Background(),
+		cancel:                 func() {},
+		resultProcessorRunning: true,
 	}
 
 	build := &Build{
@@ -610,13 +612,15 @@ func TestExecuteTaskDualCandidateUsesJudgeSelectedOutput(t *testing.T) {
 		},
 	}
 	am := &AgentManager{
-		aiRouter:    router,
-		agents:      map[string]*Agent{},
-		builds:      map[string]*Build{},
-		taskQueue:   make(chan *Task, 1),
-		resultQueue: make(chan *TaskResult, 1),
-		subscribers: map[string][]chan *WSMessage{},
-		ctx:         context.Background(),
+		aiRouter:               router,
+		agents:                 map[string]*Agent{},
+		builds:                 map[string]*Build{},
+		taskQueue:              make(chan *Task, 1),
+		resultQueue:            make(chan *TaskResult, 1),
+		subscribers:            map[string][]chan *WSMessage{},
+		ctx:                    context.Background(),
+		cancel:                 func() {},
+		resultProcessorRunning: true,
 	}
 
 	build := &Build{
@@ -701,13 +705,15 @@ func TestExecuteTaskSingleWithVerifierBlocksCandidate(t *testing.T) {
 		},
 	}
 	am := &AgentManager{
-		aiRouter:    router,
-		agents:      map[string]*Agent{},
-		builds:      map[string]*Build{},
-		taskQueue:   make(chan *Task, 1),
-		resultQueue: make(chan *TaskResult, 1),
-		subscribers: map[string][]chan *WSMessage{},
-		ctx:         context.Background(),
+		aiRouter:               router,
+		agents:                 map[string]*Agent{},
+		builds:                 map[string]*Build{},
+		taskQueue:              make(chan *Task, 1),
+		resultQueue:            make(chan *TaskResult, 1),
+		subscribers:            map[string][]chan *WSMessage{},
+		ctx:                    context.Background(),
+		cancel:                 func() {},
+		resultProcessorRunning: true,
 	}
 
 	build := &Build{

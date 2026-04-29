@@ -2135,13 +2135,13 @@ func (am *AgentManager) recoverStaleInProgressTasks(build *Build, idleFor time.D
 			},
 		})
 
-		am.resultQueue <- &TaskResult{
+		am.enqueueTaskResult(&TaskResult{
 			TaskID:  recovery.taskID,
 			AgentID: recovery.agentID,
 			Attempt: recovery.attempt,
 			Success: false,
 			Error:   errors.New(timeoutMessage),
-		}
+		})
 		am.cancelTaskExecution(recovery.taskID)
 		log.Printf("Build %s: recovered stale task %s (attempt=%d idle=%s timeout=%s)", build.ID, recovery.taskID, recovery.attempt, recovery.staleFor.Round(time.Second), recovery.timeout.Round(time.Second))
 	}
@@ -5020,6 +5020,24 @@ func (am *AgentManager) enqueueTaskQueue(task *Task) bool {
 	}
 }
 
+func (am *AgentManager) enqueueTaskResult(result *TaskResult) {
+	if am == nil || result == nil {
+		return
+	}
+	am.ensureWorkerInfrastructure()
+	if am.resultQueue == nil {
+		log.Printf("Result queue unavailable; processing task %s directly", result.TaskID)
+		go am.processResultSafely(result)
+		return
+	}
+	select {
+	case am.resultQueue <- result:
+	case <-time.After(2 * time.Second):
+		log.Printf("Result queue blocked for task %s; processing result directly to avoid build stall", result.TaskID)
+		go am.processResultSafely(result)
+	}
+}
+
 func markTaskQueueEnqueueFailure(task *Task, reason string) {
 	if task == nil {
 		return
@@ -5046,12 +5064,12 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	if !exists {
 		log.Printf("Agent %s not found for task %s", task.AssignedTo, task.ID)
-		am.resultQueue <- &TaskResult{
+		am.enqueueTaskResult(&TaskResult{
 			TaskID:  task.ID,
 			Attempt: attempt,
 			Success: false,
 			Error:   fmt.Errorf("agent %s not found", task.AssignedTo),
-		}
+		})
 		return
 	}
 	log.Printf("Found agent %s (role: %s, provider: %s)", agent.ID, agent.Role, agent.Provider)
@@ -5063,13 +5081,13 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	if !buildExists {
 		log.Printf("Build %s not found for agent %s", agent.BuildID, agent.ID)
-		am.resultQueue <- &TaskResult{
+		am.enqueueTaskResult(&TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Attempt: attempt,
 			Success: false,
 			Error:   fmt.Errorf("build %s not found", agent.BuildID),
-		}
+		})
 		return
 	}
 	log.Printf("Found build %s for task execution", build.ID)
@@ -5096,13 +5114,13 @@ func (am *AgentManager) executeTask(task *Task) {
 	}
 
 	if err := am.waitForBuildInteractionClear(build); err != nil {
-		am.resultQueue <- &TaskResult{
+		am.enqueueTaskResult(&TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Attempt: attempt,
 			Success: false,
 			Error:   err,
-		}
+		})
 		return
 	}
 
@@ -5161,13 +5179,13 @@ func (am *AgentManager) executeTask(task *Task) {
 		build.mu.Unlock()
 		task.MaxRetries = 0
 		task.Status = TaskCancelled
-		am.resultQueue <- &TaskResult{
+		am.enqueueTaskResult(&TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Attempt: attempt,
 			Success: false,
 			Error:   errBuildNotActive,
-		}
+		})
 		return
 	}
 
@@ -5196,13 +5214,13 @@ func (am *AgentManager) executeTask(task *Task) {
 			},
 		})
 
-		am.resultQueue <- &TaskResult{
+		am.enqueueTaskResult(&TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Attempt: attempt,
 			Success: false,
 			Error:   errBuildBudgetExceeded,
-		}
+		})
 		return
 	}
 
@@ -5270,23 +5288,23 @@ func (am *AgentManager) executeTask(task *Task) {
 
 		output, err := am.executeStructuredPlanningTask(ctx, task, build, agent)
 		if err != nil {
-			am.resultQueue <- &TaskResult{
+			am.enqueueTaskResult(&TaskResult{
 				TaskID:  task.ID,
 				AgentID: agent.ID,
 				Attempt: attempt,
 				Success: false,
 				Error:   err,
-			}
+			})
 			return
 		}
 
-		am.resultQueue <- &TaskResult{
+		am.enqueueTaskResult(&TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Attempt: attempt,
 			Success: true,
 			Output:  output,
-		}
+		})
 		return
 	}
 
@@ -5460,13 +5478,13 @@ func (am *AgentManager) executeTask(task *Task) {
 				"will_retry":  willRetry,
 			},
 		})
-		am.resultQueue <- &TaskResult{
+		am.enqueueTaskResult(&TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Attempt: attempt,
 			Success: false,
 			Error:   finalErr,
-		}
+		})
 		return
 	}
 
@@ -5517,13 +5535,13 @@ func (am *AgentManager) executeTask(task *Task) {
 					selectedCandidate.Output.Messages = append(selectedCandidate.Output.Messages, report.Warnings...)
 				} else {
 					err := fmt.Errorf("provider verification blocked task output: %s", strings.Join(report.Blockers, "; "))
-					am.resultQueue <- &TaskResult{
+					am.enqueueTaskResult(&TaskResult{
 						TaskID:  task.ID,
 						AgentID: agent.ID,
 						Attempt: attempt,
 						Success: false,
 						Error:   err,
-					}
+					})
 					return
 				}
 			}
@@ -5568,6 +5586,17 @@ func (am *AgentManager) executeTask(task *Task) {
 		})
 	}
 	modelUsed := selectedCandidate.Model
+
+	// Queue the canonical task result before any non-critical UI/persistence
+	// broadcasts. A slow snapshot write or saturated websocket path must never
+	// keep a completed provider response from reaching the result processor.
+	am.enqueueTaskResult(&TaskResult{
+		TaskID:  task.ID,
+		AgentID: agent.ID,
+		Attempt: attempt,
+		Success: true,
+		Output:  output,
+	})
 
 	// Broadcast completion thought with actual model and file details
 	fileNames := make([]string, 0, len(output.Files))
@@ -5616,13 +5645,6 @@ func (am *AgentManager) executeTask(task *Task) {
 		},
 	})
 
-	am.resultQueue <- &TaskResult{
-		TaskID:  task.ID,
-		AgentID: agent.ID,
-		Attempt: attempt,
-		Success: true,
-		Output:  output,
-	}
 	log.Printf("Task %s completed successfully with %d files generated", task.ID, len(output.Files))
 }
 

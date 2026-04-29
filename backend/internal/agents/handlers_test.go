@@ -1145,9 +1145,22 @@ func TestGetBuildStatusSelfHealsStaleLiveTask(t *testing.T) {
 			t.Fatalf("unexpected recovery result: %+v", result)
 		}
 	default:
-		t.Fatal("expected status read to enqueue stale task recovery")
+		deadline := time.After(3 * time.Second)
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-deadline:
+				t.Fatal("expected status read to enqueue or process stale task recovery")
+			case <-tick.C:
+				if build.Tasks[0].Status == TaskFailed && strings.Contains(build.Tasks[0].Error, "task execution timeout") {
+					goto recovered
+				}
+			}
+		}
 	}
 
+recovered:
 	if got := taskInputInt(build.Tasks[0].Input, "stale_recovery_attempt"); got != 0 {
 		t.Fatalf("expected stale recovery attempt marker 0, got %d", got)
 	}

@@ -1,6 +1,10 @@
 package agents
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+)
 
 func TestEnsureWorkerInfrastructureInitializesQueuesAndContext(t *testing.T) {
 	t.Parallel()
@@ -86,5 +90,77 @@ func TestEnqueueTaskQueueFailsFastWhenFull(t *testing.T) {
 	}
 	if task.Error != "task queue saturated" {
 		t.Fatalf("task error = %q, want queue saturation", task.Error)
+	}
+}
+
+func TestEnqueueTaskResultFallsBackWhenResultQueueBlocked(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now().UTC()
+	task := &Task{
+		ID:         "review-completed-output",
+		Type:       TaskReview,
+		Status:     TaskInProgress,
+		AssignedTo: "reviewer-1",
+		StartedAt:  &now,
+		CreatedAt:  now,
+	}
+	agent := &Agent{
+		ID:          "reviewer-1",
+		Role:        RoleReviewer,
+		Status:      StatusWorking,
+		BuildID:     "build-result-fallback",
+		CurrentTask: task,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	build := &Build{
+		ID:        "build-result-fallback",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		Agents:    map[string]*Agent{agent.ID: agent},
+		Tasks:     []*Task{task},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	am := &AgentManager{
+		ctx:                    ctx,
+		cancel:                 cancel,
+		agents:                 map[string]*Agent{agent.ID: agent},
+		builds:                 map[string]*Build{build.ID: build},
+		subscribers:            map[string][]chan *WSMessage{},
+		taskQueue:              make(chan *Task, 1),
+		resultQueue:            make(chan *TaskResult),
+		taskDispatcherRunning:  true,
+		resultProcessorRunning: true,
+	}
+
+	am.enqueueTaskResult(&TaskResult{
+		TaskID:  task.ID,
+		AgentID: agent.ID,
+		Success: true,
+		Output:  &TaskOutput{Messages: []string{"review passed"}},
+	})
+
+	deadline := time.After(4 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("task status = %s agent status = %s; expected blocked result queue fallback to complete task", task.Status, agent.Status)
+		case <-tick.C:
+			if task.Status == TaskCompleted && agent.Status == StatusCompleted {
+				if task.Output == nil || len(task.Output.Messages) != 1 || task.Output.Messages[0] != "review passed" {
+					t.Fatalf("unexpected task output after fallback: %+v", task.Output)
+				}
+				return
+			}
+		}
 	}
 }
