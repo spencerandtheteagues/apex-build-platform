@@ -1095,8 +1095,14 @@ func (am *AgentManager) enqueueRevisionTask(build *Build, userRequest string, op
 	}
 
 	broadcastMsg := "User requested changes. Launching a follow-up implementation pass."
+	phase := "user_feedback"
+	qualityGateStage := "revision"
+	restartRecovery := false
 	if action, _ := task.Input["action"].(string); action == "restart_failed_build" {
 		broadcastMsg = "Build restart triggered. Launching aggressive recovery — fixing all failures and resuming pipeline."
+		phase = "restart_recovery"
+		qualityGateStage = "Recovery"
+		restartRecovery = true
 	}
 
 	am.broadcast(build.ID, &WSMessage{
@@ -1104,12 +1110,14 @@ func (am *AgentManager) enqueueRevisionTask(build *Build, userRequest string, op
 		BuildID:   build.ID,
 		Timestamp: now,
 		Data: map[string]any{
-			"phase":                 "user_feedback",
+			"phase":                 phase,
+			"phase_key":             phase,
 			"status":                string(BuildInProgress),
 			"message":               broadcastMsg,
+			"restart_recovery":      restartRecovery,
 			"quality_gate_required": true,
 			"quality_gate_active":   true,
-			"quality_gate_stage":    "revision",
+			"quality_gate_stage":    qualityGateStage,
 		},
 	})
 

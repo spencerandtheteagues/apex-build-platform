@@ -592,6 +592,39 @@ describe('AppBuilder control surface', () => {
     expect(screen.getAllByText('Gemini 3.1 Pro Preview').length).toBeGreaterThan(0)
   })
 
+  it('keeps foreign flagship model labels out of the Ollama provider panel', async () => {
+    const ollamaBuild = buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      power_mode: 'max',
+      powerMode: 'max',
+      agents: [
+        {
+          id: 'ollama-1',
+          role: 'lead',
+          provider: 'ollama',
+          model: 'claude-opus-4-7',
+          status: 'working',
+          progress: 64,
+          current_task: {
+            type: 'plan',
+            description: 'Planning with stale cross-provider telemetry',
+          },
+        },
+      ],
+      available_providers: ['claude', 'gpt4', 'gemini', 'grok', 'ollama'],
+    })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(ollamaBuild)
+    ;(apiService.getBuildDetails as any).mockResolvedValue(ollamaBuild)
+
+    render(<AppBuilder />)
+
+    await openMockedBuild()
+
+    expect((await screen.findAllByText('Kimi K2.6')).length).toBeGreaterThan(0)
+    expect(screen.queryAllByText('Claude Opus 4.7').filter((el) => el.tagName !== 'OPTION')).toHaveLength(1)
+  })
+
   it('issues a restart command for failed builds', async () => {
     ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
       id: 'failed-build-123',
@@ -601,13 +634,23 @@ describe('AppBuilder control surface', () => {
       live: false,
       error: 'Preview validation failed',
     }))
-    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+    ;(apiService.getBuildDetails as any).mockResolvedValueOnce(buildDetail({
       id: 'failed-build-123',
       build_id: 'failed-build-123',
       status: 'failed',
       progress: 92,
       live: false,
       error: 'Preview validation failed',
+    })).mockResolvedValue(buildDetail({
+      id: 'failed-build-123',
+      build_id: 'failed-build-123',
+      status: 'in_progress',
+      progress: 24,
+      live: false,
+      phase: 'restart_recovery',
+      quality_gate_status: 'running',
+      quality_gate_stage: 'Recovery',
+      error: '',
     }))
     ;(apiService.sendBuildMessage as any).mockResolvedValue({
       interaction: buildDetail().interaction,
@@ -630,6 +673,53 @@ describe('AppBuilder control surface', () => {
           targetMode: 'lead',
         })
       )
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /restart failed build/i })).toBeNull()
+    })
+    expect(screen.getAllByText(/In Progress/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Restart Recovery/i).length).toBeGreaterThan(0)
+  })
+
+  it('refreshes active build telemetry from polling when websocket updates are missing', async () => {
+    const initial = buildDetail({
+      id: 'active-build-123',
+      build_id: 'active-build-123',
+      status: 'planning',
+      progress: 20,
+      live: false,
+      activity_timeline: [],
+    })
+    const polled = buildDetail({
+      id: 'active-build-123',
+      build_id: 'active-build-123',
+      status: 'planning',
+      progress: 20,
+      live: false,
+      activity_timeline: [
+        {
+          id: 'poll-heartbeat-1',
+          agent_id: 'lead-1',
+          agent_role: 'lead',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          type: 'thinking',
+          content: 'Lead planner requested a structured build plan from Claude and is waiting for provider output.',
+          timestamp: '2026-03-12T12:01:00Z',
+        },
+      ],
+    })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(initial)
+    ;(apiService.getBuildDetails as any)
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValue(polled)
+
+    render(<AppBuilder />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Lead planner requested a structured build plan from Claude/i)).toBeTruthy()
     })
   })
 

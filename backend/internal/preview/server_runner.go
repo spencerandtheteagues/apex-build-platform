@@ -94,6 +94,10 @@ type ServerConfig struct {
 	Command   string            `json:"command"`    // Optional, auto-detect if empty
 	EnvVars   map[string]string `json:"env_vars"`
 	WorkDir   string            `json:"work_dir"`
+	// ReadyTimeout bounds the listen/readiness wait after the process starts.
+	// The caller context still controls detection, dependency installation, and
+	// build preparation before process launch.
+	ReadyTimeout time.Duration `json:"-"`
 }
 
 // ServerStatus represents the current state of a backend server
@@ -499,8 +503,16 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		if sr.shouldInstallDependenciesLocally() {
 			// Install dependencies before starting the server — this is what makes
 			// `npm run start`, `python main.py`, and `go run .` actually work.
-			sr.installDependencies(workDir)
-			sr.prepareNodeStartArtifacts(workDir, config.Command)
+			sr.installDependencies(ctx, workDir)
+			if err := ctx.Err(); err != nil {
+				sr.releasePort(config.ProjectID)
+				return nil, fmt.Errorf("server startup cancelled before process launch: %w", err)
+			}
+			sr.prepareNodeStartArtifacts(ctx, workDir, config.Command)
+			if err := ctx.Err(); err != nil {
+				sr.releasePort(config.ProjectID)
+				return nil, fmt.Errorf("server startup cancelled before process launch: %w", err)
+			}
 		}
 	}
 
@@ -588,14 +600,24 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 	// Wait for the runtime to become reachable — local ports for host runtime,
 	// remote URLs for managed runtimes such as E2B.
 	ready := false
+	readyTimeout := config.ReadyTimeout
+	if readyTimeout <= 0 {
+		readyTimeout = 90 * time.Second
+	}
 	if strings.TrimSpace(handle.ReadyURL) != "" {
-		ready = sr.waitForURL(handle.ReadyURL, 90*time.Second, proc.stopChan)
+		ready = sr.waitForURL(ctx, handle.ReadyURL, readyTimeout, proc.stopChan)
 	} else {
-		ready = sr.waitForPort(port, 90*time.Second, proc.stopChan)
+		ready = sr.waitForPort(ctx, port, readyTimeout, proc.stopChan)
 	}
 	proc.Ready = ready
 
 	if !ready {
+		if err := ctx.Err(); err != nil {
+			sr.releasePort(config.ProjectID)
+			sr.killProcess(proc)
+			metrics.RecordPreviewBackendStart("startup_cancelled")
+			return nil, fmt.Errorf("server startup cancelled before readiness: %w", err)
+		}
 		// Check if process died
 		select {
 		case <-proc.stoppedChan:
@@ -623,13 +645,13 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 // installDependencies installs language-specific dependencies in workDir before
 // starting the backend server. Failures are logged but not fatal — the server may
 // still start (e.g., if dependencies are already in node_modules or in the PATH).
-func (sr *ServerRunner) installDependencies(workDir string) {
+func (sr *ServerRunner) installDependencies(ctx context.Context, workDir string) {
 	// Node.js — npm install (handles package-lock.json, installs TypeScript, ts-node, etc.)
 	if _, err := os.Stat(filepath.Join(workDir, "package.json")); err == nil {
 		if npmPath, lookErr := exec.LookPath("npm"); lookErr == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			cmdCtx, cancel := commandContext(ctx, 3*time.Minute)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, npmPath, "install", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error")
+			cmd := exec.CommandContext(cmdCtx, npmPath, "install", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error")
 			cmd.Dir = workDir
 			if out, runErr := cmd.CombinedOutput(); runErr != nil {
 				log.Printf("[server_runner] npm install failed in %s: %v\n%s", workDir, runErr, truncateInstallOutput(out))
@@ -646,9 +668,9 @@ func (sr *ServerRunner) installDependencies(workDir string) {
 			pip = "pip"
 		}
 		if _, lookErr := exec.LookPath(pip); lookErr == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			cmdCtx, cancel := commandContext(ctx, 3*time.Minute)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, pip, "install", "-r", "requirements.txt", "-q", "--break-system-packages")
+			cmd := exec.CommandContext(cmdCtx, pip, "install", "-r", "requirements.txt", "-q", "--break-system-packages")
 			cmd.Dir = workDir
 			if out, runErr := cmd.CombinedOutput(); runErr != nil {
 				log.Printf("[server_runner] pip install failed in %s: %v\n%s", workDir, runErr, truncateInstallOutput(out))
@@ -661,9 +683,9 @@ func (sr *ServerRunner) installDependencies(workDir string) {
 	// Go — go mod download (fetches modules; go run will compile on first execution)
 	if _, err := os.Stat(filepath.Join(workDir, "go.mod")); err == nil {
 		if goPath, lookErr := exec.LookPath("go"); lookErr == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			cmdCtx, cancel := commandContext(ctx, 3*time.Minute)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, goPath, "mod", "download")
+			cmd := exec.CommandContext(cmdCtx, goPath, "mod", "download")
 			cmd.Dir = workDir
 			if out, runErr := cmd.CombinedOutput(); runErr != nil {
 				log.Printf("[server_runner] go mod download failed in %s: %v\n%s", workDir, runErr, truncateInstallOutput(out))
@@ -674,7 +696,17 @@ func (sr *ServerRunner) installDependencies(workDir string) {
 	}
 }
 
-func (sr *ServerRunner) prepareNodeStartArtifacts(workDir string, command string) {
+func commandContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if _, ok := parent.Deadline(); ok {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
+func (sr *ServerRunner) prepareNodeStartArtifacts(ctx context.Context, workDir string, command string) {
 	if strings.TrimSpace(command) != "npm" {
 		return
 	}
@@ -700,9 +732,9 @@ func (sr *ServerRunner) prepareNodeStartArtifacts(workDir string, command string
 	}
 
 	if npmPath, lookErr := exec.LookPath("npm"); lookErr == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		cmdCtx, cancel := commandContext(ctx, 3*time.Minute)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, npmPath, "run", buildScript)
+		cmd := exec.CommandContext(cmdCtx, npmPath, "run", buildScript)
 		cmd.Dir = workDir
 		if out, runErr := cmd.CombinedOutput(); runErr != nil {
 			log.Printf("[server_runner] npm run %s failed in %s: %v\n%s", buildScript, workDir, runErr, truncateInstallOutput(out))
@@ -1014,13 +1046,15 @@ func (sr *ServerRunner) isPortAvailable(port int) bool {
 	return true
 }
 
-func (sr *ServerRunner) waitForPort(port int, timeout time.Duration, stop <-chan struct{}) bool {
+func (sr *ServerRunner) waitForPort(ctx context.Context, port int, timeout time.Duration, stop <-chan struct{}) bool {
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for time.Now().Before(deadline) {
 		select {
+		case <-ctx.Done():
+			return false
 		case <-stop:
 			return false
 		case <-ticker.C:
@@ -1034,17 +1068,19 @@ func (sr *ServerRunner) waitForPort(port int, timeout time.Duration, stop <-chan
 	return false
 }
 
-func (sr *ServerRunner) waitForURL(target string, timeout time.Duration, stop <-chan struct{}) bool {
+func (sr *ServerRunner) waitForURL(ctx context.Context, target string, timeout time.Duration, stop <-chan struct{}) bool {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 2 * time.Second}
 	for time.Now().Before(deadline) {
 		select {
+		case <-ctx.Done():
+			return false
 		case <-stop:
 			return false
 		default:
 		}
 
-		reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, target, nil)
 		if err == nil {
 			resp, err := client.Do(req)
@@ -1057,6 +1093,8 @@ func (sr *ServerRunner) waitForURL(target string, timeout time.Duration, stop <-
 		cancel()
 
 		select {
+		case <-ctx.Done():
+			return false
 		case <-stop:
 			return false
 		case <-time.After(200 * time.Millisecond):

@@ -55,7 +55,7 @@ describe('ModelRoleConfig', () => {
     )
 
     expect(screen.getByText('Model Configuration')).toBeTruthy()
-    expect(screen.getByText('Auto')).toBeTruthy()
+    expect(screen.getAllByText('Auto').length).toBeGreaterThan(0)
     expect(screen.getByText('Manual')).toBeTruthy()
 
     // Auto mode shows default assignment labels
@@ -65,10 +65,36 @@ describe('ModelRoleConfig', () => {
     expect(screen.getByText('DevOps')).toBeTruthy()
 
     // Default providers shown as badges
-    expect(screen.getByText('Claude')).toBeTruthy()
-    expect(screen.getByText('ChatGPT')).toBeTruthy()
-    expect(screen.getByText('Gemini')).toBeTruthy()
-    expect(screen.getByText('Grok')).toBeTruthy()
+    expect(screen.getAllByText('Claude').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('ChatGPT').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Gemini').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Grok').length).toBeGreaterThan(0)
+    expect(screen.getByText('Automatic Provider Pool')).toBeTruthy()
+    expect(screen.getByText('Open-model orchestration and fallback')).toBeTruthy()
+    expect(screen.getByText('Ollama')).toBeTruthy()
+  })
+
+  it('shows Ollama in Auto mode when hosted Ollama Cloud is available', () => {
+    render(
+      <ModelRoleConfig
+        mode="auto"
+        onModeChange={vi.fn()}
+        assignments={{}}
+        onAssignmentsChange={vi.fn()}
+        providerStatuses={WITH_OLLAMA}
+        selectedModels={{ ollama: 'kimi-k2.6:cloud' }}
+        modelOptions={{
+          ollama: [
+            { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
+            { id: 'glm-5.1:cloud', name: 'GLM-5.1' },
+          ],
+        }}
+      />
+    )
+
+    expect(screen.getByText('Ollama')).toBeTruthy()
+    expect(screen.getByText('Open-model orchestration and fallback')).toBeTruthy()
+    expect(screen.getByText('Kimi K2.6')).toBeTruthy()
   })
 
   it('switches to manual mode when Manual button clicked', () => {
@@ -355,6 +381,7 @@ describe('ModelRoleConfig', () => {
             { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
             { id: 'glm-5.1:cloud', name: 'GLM-5.1' },
             { id: 'deepseek-v4-flash:cloud', name: 'DeepSeek V4 Flash' },
+            { id: 'deepseek-v4-pro:cloud', name: 'DeepSeek V4 Pro' },
           ],
         }}
         onModelSelect={onModelSelect}
@@ -365,6 +392,7 @@ describe('ModelRoleConfig', () => {
     expect(screen.getByText('Kimi K2.6')).toBeTruthy()
     expect(screen.getByText('GLM-5.1')).toBeTruthy()
     expect(screen.getByText('DeepSeek V4 Flash')).toBeTruthy()
+    expect(screen.getByText('DeepSeek V4 Pro')).toBeTruthy()
 
     fireEvent.change(screen.getByDisplayValue('DeepSeek V4 Flash'), {
       target: { value: 'glm-5.1:cloud' },

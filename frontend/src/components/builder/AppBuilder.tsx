@@ -293,6 +293,14 @@ const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id'
 const LAST_WORKFLOW_BUILD_STORAGE_KEY = 'apex_last_workflow_build_id'
 const BUILD_TELEMETRY_STORAGE_KEY = 'apex_build_telemetry_cache'
 const DEFAULT_RESTART_FAILED_MESSAGE = 'Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the app is runnable.'
+const TERMINAL_REVIVAL_PHASES = new Set(['restart_recovery', 'auto_recovery', 'recovery_restart'])
+
+const shouldAllowTerminalRevivalFromPayload = (payload: Record<string, any> | null | undefined): boolean => {
+  if (!payload || typeof payload !== 'object') return false
+  if (payload.restart === true || payload.restart_recovery === true || payload.command === 'restart_failed') return true
+  const phase = String(payload.phase_key || payload.phase || payload.current_phase || '').trim().toLowerCase()
+  return TERMINAL_REVIVAL_PHASES.has(phase)
+}
 
 const extractPlatformIssue = (source: any): BuildPlatformIssueContext | undefined => {
   const payload = source?.response?.data ?? source
@@ -451,6 +459,22 @@ const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini',
 const MAX_AI_THOUGHTS = 240
 const MAX_PROVIDER_THOUGHTS = 36
 
+const mergeAiThoughtCollections = (existing: AIThought[], incoming: AIThought[]): AIThought[] => {
+  if (incoming.length === 0) return existing
+  const keyed = new Map<string, AIThought>()
+  for (const thought of existing) {
+    const key = thought.id || `${thought.timestamp.toISOString()}::${thought.provider}::${thought.content}`
+    keyed.set(key, thought)
+  }
+  for (const thought of incoming) {
+    const key = thought.id || `${thought.timestamp.toISOString()}::${thought.provider}::${thought.content}`
+    keyed.set(key, thought)
+  }
+  return Array.from(keyed.values())
+    .sort((left, right) => left.timestamp.getTime() - right.timestamp.getTime())
+    .slice(-MAX_AI_THOUGHTS)
+}
+
 const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<SupportedBuildProvider, ProviderModelTier>> = {
   fast: {
     claude: { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
@@ -477,6 +501,8 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
 
 const ADDITIONAL_PROVIDER_MODEL_OPTIONS: Partial<Record<SupportedBuildProvider, ProviderModelTier[]>> = {
   ollama: [
+    { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
+    { id: 'glm-5.1:cloud', name: 'GLM-5.1' },
     { id: 'deepseek-v4-flash:cloud', name: 'DeepSeek V4 Flash' },
     { id: 'deepseek-v4-pro:cloud', name: 'DeepSeek V4 Pro' },
     { id: 'minimax-m2.7:cloud', name: 'MiniMax M2.7' },
@@ -539,7 +565,7 @@ const PROVIDER_UI: Record<SupportedBuildProvider, {
     dotClass: 'bg-fuchsia-400',
   },
   ollama: {
-    label: 'Local',
+    label: 'Ollama',
     badgeClass: 'border-cyan-500/60 text-cyan-200 bg-cyan-500/10',
     cardClass: 'border-cyan-500/35 bg-gradient-to-br from-cyan-950/45 via-black to-slate-950/35',
     activeClass: 'shadow-[0_0_28px_rgba(34,211,238,0.18)]',
@@ -612,6 +638,8 @@ const canonicalizeModelId = (model?: string) => {
   if (value.startsWith('devstral-small-24b') || value.startsWith('devstral-24b')) return 'devstral-small-24b'
   if (value.startsWith('deepseek-v4-flash:cloud')) return 'deepseek-v4-flash:cloud'
   if (value.startsWith('deepseek-v4-flash')) return 'deepseek-v4-flash'
+  if (value.startsWith('deepseek-v4-pro:cloud')) return 'deepseek-v4-pro:cloud'
+  if (value.startsWith('deepseek-v4-pro')) return 'deepseek-v4-pro'
 
   return value
 }
@@ -619,6 +647,25 @@ const canonicalizeModelId = (model?: string) => {
 const providerForModelId = (model?: string): SupportedBuildProvider | null => {
   const canonicalModel = canonicalizeModelId(model)
   if (!canonicalModel) return null
+  if (
+    canonicalModel.endsWith(':cloud') &&
+    [
+      'deepseek-',
+      'devstral',
+      'gemini-',
+      'gemma',
+      'glm-',
+      'kimi-',
+      'llama',
+      'minimax',
+      'mistral',
+      'nemotron',
+      'qwen',
+      'rnj',
+    ].some((prefix) => canonicalModel.startsWith(prefix))
+  ) {
+    return 'ollama'
+  }
   if (canonicalModel.startsWith('claude-')) return 'claude'
   if (
     canonicalModel.startsWith('gpt-') ||
@@ -633,8 +680,13 @@ const providerForModelId = (model?: string): SupportedBuildProvider | null => {
     canonicalModel.startsWith('kimi-') ||
     canonicalModel.startsWith('glm-') ||
     canonicalModel.startsWith('qwen-') ||
+    canonicalModel.startsWith('qwen') ||
     canonicalModel.startsWith('devstral') ||
     canonicalModel.startsWith('deepseek') ||
+    canonicalModel.startsWith('minimax') ||
+    canonicalModel.startsWith('gemma') ||
+    canonicalModel.startsWith('nemotron') ||
+    canonicalModel.startsWith('rnj') ||
     canonicalModel.startsWith('llama') ||
     canonicalModel.startsWith('mistral')
   ) return 'ollama'
@@ -642,9 +694,7 @@ const providerForModelId = (model?: string): SupportedBuildProvider | null => {
 }
 
 const modelBelongsToProvider = (provider: SupportedBuildProvider, model?: string) =>
-  provider === 'ollama'
-    ? Boolean(canonicalizeModelId(model)) && canonicalizeModelId(model) !== 'auto'
-    : providerForModelId(model) === provider
+  providerForModelId(model) === provider
 
 const getModelDisplayName = (model?: string, fallbackMode: 'fast' | 'balanced' | 'max' = 'fast') => {
   const canonicalModel = canonicalizeModelId(model)
@@ -3454,16 +3504,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     switch (type) {
       case 'build:state':
         setBuildState(prev => {
-          const nextStatus = mergeBuildStatusWithTerminalPrecedence(prev?.status, data.status)
+          const allowTerminalRevival = shouldAllowTerminalRevivalFromPayload(data)
+          const nextStatus = mergeBuildStatusWithTerminalPrecedence(prev?.status, data.status, { allowTerminalRevival })
           const nextErrorMessage = extractBuildFailureReason(data)
           const nextGuarantee = Array.isArray(data.tasks)
             ? extractLatestGuaranteeStateFromTasks(data.tasks)
             : extractGuaranteeState(data)
+          if (allowTerminalRevival && prev?.id && prev.status && isTerminalBuildStatus(prev.status) && nextStatus && !isTerminalBuildStatus(nextStatus)) {
+            setIsBuilding(true)
+            persistActiveBuildId(prev.id)
+          }
           return ({
             ...prev,
             ...data,
             status: (nextStatus || prev?.status || 'pending') as BuildState['status'],
-            progress: (prev && isTerminalBuildStatus(prev.status) && typeof data.progress === 'number')
+            progress: (prev && isTerminalBuildStatus(prev.status) && typeof data.progress === 'number' && !allowTerminalRevival)
               ? (prev.status === 'completed' ? 100 : prev.progress)
               : (typeof data.progress === 'number' ? clampPercent(data.progress) : prev?.progress ?? 0),
             agents: Object.values(data.agents || {}),
@@ -3508,8 +3563,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 ? (data.quality_gate_passed ? 'passed' : 'failed')
                 : data.quality_gate_active
                   ? 'running'
-                  : prev?.qualityGateStatus,
-            errorMessage: nextErrorMessage || prev?.errorMessage,
+                  : allowTerminalRevival
+                    ? 'running'
+                    : prev?.qualityGateStatus,
+            errorMessage: allowTerminalRevival ? nextErrorMessage : nextErrorMessage || prev?.errorMessage,
             interaction: normalizeInteraction(data.interaction, data.messages) || prev?.interaction,
             guarantee: nextGuarantee || prev?.guarantee,
           })
@@ -3529,7 +3586,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           const updates: Partial<BuildState> = {}
 
           // Apply status transition (e.g. planning → in_progress)
-          const mergedStatus = mergeBuildStatusWithTerminalPrecedence(prev.status, data.status)
+          const allowTerminalRevival = shouldAllowTerminalRevivalFromPayload(data)
+          const mergedStatus = mergeBuildStatusWithTerminalPrecedence(prev.status, data.status, { allowTerminalRevival })
           const resumingFromTerminal = isTerminalBuildStatus(prev.status) && !!mergedStatus && !isTerminalBuildStatus(mergedStatus)
           if (isTerminalBuildStatus(prev.status) && !resumingFromTerminal) {
             return prev
@@ -4095,7 +4153,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         setBuildState(prev => prev
           ? {
             ...prev,
-            status: (mergeBuildStatusWithTerminalPrecedence(prev.status, data.status) || prev.status) as BuildState['status'],
+            status: (mergeBuildStatusWithTerminalPrecedence(prev.status, data.status, {
+              allowTerminalRevival: shouldAllowTerminalRevivalFromPayload(data),
+            }) || prev.status) as BuildState['status'],
             currentPhase: data.phase_key || data.phase || prev.currentPhase,
             qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev.qualityGateRequired,
             qualityGateStage: typeof data.quality_gate_stage === 'string' ? data.quality_gate_stage : prev.qualityGateStage,
@@ -4374,7 +4434,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         const oldProvider = data.old_provider || data.failed_provider || data.provider || 'unknown'
         const newProvider = data.new_provider || data.fallback_provider || 'unknown'
         const nextModel = data.model || data.new_model
-        addSystemMessage(`${data.agent_role || 'Agent'} switched provider: ${oldProvider} -> ${newProvider}`)
+        const nextModelLabel = nextModel ? ` / ${getModelDisplayName(String(nextModel), activePowerMode) || nextModel}` : ''
+        addSystemMessage(`${data.agent_role || 'Agent'} switched provider: ${humanizeIdentifier(oldProvider)} -> ${humanizeIdentifier(newProvider)}${nextModelLabel}`)
         setBuildState(prev => {
           if (!prev) return null
           return {
@@ -5615,6 +5676,130 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     resolveGeneratedFiles,
   ])
 
+  const refreshActiveBuildSnapshot = useCallback((buildId: string, payload: any): boolean => {
+    if (!payload || typeof payload !== 'object') {
+      return false
+    }
+    const status = normalizeBuildStatus(payload.status) as BuildState['status'] | null
+    if (status && isTerminalBuildStatus(status)) {
+      return false
+    }
+
+    const files = normalizeGeneratedFiles(payload.files || [])
+    const interaction = normalizeInteraction(payload.interaction, payload.messages)
+    const serverThoughts = restoreServerTelemetry(payload.activity_timeline)
+    const agents: Agent[] = Array.isArray(payload.agents)
+      ? payload.agents.map((agent: any, index: number) => ({
+        id: String(agent.id || `${buildId}-agent-${index}`),
+        role: String(agent.role || 'agent'),
+        provider: String(agent.provider || 'unknown'),
+        model: agent.model ? String(agent.model) : undefined,
+        status: (agent.status === 'working' || agent.status === 'completed' || agent.status === 'error') ? agent.status : 'idle',
+        progress: typeof agent.progress === 'number' ? clampPercent(agent.progress) : 0,
+        currentTask: agent.current_task || agent.currentTask
+          ? {
+            type: String((agent.current_task || agent.currentTask).type || ''),
+            description: String((agent.current_task || agent.currentTask).description || ''),
+          }
+          : undefined,
+      }))
+      : []
+    const tasks: Task[] = Array.isArray(payload.tasks)
+      ? payload.tasks.map((task: any, index: number) => ({
+        id: String(task.id || `${buildId}-task-${index}`),
+        type: String(task.type || 'task'),
+        description: String(task.description || ''),
+        status: (task.status === 'pending' || task.status === 'in_progress' || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')
+          ? task.status
+          : 'pending',
+        assignedTo: task.assigned_to || task.assignedTo,
+        output: task.output,
+      }))
+      : []
+    const checkpoints: Checkpoint[] = Array.isArray(payload.checkpoints)
+      ? payload.checkpoints.map((checkpoint: any, index: number) => ({
+        id: String(checkpoint.id || `${buildId}-checkpoint-${index}`),
+        number: typeof checkpoint.number === 'number' ? checkpoint.number : index + 1,
+        name: String(checkpoint.name || `Checkpoint ${index + 1}`),
+        description: String(checkpoint.description || ''),
+        progress: typeof checkpoint.progress === 'number' ? clampPercent(checkpoint.progress) : 0,
+        restorable: checkpoint.restorable !== false,
+        createdAt: String(checkpoint.created_at || checkpoint.createdAt || new Date().toISOString()),
+      }))
+      : []
+    const guarantee = extractLatestGuaranteeStateFromTasks(tasks)
+
+    if (serverThoughts.length > 0) {
+      setAiThoughts(prev => mergeAiThoughtCollections(prev, serverThoughts))
+    }
+    if (files.length > 0) {
+      setGeneratedFiles(prev => files.length >= prev.length ? files : prev)
+    }
+    if (interaction?.messages?.length) {
+      setChatMessages(normalizeConversationMessages(interaction.messages))
+    }
+
+    setBuildState(prev => {
+      if (!prev || prev.id !== buildId) return prev
+      const nextStatus = (status || prev.status) as BuildState['status']
+      if (!isActiveBuildStatus(nextStatus)) return prev
+      return {
+        ...prev,
+        status: nextStatus,
+        progress: typeof payload.progress === 'number' ? clampPercent(payload.progress) : prev.progress,
+        agents: agents.length > 0 ? agents : prev.agents,
+        tasks: tasks.length > 0 ? tasks : prev.tasks,
+        checkpoints: checkpoints.length > 0 ? checkpoints : prev.checkpoints,
+        description: String(payload.description || prev.description),
+        powerMode: payload.power_mode || payload.powerMode || prev.powerMode,
+        providerModelOverrides: normalizeProviderModelOverrides(payload.provider_model_overrides || prev.providerModelOverrides),
+        currentPhase: payload.phase || payload.current_phase || payload.currentPhase || prev.currentPhase,
+        qualityGateRequired: typeof payload.quality_gate_required === 'boolean' ? payload.quality_gate_required : prev.qualityGateRequired,
+        qualityGateStatus: typeof payload.quality_gate_status === 'string'
+          ? payload.quality_gate_status
+          : typeof payload.quality_gate_passed === 'boolean'
+            ? (payload.quality_gate_passed ? 'passed' : 'failed')
+            : payload.quality_gate_active === true
+              ? 'running'
+              : prev.qualityGateStatus,
+        qualityGateStage: payload.quality_gate_stage || prev.qualityGateStage,
+        availableProviders: Array.isArray(payload.available_providers) ? payload.available_providers : prev.availableProviders,
+        capabilityState: payload.capability_state || prev.capabilityState,
+        policyState: payload.policy_state || prev.policyState,
+        blockers: Array.isArray(payload.blockers) ? payload.blockers : prev.blockers,
+        approvals: Array.isArray(payload.approvals) ? payload.approvals : prev.approvals,
+        intentBrief: payload.intent_brief || prev.intentBrief,
+        buildContract: payload.build_contract || prev.buildContract,
+        workOrders: Array.isArray(payload.work_orders) ? payload.work_orders : prev.workOrders,
+        patchBundles: Array.isArray(payload.patch_bundles) ? payload.patch_bundles : prev.patchBundles,
+        verificationReports: Array.isArray(payload.verification_reports) ? payload.verification_reports : prev.verificationReports,
+        promotionDecision: payload.promotion_decision || prev.promotionDecision,
+        providerScorecards: Array.isArray(payload.provider_scorecards) ? payload.provider_scorecards : prev.providerScorecards,
+        failureFingerprints: Array.isArray(payload.failure_fingerprints) ? payload.failure_fingerprints : prev.failureFingerprints,
+        historicalLearning: payload.historical_learning || prev.historicalLearning,
+        truthBySurface: payload.truth_by_surface || payload.promotion_decision?.truth_by_surface || payload.build_contract?.truth_by_surface || prev.truthBySurface,
+        errorMessage: extractBuildFailureReason(payload) || prev.errorMessage,
+        platformIssue: extractPlatformIssue(payload) || prev.platformIssue,
+        guarantee: guarantee || prev.guarantee,
+        websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : prev.websocketUrl,
+        liveSession: payload.live !== false,
+        artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : prev.artifactRevision,
+        interaction: interaction || prev.interaction,
+      }
+    })
+    setIsBuilding(true)
+    persistActiveBuildId(buildId)
+    persistLastWorkflowBuildId(buildId)
+    return true
+  }, [
+    normalizeConversationMessages,
+    normalizeGeneratedFiles,
+    normalizeInteraction,
+    persistActiveBuildId,
+    persistLastWorkflowBuildId,
+    restoreServerTelemetry,
+  ])
+
   const reconcileActiveBuildTerminalState = useCallback(async (buildId: string): Promise<boolean> => {
     try {
       const detail = await apiService.getBuildDetails(buildId)
@@ -5626,6 +5811,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           payload: detail,
         })
         return true
+      }
+      if (status && isActiveBuildStatus(status)) {
+        refreshActiveBuildSnapshot(buildId, detail)
+        return false
       }
     } catch {
       try {
@@ -5646,7 +5835,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
 
     return false
-  }, [hydrateBuildContext])
+  }, [hydrateBuildContext, refreshActiveBuildSnapshot])
 
 
   useEffect(() => {
@@ -6333,8 +6522,35 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   }
 
+  const markBuildRestarting = useCallback((buildId: string) => {
+    setBuildState(prev => {
+      if (!prev || prev.id !== buildId) return prev
+      const revivedProgress = clampPercent(Math.max(20, Math.min(prev.progress || 20, 95)))
+      return {
+        ...prev,
+        status: 'in_progress',
+        progress: revivedProgress,
+        currentPhase: 'Restart Recovery',
+        qualityGateRequired: true,
+        qualityGateStatus: 'running',
+        qualityGateStage: 'Recovery',
+        errorMessage: undefined,
+        guarantee: prev.guarantee
+          ? {
+            ...prev.guarantee,
+            status: 'retrying',
+            updatedAt: new Date().toISOString(),
+          }
+          : prev.guarantee,
+      }
+    })
+    setIsBuilding(true)
+    persistActiveBuildId(buildId)
+  }, [persistActiveBuildId])
+
   const handleRestartFailedBuild = async () => {
     if (!buildState?.id || buildState.status !== 'failed' || buildActionPending !== null) return
+    const restartedBuildId = buildState.id
     setBuildActionPending('restart')
     try {
       const sent = await sendBuildConversationMessage({
@@ -6344,8 +6560,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         targetMode: 'lead',
       })
       if (sent) {
-        setIsBuilding(true)
-        persistActiveBuildId(buildState.id)
+        markBuildRestarting(restartedBuildId)
+        addSystemMessage('Restart accepted: status reset to in-progress while Apex resumes from the last workable build state.')
       }
     } finally {
       setBuildActionPending(null)

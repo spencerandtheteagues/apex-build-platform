@@ -365,6 +365,63 @@ describe('LivePreview', () => {
     })
   })
 
+  it('keeps the iframe visible when optional backend startup degrades', async () => {
+    const mockGet = apiService.client.get as any
+    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/preview/docker/status') {
+        return {
+          data: {
+            available: false,
+            backend_preview_available: true,
+          },
+        }
+      }
+      if (url === '/preview/bundler/status') return { data: { available: true } }
+      if (url.startsWith('/preview/status/')) return { data: { preview: { active: false } } }
+      if (url.startsWith('/preview/server/detect/')) {
+        return { data: { has_backend: true, framework: 'express', server_type: 'node', command: 'npm', entry_file: 'server.js' } }
+      }
+      if (url.startsWith('/preview/server/status/')) return { data: { server: { running: false, ready: false } } }
+      if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+
+    mockStartFullStack.mockImplementation(async (data: any) => ({
+      sandbox: false,
+      degraded: true,
+      diagnostics: {
+        backend_started: false,
+        backend_error: 'optional backend did not become ready before preview timeout',
+      },
+      server: { running: false, ready: false },
+      preview: {
+        project_id: data.project_id,
+        active: true,
+        port: 3000,
+        url: `http://localhost:3000/project-${data.project_id}`,
+        started_at: new Date().toISOString(),
+        last_access: new Date().toISOString(),
+        connected_clients: 1,
+      },
+    }))
+
+    const view = render(<LivePreview projectId={909} autoStart className="h-96" />)
+
+    await waitFor(() => {
+      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({
+        project_id: 909,
+        start_backend: true,
+        require_backend: false,
+      }))
+    })
+
+    expect(await within(view.container).findByTitle('Live Preview')).toBeTruthy()
+    expect(within(view.container).queryByText(/optional backend did not become ready/i)).toBeNull()
+    expect(within(view.container).getByText('Backend Down')).toBeTruthy()
+  })
+
   it('renders the preview iframe with same-origin sandbox support', async () => {
     const mockStartFullStack = (apiService as any).startFullStackPreview as any
     const mockGet = apiService.client.get as any

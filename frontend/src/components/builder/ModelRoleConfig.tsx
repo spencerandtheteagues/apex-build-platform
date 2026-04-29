@@ -42,6 +42,14 @@ const DEFAULT_ASSIGNMENTS: Record<string, string> = {
   devops: 'grok',
 }
 
+const AUTO_PROVIDER_ROUTES: Record<RoutedProviderId, string> = {
+  claude: 'Planning, architecture, review',
+  gpt4: 'Implementation, repair, synthesis',
+  gemini: 'Testing, validation, fast checks',
+  grok: 'Risk review, alternate repair',
+  ollama: 'Open-model orchestration and fallback',
+}
+
 // Chip color classes per role
 const CHIP_COLORS: Record<string, { active: string; ring: string }> = {
   purple: { active: 'border-cyan-500/70 bg-cyan-500/20 text-cyan-300', ring: 'ring-cyan-500/30' },
@@ -147,7 +155,7 @@ export default function ModelRoleConfig({
           /* Auto Mode: show default assignments read-only */
           <div>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-              APEX automatically assigns the best model for each task based on provider strengths.
+              APEX automatically assigns the best model for each task based on provider health, power mode, and task type. Ollama is part of the automatic route pool when hosted Cloud or BYOK/local routing is available.
             </p>
             <div className="space-y-2.5">
               {ROLE_CATEGORIES.map((cat) => {
@@ -171,6 +179,53 @@ export default function ModelRoleConfig({
                   </div>
                 )
               })}
+            </div>
+            <div className="mt-5 rounded-2xl border border-cyan-500/20 bg-slate-950/60 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-300">Automatic Provider Pool</p>
+                  <p className="mt-1 text-[11px] leading-5 text-gray-600">
+                    All five routes are eligible in Auto. Use Manual only when you want to force a provider or Ollama Cloud model for the next build.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {visibleProviders.map((provider) => {
+                  const available = isProviderAvailable(provider.id)
+                  const selectedModel = selectedModels[provider.id] || 'auto'
+                  const modelName = selectedModel === 'auto'
+                    ? 'Auto'
+                    : modelOptions[provider.id]?.find((model) => model.id === selectedModel)?.name || selectedModel
+                  return (
+                    <div
+                      key={provider.id}
+                      className={cn(
+                        'rounded-xl border p-3 transition-colors',
+                        available
+                          ? `${provider.borderActive} ${provider.bgActive}`
+                          : 'border-gray-800/70 bg-gray-950/50 opacity-70'
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={cn('font-bold text-sm', available ? provider.text : 'text-gray-500')}>
+                              {provider.label}
+                            </span>
+                            <span className="text-[10px] uppercase tracking-[0.16em] text-gray-600">
+                              {available ? 'Ready' : 'Offline'}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] leading-5 text-gray-500">{AUTO_PROVIDER_ROUTES[provider.id]}</p>
+                        </div>
+                        <span className={cn('shrink-0 rounded-lg border px-2 py-1 text-[10px] font-semibold', available ? `${provider.borderActive} ${provider.text}` : 'border-gray-800 text-gray-600')}>
+                          {modelName}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
             <p className="mt-4 text-[11px] text-gray-600 text-center">
               Switch to Manual to customize which model handles each role.

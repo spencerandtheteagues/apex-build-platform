@@ -203,6 +203,15 @@ describe('build status normalization helpers', () => {
     expect(mergeBuildStatusWithTerminalPrecedence('failed', 'reviewing')).toBe('failed')
   })
 
+  it('allows terminal status revival for explicit restart recovery updates', () => {
+    expect(mergeBuildStatusWithTerminalPrecedence('failed', 'in_progress', { allowTerminalRevival: true })).toBe('in_progress')
+    expect(mergeBuildStatusWithTerminalPrecedence('cancelled', 'planning', { allowTerminalRevival: true })).toBe('planning')
+  })
+
+  it('normalizes awaiting_review as an active build status', () => {
+    expect(normalizeBuildStatus('awaiting_review')).toBe('awaiting_review')
+  })
+
   it('treats build:completed without explicit status as successful', () => {
     expect(resolveBuildCompletedEventStatus(undefined)).toBe('completed')
     expect(resolveBuildCompletedEventStatus('completed')).toBe('completed')

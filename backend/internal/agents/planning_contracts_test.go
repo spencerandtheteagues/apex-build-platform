@@ -41,6 +41,33 @@ func (r *planningFallbackProbeRouter) GetAvailableProvidersForUser(_ uint) []ai.
 
 func (r *planningFallbackProbeRouter) HasConfiguredProviders() bool { return true }
 
+type planningHardTimeoutProbeRouter struct {
+	mu    sync.Mutex
+	calls []ai.AIProvider
+}
+
+func (r *planningHardTimeoutProbeRouter) Generate(ctx context.Context, provider ai.AIProvider, _ string, _ GenerateOptions) (*ai.AIResponse, error) {
+	r.mu.Lock()
+	r.calls = append(r.calls, provider)
+	r.mu.Unlock()
+
+	if provider == ai.ProviderClaude {
+		time.Sleep(50 * time.Millisecond)
+		return &ai.AIResponse{Provider: provider, Content: `{"late":true}`, Usage: &ai.Usage{}}, nil
+	}
+	return &ai.AIResponse{Provider: provider, Content: `{"ok":true}`, Usage: &ai.Usage{}}, nil
+}
+
+func (r *planningHardTimeoutProbeRouter) GetAvailableProviders() []ai.AIProvider {
+	return []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4}
+}
+
+func (r *planningHardTimeoutProbeRouter) GetAvailableProvidersForUser(_ uint) []ai.AIProvider {
+	return r.GetAvailableProviders()
+}
+
+func (r *planningHardTimeoutProbeRouter) HasConfiguredProviders() bool { return true }
+
 func TestPlannerRouterAdapterFallsBackWhenPrimaryPlanningProviderTimesOut(t *testing.T) {
 	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "5")
 
@@ -73,6 +100,41 @@ func TestPlannerRouterAdapterFallsBackWhenPrimaryPlanningProviderTimesOut(t *tes
 	defer router.mu.Unlock()
 	if len(router.calls) != 2 || router.calls[0] != ai.ProviderOllama || router.calls[1] != ai.ProviderClaude {
 		t.Fatalf("provider calls = %+v, want [ollama claude]", router.calls)
+	}
+}
+
+func TestPlannerRouterAdapterHardTimesOutProviderThatIgnoresContext(t *testing.T) {
+	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "5")
+
+	router := &planningHardTimeoutProbeRouter{}
+	adapter := &plannerRouterAdapter{
+		router:          router,
+		provider:        ai.ProviderClaude,
+		providers:       []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
+		userID:          1,
+		powerMode:       PowerBalanced,
+		usePlatformKeys: true,
+	}
+
+	content, err := adapter.Generate(context.Background(), "plan this app", autonomous.AIOptions{
+		MaxTokens:    4000,
+		Temperature:  0.2,
+		SystemPrompt: "Return JSON.",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if content != `{"ok":true}` {
+		t.Fatalf("content = %q, want fallback content", content)
+	}
+	if adapter.lastProvider != ai.ProviderGPT4 {
+		t.Fatalf("last provider = %s, want gpt4", adapter.lastProvider)
+	}
+
+	router.mu.Lock()
+	defer router.mu.Unlock()
+	if len(router.calls) < 2 || router.calls[0] != ai.ProviderClaude || router.calls[1] != ai.ProviderGPT4 {
+		t.Fatalf("provider calls = %+v, want claude then gpt4", router.calls)
 	}
 }
 

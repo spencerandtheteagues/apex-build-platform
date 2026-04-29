@@ -247,7 +247,7 @@ interface EditorActions {
   setCursorPosition: (line: number, column: number) => void
   setSelection: (startLine: number, startColumn: number, endLine: number, endColumn: number) => void
   toggleAIAssistant: () => void
-  setAIProvider: (provider: 'claude' | 'gpt4' | 'gemini' | 'grok' | 'auto') => void
+  setAIProvider: (provider: 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'auto') => void
   setTheme: (theme: string) => void
   addAIConversation: (conversation: AIConversation) => void
   updateAIConversation: (id: string, messages: any[]) => void

@@ -11,6 +11,7 @@ const NORMALIZED_BUILD_STATUSES = new Set([
   'in_progress',
   'testing',
   'reviewing',
+  'awaiting_review',
   'completed',
   'failed',
   'cancelled',
@@ -231,11 +232,17 @@ export const normalizeBuildStatus = (status: unknown): string | null => {
 
 export const mergeBuildStatusWithTerminalPrecedence = (
   prevStatus: string | undefined,
-  incomingStatus: unknown
+  incomingStatus: unknown,
+  options?: { allowTerminalRevival?: boolean }
 ): string | undefined => {
   const normalizedIncoming = normalizeBuildStatus(incomingStatus)
   if (!normalizedIncoming) return undefined
-  if (prevStatus && isTerminalBuildStatus(prevStatus) && !isTerminalBuildStatus(normalizedIncoming)) {
+  if (
+    prevStatus &&
+    isTerminalBuildStatus(prevStatus) &&
+    !isTerminalBuildStatus(normalizedIncoming) &&
+    !options?.allowTerminalRevival
+  ) {
     return prevStatus
   }
   return normalizedIncoming

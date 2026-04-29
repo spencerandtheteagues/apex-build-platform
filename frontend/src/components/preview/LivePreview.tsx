@@ -80,10 +80,11 @@ export default function LivePreview({
     fetchServerLogs,
     toggleServerLogs,
   } = usePreviewServer({ projectId, setError })
+  const previewAutoStartReady = autoStart && serverDetection !== null
 
   const runtime = usePreviewRuntime({
     projectId,
-    autoStart,
+    autoStart: previewAutoStartReady,
     clearDevTools,
     setError,
     serverDetection,

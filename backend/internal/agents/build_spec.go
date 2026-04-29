@@ -71,21 +71,42 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 
 		attemptCtx := ctx
 		cancel := func() {}
-		if timeout := planningProviderAttemptTimeout(provider, a.powerMode, a.usePlatformKeys); timeout > 0 {
-			attemptCtx, cancel = context.WithTimeout(ctx, timeout)
+		attemptTimeout := planningProviderAttemptTimeout(provider, a.powerMode, a.usePlatformKeys)
+		if attemptTimeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, attemptTimeout)
 		}
 
-		resp, err := a.router.Generate(attemptCtx, provider, prompt, GenerateOptions{
-			UserID:                  a.userID,
-			BuildID:                 a.buildID,
-			MaxTokens:               opts.MaxTokens,
-			Temperature:             opts.Temperature,
-			SystemPrompt:            opts.SystemPrompt,
-			RoleHint:                string(RolePlanner),
-			PowerMode:               a.powerMode,
-			UsePlatformKeys:         a.usePlatformKeys,
-			DisableProviderFallback: true,
-		})
+		a.broadcastPlanningProviderAttempt(provider, idx+1, len(providers), attemptTimeout)
+
+		type planningGenerateResult struct {
+			resp *ai.AIResponse
+			err  error
+		}
+		resultCh := make(chan planningGenerateResult, 1)
+		go func() {
+			resp, err := a.router.Generate(attemptCtx, provider, prompt, GenerateOptions{
+				UserID:                  a.userID,
+				BuildID:                 a.buildID,
+				MaxTokens:               opts.MaxTokens,
+				Temperature:             opts.Temperature,
+				SystemPrompt:            opts.SystemPrompt,
+				RoleHint:                string(RolePlanner),
+				PowerMode:               a.powerMode,
+				UsePlatformKeys:         a.usePlatformKeys,
+				DisableProviderFallback: true,
+			})
+			resultCh <- planningGenerateResult{resp: resp, err: err}
+		}()
+
+		var resp *ai.AIResponse
+		var err error
+		select {
+		case result := <-resultCh:
+			resp = result.resp
+			err = result.err
+		case <-attemptCtx.Done():
+			err = fmt.Errorf("planning provider %s timed out after %s: %w", provider, attemptTimeout.Round(time.Second), attemptCtx.Err())
+		}
 		cancel()
 
 		if err != nil {
@@ -93,6 +114,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
 			}
+			a.broadcastPlanningProviderFailure(provider, err, idx+1, len(providers))
 			continue
 		}
 		if resp == nil {
@@ -100,6 +122,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
 			}
+			a.broadcastPlanningProviderFailure(provider, lastErr, idx+1, len(providers))
 			continue
 		}
 		if strings.TrimSpace(resp.Content) == "" {
@@ -107,6 +130,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
 			}
+			a.broadcastPlanningProviderFailure(provider, lastErr, idx+1, len(providers))
 			continue
 		}
 
@@ -116,6 +140,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		if a.manager != nil && a.buildID != "" {
 			a.manager.clearProviderTemporaryFailure(a.buildID, provider)
 		}
+		a.broadcastPlanningProviderSuccess(provider, a.lastModel)
 		return resp.Content, nil
 	}
 
@@ -227,6 +252,83 @@ func isContextDeadlineError(err error) bool {
 		return false
 	}
 	return errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "deadline exceeded")
+}
+
+func (a *plannerRouterAdapter) broadcastPlanningProviderAttempt(provider ai.AIProvider, attempt int, total int, timeout time.Duration) {
+	if a == nil || a.manager == nil || a.buildID == "" || provider == "" {
+		return
+	}
+	timeoutLabel := "provider timeout"
+	if timeout > 0 {
+		timeoutLabel = timeout.Round(time.Second).String()
+	}
+	content := fmt.Sprintf("Lead planner is requesting a structured build plan from %s (attempt %d/%d, timeout %s).", provider, attempt, total, timeoutLabel)
+	a.manager.broadcast(a.buildID, &WSMessage{
+		Type:      WSAgentWorking,
+		BuildID:   a.buildID,
+		AgentID:   a.agentID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"task_id":          a.taskID,
+			"task_type":        string(TaskPlan),
+			"agent_role":       string(RoleLead),
+			"provider":         string(provider),
+			"model":            warRoomModelOverrideForProvider(provider, a.powerMode, a.usePlatformKeys),
+			"planning_attempt": attempt,
+			"planning_total":   total,
+			"content":          content,
+			"description":      content,
+		},
+	})
+}
+
+func (a *plannerRouterAdapter) broadcastPlanningProviderFailure(provider ai.AIProvider, err error, attempt int, total int) {
+	if a == nil || a.manager == nil || a.buildID == "" || provider == "" {
+		return
+	}
+	errText := ""
+	if err != nil {
+		errText = err.Error()
+	}
+	a.manager.broadcast(a.buildID, &WSMessage{
+		Type:      "agent:generation_failed",
+		BuildID:   a.buildID,
+		AgentID:   a.agentID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"task_id":     a.taskID,
+			"task_type":   string(TaskPlan),
+			"agent_role":  string(RoleLead),
+			"provider":    string(provider),
+			"attempt":     attempt,
+			"max_retries": total,
+			"recoverable": attempt < total,
+			"error":       errText,
+			"content":     fmt.Sprintf("Lead planner did not receive a usable plan from %s on attempt %d/%d; rotating if another provider is available.", provider, attempt, total),
+		},
+	})
+}
+
+func (a *plannerRouterAdapter) broadcastPlanningProviderSuccess(provider ai.AIProvider, model string) {
+	if a == nil || a.manager == nil || a.buildID == "" || provider == "" {
+		return
+	}
+	content := fmt.Sprintf("Lead planner received a structured plan from %s and is normalizing work orders.", provider)
+	a.manager.broadcast(a.buildID, &WSMessage{
+		Type:      WSAgentWorking,
+		BuildID:   a.buildID,
+		AgentID:   a.agentID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"task_id":     a.taskID,
+			"task_type":   string(TaskPlan),
+			"agent_role":  string(RoleLead),
+			"provider":    string(provider),
+			"model":       model,
+			"content":     content,
+			"description": content,
+		},
+	})
 }
 
 func (a *plannerRouterAdapter) broadcastPlanningProviderFallback(failed ai.AIProvider, next ai.AIProvider, err error) {

@@ -110,17 +110,46 @@ func formatAgentHeartbeatContent(role AgentRole, provider ai.AIProvider, model s
 	roleLabel := firstNonEmptyString(strings.TrimSpace(string(role)), "agent")
 	providerLabel := firstNonEmptyString(strings.TrimSpace(string(provider)), "configured provider")
 	modelLabel := strings.TrimSpace(model)
+	bucket := int(elapsed.Seconds()/30) % 4
 
 	switch stage {
 	case "planning":
-		return fmt.Sprintf("%s is still drafting %s with %s (%s elapsed). Active heartbeat; no user action required.", roleLabel, taskLabel, providerLabel, elapsedLabel)
-	case "generation":
-		if modelLabel != "" {
-			return fmt.Sprintf("%s is still generating %s with %s / %s (%s elapsed). Waiting on provider output; not stalled.", roleLabel, taskLabel, providerLabel, modelLabel, elapsedLabel)
+		switch bucket {
+		case 0:
+			return fmt.Sprintf("%s sent the structured planning request to %s for %s (%s elapsed).", roleLabel, providerLabel, taskLabel, elapsedLabel)
+		case 1:
+			return fmt.Sprintf("%s is waiting for %s to return the JSON build plan; provider timeout and failover are armed (%s elapsed).", roleLabel, providerLabel, elapsedLabel)
+		case 2:
+			return fmt.Sprintf("%s has not committed work orders yet; if %s misses the deadline, planning rotates to the next healthy provider (%s elapsed).", roleLabel, providerLabel, elapsedLabel)
+		default:
+			return fmt.Sprintf("%s is holding the planning lock while %s finishes or times out for %s (%s elapsed).", roleLabel, providerLabel, taskLabel, elapsedLabel)
 		}
-		return fmt.Sprintf("%s is still generating %s with %s (%s elapsed). Waiting on provider output; not stalled.", roleLabel, taskLabel, providerLabel, elapsedLabel)
+	case "generation":
+		modelPart := ""
+		if modelLabel != "" {
+			modelPart = " / " + modelLabel
+		}
+		switch bucket {
+		case 0:
+			return fmt.Sprintf("%s is generating the patch bundle for %s with %s%s (%s elapsed).", roleLabel, taskLabel, providerLabel, modelPart, elapsedLabel)
+		case 1:
+			return fmt.Sprintf("%s is waiting for %s%s to finish file output for %s; no merge has occurred yet (%s elapsed).", roleLabel, providerLabel, modelPart, taskLabel, elapsedLabel)
+		case 2:
+			return fmt.Sprintf("%s is keeping the request open while %s%s completes; validation will run immediately after files arrive (%s elapsed).", roleLabel, providerLabel, modelPart, elapsedLabel)
+		default:
+			return fmt.Sprintf("%s is still inside provider generation for %s; timeout and fallback guards remain active (%s elapsed).", roleLabel, taskLabel, elapsedLabel)
+		}
 	default:
-		return fmt.Sprintf("%s is still working on %s (%s elapsed). Active heartbeat; no user action required.", roleLabel, taskLabel, elapsedLabel)
+		switch bucket {
+		case 0:
+			return fmt.Sprintf("%s is working on %s (%s elapsed).", roleLabel, taskLabel, elapsedLabel)
+		case 1:
+			return fmt.Sprintf("%s is still active on %s; build heartbeat refreshed (%s elapsed).", roleLabel, taskLabel, elapsedLabel)
+		case 2:
+			return fmt.Sprintf("%s is waiting on the current provider/tool step for %s (%s elapsed).", roleLabel, taskLabel, elapsedLabel)
+		default:
+			return fmt.Sprintf("%s is preserving the active build lock while %s continues (%s elapsed).", roleLabel, taskLabel, elapsedLabel)
+		}
 	}
 }
 
@@ -5342,6 +5371,7 @@ func (am *AgentManager) executeTask(task *Task) {
 				continue
 			}
 			triedProviders[fallback] = true
+			fallbackModel := selectBuildModelForProvider(build, fallback)
 			log.Printf("Provider fallback: %s unavailable/failed, trying %s for task %s", agent.Provider, fallback, task.ID)
 			am.broadcast(agent.BuildID, &WSMessage{
 				Type:      "agent:provider_fallback",
@@ -5352,9 +5382,10 @@ func (am *AgentManager) executeTask(task *Task) {
 					"task_id":           task.ID,
 					"failed_provider":   string(agent.Provider),
 					"fallback_provider": string(fallback),
+					"model":             fallbackModel,
 					"reason":            "primary_provider_unavailable",
 					"original_error":    generationErr.Error(),
-					"content":           fmt.Sprintf("%s agent switching to %s (primary provider unavailable)", agent.Role, fallback),
+					"content":           fmt.Sprintf("%s agent is switching from %s to %s / %s after a provider-level failure on task %s.", agent.Role, agent.Provider, fallback, fallbackModel, task.Type),
 				},
 			})
 			candidate, candidateErr := am.generateTaskOutputWithProvider(ctx, build, agent, task, prompt, systemPrompt, fallback, maxTokens, temperature)
@@ -19603,6 +19634,7 @@ func (am *AgentManager) RestartFailedBuildWithClientToken(buildID string, messag
 	var userMessage BuildConversationMessage
 	var leadMessage BuildConversationMessage
 	var leadAgent *Agent
+	restartedProgress := 20
 
 	build.mu.Lock()
 	switch build.Status {
@@ -19629,13 +19661,25 @@ func (am *AgentManager) RestartFailedBuildWithClientToken(buildID string, messag
 	leadMessage = appendBuildConversationMessageLocked(build, BuildConversationMessage{
 		Role:             ConversationRoleLead,
 		Kind:             ConversationKindMessage,
-		Content:          "Restarting the failed build from the last workable state.",
+		Content:          "Restart accepted. I am clearing the failed state, preserving valid files, and queueing a targeted recovery pass from the last workable checkpoint.",
 		AgentID:          leadAgent.ID,
 		AgentRole:        string(leadAgent.Role),
 		RequiresResponse: false,
 		Blocking:         false,
 		Timestamp:        now,
 	})
+	build.Status = BuildInProgress
+	build.CompletedAt = nil
+	build.Error = ""
+	if build.Progress < 20 {
+		build.Progress = 20
+	} else if build.Progress > 96 {
+		build.Progress = 96
+	}
+	restartedProgress = build.Progress
+	build.SnapshotState.CurrentPhase = "restart_recovery"
+	build.SnapshotState.QualityGateStatus = "running"
+	build.SnapshotState.QualityGateStage = "Recovery"
 	build.UpdatedAt = now
 	interaction = copyBuildInteractionStateLocked(build)
 	build.mu.Unlock()
@@ -19665,6 +19709,23 @@ func (am *AgentManager) RestartFailedBuildWithClientToken(buildID string, messag
 		},
 	})
 	am.broadcastInteractionUpdate(buildID, interaction)
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   buildID,
+		AgentID:   leadAgent.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":                 "restart_recovery",
+			"phase_key":             "restart_recovery",
+			"status":                string(BuildInProgress),
+			"progress":              restartedProgress,
+			"message":               "Restart accepted: failed status cleared and recovery task is being queued.",
+			"restart_recovery":      true,
+			"quality_gate_required": true,
+			"quality_gate_active":   true,
+			"quality_gate_stage":    "Recovery",
+		},
+	})
 
 	return am.enqueueRestartRecoveryTask(build, restartMessage)
 }
@@ -26671,9 +26732,10 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 						"task_id":           task.ID,
 						"failed_provider":   string(oldProvider),
 						"fallback_provider": string(nextProvider),
+						"model":             agent.Model,
 						"reason":            "planning_retry_provider_rotation",
 						"original_error":    errorMsg,
-						"content":           fmt.Sprintf("Lead agent rotating planning retry to %s after provider-level failure.", nextProvider),
+						"content":           fmt.Sprintf("Lead agent is rotating the planning retry from %s to %s / %s after a provider-level failure.", oldProvider, nextProvider, agent.Model),
 					},
 				})
 			}

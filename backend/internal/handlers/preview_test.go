@@ -72,6 +72,8 @@ func newFakePreviewRuntime(name, readyURL string) *fakePreviewRuntime {
 
 func (f *fakePreviewRuntime) Name() string { return f.name }
 
+func (f *fakePreviewRuntime) RequiresLocalDependencyInstall() bool { return false }
+
 func (f *fakePreviewRuntime) StartProcess(cfg *preview.ProcessStartConfig) (*preview.ProcessHandle, error) {
 	var stopOnce sync.Once
 	stop := func() {
@@ -181,6 +183,66 @@ func TestPreviewHandlerFullStackNextFallsBackToFrontendPreviewWhenRuntimeFails(t
 	require.Contains(t, recorder.Body.String(), `"success":true`)
 	require.Contains(t, recorder.Body.String(), `"degraded":true`)
 	require.Contains(t, recorder.Body.String(), `"frontend_fallback":true`)
+	require.Contains(t, recorder.Body.String(), `/api/v1/preview/proxy/`+strconv.FormatUint(uint64(projectID), 10)+`/`)
+}
+
+func TestPreviewHandlerFullStackOptionalBackendTimeoutStillReturnsFrontendPreview(t *testing.T) {
+	t.Setenv("APEX_PREVIEW_OPTIONAL_BACKEND_START_TIMEOUT_MS", "10")
+
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+	handler.serverRunner = preview.NewServerRunnerWithRuntime(handler.db, newFakePreviewRuntime("host", "http://127.0.0.1:1/__never_ready"))
+
+	files := []models.File{
+		{
+			ProjectID: projectID,
+			Path:      "package.json",
+			Name:      "package.json",
+			Type:      "file",
+			Content: `{
+				"scripts": {"start": "node server.js"},
+				"dependencies": {"express": "^4.18.3"}
+			}`,
+		},
+		{
+			ProjectID: projectID,
+			Path:      "server.js",
+			Name:      "server.js",
+			Type:      "file",
+			Content:   `const express = require('express'); const app = express(); app.get('/api/health', (_req, res) => res.json({ok:true})); app.listen(process.env.PORT || 3000);`,
+		},
+		{
+			ProjectID: projectID,
+			Path:      "index.html",
+			Name:      "index.html",
+			Type:      "file",
+			Content:   `<!doctype html><html><body><main>Apex preview still boots</main></body></html>`,
+		},
+	}
+	require.NoError(t, handler.db.Create(&files).Error)
+
+	body, err := json.Marshal(map[string]any{
+		"project_id":      projectID,
+		"framework":       "react",
+		"entry_point":     "index.html",
+		"start_backend":   true,
+		"require_backend": false,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/preview/fullstack/start", bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Request.Host = "apex-build.dev"
+	context.Set("user_id", uint(1))
+	context.Set("bypass_billing", true)
+
+	handler.StartFullStackPreview(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.Contains(t, recorder.Body.String(), `"degraded":true`)
+	require.Contains(t, recorder.Body.String(), `"backend_started":false`)
 	require.Contains(t, recorder.Body.String(), `/api/v1/preview/proxy/`+strconv.FormatUint(uint64(projectID), 10)+`/`)
 }
 

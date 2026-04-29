@@ -170,14 +170,24 @@ export function usePreviewRuntime({
         const requestedSandbox = useSandbox && dockerAvailable && !sandboxDegraded
         let data: any
         try {
-          data = await apiService.startFullStackPreview({
+          const fullStackRequest: {
+            project_id: number
+            sandbox: boolean
+            require_backend: boolean
+            start_backend?: boolean
+            backend_entry_file?: string
+            backend_command?: string
+          } = {
             project_id: projectId,
             sandbox: requestedSandbox,
-            start_backend: Boolean(serverDetection?.has_backend),
             require_backend: false,
             backend_entry_file: serverDetection?.entry_file,
             backend_command: serverDetection?.command,
-          })
+          }
+          if (serverDetection !== null) {
+            fullStackRequest.start_backend = Boolean(serverDetection.has_backend)
+          }
+          data = await apiService.startFullStackPreview(fullStackRequest)
         } catch (fullStackErr: any) {
           const statusCode = fullStackErr?.response?.status
           if (statusCode !== 404 && statusCode !== 405) {
@@ -207,8 +217,10 @@ export function usePreviewRuntime({
           onServerStatusHint(null)
         }
 
-        if (data.degraded && data.diagnostics?.backend_error) {
-          setError(`Preview degraded: ${data.diagnostics.backend_error}`)
+        // A degraded optional backend is not a failed preview. Keep the iframe
+        // visible and let the status cards/server panel explain the API state.
+        if (!data.degraded) {
+          setError(null)
         }
         setRefreshKey(prev => prev + 1)
         setLoading(false)

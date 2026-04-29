@@ -720,11 +720,7 @@ function App() {
     if (!isAuthenticated) return
 
     const preferredAI = provider && provider.length > 0 ? provider : 'auto'
-    const canUseBYOKPreference = user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type)
-    const allowedProviders = new Set(['auto', 'claude', 'gpt4', 'gemini', 'grok'])
-    if (canUseBYOKPreference) {
-      allowedProviders.add('ollama')
-    }
+    const allowedProviders = new Set(['auto', 'claude', 'gpt4', 'gemini', 'grok', 'ollama'])
     if (!allowedProviders.has(preferredAI)) {
       return
     }

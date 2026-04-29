@@ -141,7 +141,7 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 	}
 
 	if isNextPreviewFramework(req.Framework) {
-		previewStatus, serverStatus, startErr := h.startFrameworkRuntimePreview(c, req.ProjectID, req.EnvVars)
+		previewStatus, serverStatus, startErr := h.startFrameworkRuntimePreview(c, req.ProjectID, req.EnvVars, previewRuntimeStartTimeout())
 		if startErr != nil {
 			metrics.RecordPreviewStart("frontend", "error", false)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": startErr.Error()})
@@ -271,7 +271,7 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 
 	if isNextPreviewFramework(req.Framework) {
 		nextEnvVars := mergePreviewEnvVars(req.EnvVars, req.BackendEnvVars)
-		previewStatus, serverStatus, startErr := h.startFrameworkRuntimePreview(c, req.ProjectID, nextEnvVars)
+		previewStatus, serverStatus, startErr := h.startFrameworkRuntimePreview(c, req.ProjectID, nextEnvVars, previewRuntimeStartTimeout())
 		if startErr != nil {
 			if req.RequireBackend {
 				metrics.RecordPreviewStart("fullstack", "error", false)
@@ -394,11 +394,25 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 			Command:   req.BackendCommand,
 			EnvVars:   req.BackendEnvVars,
 		}
-		proc, startErr := h.serverRunner.Start(context.Background(), serverConfig)
+		startCtx := c.Request.Context()
+		var cancel context.CancelFunc
+		if !req.RequireBackend {
+			timeout := previewOptionalBackendStartTimeout()
+			startCtx, cancel = context.WithTimeout(startCtx, timeout)
+			serverConfig.ReadyTimeout = timeout
+		}
+		if cancel != nil {
+			defer cancel()
+		}
+		proc, startErr := h.serverRunner.Start(startCtx, serverConfig)
 		if startErr != nil {
 			degraded = true
 			diagnostics["backend_started"] = false
 			diagnostics["backend_error"] = startErr.Error()
+			if !req.RequireBackend && errors.Is(startCtx.Err(), context.DeadlineExceeded) {
+				diagnostics["backend_pending"] = false
+				diagnostics["backend_timeout_ms"] = previewOptionalBackendStartTimeout().Milliseconds()
+			}
 			serverStatus = h.serverRunner.GetStatus(req.ProjectID)
 			if req.RequireBackend {
 				metrics.RecordPreviewStart("fullstack", "backend_required_failed", req.Sandbox)
@@ -1618,7 +1632,27 @@ func mergePreviewEnvVars(primary map[string]string, overlays ...map[string]strin
 	return merged
 }
 
-func (h *PreviewHandler) startFrameworkRuntimePreview(c *gin.Context, projectID uint, envVars map[string]string) (*preview.PreviewStatus, *preview.ServerStatus, error) {
+func previewRuntimeStartTimeout() time.Duration {
+	return previewDurationFromEnv("APEX_PREVIEW_RUNTIME_START_TIMEOUT_MS", 25*time.Second)
+}
+
+func previewOptionalBackendStartTimeout() time.Duration {
+	return previewDurationFromEnv("APEX_PREVIEW_OPTIONAL_BACKEND_START_TIMEOUT_MS", 8*time.Second)
+}
+
+func previewDurationFromEnv(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		return fallback
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func (h *PreviewHandler) startFrameworkRuntimePreview(c *gin.Context, projectID uint, envVars map[string]string, timeout time.Duration) (*preview.PreviewStatus, *preview.ServerStatus, error) {
 	if !h.backendPreviewAvailable() {
 		reason := strings.TrimSpace(h.backendPreviewDisabledReason())
 		if reason == "" {
@@ -1627,9 +1661,13 @@ func (h *PreviewHandler) startFrameworkRuntimePreview(c *gin.Context, projectID 
 		return nil, nil, errors.New(reason)
 	}
 
-	proc, err := h.serverRunner.Start(context.Background(), &preview.ServerConfig{
-		ProjectID: projectID,
-		EnvVars:   envVars,
+	startCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	proc, err := h.serverRunner.Start(startCtx, &preview.ServerConfig{
+		ProjectID:    projectID,
+		EnvVars:      envVars,
+		ReadyTimeout: timeout,
 	})
 	if err != nil {
 		return nil, h.serverRunner.GetStatus(projectID), err
