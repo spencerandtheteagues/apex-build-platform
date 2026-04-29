@@ -1080,6 +1080,11 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.FlushInterval = -1
+	baseDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		baseDirector(req)
+		disablePreviewProxyCompression(req)
+	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, proxyErr error) {
 		h.applyPreviewResponseHeaders(w.Header(), c.GetHeader("Origin"), false)
 		w.Header().Set("Content-Type", "application/json")
@@ -1121,13 +1126,27 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 				previewToken,
 			)
 		}
-		resp.Body = io.NopCloser(bytes.NewBufferString(rewritten))
-		resp.ContentLength = int64(len(rewritten))
-		resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
+		setRewrittenPreviewResponseBody(resp, rewritten)
 		return nil
 	}
 	h.applyPreviewResponseHeaders(c.Writer.Header(), c.GetHeader("Origin"), false)
 	proxy.ServeHTTP(c.Writer, c.Request)
+}
+
+func disablePreviewProxyCompression(req *http.Request) {
+	if req == nil {
+		return
+	}
+	req.Header.Del("Accept-Encoding")
+}
+
+func setRewrittenPreviewResponseBody(resp *http.Response, body string) {
+	resp.Body = io.NopCloser(bytes.NewBufferString(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Del("Content-Encoding")
+	resp.Header.Del("ETag")
+	resp.Header.Del("Last-Modified")
+	resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 }
 
 // buildBackendProxyURL returns the public URL for the backend proxy for a given project.

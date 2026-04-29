@@ -222,6 +222,35 @@ func TestPreviewHandlerBuildBackendProxyURLUsesForwardedPublicOrigin(t *testing.
 	require.Equal(t, "https://preview.apex-build.dev/api/v1/preview/backend-proxy/"+strconv.FormatUint(uint64(projectID), 10), url)
 }
 
+func TestPreviewProxyRewriteDisablesCompressionHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/_next/static/chunks/app.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip, br")
+
+	disablePreviewProxyCompression(req)
+
+	require.Empty(t, req.Header.Get("Accept-Encoding"))
+
+	resp := &http.Response{
+		Header: http.Header{
+			"Content-Encoding": []string{"gzip"},
+			"Content-Length":   []string{"999"},
+			"ETag":             []string{`"old-etag"`},
+			"Last-Modified":    []string{"Tue, 28 Apr 2026 00:00:00 GMT"},
+		},
+	}
+
+	setRewrittenPreviewResponseBody(resp, "<html>Apex Preview</html>")
+
+	require.Empty(t, resp.Header.Get("Content-Encoding"))
+	require.Empty(t, resp.Header.Get("ETag"))
+	require.Empty(t, resp.Header.Get("Last-Modified"))
+	require.Equal(t, "25", resp.Header.Get("Content-Length"))
+	require.Equal(t, int64(25), resp.ContentLength)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "<html>Apex Preview</html>", string(body))
+}
+
 func TestRewritePreviewHTMLForProxyWithBackendAppendsPreviewTokenToAssets(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, false)
 
