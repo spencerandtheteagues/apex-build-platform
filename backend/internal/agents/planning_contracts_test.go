@@ -245,3 +245,21 @@ func TestPlanningRouteCandidatesExpandBalancedOllamaCloudModelFallbacks(t *testi
 		}
 	}
 }
+
+func TestPlanningTaskOverallTimeoutBudgetsExpandedOllamaPlanningRoutes(t *testing.T) {
+	t.Setenv("APEX_BALANCED_OLLAMA_PLANNING_MODELS", "")
+	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "")
+	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_SECONDS", "")
+	t.Setenv("APEX_PLANNING_OLLAMA_TIMEOUT_SECONDS", "")
+
+	got := planningTaskOverallTimeout(
+		PowerBalanced,
+		ai.ProviderOllama,
+		[]ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude},
+		true,
+	)
+	want := 30*time.Second + 5*(35*time.Second) + 55*time.Second
+	if got != want {
+		t.Fatalf("overall planning timeout = %s, want %s", got, want)
+	}
+}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"apex-build/internal/preview"
 	"apex-build/pkg/models"
@@ -315,6 +317,55 @@ func TestPreviewHandlerGetDockerStatusTreatsE2BRuntimeAsBackendPreviewAvailable(
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"backend_preview_available":true`)
 	require.Contains(t, recorder.Body.String(), `"backend_preview_runtime":"e2b"`)
+}
+
+func TestPreviewHandlerFactoryStatusPrefersActiveFrameworkRuntime(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+	factory, err := preview.NewPreviewServerFactory(handler.db, &preview.FactoryConfig{EnableContainerPreviews: false})
+	require.NoError(t, err)
+	handler.factory = factory
+	handler.server = factory.GetProcessServer()
+
+	files := []models.File{
+		{
+			ProjectID: projectID,
+			Path:      "package.json",
+			Name:      "package.json",
+			Type:      "file",
+			Content:   `{"dependencies":{"next":"^15.3.2","react":"^18.3.1","react-dom":"^18.3.1"}}`,
+		},
+		{
+			ProjectID: projectID,
+			Path:      "app/page.tsx",
+			Name:      "page.tsx",
+			Type:      "file",
+			Content:   `export default function Page() { return <main>Apex Preview Runtime</main> }`,
+		},
+	}
+	require.NoError(t, handler.db.Create(&files).Error)
+
+	readyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer readyServer.Close()
+
+	handler.serverRunner = preview.NewServerRunnerWithRuntime(handler.db, newFakePreviewRuntime("e2b", readyServer.URL))
+	proc, err := handler.serverRunner.Start(context.Background(), &preview.ServerConfig{
+		ProjectID:    projectID,
+		EntryFile:    "app/page.tsx",
+		Command:      "npx next dev",
+		ReadyTimeout: 250 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer proc.Stop()
+
+	status, activeSandbox := handler.getPreviewStatus(projectID, false)
+
+	require.False(t, activeSandbox)
+	require.NotNil(t, status)
+	require.True(t, status.Active)
+	require.Equal(t, projectID, status.ProjectID)
+	require.Equal(t, readyServer.URL, status.URL)
 }
 
 func TestPreviewHandlerBuildProxyURLUsesForwardedPublicOrigin(t *testing.T) {

@@ -371,7 +371,43 @@ func (am *AgentManager) startAgentActivityHeartbeat(
 	var stopOnce sync.Once
 	startedAt := time.Now()
 
+	emitHeartbeat := func(now time.Time) {
+		am.touchBuildExecutionHeartbeat(buildID, agent, now)
+
+		content := formatAgentHeartbeatContent(agent.Role, provider, model, task, stage, now.Sub(startedAt))
+		if strings.TrimSpace(content) == "" {
+			return
+		}
+
+		data := map[string]any{
+			"agent_role":      agent.Role,
+			"provider":        provider,
+			"model":           model,
+			"task_id":         task.ID,
+			"task_type":       string(task.Type),
+			"heartbeat":       true,
+			"elapsed_seconds": int(now.Sub(startedAt).Seconds()),
+		}
+		switch messageType {
+		case WSAgentWorking:
+			data["description"] = content
+			data["content"] = content
+		default:
+			data["content"] = content
+		}
+
+		am.broadcast(buildID, &WSMessage{
+			Type:      messageType,
+			BuildID:   buildID,
+			AgentID:   agent.ID,
+			Timestamp: now,
+			Data:      data,
+		})
+	}
+
 	go func() {
+		emitHeartbeat(startedAt)
+
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -382,37 +418,7 @@ func (am *AgentManager) startAgentActivityHeartbeat(
 			case <-stopCh:
 				return
 			case now := <-ticker.C:
-				am.touchBuildExecutionHeartbeat(buildID, agent, now)
-
-				content := formatAgentHeartbeatContent(agent.Role, provider, model, task, stage, now.Sub(startedAt))
-				if strings.TrimSpace(content) == "" {
-					continue
-				}
-
-				data := map[string]any{
-					"agent_role":      agent.Role,
-					"provider":        provider,
-					"model":           model,
-					"task_id":         task.ID,
-					"task_type":       string(task.Type),
-					"heartbeat":       true,
-					"elapsed_seconds": int(now.Sub(startedAt).Seconds()),
-				}
-				switch messageType {
-				case WSAgentWorking:
-					data["description"] = content
-					data["content"] = content
-				default:
-					data["content"] = content
-				}
-
-				am.broadcast(buildID, &WSMessage{
-					Type:      messageType,
-					BuildID:   buildID,
-					AgentID:   agent.ID,
-					Timestamp: now,
-					Data:      data,
-				})
+				emitHeartbeat(now)
 			}
 		}
 	}()

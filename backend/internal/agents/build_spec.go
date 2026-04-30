@@ -288,9 +288,17 @@ func planningTaskOverallTimeout(mode PowerMode, primary ai.AIProvider, providers
 	if len(ordered) == 0 {
 		ordered = []ai.AIProvider{primary}
 	}
+	routes := planningRouteCandidates(ordered, mode, usePlatformKeys)
+	if len(routes) == 0 {
+		for _, provider := range ordered {
+			if provider != "" {
+				routes = append(routes, planningRouteCandidate{provider: provider})
+			}
+		}
+	}
 	total := 30 * time.Second
-	for _, provider := range ordered {
-		total += planningProviderAttemptTimeout(provider, mode, usePlatformKeys)
+	for _, route := range routes {
+		total += planningProviderAttemptTimeout(route.provider, mode, usePlatformKeys)
 	}
 	if total < 2*time.Minute {
 		return 2 * time.Minute

@@ -82,3 +82,56 @@ func TestAgentActivityHeartbeatAppendsTimelineUpdates(t *testing.T) {
 		t.Fatal("expected heartbeat to refresh agent updated_at")
 	}
 }
+
+func TestAgentActivityHeartbeatEmitsImmediately(t *testing.T) {
+	originalInterval := agentActivityHeartbeatInterval
+	agentActivityHeartbeatInterval = time.Hour
+	defer func() {
+		agentActivityHeartbeatInterval = originalInterval
+	}()
+
+	am := &AgentManager{
+		builds:      map[string]*Build{},
+		subscribers: map[string][]chan *WSMessage{},
+	}
+	build := &Build{
+		ID:     "build-immediate-heartbeat",
+		Status: BuildInProgress,
+		Agents: map[string]*Agent{},
+	}
+	agent := &Agent{
+		ID:       "agent-immediate-heartbeat",
+		Role:     RoleLead,
+		Provider: ai.ProviderClaude,
+		Model:    "claude-sonnet-4-6",
+		BuildID:  build.ID,
+		Status:   StatusWorking,
+	}
+	task := &Task{
+		ID:          "task-plan",
+		Type:        TaskPlan,
+		Description: "Create build plan",
+	}
+	build.Agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopHeartbeat := am.startAgentActivityHeartbeat(ctx, build.ID, agent, task, WSAgentWorking, "planning", agent.Provider, agent.Model)
+	defer func() {
+		stopHeartbeat()
+		cancel()
+	}()
+
+	deadline := time.Now().Add(150 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		build.mu.RLock()
+		count := len(build.ActivityTimeline)
+		build.mu.RUnlock()
+		if count > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatal("expected immediate heartbeat before the first ticker interval")
+}

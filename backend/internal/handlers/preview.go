@@ -1766,11 +1766,11 @@ func (h *PreviewHandler) getPreviewStatus(projectID uint, preferredSandbox bool)
 		if fallback != nil && fallback.Active {
 			return fallback, !preferredSandbox
 		}
-		if primary != nil {
-			return primary, preferredSandbox
-		}
 		if runtimeStatus := h.runtimePreviewStatus(projectID); runtimeStatus != nil {
 			return runtimeStatus, false
+		}
+		if primary != nil {
+			return primary, preferredSandbox
 		}
 		return fallback, !preferredSandbox
 	}
