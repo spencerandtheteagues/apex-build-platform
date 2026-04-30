@@ -15919,7 +15919,7 @@ func patchManifestForSyntheticFrontendShell(content string, backendEntry string)
 	for _, pkg := range []string{"react", "react-dom"} {
 		ensureDep(deps, pkg)
 	}
-	for _, pkg := range []string{"typescript", "vite", "@vitejs/plugin-react", "@types/react", "@types/react-dom", "tailwindcss", "postcss", "autoprefixer"} {
+	for _, pkg := range []string{"typescript", "vite", "@vitejs/plugin-react", "@types/react", "@types/react-dom", "@types/node", "tailwindcss", "postcss", "autoprefixer"} {
 		ensureDep(devDeps, pkg)
 	}
 	for _, pkg := range shadcnCoreDeps() {
@@ -16863,6 +16863,7 @@ func syntheticFrontendTSConfig() string {
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    "types": ["node", "react", "react-dom"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
@@ -17136,14 +17137,6 @@ func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(b
 		}
 	}
 
-	createIfMissing := func(path string, content string, language string) {
-		if strings.TrimSpace(plan.content(path)) != "" {
-			return
-		}
-		if plan.createFile(path, content, language) {
-			applied = append(applied, path)
-		}
-	}
 	title := "Recovered Preview"
 	build.mu.RLock()
 	if trimmed := strings.TrimSpace(build.Description); trimmed != "" {
@@ -17151,13 +17144,24 @@ func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(b
 	}
 	build.mu.RUnlock()
 	backendEntry := detectGeneratedBackendEntryForFrontendShell(files)
-	createIfMissing("index.html", syntheticFrontendIndexHTML(title), "html")
-	createIfMissing("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
-	createIfMissing("src/index.css", syntheticFrontendIndexCSS(), "css")
-	createIfMissing("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
-	createIfMissing("tailwind.config.js", syntheticFrontendTailwindConfig(), "javascript")
-	createIfMissing("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript")
-	createIfMissing("tsconfig.json", syntheticFrontendTSConfig(), "json")
+	upsertPreviewFile := func(path string, content string, language string) {
+		if strings.TrimSpace(plan.content(path)) == "" {
+			if plan.createFile(path, content, language) {
+				applied = append(applied, path)
+			}
+			return
+		}
+		if plan.patchFile(path, content, language) {
+			applied = append(applied, path)
+		}
+	}
+	upsertPreviewFile("index.html", syntheticFrontendIndexHTML(title), "html")
+	upsertPreviewFile("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
+	upsertPreviewFile("src/index.css", syntheticFrontendIndexCSS(), "css")
+	upsertPreviewFile("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
+	upsertPreviewFile("tailwind.config.js", syntheticFrontendTailwindConfig(), "javascript")
+	upsertPreviewFile("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript")
+	upsertPreviewFile("tsconfig.json", syntheticFrontendTSConfig(), "json")
 
 	manifestPath := "package.json"
 	if updatedManifest, _, ok := patchManifestForSyntheticFrontendShell(plan.content(manifestPath), backendEntry); ok {

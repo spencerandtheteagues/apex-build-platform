@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"os/exec"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -5362,6 +5363,26 @@ func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShe
 				Language: "typescript",
 				Content:  `export default function App(){ return <div>The deterministic scaffold is live. Replace this shell with the real experience.</div> }`,
 			},
+			{
+				Path:     "src/main.tsx",
+				Language: "typescript",
+				Content:  `import "./index.css"; import AppShell from "./components/AppShell"; export default AppShell;`,
+			},
+			{
+				Path:     "src/index.css",
+				Language: "css",
+				Content:  `@tailwind base; .broken { color: }`,
+			},
+			{
+				Path:     "tsconfig.json",
+				Language: "json",
+				Content:  `{"compilerOptions":{"jsx":"react-jsx","strict":true},"include":["src/**/*"]}`,
+			},
+			{
+				Path:     "src/components/AppShell.tsx",
+				Language: "typescript",
+				Content:  `import create from 'zustand'; export default function AppShell(){ return <div /> }`,
+			},
 		},
 	}
 
@@ -5396,6 +5417,25 @@ func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShe
 		if !strings.Contains(app, expected) {
 			t.Fatalf("expected repaired FieldOps shell to contain %q, got %q", expected, app)
 		}
+	}
+	byPath := map[string]string{}
+	for _, file := range am.collectGeneratedFiles(build) {
+		byPath[file.Path] = file.Content
+	}
+	if strings.Contains(byPath["src/main.tsx"], "AppShell") {
+		t.Fatalf("expected preview main entry to be replaced, got %q", byPath["src/main.tsx"])
+	}
+	if strings.Contains(byPath["src/index.css"], "color: }") {
+		t.Fatalf("expected broken preview CSS to be replaced, got %q", byPath["src/index.css"])
+	}
+	var tsconfig struct {
+		Include []string `json:"include"`
+	}
+	if err := json.Unmarshal([]byte(byPath["tsconfig.json"]), &tsconfig); err != nil {
+		t.Fatalf("expected valid tsconfig json, got %q: %v", byPath["tsconfig.json"], err)
+	}
+	if !reflect.DeepEqual(tsconfig.Include, []string{"src/main.tsx", "src/App.tsx", "vite.config.ts"}) {
+		t.Fatalf("expected tsconfig to restrict preview compile surface, got %+v in %q", tsconfig.Include, byPath["tsconfig.json"])
 	}
 }
 
