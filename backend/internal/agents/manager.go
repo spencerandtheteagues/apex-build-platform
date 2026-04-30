@@ -12082,6 +12082,437 @@ func addNamedAliasForDefaultExport(content, exportName string) (string, bool) {
 	return repaired, true
 }
 
+type shadcnUIExportRequirement struct {
+	TargetPath string
+	Module     string
+	Names      map[string]bool
+}
+
+func parseGeneratedImportNamedSourceNames(sourceContent string, specifier string) []string {
+	specifier = strings.TrimSpace(specifier)
+	if strings.TrimSpace(sourceContent) == "" || specifier == "" {
+		return nil
+	}
+
+	pattern := regexp.MustCompile(`(?ms)^\s*import\s+(.+?)\s+from\s+['"]` + regexp.QuoteMeta(specifier) + `['"]`)
+	match := pattern.FindStringSubmatch(sourceContent)
+	if len(match) != 2 {
+		return nil
+	}
+	clause := strings.TrimSpace(match[1])
+	if strings.HasPrefix(clause, "type ") {
+		return nil
+	}
+	if !strings.Contains(clause, "{") || !strings.Contains(clause, "}") {
+		return nil
+	}
+	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.SplitN(clause, "{", 2)[1], "{"), "}"))
+	names := make([]string, 0)
+	for _, part := range strings.Split(inner, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(part, "type ") {
+			continue
+		}
+		if strings.Contains(part, " as ") {
+			pieces := regexp.MustCompile(`\s+as\s+`).Split(part, 2)
+			part = strings.TrimSpace(pieces[0])
+		}
+		if name := sanitizeGeneratedIdentifier(part); name != "" {
+			names = append(names, name)
+		}
+	}
+	return dedupeStringsPreserveOrder(names)
+}
+
+func localImportResolutionCandidatesWithAliasPrefix(importerPath, spec string) []string {
+	candidates := localImportResolutionCandidates(importerPath, spec)
+	if !(strings.HasPrefix(strings.TrimSpace(spec), "@/") || strings.HasPrefix(strings.TrimSpace(spec), "~/")) {
+		return candidates
+	}
+	importerPath = sanitizeFilePath(importerPath)
+	idx := strings.Index(importerPath, "/src/")
+	if idx < 0 {
+		return candidates
+	}
+	prefix := importerPath[:idx+1]
+	prefixed := make([]string, 0, len(candidates)*2)
+	for _, candidate := range candidates {
+		candidate = sanitizeFilePath(candidate)
+		if candidate == "" {
+			continue
+		}
+		prefixed = append(prefixed, prefix+candidate)
+	}
+	prefixed = append(prefixed, candidates...)
+	return dedupeStringsPreserveOrder(prefixed)
+}
+
+func shadcnUIModuleFromPath(path string) string {
+	path = sanitizeFilePath(path)
+	if path == "" {
+		return ""
+	}
+	marker := "/components/ui/"
+	idx := strings.Index(path, marker)
+	if idx < 0 {
+		if strings.HasPrefix(path, "src/components/ui/") {
+			idx = len("src") - 1
+		} else {
+			return ""
+		}
+	}
+	segment := path[idx+len(marker):]
+	if segment == "" {
+		return ""
+	}
+	segment = strings.TrimSuffix(segment, filepath.Ext(segment))
+	segment = strings.TrimSuffix(segment, "/index")
+	if strings.Contains(segment, "/") {
+		parts := strings.Split(segment, "/")
+		segment = parts[0]
+	}
+	return strings.ToLower(sanitizeFilePath(segment))
+}
+
+func collectShadcnUIExportRequirements(files []GeneratedFile) map[string]*shadcnUIExportRequirement {
+	if len(files) == 0 {
+		return nil
+	}
+	existing := make(map[string]string, len(files))
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path != "" {
+			existing[strings.ToLower(path)] = path
+		}
+	}
+	requirements := map[string]*shadcnUIExportRequirement{}
+	for _, file := range files {
+		importerPath := sanitizeFilePath(file.Path)
+		if importerPath == "" || strings.TrimSpace(file.Content) == "" {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(importerPath)) {
+		case ".js", ".jsx", ".ts", ".tsx":
+		default:
+			continue
+		}
+		for _, match := range generatedImportPathPattern.FindAllStringSubmatch(file.Content, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			spec := strings.TrimSpace(match[1])
+			if !strings.Contains(spec, "components/ui/") {
+				continue
+			}
+			names := parseGeneratedImportNamedSourceNames(file.Content, spec)
+			if len(names) == 0 {
+				continue
+			}
+			targetPath := ""
+			candidates := localImportResolutionCandidatesWithAliasPrefix(importerPath, spec)
+			for _, candidate := range candidates {
+				if existingPath, ok := existing[strings.ToLower(sanitizeFilePath(candidate))]; ok {
+					targetPath = existingPath
+					break
+				}
+			}
+			if targetPath == "" {
+				for _, candidate := range candidates {
+					candidate = sanitizeFilePath(candidate)
+					if strings.Contains(candidate, "/components/ui/") && strings.HasSuffix(strings.ToLower(candidate), ".tsx") {
+						targetPath = candidate
+						break
+					}
+				}
+			}
+			if targetPath == "" {
+				continue
+			}
+			module := shadcnUIModuleFromPath(targetPath)
+			if module == "" {
+				continue
+			}
+			req := requirements[targetPath]
+			if req == nil {
+				req = &shadcnUIExportRequirement{
+					TargetPath: targetPath,
+					Module:     module,
+					Names:      map[string]bool{},
+				}
+				requirements[targetPath] = req
+			}
+			for _, name := range names {
+				req.Names[name] = true
+			}
+		}
+	}
+	return requirements
+}
+
+func shadcnPascalName(slug string) string {
+	parts := regexp.MustCompile(`[^A-Za-z0-9]+`).Split(slug, -1)
+	var b strings.Builder
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(part[:1]))
+		if len(part) > 1 {
+			b.WriteString(part[1:])
+		}
+	}
+	if b.Len() == 0 {
+		return "Primitive"
+	}
+	return sanitizeGeneratedIdentifier(b.String())
+}
+
+func shadcnKnownExports(module string) []string {
+	switch module {
+	case "badge":
+		return []string{"Badge", "badgeVariants"}
+	case "button":
+		return []string{"Button", "buttonVariants"}
+	case "card":
+		return []string{"Card", "CardHeader", "CardFooter", "CardTitle", "CardDescription", "CardContent"}
+	case "input":
+		return []string{"Input"}
+	case "label":
+		return []string{"Label"}
+	case "textarea":
+		return []string{"Textarea"}
+	case "select":
+		return []string{"Select", "SelectGroup", "SelectValue", "SelectTrigger", "SelectContent", "SelectLabel", "SelectItem", "SelectSeparator"}
+	case "dialog":
+		return []string{"Dialog", "DialogTrigger", "DialogPortal", "DialogOverlay", "DialogContent", "DialogHeader", "DialogFooter", "DialogTitle", "DialogDescription", "DialogClose"}
+	case "tabs":
+		return []string{"Tabs", "TabsList", "TabsTrigger", "TabsContent"}
+	case "table":
+		return []string{"Table", "TableHeader", "TableBody", "TableFooter", "TableHead", "TableRow", "TableCell", "TableCaption"}
+	case "avatar":
+		return []string{"Avatar", "AvatarImage", "AvatarFallback"}
+	case "separator":
+		return []string{"Separator"}
+	case "checkbox":
+		return []string{"Checkbox"}
+	case "switch":
+		return []string{"Switch"}
+	case "progress":
+		return []string{"Progress"}
+	case "sheet":
+		return []string{"Sheet", "SheetTrigger", "SheetClose", "SheetContent", "SheetHeader", "SheetFooter", "SheetTitle", "SheetDescription"}
+	default:
+		return []string{shadcnPascalName(module)}
+	}
+}
+
+func shadcnUIFallbackModuleContent(module string, importedNames []string) string {
+	names := dedupeStringsPreserveOrder(append(shadcnKnownExports(module), importedNames...))
+	mainName := shadcnPascalName(module)
+	for _, name := range names {
+		if isLikelyReactComponentName(name) {
+			mainName = name
+			break
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("import * as React from 'react';\n\n")
+	b.WriteString("function cx(...classes: Array<string | false | null | undefined>) {\n")
+	b.WriteString("  return classes.filter(Boolean).join(' ');\n")
+	b.WriteString("}\n\n")
+	b.WriteString("type PrimitiveProps = React.HTMLAttributes<HTMLDivElement> & {\n")
+	b.WriteString("  asChild?: boolean;\n  variant?: string;\n  size?: string;\n  value?: string;\n  placeholder?: string;\n  checked?: boolean;\n  onValueChange?: (value: string) => void;\n  onCheckedChange?: (checked: boolean) => void;\n};\n\n")
+	b.WriteString("function Primitive({ className = '', children, ...props }: PrimitiveProps) {\n")
+	b.WriteString("  const { asChild: _asChild, variant: _variant, size: _size, value: _value, placeholder: _placeholder, checked: _checked, onValueChange: _onValueChange, onCheckedChange: _onCheckedChange, ...rest } = props;\n")
+	b.WriteString("  return <div className={cx('rounded-xl border border-slate-700/70 bg-slate-900/70 text-slate-100 shadow-sm', className)} {...rest}>{children}</div>;\n")
+	b.WriteString("}\n\n")
+
+	writeComponent := func(name, element, propsType, baseClass string) {
+		name = sanitizeGeneratedIdentifier(name)
+		if name == "" {
+			return
+		}
+		b.WriteString(fmt.Sprintf("export function %s({ className = '', children, ...props }: %s) {\n", name, propsType))
+		if propsType == "PrimitiveProps" {
+			b.WriteString("  return <Primitive className={cx('" + baseClass + "', className)} {...props}>{children}</Primitive>;\n")
+		} else {
+			b.WriteString(fmt.Sprintf("  return <%s className={cx('%s', className)} {...props}>{children}</%s>;\n", element, baseClass, element))
+		}
+		b.WriteString("}\n\n")
+	}
+
+	written := map[string]bool{}
+	writeNamed := func(name string) {
+		name = sanitizeGeneratedIdentifier(name)
+		if name == "" || written[name] {
+			return
+		}
+		written[name] = true
+		switch name {
+		case "Badge":
+			b.WriteString("export function Badge({ className = '', children, ...props }: React.HTMLAttributes<HTMLSpanElement> & { variant?: string }) {\n")
+			b.WriteString("  const { variant: _variant, ...rest } = props;\n")
+			b.WriteString("  return <span className={cx('inline-flex items-center rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-100', className)} {...rest}>{children}</span>;\n")
+			b.WriteString("}\n\n")
+		case "badgeVariants", "buttonVariants":
+			b.WriteString(fmt.Sprintf("export function %s(..._args: unknown[]) {\n  return '';\n}\n\n", name))
+		case "Button":
+			b.WriteString("export function Button({ className = '', children, type = 'button', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string; asChild?: boolean }) {\n")
+			b.WriteString("  const { variant: _variant, size: _size, asChild: _asChild, ...rest } = props;\n")
+			b.WriteString("  return <button type={type} className={cx('inline-flex items-center justify-center rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-400/20 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60', className)} {...rest}>{children}</button>;\n")
+			b.WriteString("}\n\n")
+		case "Input":
+			b.WriteString("export function Input({ className = '', ...props }: React.InputHTMLAttributes<HTMLInputElement>) {\n")
+			b.WriteString("  return <input className={cx('h-10 w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20', className)} {...props} />;\n")
+			b.WriteString("}\n\n")
+		case "Label":
+			b.WriteString("export function Label({ className = '', children, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {\n")
+			b.WriteString("  return <label className={cx('text-sm font-medium text-slate-200', className)} {...props}>{children}</label>;\n")
+			b.WriteString("}\n\n")
+		case "Textarea":
+			b.WriteString("export function Textarea({ className = '', ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {\n")
+			b.WriteString("  return <textarea className={cx('min-h-24 w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20', className)} {...props} />;\n")
+			b.WriteString("}\n\n")
+		case "Card":
+			writeComponent(name, "div", "React.HTMLAttributes<HTMLDivElement>", "rounded-2xl border border-slate-800 bg-slate-950/70 shadow-xl shadow-black/20")
+		case "CardHeader", "CardFooter", "CardContent", "DialogHeader", "DialogFooter", "SheetHeader", "SheetFooter":
+			writeComponent(name, "div", "React.HTMLAttributes<HTMLDivElement>", "space-y-2 p-5")
+		case "CardTitle", "DialogTitle", "SheetTitle":
+			writeComponent(name, "h3", "React.HTMLAttributes<HTMLHeadingElement>", "text-lg font-semibold text-slate-50")
+		case "CardDescription", "DialogDescription", "SheetDescription":
+			writeComponent(name, "p", "React.HTMLAttributes<HTMLParagraphElement>", "text-sm text-slate-400")
+		case "Table":
+			writeComponent(name, "table", "React.TableHTMLAttributes<HTMLTableElement>", "w-full caption-bottom text-sm")
+		case "TableHeader":
+			writeComponent(name, "thead", "React.HTMLAttributes<HTMLTableSectionElement>", "border-b border-slate-800")
+		case "TableBody":
+			writeComponent(name, "tbody", "React.HTMLAttributes<HTMLTableSectionElement>", "")
+		case "TableFooter":
+			writeComponent(name, "tfoot", "React.HTMLAttributes<HTMLTableSectionElement>", "border-t border-slate-800")
+		case "TableRow":
+			writeComponent(name, "tr", "React.HTMLAttributes<HTMLTableRowElement>", "border-b border-slate-800 transition hover:bg-slate-900/60")
+		case "TableHead":
+			writeComponent(name, "th", "React.ThHTMLAttributes<HTMLTableCellElement>", "h-10 px-3 text-left align-middle font-medium text-slate-400")
+		case "TableCell":
+			writeComponent(name, "td", "React.TdHTMLAttributes<HTMLTableCellElement>", "p-3 align-middle text-slate-200")
+		case "TableCaption":
+			writeComponent(name, "caption", "React.HTMLAttributes<HTMLTableCaptionElement>", "mt-4 text-sm text-slate-500")
+		case "Checkbox", "Switch":
+			b.WriteString(fmt.Sprintf("export function %s({ className = '', checked, onCheckedChange, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { checked?: boolean; onCheckedChange?: (checked: boolean) => void }) {\n", name))
+			b.WriteString("  return <button type=\"button\" aria-pressed={checked} className={cx('h-5 w-9 rounded-full border border-cyan-400/40 bg-slate-900 text-cyan-200', className)} onClick={() => onCheckedChange?.(!checked)} {...props} />;\n")
+			b.WriteString("}\n\n")
+		case "Progress":
+			b.WriteString("export function Progress({ className = '', value = 0, ...props }: React.HTMLAttributes<HTMLDivElement> & { value?: number }) {\n")
+			b.WriteString("  return <div className={cx('h-2 overflow-hidden rounded-full bg-slate-800', className)} {...props}><div className='h-full bg-cyan-400' style={{ width: `${Math.max(0, Math.min(100, value))}%` }} /></div>;\n")
+			b.WriteString("}\n\n")
+		default:
+			if strings.HasSuffix(name, "Props") {
+				b.WriteString(fmt.Sprintf("export type %s = PrimitiveProps;\n\n", name))
+			} else {
+				writeComponent(name, "div", "PrimitiveProps", "p-2")
+			}
+		}
+	}
+
+	for _, name := range names {
+		writeNamed(name)
+	}
+	if !written[mainName] {
+		writeNamed(mainName)
+	}
+	if isLikelyReactComponentName(mainName) {
+		b.WriteString(fmt.Sprintf("export default %s;\n", mainName))
+	}
+	return b.String()
+}
+
+func normalizeShadcnUIExportsInPatchPlan(files []GeneratedFile, plan *generatedFilePatchPlan) (bool, string) {
+	requirements := collectShadcnUIExportRequirements(files)
+	if len(requirements) == 0 || plan == nil {
+		return false, ""
+	}
+
+	targets := make([]string, 0, len(requirements))
+	for target := range requirements {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+
+	changed := false
+	summaries := make([]string, 0, len(targets))
+	for _, targetPath := range targets {
+		req := requirements[targetPath]
+		if req == nil || len(req.Names) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(req.Names))
+		for name := range req.Names {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		content := plan.content(targetPath)
+		allPresent := strings.TrimSpace(content) != ""
+		for _, name := range names {
+			if !generatedFileExportsNamedSymbol(content, name) {
+				allPresent = false
+				break
+			}
+		}
+		if allPresent {
+			continue
+		}
+		repaired := shadcnUIFallbackModuleContent(req.Module, names)
+		language := "typescript"
+		if strings.HasSuffix(strings.ToLower(targetPath), ".jsx") || strings.HasSuffix(strings.ToLower(targetPath), ".js") {
+			language = "javascript"
+		}
+		applied := false
+		if strings.TrimSpace(content) == "" {
+			applied = plan.createFile(targetPath, repaired, language)
+		} else {
+			applied = plan.patchFile(targetPath, repaired, language)
+		}
+		if !applied {
+			continue
+		}
+		changed = true
+		summaries = append(summaries, fmt.Sprintf("%s exports %s", targetPath, strings.Join(names, ", ")))
+	}
+	if !changed {
+		return false, ""
+	}
+	return true, "shadcn ui exports: " + strings.Join(summaries, "; ")
+}
+
+func readinessSuggestsShadcnUIExportRepair(readinessErrors []string) bool {
+	for _, err := range readinessErrors {
+		lower := strings.ToLower(err)
+		if strings.Contains(lower, "components/ui/") && (strings.Contains(lower, "has no exported member") || strings.Contains(lower, "is not exported") || strings.Contains(lower, "has no default export")) {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) applyDeterministicShadcnUIExportRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 || !readinessSuggestsShadcnUIExportRepair(readinessErrors) {
+		return nil, ""
+	}
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return nil, ""
+	}
+	if changed, summary := normalizeShadcnUIExportsInPatchPlan(files, plan); changed {
+		return am.bundleFromPatchPlan(build.ID, files, plan, "shadcn_ui_export_repair: "+summary), summary
+	}
+	return nil, ""
+}
+
 func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
 		return nil, ""
@@ -14201,6 +14632,9 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 	// regardless of whether a manifest path was found.
 	if _, twSummary := ensureGeneratedTailwindConfig(plan, files); twSummary != "" {
 		summaries = append(summaries, twSummary)
+	}
+	if repaired, summary := normalizeShadcnUIExportsInPatchPlan(plan.files(), plan); repaired {
+		summaries = append(summaries, summary)
 	}
 
 	if len(summaries) == 0 {
@@ -16692,6 +17126,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied external import/export repair: %s)",
 			message:     "Applied deterministic third-party import/export repair for generated frontend modules. Re-running final validation before solver recovery.",
 			summaryKey:  "external_import_export_repair",
+		},
+		{
+			apply:       am.applyDeterministicShadcnUIExportRepair,
+			errorFormat: "Final output validation failed: %s (applied shadcn/ui export repair: %s)",
+			message:     "Applied deterministic shadcn/ui export repair across generated UI primitives. Re-running final validation before solver recovery.",
+			summaryKey:  "shadcn_ui_export_repair",
 		},
 		{
 			apply:       am.applyDeterministicExportMismatchRepair,

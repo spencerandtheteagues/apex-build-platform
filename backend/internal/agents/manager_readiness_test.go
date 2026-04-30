@@ -6100,6 +6100,90 @@ func TestApplyDeterministicPreValidationNormalizationAddsPostCSSConfigDependenci
 	}
 }
 
+func TestApplyDeterministicPreValidationNormalizationRepairsShadcnUIExports(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-prevalidation-shadcn-exports",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		TechStack: &TechStack{Frontend: "React"},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/App.tsx",
+				Content: `import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+
+export default function App() {
+  return <Card><CardHeader><CardTitle>FieldOps</CardTitle></CardHeader><CardContent><Badge>Ready</Badge></CardContent></Card>;
+}`,
+				IsNew: true,
+			},
+			{
+				Path:    "src/components/ui/badge.tsx",
+				Content: `export default function Badge(){ return <span />; }`,
+				IsNew:   true,
+			},
+			{
+				Path:    "src/components/ui/card.tsx",
+				Content: `export default function GeneratedCard(){ return <div />; }`,
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to repair shadcn/ui named exports")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	contentByPath := map[string]string{}
+	for _, file := range files {
+		contentByPath[file.Path] = file.Content
+	}
+	for path, needles := range map[string][]string{
+		"src/components/ui/badge.tsx": {`export function Badge`, `export function badgeVariants`},
+		"src/components/ui/card.tsx":  {`export function Card`, `export function CardHeader`, `export function CardTitle`, `export function CardContent`},
+	} {
+		content := contentByPath[path]
+		if content == "" {
+			t.Fatalf("expected %s to exist", path)
+		}
+		for _, needle := range needles {
+			if !strings.Contains(content, needle) {
+				t.Fatalf("expected %s in %s, got %s", needle, path, content)
+			}
+		}
+	}
+}
+
 func TestApplyDeterministicPreValidationNormalizationAddsBackendTSConfigAndTooling(t *testing.T) {
 	t.Parallel()
 
