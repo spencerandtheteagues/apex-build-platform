@@ -2472,15 +2472,23 @@ func TestParseMissingDependenciesByVerificationScope(t *testing.T) {
 	errs := []string{
 		`Preview verification dependency check failed: source imports "zod" but package.json does not declare dependency "zod"`,
 		`Preview verification dependency check failed: source imports "@vitejs/plugin-react" but package.json does not declare dependency "@vitejs/plugin-react"; Preview verification dependency check failed: source imports "react-hook-form" but package.json does not declare dependency "react-hook-form"`,
+		`Preview verification build failed: [Failed to load PostCSS config: [Error] Loading PostCSS Plugin failed: Cannot find module 'autoprefixer'`,
 		`Backend verification dependency check failed: source imports "bcrypt" but package.json does not declare dependency "bcrypt"`,
 	}
 
 	frontend, backend := parseMissingDependenciesByVerificationScope(errs)
-	if got := strings.Join(frontend, ","); got != "@vitejs/plugin-react,react-hook-form,zod" {
+	if got := strings.Join(frontend, ","); got != "@vitejs/plugin-react,autoprefixer,react-hook-form,zod" {
 		t.Fatalf("unexpected frontend deps: %q", got)
 	}
 	if got := strings.Join(backend, ","); got != "bcrypt" {
 		t.Fatalf("unexpected backend deps: %q", got)
+	}
+
+	frontend, backend = parseMissingDependenciesByVerificationScope([]string{
+		`Preview verification build failed: server/__tests__/api.test.ts(1,21): error TS2307: Cannot find module 'supertest' or its corresponding type declarations.`,
+	})
+	if len(frontend) != 0 || len(backend) != 0 {
+		t.Fatalf("expected source-level missing module to remain outside manifest-scope parser, got frontend=%v backend=%v", frontend, backend)
 	}
 }
 
@@ -6017,6 +6025,78 @@ func TestApplyDeterministicPreValidationNormalizationCanonicalizesRadixPackageNa
 
 	if errs := am.validateFinalBuildReadiness(build, files); containsError(errs, `invalid npm package name "radix-ui/react-accordion"`) || containsError(errs, `does not declare dependency "@radix-ui/react-accordion"`) {
 		t.Fatalf("expected canonicalized Radix manifest to pass dependency validation, got %v", errs)
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationAddsPostCSSConfigDependencies(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-prevalidation-postcss-config",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		TechStack: &TechStack{Frontend: "React"},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "tailwindcss": "^3.4.3"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "postcss.config.js",
+				Content: `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {}
+  }
+};`,
+				IsNew: true,
+			},
+			{Path: "src/App.tsx", Content: `export default function App(){ return <div className="text-cyan-300">ok</div>; }`, IsNew: true},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to add PostCSS config dependencies")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var manifest string
+	for _, file := range files {
+		if file.Path == "package.json" {
+			manifest = file.Content
+			break
+		}
+	}
+	for _, needle := range []string{`"postcss"`, `"autoprefixer"`} {
+		if !strings.Contains(manifest, needle) {
+			t.Fatalf("expected %s in normalized package.json, got %s", needle, manifest)
+		}
 	}
 }
 

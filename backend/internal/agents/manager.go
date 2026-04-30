@@ -8254,14 +8254,28 @@ func parseMissingDependenciesByVerificationScope(errors []string) (frontendPkgs 
 		return nil, nil
 	}
 	reMissing := regexp.MustCompile(`does not declare dependency "([^"]+)"`)
+	reCannotFindModule := regexp.MustCompile(`Cannot find module ['"]([^'"]+)['"]`)
 	frontSet := map[string]bool{}
 	backSet := map[string]bool{}
 	for _, msg := range errors {
-		matches := reMissing.FindAllStringSubmatch(strings.TrimSpace(msg), -1)
+		trimmedMsg := strings.TrimSpace(msg)
+		matches := reMissing.FindAllStringSubmatch(trimmedMsg, -1)
+		lower := strings.ToLower(trimmedMsg)
+		if strings.Contains(lower, "failed to load postcss config") || strings.Contains(lower, "loading postcss plugin failed") {
+			for _, match := range reCannotFindModule.FindAllStringSubmatch(trimmedMsg, -1) {
+				if len(match) != 2 {
+					continue
+				}
+				pkg := packageNameFromImportPath(match[1])
+				if pkg == "" {
+					continue
+				}
+				matches = append(matches, []string{match[0], pkg})
+			}
+		}
 		if len(matches) == 0 {
 			continue
 		}
-		lower := strings.ToLower(msg)
 		for _, match := range matches {
 			if len(match) != 2 {
 				continue
@@ -8271,6 +8285,9 @@ func parseMissingDependenciesByVerificationScope(errors []string) (frontendPkgs 
 				continue
 			}
 			if strings.Contains(lower, "preview verification dependency check failed") {
+				frontSet[pkg] = true
+			}
+			if strings.Contains(lower, "preview verification failed") || strings.Contains(lower, "preview verification build failed") {
 				frontSet[pkg] = true
 			}
 			if strings.Contains(lower, "backend verification dependency check failed") {
@@ -8363,6 +8380,20 @@ func missingManifestDependenciesForGeneratedFiles(files []GeneratedFile, manifes
 	missing = append(missing, parseMissingDependencyNamesFromIssues(validateGeneratedImportDependencies(files, prefix, manifest))...)
 
 	signals := inspectGeneratedPackageSignals(files, prefix)
+	missing = appendGeneratedPackageSignalDependencies(missing, manifest, signals)
+	return dedupeStrings(missing)
+}
+
+func appendGeneratedPackageSignalDependencies(missing []string, manifest previewManifest, signals generatedPackageSignals) []string {
+	if signals.usesPostCSSConfig && !manifestDeclaresDependency(manifest, "postcss") {
+		missing = append(missing, "postcss")
+	}
+	if signals.usesPostCSSConfigTailwind && !manifestDeclaresDependency(manifest, "tailwindcss") {
+		missing = append(missing, "tailwindcss")
+	}
+	if signals.usesPostCSSConfigAutoprefixer && !manifestDeclaresDependency(manifest, "autoprefixer") {
+		missing = append(missing, "autoprefixer")
+	}
 	if signals.hasNodeTests && manifestUsesVitest(manifest) && (signals.usesTestingLibrary || signals.usesJestDOM) && !manifestDeclaresDependency(manifest, "jsdom") {
 		missing = append(missing, "jsdom")
 	}
@@ -8382,7 +8413,7 @@ func missingManifestDependenciesForGeneratedFiles(files []GeneratedFile, manifes
 		missing = append(missing, "jest")
 	}
 
-	return dedupeStrings(missing)
+	return missing
 }
 
 type generatedFilePatchPlan struct {
@@ -13345,12 +13376,15 @@ func manifestUsesJest(manifest previewManifest) bool {
 }
 
 type generatedPackageSignals struct {
-	hasImportMetaEnv       bool
-	hasNodeTests           bool
-	usesTestingLibrary     bool
-	usesJestDOM            bool
-	usesJestGlobals        bool
-	usesVitestConfigImport bool
+	hasImportMetaEnv              bool
+	hasNodeTests                  bool
+	usesTestingLibrary            bool
+	usesJestDOM                   bool
+	usesJestGlobals               bool
+	usesVitestConfigImport        bool
+	usesPostCSSConfig             bool
+	usesPostCSSConfigTailwind     bool
+	usesPostCSSConfigAutoprefixer bool
 }
 
 func inspectGeneratedPackageSignals(files []GeneratedFile, prefix string) generatedPackageSignals {
@@ -13372,12 +13406,21 @@ func inspectGeneratedPackageSignals(files []GeneratedFile, prefix string) genera
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(path))
+		contentLower := strings.ToLower(file.Content)
+		if path == "postcss.config.js" || path == "postcss.config.cjs" || path == "postcss.config.mjs" || path == "postcss.config.ts" {
+			signals.usesPostCSSConfig = true
+			if strings.Contains(contentLower, "tailwindcss") {
+				signals.usesPostCSSConfigTailwind = true
+			}
+			if strings.Contains(contentLower, "autoprefixer") {
+				signals.usesPostCSSConfigAutoprefixer = true
+			}
+		}
 		switch ext {
 		case ".js", ".jsx", ".ts", ".tsx":
 		default:
 			continue
 		}
-		contentLower := strings.ToLower(file.Content)
 		if strings.Contains(file.Content, "import.meta.env") {
 			signals.hasImportMetaEnv = true
 		}
@@ -14083,24 +14126,7 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 			validatePreviewManifestToolingDependencies(manifest),
 			validateGeneratedImportDependencies(files, prefix, manifest)...,
 		))
-		if signals.hasNodeTests && manifestUsesVitest(manifest) && (signals.usesTestingLibrary || signals.usesJestDOM) && !manifestDeclaresDependency(manifest, "jsdom") {
-			missingPkgs = append(missingPkgs, "jsdom")
-		}
-		if signals.usesVitestConfigImport && !manifestDeclaresDependency(manifest, "vitest") {
-			missingPkgs = append(missingPkgs, "vitest")
-		}
-		if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
-			missingPkgs = append(missingPkgs, "@testing-library/react")
-		}
-		if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/dom") {
-			missingPkgs = append(missingPkgs, "@testing-library/dom")
-		}
-		if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
-			missingPkgs = append(missingPkgs, "@testing-library/jest-dom")
-		}
-		if signals.usesJestGlobals && !manifestDeclaresDependency(manifest, "jest") {
-			missingPkgs = append(missingPkgs, "jest")
-		}
+		missingPkgs = appendGeneratedPackageSignalDependencies(missingPkgs, manifest, signals)
 		missingPkgs = dedupeStrings(missingPkgs)
 
 		updatedContent := content
@@ -14115,24 +14141,7 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 				validatePreviewManifestToolingDependencies(manifest),
 				validateGeneratedImportDependencies(files, prefix, manifest)...,
 			))
-			if signals.hasNodeTests && manifestUsesVitest(manifest) && (signals.usesTestingLibrary || signals.usesJestDOM) && !manifestDeclaresDependency(manifest, "jsdom") {
-				missingPkgs = append(missingPkgs, "jsdom")
-			}
-			if signals.usesVitestConfigImport && !manifestDeclaresDependency(manifest, "vitest") {
-				missingPkgs = append(missingPkgs, "vitest")
-			}
-			if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
-				missingPkgs = append(missingPkgs, "@testing-library/react")
-			}
-			if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/dom") {
-				missingPkgs = append(missingPkgs, "@testing-library/dom")
-			}
-			if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
-				missingPkgs = append(missingPkgs, "@testing-library/jest-dom")
-			}
-			if signals.usesJestGlobals && !manifestDeclaresDependency(manifest, "jest") {
-				missingPkgs = append(missingPkgs, "jest")
-			}
+			missingPkgs = appendGeneratedPackageSignalDependencies(missingPkgs, manifest, signals)
 			missingPkgs = dedupeStrings(missingPkgs)
 		}
 
