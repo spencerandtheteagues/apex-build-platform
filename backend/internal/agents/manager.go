@@ -1127,11 +1127,11 @@ func (am *AgentManager) buildTimeoutHandler(buildID string) {
 	defer probe.Stop()
 	deadline := time.Now().Add(timeout)
 	maxExtension := timeout / 2
-	if maxExtension < 15*time.Minute {
-		maxExtension = 15 * time.Minute
+	if maxExtension < time.Minute {
+		maxExtension = time.Minute
 	}
-	if maxExtension > 30*time.Minute {
-		maxExtension = 30 * time.Minute
+	if maxExtension > 5*time.Minute {
+		maxExtension = 5 * time.Minute
 	}
 	hardDeadline := deadline.Add(maxExtension)
 	const recentActivityWindow = 45 * time.Second
@@ -7406,9 +7406,6 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 					"quality_gate_stage":    "review",
 				},
 			})
-			build.mu.Lock()
-			build.UpdatedAt = time.Now()
-			build.mu.Unlock()
 			am.cancelAutomatedRecoveryTasksForLoopCap(build)
 			am.checkBuildCompletion(build)
 			return
@@ -7434,9 +7431,6 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 					"quality_gate_stage":    "review",
 				},
 			})
-			build.mu.Lock()
-			build.UpdatedAt = time.Now()
-			build.mu.Unlock()
 			am.cancelAutomatedRecoveryTasksForLoopCap(build)
 			am.checkBuildCompletion(build)
 			return
@@ -7457,9 +7451,6 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 					"quality_gate_stage":    "review",
 				},
 			})
-			build.mu.Lock()
-			build.UpdatedAt = time.Now()
-			build.mu.Unlock()
 			am.cancelAutomatedRecoveryTasksForLoopCap(build)
 			am.checkBuildCompletion(build)
 			return
@@ -7521,10 +7512,6 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 			markTaskAssignmentFailure(build, fixTask, fmt.Errorf("review fix task could not be assigned: %w", err))
 		}
 	}
-
-	build.mu.Lock()
-	build.UpdatedAt = time.Now()
-	build.mu.Unlock()
 }
 
 // cancelPendingTasks marks all pending tasks as cancelled to stop further work
@@ -7605,6 +7592,7 @@ func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
 	defaultLimit := 3
 	envKey := "BUILD_MAX_FIX_LOOPS"
 	if action == "fix_review_issues" {
+		defaultLimit = 1
 		envKey = "BUILD_MAX_REVIEW_FIX_LOOPS"
 	} else if action == "fix_tests" {
 		envKey = "BUILD_MAX_TEST_FIX_LOOPS"
@@ -7615,6 +7603,9 @@ func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
 	limit := envInt(envKey, defaultLimit)
 	if am.isLocalDevStrictPreviewBuild(build) && limit < 2 {
 		limit = 2
+	}
+	if action == "fix_review_issues" && !am.isLocalDevStrictPreviewBuild(build) && limit > 1 {
+		limit = 1
 	}
 	if limit < 0 {
 		limit = 0
@@ -11747,7 +11738,7 @@ func parseExportMismatchRepairTargets(errors []string) []exportMismatchRepairTar
 
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`(?m)RollupError:\s+["']([^"']+)["'] is not exported by ["']([^"']+)["'], imported by ["']([^"']+)["']`),
-		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS(?:2305|2614): Module ['"]([^'"]+)['"] has no exported member ['"]([^'"]+)['"]`),
+		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS(?:2305|2614): Module ['"]"?([^'"]+)"?['"] has no exported member ['"]([^'"]+)['"]`),
 		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2613: Module ['"](.+?)['"] has no default export\.[^\n]*import\s+\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\s+from`),
 		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS1192: Module ['"](.+?)['"] has no default export\.`),
 	}
@@ -12125,6 +12116,201 @@ func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, rea
 
 	summary := "export mismatch repair: " + strings.Join(applied, ", ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "export_mismatch_repair: "+summary), summary
+}
+
+func isExternalGeneratedModuleSpecifier(specifier string) bool {
+	specifier = strings.TrimSpace(specifier)
+	if specifier == "" {
+		return false
+	}
+	if strings.HasPrefix(specifier, ".") || strings.HasPrefix(specifier, "/") {
+		return false
+	}
+	if strings.HasPrefix(specifier, "@/") || strings.HasPrefix(specifier, "~/") {
+		return false
+	}
+	return true
+}
+
+func lucideReactKnownReplacement(exportName string) string {
+	switch strings.ToLower(strings.TrimSpace(exportName)) {
+	case "dashboard":
+		return "LayoutDashboard"
+	case "assignment", "assignments", "task", "tasks", "checklist":
+		return "ClipboardList"
+	case "people", "team", "teams", "group", "groups":
+		return "Users"
+	case "person":
+		return "User"
+	case "money", "cost", "costs", "price", "pricing", "revenue":
+		return "DollarSign"
+	case "chart", "analytics", "metrics":
+		return "TrendingUp"
+	case "warning", "risk", "alert":
+		return "AlertTriangle"
+	case "success", "complete", "completed":
+		return "CheckCircle"
+	case "job", "jobs", "work":
+		return "Briefcase"
+	case "pipeline", "kanban":
+		return "Columns3"
+	case "calendar", "schedule", "booking":
+		return "Calendar"
+	case "settings":
+		return "Settings"
+	case "search":
+		return "Search"
+	case "notification", "notifications":
+		return "Bell"
+	case "menu":
+		return "Menu"
+	case "close":
+		return "X"
+	case "home":
+		return "Home"
+	case "file", "document", "proposal":
+		return "FileText"
+	case "folder", "project":
+		return "Folder"
+	case "wrench", "tools", "service":
+		return "Wrench"
+	case "clock", "time":
+		return "Clock"
+	default:
+		return "Circle"
+	}
+}
+
+func rewriteInvalidNamedImportsFromExternalModule(content, module string, replacements map[string]string) (string, []string) {
+	if strings.TrimSpace(content) == "" || strings.TrimSpace(module) == "" || len(replacements) == 0 {
+		return content, nil
+	}
+
+	importRe := regexp.MustCompile(`(?ms)import\s*\{([^}]*)\}\s*from\s*['"]` + regexp.QuoteMeta(module) + `['"]\s*;?`)
+	rewrites := make([]string, 0)
+	updated := importRe.ReplaceAllStringFunc(content, func(match string) string {
+		parts := importRe.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+
+		specifiers := strings.Split(parts[1], ",")
+		rewritten := make([]string, 0, len(specifiers))
+		changed := false
+		for _, raw := range specifiers {
+			item := strings.TrimSpace(raw)
+			if item == "" {
+				continue
+			}
+			typePrefix := ""
+			if strings.HasPrefix(item, "type ") {
+				typePrefix = "type "
+				item = strings.TrimSpace(strings.TrimPrefix(item, "type "))
+			}
+
+			sourceName := item
+			localName := ""
+			if fields := regexp.MustCompile(`\s+as\s+`).Split(item, 2); len(fields) == 2 {
+				sourceName = strings.TrimSpace(fields[0])
+				localName = strings.TrimSpace(fields[1])
+			}
+			if replacement, ok := replacements[sourceName]; ok && replacement != "" && typePrefix == "" {
+				if localName == "" {
+					localName = sourceName
+				}
+				if replacement == localName {
+					rewritten = append(rewritten, replacement)
+				} else {
+					rewritten = append(rewritten, replacement+" as "+localName)
+				}
+				rewrites = append(rewrites, sourceName+"->"+replacement)
+				changed = true
+				continue
+			}
+
+			rewritten = append(rewritten, strings.TrimSpace(raw))
+		}
+		if !changed {
+			return match
+		}
+		return "import { " + strings.Join(rewritten, ", ") + " } from " + strconv.Quote(module) + ";"
+	})
+	if updated == content {
+		return content, nil
+	}
+	return updated, dedupeStrings(rewrites)
+}
+
+func (am *AgentManager) applyDeterministicExternalImportExportRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	targets := parseExportMismatchRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return nil, ""
+	}
+
+	replacementsByFileModule := map[string]map[string]string{}
+	for _, target := range targets {
+		module := strings.TrimSpace(target.Specifier)
+		if !isExternalGeneratedModuleSpecifier(module) || target.ExportName == "" {
+			continue
+		}
+
+		replacement := ""
+		switch module {
+		case "lucide-react":
+			replacement = lucideReactKnownReplacement(target.ExportName)
+		default:
+			continue
+		}
+		if replacement == "" || replacement == target.ExportName {
+			continue
+		}
+
+		key := sanitizeFilePath(target.ImporterPath) + "\x00" + module
+		if replacementsByFileModule[key] == nil {
+			replacementsByFileModule[key] = map[string]string{}
+		}
+		replacementsByFileModule[key][target.ExportName] = replacement
+	}
+	if len(replacementsByFileModule) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(replacementsByFileModule))
+	for key, replacements := range replacementsByFileModule {
+		parts := strings.SplitN(key, "\x00", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			continue
+		}
+		path, module := parts[0], parts[1]
+		content := plan.content(path)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		updated, rewrites := rewriteInvalidNamedImportsFromExternalModule(content, module, replacements)
+		if len(rewrites) == 0 || updated == content {
+			continue
+		}
+		if plan.patchFile(path, updated, am.detectLanguage(path)) {
+			sort.Strings(rewrites)
+			applied = append(applied, fmt.Sprintf("%s %s: %s", path, module, strings.Join(rewrites, ", ")))
+		}
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	sort.Strings(applied)
+	summary := "external import/export repair: " + strings.Join(applied, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "external_import_export_repair: "+summary), summary
 }
 
 func parseSequelizeConstructorRepairTargets(errors []string) []string {
@@ -16319,6 +16505,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied missing local module repair: %s)",
 			message:     "Applied deterministic local module repair for missing generated frontend files. Re-running final validation before solver recovery.",
 			summaryKey:  "missing_local_module_repair",
+		},
+		{
+			apply:       am.applyDeterministicExternalImportExportRepair,
+			errorFormat: "Final output validation failed: %s (applied external import/export repair: %s)",
+			message:     "Applied deterministic third-party import/export repair for generated frontend modules. Re-running final validation before solver recovery.",
+			summaryKey:  "external_import_export_repair",
 		},
 		{
 			apply:       am.applyDeterministicExportMismatchRepair,

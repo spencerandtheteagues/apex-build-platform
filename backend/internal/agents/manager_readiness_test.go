@@ -1601,12 +1601,13 @@ func TestCanCreateAutomatedFixTask_DedupesActiveAndRecent(t *testing.T) {
 	t.Parallel()
 
 	am := &AgentManager{}
+	action := "fix_tests"
 	build := &Build{
 		Mode:  ModeFast,
 		Tasks: []*Task{},
 	}
 
-	if !am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+	if !am.canCreateAutomatedFixTask(build, action) {
 		t.Fatalf("expected fix task creation allowed for empty build")
 	}
 
@@ -1616,22 +1617,46 @@ func TestCanCreateAutomatedFixTask_DedupesActiveAndRecent(t *testing.T) {
 		Status:    TaskPending,
 		CreatedAt: time.Now(),
 		Input: map[string]any{
-			"action": "fix_review_issues",
+			"action": action,
 		},
 	})
-	if am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+	if am.canCreateAutomatedFixTask(build, action) {
 		t.Fatalf("expected active pending fix task to block duplicate creation")
 	}
 
 	build.Tasks[0].Status = TaskCompleted
 	build.Tasks[0].CreatedAt = time.Now()
-	if am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+	if am.canCreateAutomatedFixTask(build, action) {
 		t.Fatalf("expected recent completed fix task to block duplicate creation")
 	}
 
 	build.Tasks[0].CreatedAt = time.Now().Add(-30 * time.Second)
-	if !am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+	if !am.canCreateAutomatedFixTask(build, action) {
 		t.Fatalf("expected old completed fix task to allow new creation")
+	}
+}
+
+func TestCanCreateAutomatedFixTask_CapsReviewFixLoopAtOne(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		Mode: ModeFull,
+		Tasks: []*Task{
+			{
+				ID:        "review-fix-1",
+				Type:      TaskFix,
+				Status:    TaskCompleted,
+				CreatedAt: time.Now().Add(-2 * time.Minute),
+				Input: map[string]any{
+					"action": "fix_review_issues",
+				},
+			},
+		},
+	}
+
+	if am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+		t.Fatalf("expected completed review-fix pass to cap additional review-fix loops")
 	}
 }
 
@@ -3865,6 +3890,74 @@ test("renders", () => {
 	if !strings.Contains(repairedFile.Content, "generated verification placeholder") &&
 		!strings.Contains(repairedFile.Content, `from '@testing-library/dom'`) {
 		t.Fatalf("expected placeholder fallback or patched screen import, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsRewritesInvalidLucideIcons(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-lucide-icon-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: `{"name":"fieldops","private":true,"dependencies":{"lucide-react":"^0.439.0"}}`,
+				IsNew:   true,
+			},
+			{
+				Path: "src/components/AppShell.tsx",
+				Content: `import { Dashboard, Assignment, People, Settings } from "lucide-react";
+
+export function AppShell() {
+  return <div><Dashboard /><Assignment /><People /><Settings /></div>;
+}
+`,
+				Language: "typescript",
+				IsNew:    true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: src/components/AppShell.tsx(1,10): error TS2305: Module '"lucide-react"' has no exported member 'Dashboard'.`,
+			`Preview verification build failed: src/components/AppShell.tsx(1,21): error TS2305: Module '"lucide-react"' has no exported member 'Assignment'.`,
+			`Preview verification build failed: src/components/AppShell.tsx(1,33): error TS2305: Module '"lucide-react"' has no exported member 'People'.`,
+		},
+		"invalid lucide icons",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected invalid lucide icon import repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var appShell string
+	for _, file := range files {
+		if file.Path == "src/components/AppShell.tsx" {
+			appShell = file.Content
+			break
+		}
+	}
+	for _, want := range []string{"LayoutDashboard as Dashboard", "ClipboardList as Assignment", "Users as People", "Settings"} {
+		if !strings.Contains(appShell, want) {
+			t.Fatalf("expected repaired AppShell import to contain %q, got %q", want, appShell)
+		}
+	}
+	for _, forbidden := range []string{"{ Dashboard,", "{ Dashboard ", "{ Assignment,", "{ People,"} {
+		if strings.Contains(appShell, forbidden) {
+			t.Fatalf("expected invalid raw lucide imports to be removed, got %q", appShell)
+		}
 	}
 }
 

@@ -52,6 +52,25 @@ function apiURL(route) {
 }
 
 async function request(route, options = {}) {
+  const { skipReauth = false, ...fetchOptions } = options
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await requestOnce(route, fetchOptions)
+    } catch (error) {
+      if (!skipReauth && error.status === 401 && attempt === 0) {
+        console.log(`[${new Date().toISOString()}] auth expired during ${route}; refreshing session and retrying`)
+        cookies.clear()
+        csrfToken = ''
+        bearerToken = ''
+        await login()
+        continue
+      }
+      throw error
+    }
+  }
+}
+
+async function requestOnce(route, options = {}) {
   const method = options.method || 'GET'
   const headers = {
     Accept: 'application/json',
@@ -79,6 +98,7 @@ async function request(route, options = {}) {
   }
   if (!response.ok) {
     const err = new Error(`HTTP ${response.status} ${method} ${route}`)
+    err.status = response.status
     err.response = data
     throw err
   }
@@ -87,7 +107,7 @@ async function request(route, options = {}) {
 
 async function fetchCSRF() {
   try {
-    const data = await request('/csrf-token')
+    const data = await request('/csrf-token', { skipReauth: true })
     csrfToken = data?.token || ''
   } catch {
     csrfToken = ''
@@ -98,6 +118,7 @@ async function login() {
   await fetchCSRF()
   const data = await request('/auth/login', {
     method: 'POST',
+    skipReauth: true,
     body: {
       username: loginUsername,
       email: loginEmail,
