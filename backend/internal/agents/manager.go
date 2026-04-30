@@ -11615,6 +11615,11 @@ type exportMismatchRepairTarget struct {
 	PreferNamedImport bool
 }
 
+type externalDefaultImportRepairTarget struct {
+	ImporterPath string
+	PackageName  string
+}
+
 type missingKnownImportRepairTarget struct {
 	Path   string
 	Symbol string
@@ -12932,6 +12937,170 @@ func rewriteInvalidNamedImportsFromExternalModule(content, module string, replac
 		return content, nil
 	}
 	return updated, dedupeStrings(rewrites)
+}
+
+func packageNameFromNodeModulesPath(modulePath string) string {
+	normalized := filepath.ToSlash(strings.Trim(modulePath, `"' `))
+	lower := strings.ToLower(normalized)
+	if idx := strings.Index(lower, "/node_modules/.vite/deps/"); idx >= 0 {
+		rest := normalized[idx+len("/node_modules/.vite/deps/"):]
+		rest = strings.TrimSuffix(rest, filepath.Ext(rest))
+		rest = strings.Trim(rest, "/")
+		if strings.Contains(rest, "__") {
+			rest = strings.Split(rest, "__")[0]
+		}
+		if strings.HasPrefix(rest, "@") {
+			parts := strings.Split(rest, "_")
+			if len(parts) >= 2 {
+				return parts[0] + "/" + parts[1]
+			}
+		}
+		if rest != "" && !strings.HasPrefix(rest, ".") {
+			return strings.Split(rest, "_")[0]
+		}
+	}
+	marker := "node_modules/"
+	idx := strings.Index(lower, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.Trim(normalized[idx+len(marker):], "/")
+	if rest == "" {
+		return ""
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return ""
+	}
+	if strings.HasPrefix(parts[0], "@") && len(parts) >= 2 {
+		return parts[0] + "/" + parts[1]
+	}
+	return parts[0]
+}
+
+func parseExternalDefaultImportRepairTargets(errors []string) []externalDefaultImportRepairTarget {
+	if len(errors) == 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS1192: Module ['"](.+?)['"] has no default export\.`)
+	seen := map[string]bool{}
+	targets := make([]externalDefaultImportRepairTarget, 0)
+	for _, msg := range errors {
+		for _, match := range re.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 3 {
+				continue
+			}
+			importerPath := sanitizeFilePath(strings.TrimSpace(match[1]))
+			packageName := packageNameFromNodeModulesPath(match[2])
+			if importerPath == "" || packageName == "" {
+				continue
+			}
+			key := strings.ToLower(importerPath + "::" + packageName)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			targets = append(targets, externalDefaultImportRepairTarget{
+				ImporterPath: importerPath,
+				PackageName:  packageName,
+			})
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].ImporterPath == targets[j].ImporterPath {
+			return targets[i].PackageName < targets[j].PackageName
+		}
+		return targets[i].ImporterPath < targets[j].ImporterPath
+	})
+	return targets
+}
+
+func namedExportForExternalDefaultImport(packageName, localName string) string {
+	localName = sanitizeGeneratedIdentifier(localName)
+	switch strings.TrimSpace(packageName) {
+	case "zustand":
+		return "create"
+	case "lucide-react":
+		return localName
+	case "framer-motion":
+		return "motion"
+	case "sonner":
+		if localName == "toast" || localName == "Toaster" {
+			return localName
+		}
+	}
+	return ""
+}
+
+func rewriteExternalDefaultImportToNamedImport(content, packageName string) (string, bool) {
+	packageName = strings.TrimSpace(packageName)
+	if strings.TrimSpace(content) == "" || packageName == "" {
+		return content, false
+	}
+	importRe := regexp.MustCompile(`(?m)^(\s*import\s+)([A-Za-z_$][A-Za-z0-9_$]*)(\s*,\s*\{([^}]*)\})?(\s+from\s+['"]` + regexp.QuoteMeta(packageName) + `['"]\s*;?\s*)$`)
+	matches := importRe.FindAllStringSubmatchIndex(content, -1)
+	for _, match := range matches {
+		if len(match) < 12 {
+			continue
+		}
+		localName := content[match[4]:match[5]]
+		namedExport := namedExportForExternalDefaultImport(packageName, localName)
+		if namedExport == "" {
+			continue
+		}
+		namedParts := make([]string, 0, 4)
+		if namedExport == localName {
+			namedParts = append(namedParts, namedExport)
+		} else {
+			namedParts = append(namedParts, namedExport+" as "+localName)
+		}
+		if len(match) >= 10 && match[8] >= 0 && match[9] >= 0 {
+			for _, part := range strings.Split(content[match[8]:match[9]], ",") {
+				part = strings.TrimSpace(part)
+				if part == "" || strings.EqualFold(part, namedExport) || strings.Contains(part, namedExport+" as ") {
+					continue
+				}
+				namedParts = append(namedParts, part)
+			}
+		}
+		replacement := content[match[2]:match[3]] + "{ " + strings.Join(namedParts, ", ") + " }" + content[match[10]:match[11]]
+		return content[:match[0]] + replacement + content[match[1]:], true
+	}
+	return content, false
+}
+
+func (am *AgentManager) applyDeterministicExternalDefaultImportRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+	targets := parseExternalDefaultImportRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return nil, ""
+	}
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target.ImporterPath)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		updated, changed := rewriteExternalDefaultImportToNamedImport(content, target.PackageName)
+		if !changed {
+			continue
+		}
+		if plan.patchFile(target.ImporterPath, updated, am.detectLanguage(target.ImporterPath)) {
+			applied = append(applied, fmt.Sprintf("%s rewrote default import from %s to named import", target.ImporterPath, target.PackageName))
+		}
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+	sort.Strings(applied)
+	summary := "external default import repair: " + strings.Join(applied, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "external_default_import_repair: "+summary), summary
 }
 
 func (am *AgentManager) applyDeterministicExternalImportExportRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
@@ -15847,7 +16016,603 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 `
 }
 
+func promptLooksLikeFieldOpsApp(description string) bool {
+	normalized := strings.ToLower(description)
+	required := []string{"job", "estimate", "crew"}
+	for _, token := range required {
+		if !strings.Contains(normalized, token) {
+			return false
+		}
+	}
+	return strings.Contains(normalized, "fieldops") ||
+		strings.Contains(normalized, "field service") ||
+		strings.Contains(normalized, "field-service") ||
+		strings.Contains(normalized, "contractor") ||
+		strings.Contains(normalized, "estimate swarm")
+}
+
+func syntheticFieldOpsAppTSX() string {
+	return `import { type FormEvent, useEffect, useMemo, useState } from "react";
+
+type Status = "New Lead" | "Estimate Needed" | "Proposal Sent" | "Accepted" | "In Progress" | "Completed";
+type Page = "Dashboard" | "Job Pipeline" | "New Job" | "Job Detail" | "Crew Management" | "Settings";
+type Urgency = "Low" | "Medium" | "High" | "Emergency";
+
+type Job = {
+  id: number;
+  customerName: string;
+  phone: string;
+  email: string;
+  address: string;
+  title: string;
+  type: string;
+  urgency: Urgency;
+  squareFeet: number;
+  laborHours: number;
+  laborRate: number;
+  materialsCost: number;
+  markupPercent: number;
+  status: Status;
+  crewId: number;
+  followUp: boolean;
+  notes: string;
+  timeline: string[];
+};
+
+type Crew = {
+  id: number;
+  name: string;
+  members: string[];
+  currentJobs: number;
+  availability: string;
+};
+
+type JobForm = {
+  customerName: string;
+  phone: string;
+  email: string;
+  address: string;
+  title: string;
+  type: string;
+  urgency: Urgency;
+  squareFeet: string;
+  laborHours: string;
+  laborRate: string;
+  materialsCost: string;
+  markupPercent: string;
+  notes: string;
+};
+
+const statuses: Status[] = ["New Lead", "Estimate Needed", "Proposal Sent", "Accepted", "In Progress", "Completed"];
+
+const demoCrews: Crew[] = [
+  { id: 1, name: "Blue Ridge Remodel", members: ["Maya", "Drew", "Noah"], currentJobs: 2, availability: "Available tomorrow" },
+  { id: 2, name: "Summit Roofing", members: ["Ari", "Dev", "Luis", "Theo"], currentJobs: 1, availability: "On site today" },
+  { id: 3, name: "Rapid Restore", members: ["Iris", "Sam"], currentJobs: 3, availability: "Booked until Friday" },
+  { id: 4, name: "Northline HVAC", members: ["June", "Owen", "Kai"], currentJobs: 1, availability: "Available now" },
+];
+
+const demoJobs: Job[] = [
+  { id: 101, customerName: "Harper Lane", phone: "(512) 555-0198", email: "harper@example.com", address: "1440 Willow Bend, Austin, TX", title: "Kitchen remodel estimate", type: "Remodeling", urgency: "High", squareFeet: 420, laborHours: 88, laborRate: 82, materialsCost: 18400, markupPercent: 32, status: "Proposal Sent", crewId: 1, followUp: true, notes: "Customer wants quartz counters, cabinet refacing, and appliance relocation.", timeline: ["Lead captured from website", "Site visit completed", "Proposal sent with two finish options"] },
+  { id: 102, customerName: "Ethan Brooks", phone: "(214) 555-0114", email: "ethan@example.com", address: "88 Cedar Point, Dallas, TX", title: "Storm roof replacement", type: "Roofing", urgency: "Emergency", squareFeet: 2100, laborHours: 64, laborRate: 76, materialsCost: 22100, markupPercent: 28, status: "Accepted", crewId: 2, followUp: false, notes: "Insurance adjuster approved shingles and decking allowance.", timeline: ["Inspection photos uploaded", "Insurance scope reviewed", "Deposit received"] },
+  { id: 103, customerName: "Mia Chen", phone: "(737) 555-0172", email: "mia@example.com", address: "2210 Juniper Trail, Round Rock, TX", title: "Water damage restoration", type: "Restoration", urgency: "High", squareFeet: 860, laborHours: 52, laborRate: 88, materialsCost: 7400, markupPercent: 24, status: "In Progress", crewId: 3, followUp: true, notes: "Drywall cutout complete. Needs final moisture check before rebuild.", timeline: ["Emergency call received", "Mitigation crew dispatched", "Containment complete"] },
+  { id: 104, customerName: "Olivia Stone", phone: "(512) 555-0140", email: "olivia@example.com", address: "67 Mesa Grove, Austin, TX", title: "HVAC condenser swap", type: "HVAC", urgency: "Medium", squareFeet: 1800, laborHours: 18, laborRate: 95, materialsCost: 5300, markupPercent: 30, status: "Estimate Needed", crewId: 4, followUp: false, notes: "Existing unit is 14 years old. Customer requested two efficiency options.", timeline: ["Phone intake complete", "Equipment photos requested"] },
+  { id: 105, customerName: "Noah Patel", phone: "(469) 555-0185", email: "noah@example.com", address: "900 Lakeview Drive, Plano, TX", title: "Backyard drainage and sod", type: "Landscaping", urgency: "Low", squareFeet: 1400, laborHours: 40, laborRate: 68, materialsCost: 6200, markupPercent: 26, status: "New Lead", crewId: 1, followUp: true, notes: "Recurring standing water near patio after heavy rain.", timeline: ["Lead imported from referral partner"] },
+  { id: 106, customerName: "Ava Morgan", phone: "(972) 555-0122", email: "ava@example.com", address: "18 Oak Hollow, Frisco, TX", title: "Bathroom conversion", type: "Plumbing", urgency: "Medium", squareFeet: 160, laborHours: 74, laborRate: 86, materialsCost: 9600, markupPercent: 35, status: "Completed", crewId: 1, followUp: false, notes: "Tub-to-shower conversion with tile surround and glass panel.", timeline: ["Proposal accepted", "Rough-in passed", "Final walkthrough complete"] },
+  { id: 107, customerName: "Lucas Rivera", phone: "(512) 555-0163", email: "lucas@example.com", address: "312 River Rock, Georgetown, TX", title: "Retail buildout punch list", type: "Commercial", urgency: "High", squareFeet: 2800, laborHours: 96, laborRate: 90, materialsCost: 12800, markupPercent: 22, status: "In Progress", crewId: 3, followUp: true, notes: "Margin is tight because client fixed the allowance after design changes.", timeline: ["Change order requested", "Crew reassigned", "Final inspection scheduled"] },
+];
+
+const emptyForm: JobForm = {
+  customerName: "",
+  phone: "",
+  email: "",
+  address: "",
+  title: "",
+  type: "Remodeling",
+  urgency: "Medium",
+  squareFeet: "500",
+  laborHours: "40",
+  laborRate: "85",
+  materialsCost: "8000",
+  markupPercent: "30",
+  notes: "",
+};
+
+function numberValue(value: number | string) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function estimate(input: Pick<Job, "laborHours" | "laborRate" | "materialsCost" | "markupPercent"> | JobForm) {
+  const laborCost = numberValue(input.laborHours) * numberValue(input.laborRate);
+  const materialCost = numberValue(input.materialsCost);
+  const subtotal = laborCost + materialCost;
+  const markupAmount = subtotal * (numberValue(input.markupPercent) / 100);
+  const finalPrice = subtotal + markupAmount;
+  const profit = finalPrice - subtotal;
+  const grossMargin = finalPrice > 0 ? (profit / finalPrice) * 100 : 0;
+  return { laborCost, materialCost, subtotal, markupAmount, finalPrice, profit, grossMargin };
+}
+
+function money(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function percent(value: number) {
+  return value.toFixed(1) + "%";
+}
+
+function statusTone(status: Status) {
+  switch (status) {
+    case "New Lead":
+      return "border-sky-400/30 bg-sky-400/10 text-sky-200";
+    case "Estimate Needed":
+      return "border-amber-300/30 bg-amber-300/10 text-amber-100";
+    case "Proposal Sent":
+      return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
+    case "Accepted":
+      return "border-emerald-300/30 bg-emerald-300/10 text-emerald-100";
+    case "In Progress":
+      return "border-blue-300/30 bg-blue-300/10 text-blue-100";
+    case "Completed":
+      return "border-slate-500/40 bg-slate-700/40 text-slate-200";
+  }
+}
+
+function Sparkline({ active }: { active: boolean }) {
+  return (
+    <div className="flex h-8 items-end gap-1">
+      {[32, 48, 38, 64, 55, 78, active ? 92 : 70].map((height, index) => (
+        <span key={index} className="w-2 rounded-full bg-cyan-300/70 shadow-[0_0_14px_rgba(34,211,238,0.45)]" style={{ height: height + "%" }} />
+      ))}
+    </div>
+  );
+}
+
+export default function App() {
+  const [jobs, setJobs] = useState<Job[]>(demoJobs);
+  const [crews] = useState<Crew[]>(demoCrews);
+  const [page, setPage] = useState<Page>("Dashboard");
+  const [selectedJobId, setSelectedJobId] = useState(demoJobs[0].id);
+  const [form, setForm] = useState<JobForm>(emptyForm);
+  const [toast, setToast] = useState("");
+  const [swarmOpen, setSwarmOpen] = useState(false);
+  const [swarmStep, setSwarmStep] = useState(0);
+  const [companyName, setCompanyName] = useState("Apex FieldOps AI");
+  const [defaultLaborRate, setDefaultLaborRate] = useState("85");
+  const [defaultMarkup, setDefaultMarkup] = useState("30");
+
+  const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0];
+  const selectedCrew = crews.find((crew) => crew.id === selectedJob.crewId) ?? crews[0];
+  const selectedEstimate = estimate(selectedJob);
+  const liveEstimate = useMemo(() => estimate(form), [form]);
+
+  const metrics = useMemo(() => {
+    const openJobs = jobs.filter((job) => job.status !== "Completed").length;
+    const pendingEstimateValue = jobs.filter((job) => ["New Lead", "Estimate Needed", "Proposal Sent"].includes(job.status)).reduce((sum, job) => sum + estimate(job).finalPrice, 0);
+    const acceptedValue = jobs.filter((job) => ["Accepted", "In Progress", "Completed"].includes(job.status)).reduce((sum, job) => sum + estimate(job).finalPrice, 0);
+    const averageMargin = jobs.reduce((sum, job) => sum + estimate(job).grossMargin, 0) / jobs.length;
+    const followUps = jobs.filter((job) => job.followUp).length;
+    return { openJobs, pendingEstimateValue, acceptedValue, averageMargin, followUps };
+  }, [jobs]);
+
+  useEffect(() => {
+    if (!swarmOpen) {
+      return;
+    }
+    setSwarmStep(0);
+    const timer = window.setInterval(() => {
+      setSwarmStep((current) => Math.min(current + 1, 5));
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, [swarmOpen, selectedJob.id]);
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function moveJob(jobId: number, status: Status) {
+    setJobs((current) => current.map((job) => job.id === jobId ? { ...job, status, timeline: ["Status changed to " + status, ...job.timeline].slice(0, 5) } : job));
+  }
+
+  function updateForm(field: keyof JobForm, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function saveJob(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.customerName.trim() || !form.phone.trim() || !form.title.trim()) {
+      showToast("Add customer name, phone, and job title before saving.");
+      return;
+    }
+    const newJob: Job = {
+      id: Math.max(...jobs.map((job) => job.id)) + 1,
+      customerName: form.customerName.trim(),
+      phone: form.phone.trim(),
+      email: form.email.trim() || "customer@example.com",
+      address: form.address.trim() || "Address pending",
+      title: form.title.trim(),
+      type: form.type,
+      urgency: form.urgency,
+      squareFeet: numberValue(form.squareFeet),
+      laborHours: numberValue(form.laborHours),
+      laborRate: numberValue(form.laborRate),
+      materialsCost: numberValue(form.materialsCost),
+      markupPercent: numberValue(form.markupPercent),
+      status: "Estimate Needed",
+      crewId: crews[0].id,
+      followUp: true,
+      notes: form.notes.trim(),
+      timeline: ["Estimate created", "Customer intake completed"],
+    };
+    setJobs((current) => [newJob, ...current]);
+    setSelectedJobId(newJob.id);
+    setForm(emptyForm);
+    setPage("Job Detail");
+    showToast("Job saved and estimate created.");
+  }
+
+  function resetDemoData() {
+    setJobs(demoJobs);
+    setSelectedJobId(demoJobs[0].id);
+    setForm(emptyForm);
+    showToast("Demo data reset.");
+  }
+
+  const nav: Page[] = ["Dashboard", "Job Pipeline", "New Job", "Crew Management", "Settings"];
+
+  return (
+    <main className="min-h-screen bg-[#0F172A] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.18),transparent_28%)]" />
+      <div className="relative flex min-h-screen">
+        <aside className="hidden w-72 shrink-0 border-r border-cyan-300/10 bg-slate-950/75 p-6 backdrop-blur-xl lg:block">
+          <div className="rounded-3xl border border-cyan-300/20 bg-cyan-300/10 p-5 shadow-2xl shadow-cyan-500/10">
+            <p className="text-xs uppercase tracking-[0.4em] text-cyan-200">Apex</p>
+            <h1 className="mt-3 text-3xl font-black tracking-tight text-white">FieldOps AI</h1>
+            <p className="mt-3 text-sm leading-6 text-slate-300">Contractor operations, estimates, crews, and AI quote review in one control room.</p>
+          </div>
+          <nav className="mt-8 space-y-2">
+            {nav.map((item) => (
+              <button key={item} type="button" onClick={() => setPage(item)} className={"flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition " + (page === item ? "border-cyan-300/60 bg-cyan-300/15 text-cyan-100 shadow-lg shadow-cyan-500/10" : "border-slate-700/60 bg-slate-900/45 text-slate-300 hover:border-cyan-300/30 hover:text-white")}>
+                <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_14px_rgba(34,211,238,0.9)]" />
+                {item}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <section className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-20 border-b border-cyan-300/10 bg-slate-950/80 px-5 py-4 backdrop-blur-xl">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.35em] text-cyan-200">Premium contractor SaaS</p>
+                <h2 className="mt-1 text-2xl font-black text-white md:text-4xl">{companyName}</h2>
+              </div>
+              <div className="flex flex-wrap gap-2 lg:hidden">
+                {nav.map((item) => (
+                  <button key={item} type="button" onClick={() => setPage(item)} className={"rounded-full border px-3 py-2 text-xs font-semibold " + (page === item ? "border-cyan-300 bg-cyan-300 text-slate-950" : "border-slate-700 bg-slate-900 text-slate-300")}>{item}</button>
+                ))}
+              </div>
+            </div>
+          </header>
+
+          <div className="flex-1 px-5 py-6 md:px-8">
+            {page === "Dashboard" && (
+              <section className="space-y-6">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                  {[
+                    ["Open Jobs", String(metrics.openJobs), true],
+                    ["Pending Estimate Value", money(metrics.pendingEstimateValue), true],
+                    ["Accepted Job Value", money(metrics.acceptedValue), true],
+                    ["Average Gross Margin", percent(metrics.averageMargin), metrics.averageMargin >= 25],
+                    ["Jobs Needing Follow-up", String(metrics.followUps), metrics.followUps > 0],
+                  ].map(([label, value, active]) => (
+                    <article key={String(label)} className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-5 shadow-xl shadow-black/20">
+                      <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{label}</p>
+                      <div className="mt-4 flex items-end justify-between gap-4">
+                        <strong className="text-3xl font-black text-white">{value}</strong>
+                        <Sparkline active={Boolean(active)} />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+                  <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6">
+                    <div className="flex items-center justify-between gap-4">
+                      <h3 className="text-xl font-bold">Priority jobs</h3>
+                      <button type="button" onClick={() => setPage("New Job")} className="rounded-full bg-cyan-300 px-4 py-2 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20">New estimate</button>
+                    </div>
+                    <div className="mt-5 space-y-3">
+                      {jobs.filter((job) => job.followUp).slice(0, 4).map((job) => (
+                        <button key={job.id} type="button" onClick={() => { setSelectedJobId(job.id); setPage("Job Detail"); }} className="flex w-full items-center justify-between gap-4 rounded-2xl border border-slate-700/70 bg-slate-950/50 p-4 text-left transition hover:border-cyan-300/50">
+                          <span>
+                            <span className="block font-bold text-white">{job.title}</span>
+                            <span className="text-sm text-slate-400">{job.customerName} - {job.type}</span>
+                          </span>
+                          <span className={"rounded-full border px-3 py-1 text-xs font-bold " + statusTone(job.status)}>{job.status}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                  <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6">
+                    <h3 className="text-xl font-bold">Margin radar</h3>
+                    <p className="mt-2 text-sm text-slate-400">DeepSeek risk review highlights jobs below the 25% gross margin floor.</p>
+                    <div className="mt-5 space-y-3">
+                      {jobs.map((job) => ({ job, margin: estimate(job).grossMargin })).filter((item) => item.margin < 25).map((item) => (
+                        <div key={item.job.id} className="rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4">
+                          <p className="font-bold text-amber-100">{item.job.title}</p>
+                          <p className="text-sm text-amber-100/75">Gross margin {percent(item.margin)} needs pricing review.</p>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                </div>
+              </section>
+            )}
+
+            {page === "Job Pipeline" && (
+              <section className="grid gap-4 overflow-x-auto pb-4 xl:grid-cols-6">
+                {statuses.map((status) => (
+                  <div key={status} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveJob(Number(event.dataTransfer.getData("text/plain")), status); }} className="min-h-[520px] min-w-[260px] rounded-3xl border border-cyan-300/10 bg-slate-900/60 p-4">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h3 className="font-bold text-white">{status}</h3>
+                      <span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">{jobs.filter((job) => job.status === status).length}</span>
+                    </div>
+                    <div className="space-y-3">
+                      {jobs.filter((job) => job.status === status).map((job) => {
+                        const calc = estimate(job);
+                        return (
+                          <article key={job.id} draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", String(job.id))} onClick={() => { setSelectedJobId(job.id); setPage("Job Detail"); }} className="cursor-pointer rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-cyan-300/50">
+                            <p className="text-sm font-bold text-white">{job.title}</p>
+                            <p className="mt-1 text-xs text-slate-400">{job.customerName}</p>
+                            <div className="mt-4 flex items-center justify-between text-xs">
+                              <span className="text-cyan-200">{money(calc.finalPrice)}</span>
+                              <span className={calc.grossMargin < 25 ? "text-amber-200" : "text-emerald-200"}>{percent(calc.grossMargin)} margin</span>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            )}
+
+            {page === "New Job" && (
+              <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                <form onSubmit={saveJob} className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6 shadow-xl shadow-black/20">
+                  <h3 className="text-2xl font-black text-white">New Job / Estimate Builder</h3>
+                  <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    {([
+                      ["customerName", "Customer name", "text"],
+                      ["phone", "Phone", "tel"],
+                      ["email", "Email", "email"],
+                      ["address", "Address", "text"],
+                      ["title", "Job title", "text"],
+                      ["type", "Job type", "text"],
+                      ["squareFeet", "Project size / sq ft", "number"],
+                      ["laborHours", "Labor hours", "number"],
+                      ["laborRate", "Labor rate", "number"],
+                      ["materialsCost", "Materials cost", "number"],
+                      ["markupPercent", "Markup percentage", "number"],
+                    ] as Array<[keyof JobForm, string, string]>).map(([field, label, type]) => (
+                      <label key={field} className="space-y-2 text-sm font-semibold text-slate-300">
+                        <span>{label}</span>
+                        <input type={type} value={String(form[field])} onChange={(event) => updateForm(field, event.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-300/10" />
+                      </label>
+                    ))}
+                    <label className="space-y-2 text-sm font-semibold text-slate-300">
+                      <span>Urgency</span>
+                      <select value={form.urgency} onChange={(event) => updateForm("urgency", event.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-300/10">
+                        {(["Low", "Medium", "High", "Emergency"] as Urgency[]).map((urgency) => <option key={urgency}>{urgency}</option>)}
+                      </select>
+                    </label>
+                    <label className="space-y-2 text-sm font-semibold text-slate-300 md:col-span-2">
+                      <span>Customer notes</span>
+                      <textarea value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} className="min-h-28 w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-300/10" />
+                    </label>
+                  </div>
+                  <button type="submit" className="mt-6 rounded-2xl bg-cyan-300 px-6 py-3 font-black text-slate-950 shadow-xl shadow-cyan-500/20 transition hover:bg-cyan-200">Save job and open detail</button>
+                </form>
+                <EstimateCard calc={liveEstimate} title="Live estimate totals" />
+              </section>
+            )}
+
+            {page === "Job Detail" && (
+              <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+                <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.28em] text-cyan-200">Job Detail</p>
+                      <h3 className="mt-2 text-3xl font-black text-white">{selectedJob.title}</h3>
+                      <p className="mt-2 text-slate-400">{selectedJob.customerName} - {selectedJob.address}</p>
+                    </div>
+                    <button type="button" onClick={() => setSwarmOpen(true)} className="rounded-2xl border border-cyan-200/60 bg-cyan-300 px-5 py-3 font-black text-slate-950 shadow-2xl shadow-cyan-500/30 transition hover:scale-[1.02]">Launch Estimate Swarm</button>
+                  </div>
+                  <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    <label className="space-y-2 text-sm font-semibold text-slate-300">
+                      <span>Status selector</span>
+                      <select value={selectedJob.status} onChange={(event) => moveJob(selectedJob.id, event.target.value as Status)} className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white">
+                        {statuses.map((status) => <option key={status}>{status}</option>)}
+                      </select>
+                    </label>
+                    <label className="space-y-2 text-sm font-semibold text-slate-300">
+                      <span>Assigned crew</span>
+                      <select value={selectedJob.crewId} onChange={(event) => setJobs((current) => current.map((job) => job.id === selectedJob.id ? { ...job, crewId: Number(event.target.value) } : job))} className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white">
+                        {crews.map((crew) => <option key={crew.id} value={crew.id}>{crew.name}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    <Info label="Customer" value={selectedJob.customerName} hint={selectedJob.phone + " - " + selectedJob.email} />
+                    <Info label="Job type" value={selectedJob.type} hint={selectedJob.urgency + " urgency"} />
+                    <Info label="Assigned crew" value={selectedCrew.name} hint={selectedCrew.availability} />
+                    <Info label="Project size" value={selectedJob.squareFeet.toLocaleString() + " sq ft"} hint={selectedJob.notes} />
+                  </div>
+                  <div className="mt-6 rounded-3xl border border-slate-700/70 bg-slate-950/60 p-5">
+                    <h4 className="font-bold text-white">Activity timeline</h4>
+                    <div className="mt-4 space-y-3">
+                      {selectedJob.timeline.map((item, index) => (
+                        <div key={index} className="flex gap-3 text-sm text-slate-300">
+                          <span className="mt-1 h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.9)]" />
+                          {item}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </article>
+                <div className="space-y-6">
+                  <EstimateCard calc={selectedEstimate} title="Estimate breakdown" />
+                  <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6">
+                    <h4 className="text-xl font-black text-white">Customer proposal preview</h4>
+                    <p className="mt-4 leading-7 text-slate-300">Thank you for inviting {companyName} to review {selectedJob.title.toLowerCase()}. Based on the current scope, labor plan, materials, and markup, the recommended customer price is {money(selectedEstimate.finalPrice)}. Our crew will confirm final site conditions before kickoff and keep you updated at every milestone.</p>
+                  </article>
+                </div>
+              </section>
+            )}
+
+            {page === "Crew Management" && (
+              <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {crews.map((crew) => (
+                  <article key={crew.id} className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6">
+                    <h3 className="text-xl font-black text-white">{crew.name}</h3>
+                    <p className="mt-2 text-sm text-cyan-200">{crew.availability}</p>
+                    <div className="mt-5 space-y-2">
+                      {crew.members.map((member) => <span key={member} className="mr-2 inline-flex rounded-full border border-slate-700 px-3 py-1 text-sm text-slate-300">{member}</span>)}
+                    </div>
+                    <p className="mt-5 text-sm text-slate-400">Current jobs: <strong className="text-white">{jobs.filter((job) => job.crewId === crew.id && job.status !== "Completed").length}</strong></p>
+                  </article>
+                ))}
+              </section>
+            )}
+
+            {page === "Settings" && (
+              <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+                <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6">
+                  <h3 className="text-2xl font-black text-white">Company settings</h3>
+                  <div className="mt-6 space-y-4">
+                    <label className="block space-y-2 text-sm font-semibold text-slate-300"><span>Company name</span><input value={companyName} onChange={(event) => setCompanyName(event.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white" /></label>
+                    <label className="block space-y-2 text-sm font-semibold text-slate-300"><span>Default labor rate</span><input value={defaultLaborRate} onChange={(event) => setDefaultLaborRate(event.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white" /></label>
+                    <label className="block space-y-2 text-sm font-semibold text-slate-300"><span>Default markup %</span><input value={defaultMarkup} onChange={(event) => setDefaultMarkup(event.target.value)} className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white" /></label>
+                    <label className="block space-y-2 text-sm font-semibold text-slate-300"><span>AI provider/API key placeholder</span><input placeholder="Ollama Cloud API key placeholder" className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white" /></label>
+                    <button type="button" onClick={resetDemoData} className="rounded-2xl border border-cyan-300/40 px-5 py-3 font-bold text-cyan-100 transition hover:bg-cyan-300/10">Reset Demo Data</button>
+                  </div>
+                </article>
+                <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6">
+                  <h3 className="text-2xl font-black text-white">Model routing display</h3>
+                  <div className="mt-6 overflow-hidden rounded-2xl border border-slate-700">
+                    {[
+                      ["Kimi K2.6 Orchestrator", "Summarizes job context and coordinates the final recommendation"],
+                      ["GLM-5.1 Proposal Agent", "Drafts scope of work, customer proposal, and follow-up message"],
+                      ["DeepSeek V4 Risk Agent", "Reviews labor, materials, margin, and operational risk"],
+                    ].map(([agent, role]) => (
+                      <div key={agent} className="grid gap-2 border-b border-slate-700 bg-slate-950/50 p-4 last:border-b-0 md:grid-cols-[0.35fr_0.65fr]">
+                        <strong className="text-cyan-100">{agent}</strong>
+                        <span className="text-slate-300">{role}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              </section>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {swarmOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 p-5 backdrop-blur-xl">
+          <div className="mx-auto max-w-7xl rounded-[2rem] border border-cyan-300/20 bg-slate-900/90 p-6 shadow-2xl shadow-cyan-500/10">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.35em] text-cyan-200">Estimate Swarm</p>
+                <h3 className="mt-2 text-3xl font-black text-white">{selectedJob.title}</h3>
+              </div>
+              <button type="button" onClick={() => setSwarmOpen(false)} className="rounded-full border border-slate-700 px-4 py-2 text-slate-200">Close</button>
+            </div>
+            <div className="mt-6 grid gap-4 lg:grid-cols-3">
+              <AgentPanel name="Kimi K2.6 Orchestrator" step={swarmStep} lines={["Parsing job details, customer urgency, and crew availability.", "Coordinating proposal, risk, and operations signals.", "Merging agent output into a single recommended action."]} />
+              <AgentPanel name="GLM-5.1 Proposal Agent" step={swarmStep} lines={["Drafting customer-ready scope with clear deliverables.", "Converting estimate math into a polished proposal narrative.", "Preparing follow-up message for approval and scheduling."]} />
+              <AgentPanel name="DeepSeek V4 Risk Agent" step={swarmStep} lines={["Checking labor assumptions against project type and urgency.", "Reviewing material exposure, markup, and gross margin floor.", "Flagging operational risk before crew dispatch."]} />
+            </div>
+            <div className="mt-6 grid gap-4 rounded-3xl border border-cyan-300/20 bg-cyan-300/10 p-5 lg:grid-cols-2">
+              <Info label="Recommended final quote" value={money(selectedEstimate.finalPrice)} hint={"Gross margin " + percent(selectedEstimate.grossMargin)} />
+              <Info label="Margin warning" value={selectedEstimate.grossMargin < 25 ? "Review required" : "Healthy margin"} hint={selectedEstimate.grossMargin < 25 ? "Gross margin is below the 25% floor." : "Pricing clears the margin floor."} />
+              <Info label="Risk flags" value={selectedJob.urgency + " urgency, " + selectedCrew.availability} hint={selectedEstimate.grossMargin < 25 ? "Protect scope creep and material allowance." : "Standard crew readiness checks apply."} />
+              <Info label="Next best action" value="Send proposal and schedule kickoff" hint="Confirm site conditions, collect approval, then assign crew window." />
+              <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4 lg:col-span-2">
+                <h4 className="font-black text-white">Customer-ready proposal</h4>
+                <p className="mt-3 leading-7 text-slate-300">We recommend approving a final quote of {money(selectedEstimate.finalPrice)} for {selectedJob.title.toLowerCase()}. This includes labor, materials, markup, and crew coordination. Internal crew instructions: verify site access, document pre-existing conditions, confirm materials before dispatch, and update the customer after each milestone.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <div className="fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-2xl border border-cyan-300/40 bg-slate-950 px-5 py-3 text-sm font-bold text-cyan-100 shadow-2xl shadow-cyan-500/20">{toast}</div>}
+    </main>
+  );
+}
+
+function EstimateCard({ calc, title }: { calc: ReturnType<typeof estimate>; title: string }) {
+  return (
+    <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/70 p-6 shadow-xl shadow-black/20">
+      <h3 className="text-2xl font-black text-white">{title}</h3>
+      <div className="mt-5 grid gap-3">
+        {[
+          ["Labor cost", money(calc.laborCost)],
+          ["Material cost", money(calc.materialCost)],
+          ["Subtotal", money(calc.subtotal)],
+          ["Markup amount", money(calc.markupAmount)],
+          ["Final customer price", money(calc.finalPrice)],
+          ["Estimated profit", money(calc.profit)],
+          ["Gross margin percentage", percent(calc.grossMargin)],
+        ].map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between rounded-2xl border border-slate-700/70 bg-slate-950/60 px-4 py-3">
+            <span className="text-sm text-slate-400">{label}</span>
+            <strong className="text-white">{value}</strong>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function Info({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
+      <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{label}</p>
+      <p className="mt-2 font-black text-white">{value}</p>
+      <p className="mt-1 text-sm text-slate-400">{hint}</p>
+    </div>
+  );
+}
+
+function AgentPanel({ name, lines, step }: { name: string; lines: string[]; step: number }) {
+  return (
+    <article className="rounded-3xl border border-cyan-300/20 bg-slate-950/70 p-5 shadow-xl shadow-cyan-500/10">
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-300 text-lg font-black text-slate-950">AI</span>
+        <div>
+          <h4 className="font-black text-white">{name}</h4>
+          <p className="text-xs text-cyan-200">{step >= 5 ? "Complete" : "Streaming analysis"}</p>
+        </div>
+      </div>
+      <div className="mt-5 space-y-3">
+        {lines.map((line, index) => (
+          <p key={line} className={"rounded-2xl border p-3 text-sm leading-6 " + (step > index ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-50" : "border-slate-700 bg-slate-900/70 text-slate-500")}>{line}</p>
+        ))}
+      </div>
+    </article>
+  );
+}
+`
+}
+
 func syntheticFrontendAppTSX(title string, summary string, backendEntry string, backendPort int) string {
+	if promptLooksLikeFieldOpsApp(title + " " + summary) {
+		return syntheticFieldOpsAppTSX()
+	}
 	backendNote := "Backend runtime files were generated separately and can be launched alongside this preview."
 	if backendEntry != "" {
 		backendNote = fmt.Sprintf("Backend runtime detected at %s. Start it separately to enable live API calls in local development.", backendEntry)
@@ -16149,6 +16914,24 @@ func parseFrontendScaffoldRepairTargets(output *TaskOutput, errors []string) []s
 
 	joined := strings.Join(errors, "\n")
 	lower := strings.ToLower(joined)
+	if strings.Contains(lower, "deterministic scaffold placeholder content") {
+		pathPatterns := []*regexp.Regexp{
+			regexp.MustCompile(`(?i)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx|json|css|html))`),
+		}
+		for _, pattern := range pathPatterns {
+			for _, match := range pattern.FindAllStringSubmatch(joined, -1) {
+				if len(match) != 2 {
+					continue
+				}
+				addPath(match[1])
+			}
+		}
+		if len(targets) == 0 {
+			addPath("src/App.tsx")
+		}
+		sort.Strings(targets)
+		return targets
+	}
 	if !strings.Contains(lower, "truncated") &&
 		!strings.Contains(lower, "unterminated") &&
 		!strings.Contains(lower, "abrupt eof") &&
@@ -16304,6 +17087,101 @@ func (am *AgentManager) applyDeterministicFrontendScaffoldTruncationRepair(build
 	}
 	output.Messages = append(output.Messages, "Applied deterministic frontend scaffold truncation repair: "+strings.Join(applied, ", "))
 	return true, strings.Join(applied, ", ")
+}
+
+func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 || !buildRequestsFrontendSurface(build) || !repairNeedsScaffoldReplacement(readinessErrors) {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return nil, ""
+	}
+
+	build.mu.RLock()
+	backendName := ""
+	if build.TechStack != nil {
+		backendName = strings.TrimSpace(build.TechStack.Backend)
+	}
+	build.mu.RUnlock()
+	if backendName == "" && build.Plan != nil {
+		backendName = strings.TrimSpace(build.Plan.TechStack.Backend)
+	}
+	backendPort := canonicalBackendPort(backendName)
+	if backendPort == 0 {
+		backendPort = 3001
+	}
+
+	output := &TaskOutput{Files: files}
+	targets := parseFrontendScaffoldRepairTargets(output, readinessErrors)
+	if len(targets) == 0 {
+		targets = []string{"src/App.tsx"}
+	}
+
+	applied := make([]string, 0, len(targets)+4)
+	for _, target := range targets {
+		content, language, ok := am.canonicalFrontendScaffoldContent(build, output, target)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(plan.content(target)) == "" {
+			if plan.createFile(target, content, language) {
+				applied = append(applied, target)
+			}
+			continue
+		}
+		if plan.patchFile(target, content, language) {
+			applied = append(applied, target)
+		}
+	}
+
+	createIfMissing := func(path string, content string, language string) {
+		if strings.TrimSpace(plan.content(path)) != "" {
+			return
+		}
+		if plan.createFile(path, content, language) {
+			applied = append(applied, path)
+		}
+	}
+	title := "Recovered Preview"
+	build.mu.RLock()
+	if trimmed := strings.TrimSpace(build.Description); trimmed != "" {
+		title = synthesizedFrontendShellAppName(trimmed)
+	}
+	build.mu.RUnlock()
+	backendEntry := detectGeneratedBackendEntryForFrontendShell(files)
+	createIfMissing("index.html", syntheticFrontendIndexHTML(title), "html")
+	createIfMissing("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
+	createIfMissing("src/index.css", syntheticFrontendIndexCSS(), "css")
+	createIfMissing("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
+	createIfMissing("tailwind.config.js", syntheticFrontendTailwindConfig(), "javascript")
+	createIfMissing("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript")
+	createIfMissing("tsconfig.json", syntheticFrontendTSConfig(), "json")
+
+	manifestPath := "package.json"
+	if updatedManifest, _, ok := patchManifestForSyntheticFrontendShell(plan.content(manifestPath), backendEntry); ok {
+		if strings.TrimSpace(plan.content(manifestPath)) == "" {
+			if plan.createFile(manifestPath, updatedManifest, "json") {
+				applied = append(applied, manifestPath)
+			}
+		} else if plan.patchFile(manifestPath, updatedManifest, "json") {
+			applied = append(applied, manifestPath)
+		}
+	}
+	if strings.TrimSpace(plan.content("src/App.tsx")) == "" {
+		if content, language, ok := am.canonicalFrontendScaffoldContent(build, output, "src/App.tsx"); ok && plan.createFile("src/App.tsx", content, language) {
+			applied = append(applied, "src/App.tsx")
+		}
+	}
+
+	if len(applied) == 0 {
+		return nil, ""
+	}
+	applied = dedupeStringsPreserveOrder(applied)
+	sort.Strings(applied)
+	summaryText := "replaced scaffold placeholder with prompt-specific frontend: " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "scaffold_placeholder_replacement: "+summaryText), summaryText
 }
 
 func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
@@ -17353,6 +18231,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 
 	repairs := []validationRepairSpec{
 		{
+			apply:       am.applyDeterministicScaffoldPlaceholderReplacementRepair,
+			errorFormat: "Final output validation failed: %s (applied scaffold placeholder replacement: %s)",
+			message:     "Replaced a starter scaffold that survived generation with a prompt-specific previewable app shell. Re-running final validation before solver recovery.",
+			summaryKey:  "scaffold_placeholder_replacement",
+		},
+		{
 			apply:       am.applyDeterministicMissingFrontendShellRepair,
 			errorFormat: "Final output validation failed: %s (applied missing frontend shell repair: %s)",
 			message:     "Applied deterministic frontend shell recovery for a preview-required build that generated backend-only output. Re-running final validation before solver recovery.",
@@ -17375,6 +18259,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied external import/export repair: %s)",
 			message:     "Applied deterministic third-party import/export repair for generated frontend modules. Re-running final validation before solver recovery.",
 			summaryKey:  "external_import_export_repair",
+		},
+		{
+			apply:       am.applyDeterministicExternalDefaultImportRepair,
+			errorFormat: "Final output validation failed: %s (applied external default-import repair: %s)",
+			message:     "Applied deterministic external package default-import repair for generated frontend modules. Re-running final validation before solver recovery.",
+			summaryKey:  "external_default_import_repair",
 		},
 		{
 			apply:       am.applyDeterministicShadcnUIExportRepair,

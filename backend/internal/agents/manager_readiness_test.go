@@ -5182,6 +5182,63 @@ export default function App() {
 	}
 }
 
+func TestApplyDeterministicExternalDefaultImportRepairFixesZustand(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-zustand-default-import",
+		Tasks: []*Task{
+			{
+				ID:   "frontend-task",
+				Type: TaskGenerateUI,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "src/components/AppShell.tsx",
+							Content: `import create from 'zustand'
+
+type State = { count: number }
+const useStore = create<State>(() => ({ count: 0 }))
+export default function AppShell() {
+  const count = useStore((state) => state.count)
+  return <div>{count}</div>
+}
+`,
+							IsNew: true,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicExternalDefaultImportRepair(build, []string{
+		`Preview verification build failed: src/components/AppShell.tsx(1,8): error TS1192: Module '"/tmp/apex-preview-verify-988082645/node_modules/zustand/index"' has no default export.`,
+	})
+	if bundle == nil {
+		t.Fatal("expected external default-import repair to trigger")
+	}
+	if !strings.Contains(summary, "zustand") {
+		t.Fatalf("expected summary to mention zustand, got %q", summary)
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatal("expected patch bundle to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repaired string
+	for _, file := range files {
+		if file.Path == "src/components/AppShell.tsx" {
+			repaired = file.Content
+			break
+		}
+	}
+	if !strings.Contains(repaired, `import { create } from 'zustand'`) && !strings.Contains(repaired, `import { create } from "zustand"`) {
+		t.Fatalf("expected zustand default import to be rewritten, got %q", repaired)
+	}
+}
+
 func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
 	t.Parallel()
 
@@ -5273,6 +5330,72 @@ func TestApplyDeterministicFrontendScaffoldTruncationRepair(t *testing.T) {
 	}
 	if len(output.TruncatedFiles) != 0 {
 		t.Fatalf("expected repaired scaffold files to be removed from truncated files, got %+v", output.TruncatedFiles)
+	}
+}
+
+func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShell(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:          "build-fieldops-placeholder",
+		Description: "Build a complete production-ready full-stack SaaS web app called Apex FieldOps AI for contractors with job pipeline, estimate builder, crew management, and Estimate Swarm.",
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Plan: &BuildPlan{
+			AppType: "fullstack",
+			TechStack: TechStack{
+				Frontend: "React",
+				Backend:  "Express",
+			},
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "package.json",
+				Language: "json",
+				Content:  `{"name":"fieldops","private":true,"scripts":{"build":"vite build"},"dependencies":{"@vitejs/plugin-react":"^4.2.1","vite":"^5.0.0","typescript":"^5.0.0","react":"^18.2.0","react-dom":"^18.2.0"}}`,
+			},
+			{
+				Path:     "src/App.tsx",
+				Language: "typescript",
+				Content:  `export default function App(){ return <div>The deterministic scaffold is live. Replace this shell with the real experience.</div> }`,
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicScaffoldPlaceholderReplacementRepair(build, []string{
+		"src/App.tsx still contains deterministic scaffold placeholder content; replace the starter UI with the requested app",
+	})
+	if bundle == nil {
+		t.Fatal("expected scaffold placeholder replacement repair to trigger")
+	}
+	if !strings.Contains(summary, "src/App.tsx") {
+		t.Fatalf("expected summary to mention src/App.tsx, got %q", summary)
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatal("expected patch bundle to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range files {
+		if file.Path == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if app == "" {
+		t.Fatalf("expected repaired App.tsx, got %+v", files)
+	}
+	if strings.Contains(strings.ToLower(app), "deterministic scaffold is live") {
+		t.Fatalf("expected starter scaffold text to be removed, got %q", app)
+	}
+	for _, expected := range []string{"Launch Estimate Swarm", "Job Pipeline", "Crew Management", "Kimi K2.6 Orchestrator", "DeepSeek V4 Risk Agent"} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired FieldOps shell to contain %q, got %q", expected, app)
+		}
 	}
 }
 
