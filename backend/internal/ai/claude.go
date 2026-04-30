@@ -97,9 +97,9 @@ func NewClaudeClient(apiKey string) *ClaudeClient {
 	return &ClaudeClient{
 		apiKey:  apiKey,
 		baseURL: "https://api.anthropic.com/v1/messages",
-		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		// Build task contexts own generation deadlines. Client-level timeouts
+		// must not cut off long Max/War Room outputs before task recovery runs.
+		httpClient: &http.Client{},
 		usage: &ProviderUsage{
 			Provider: ProviderClaude,
 			LastUsed: time.Now(),

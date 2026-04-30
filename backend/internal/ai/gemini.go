@@ -93,9 +93,9 @@ func NewGeminiClient(apiKey string) *GeminiClient {
 	return &GeminiClient{
 		apiKey:  apiKey,
 		baseURL: "https://generativelanguage.googleapis.com/v1beta/models",
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		// Build task contexts own generation deadlines. A 60s client timeout
+		// caused false provider failures on large generated UI outputs.
+		httpClient: &http.Client{},
 		usage: &ProviderUsage{
 			Provider: ProviderGemini,
 			LastUsed: time.Now(),

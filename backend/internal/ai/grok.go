@@ -67,9 +67,9 @@ func NewGrokClient(apiKey string) *GrokClient {
 	return &GrokClient{
 		apiKey:  apiKey,
 		baseURL: "https://api.x.ai/v1/chat/completions",
-		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		// Build task contexts own generation deadlines. Client-level timeouts
+		// were terminating valid long-running Max outputs too early.
+		httpClient: &http.Client{},
 		usage: &ProviderUsage{
 			Provider: ProviderGrok,
 			LastUsed: time.Now(),

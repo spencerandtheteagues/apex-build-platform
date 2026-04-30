@@ -119,9 +119,10 @@ func NewOpenAIClient(apiKey string) *OpenAIClient {
 		apiKey:       apiKey,
 		baseURL:      "https://api.openai.com/v1/chat/completions",
 		responsesURL: "https://api.openai.com/v1/responses",
-		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		// Generation deadlines are controlled by the request context supplied by
+		// the build orchestrator. A shorter client-level timeout preempted Max
+		// UI generations before the task timeout/fallback policy could work.
+		httpClient: &http.Client{},
 		usage: &ProviderUsage{
 			Provider: ProviderGPT4,
 			LastUsed: time.Now(),
