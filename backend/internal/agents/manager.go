@@ -16006,6 +16006,46 @@ func repairNeedsScaffoldReplacement(readinessErrors []string) bool {
 	return false
 }
 
+func isDeterministicGeneratedPlaceholderModule(path string, content string) bool {
+	path = strings.ToLower(strings.TrimSpace(sanitizeFilePath(path)))
+	if path == "" || isTestFile(path) {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ts", ".tsx", ".js", ".jsx":
+	default:
+		return false
+	}
+
+	lower := strings.ToLower(content)
+	if !strings.Contains(lower, "placeholderprops") || !strings.Contains(lower, "record<string, unknown>") {
+		return false
+	}
+	if !strings.Contains(lower, " placeholder") && !strings.Contains(lower, "generatedplaceholder") {
+		return false
+	}
+
+	return strings.Contains(lower, "border-dashed") ||
+		strings.Contains(lower, "generatedplaceholder") ||
+		strings.Contains(lower, "react.fc<placeholderprops>") ||
+		strings.Contains(lower, "export const ") && strings.Contains(lower, " = generatedplaceholder")
+}
+
+func deterministicScaffoldPlaceholderPaths(files []GeneratedFile) []string {
+	seen := map[string]bool{}
+	paths := make([]string, 0)
+	for _, file := range files {
+		path := sanitizeFilePath(strings.TrimSpace(file.Path))
+		if path == "" || seen[path] || !isDeterministicGeneratedPlaceholderModule(path, file.Content) {
+			continue
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
 func synthesizedFrontendShellAppName(description string) string {
 	desc := strings.TrimSpace(description)
 	if desc == "" {
@@ -17386,12 +17426,16 @@ func (am *AgentManager) applyDeterministicFrontendScaffoldTruncationRepair(build
 }
 
 func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
-	if build == nil || len(readinessErrors) == 0 || !buildRequestsFrontendSurface(build) || !repairNeedsScaffoldReplacement(readinessErrors) {
+	if build == nil || len(readinessErrors) == 0 || !buildRequestsFrontendSurface(build) {
 		return nil, ""
 	}
 
 	files, plan := am.buildGeneratedFilePatchPlan(build)
 	if len(files) == 0 || plan == nil {
+		return nil, ""
+	}
+	placeholderPaths := deterministicScaffoldPlaceholderPaths(files)
+	if !repairNeedsScaffoldReplacement(readinessErrors) && len(placeholderPaths) == 0 {
 		return nil, ""
 	}
 
@@ -17472,6 +17516,14 @@ func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(b
 	if strings.TrimSpace(plan.content("src/App.tsx")) == "" {
 		if content, language, ok := am.canonicalFrontendScaffoldContent(build, output, "src/App.tsx"); ok && plan.createFile("src/App.tsx", content, language) {
 			applied = append(applied, "src/App.tsx")
+		}
+	}
+	for _, path := range placeholderPaths {
+		if isCanonicalFrontendScaffoldPath(path) {
+			continue
+		}
+		if plan.deleteFile(path) {
+			applied = append(applied, "removed "+path)
 		}
 	}
 
@@ -29032,6 +29084,8 @@ func scaffoldPlaceholderValidationError(path string, content string) string {
 	contentLower := strings.ToLower(content)
 	switch {
 	case strings.Contains(contentLower, "the deterministic scaffold is live"):
+		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
+	case isDeterministicGeneratedPlaceholderModule(path, content):
 		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
 	case strings.Contains(contentLower, "replace this shell with the real experience"),
 		strings.Contains(contentLower, "replace this shell with the product-specific experience"):

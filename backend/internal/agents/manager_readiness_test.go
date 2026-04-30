@@ -5628,6 +5628,21 @@ func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShe
 				Language: "typescript",
 				Content:  `import create from 'zustand'; export default function AppShell(){ return <div /> }`,
 			},
+			{
+				Path:     "src/components/pages/DashboardPage.tsx",
+				Language: "typescript",
+				Content:  "import React from 'react';\n\ntype PlaceholderProps = Record<string, unknown>;\n\nconst DashboardPage: React.FC<PlaceholderProps> = () => (\n  <div className='rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 p-4 text-sm text-slate-300'>\n    DashboardPage placeholder\n  </div>\n);\n\nexport default DashboardPage;\n",
+			},
+			{
+				Path:     "src/lib/types.tsx",
+				Language: "typescript",
+				Content:  "import React from 'react';\n\ntype PlaceholderProps = Record<string, unknown>;\n\nconst Job: React.FC<PlaceholderProps> = () => (\n  <div className='rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 p-4 text-sm text-slate-300'>\n    types placeholder\n  </div>\n);\n\nexport const Customer = Job;\nexport const JobStatus = Job;\nexport default Job;\n",
+			},
+			{
+				Path:     "src/lib/demoData.tsx",
+				Language: "typescript",
+				Content:  "import React from 'react';\n\ntype PlaceholderProps = Record<string, unknown>;\n\nconst GeneratedPlaceholder: React.FC<PlaceholderProps> = () => (\n  <div className='rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 p-4 text-sm text-slate-300'>\n    demoData placeholder\n  </div>\n);\n\nexport const initializeDemoData = GeneratedPlaceholder;\nexport const computeDashboardMetrics = GeneratedPlaceholder;\nexport default GeneratedPlaceholder;\n",
+			},
 		},
 	}
 
@@ -5681,6 +5696,26 @@ func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShe
 	}
 	if !reflect.DeepEqual(tsconfig.Include, []string{"src/main.tsx", "src/App.tsx", "vite.config.ts"}) {
 		t.Fatalf("expected tsconfig to restrict preview compile surface, got %+v in %q", tsconfig.Include, byPath["tsconfig.json"])
+	}
+	for _, removed := range []string{"src/components/pages/DashboardPage.tsx", "src/lib/types.tsx", "src/lib/demoData.tsx"} {
+		if _, ok := byPath[removed]; ok {
+			t.Fatalf("expected deterministic placeholder module %s to be deleted during repair", removed)
+		}
+	}
+	for path, content := range byPath {
+		if msg := scaffoldPlaceholderValidationError(path, content); msg != "" {
+			t.Fatalf("expected repair output to contain no scaffold placeholders, got %q", msg)
+		}
+	}
+}
+
+func TestScaffoldPlaceholderValidationErrorDetectsGeneratedPlaceholderModules(t *testing.T) {
+	t.Parallel()
+
+	content := "import React from 'react';\n\ntype PlaceholderProps = Record<string, unknown>;\n\nconst Job: React.FC<PlaceholderProps> = () => (\n  <div className='rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 p-4 text-sm text-slate-300'>\n    types placeholder\n  </div>\n);\n\nexport const Customer = Job;\nexport default Job;\n"
+	msg := scaffoldPlaceholderValidationError("src/lib/types.tsx", content)
+	if !strings.Contains(msg, "deterministic scaffold placeholder content") {
+		t.Fatalf("expected generated placeholder module to fail readiness, got %q", msg)
 	}
 }
 
