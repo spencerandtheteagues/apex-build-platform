@@ -1682,6 +1682,29 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 			t.Fatalf("expected frontend moduleResolution to remain bundler-safe, got %s", got)
 		}
 	})
+
+	t.Run("disables_frontend_unused_symbol_strictness_that_blocks_valid_previews", func(t *testing.T) {
+		t.Parallel()
+
+		in := `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["src"]
+}`
+		got := normalizeGeneratedFileContent("tsconfig.json", in)
+		if strings.Contains(got, `"noUnusedLocals": true`) || strings.Contains(got, `"noUnusedParameters": true`) {
+			t.Fatalf("expected frontend unused-symbol strictness to be disabled, got %s", got)
+		}
+		if !strings.Contains(got, `"noUnusedLocals": false`) || !strings.Contains(got, `"noUnusedParameters": false`) {
+			t.Fatalf("expected frontend unused-symbol flags to be explicitly false, got %s", got)
+		}
+	})
 }
 
 func canBindLocalhostPort() bool {

@@ -20314,6 +20314,13 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 				delete(cfg, "references")
 				changed = true
 			}
+			for _, noisyStrictness := range []string{"noUnusedLocals", "noUnusedParameters"} {
+				if value, ok := compilerOptions[noisyStrictness].(bool); ok && value {
+					compilerOptions[noisyStrictness] = false
+					cfg["compilerOptions"] = compilerOptions
+					changed = true
+				}
+			}
 		}
 	}
 
