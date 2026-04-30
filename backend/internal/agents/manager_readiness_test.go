@@ -554,6 +554,66 @@ app.listen(process.env.PORT || 3001);`,
 	}
 }
 
+func TestApplyDeterministicMissingFrontendShellRepairUsesFullPromptForFieldOps(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:          "missing-fieldops-shell",
+		Description: strings.Repeat("Build a premium SaaS workspace with analytics cards, clean navigation, polished settings, responsive layouts, and investor-ready visual polish. ", 3) + "Now build Apex FieldOps AI for contractors with job pipeline, estimate builder, crew management, and Estimate Swarm.",
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+			Styling:  "Tailwind CSS",
+		},
+		Tasks: []*Task{
+			{
+				ID:     "backend-only-output",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path:    "package.json",
+							Content: `{"name":"backend-only","private":true,"type":"module","scripts":{"start":"node server/index.js"},"dependencies":{"express":"^4.18.2"}}`,
+						},
+						{
+							Path:    "server/index.js",
+							Content: `import express from "express"; const app = express(); app.listen(process.env.PORT || 3001);`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, _ := am.applyDeterministicMissingFrontendShellRepair(build, []string{
+		"No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.).",
+	})
+	if bundle == nil {
+		t.Fatal("expected deterministic frontend shell repair to produce a patch bundle")
+	}
+
+	var app string
+	for _, op := range bundle.Operations {
+		if op.Path == "src/App.tsx" {
+			app = op.Content
+			break
+		}
+	}
+	if app == "" {
+		t.Fatalf("expected repair bundle to create src/App.tsx, got %+v", bundle.Operations)
+	}
+	for _, expected := range []string{"Launch Estimate Swarm", "Job Pipeline", "Crew Management", "Kimi K2.6 Orchestrator", "DeepSeek V4 Risk Agent"} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected FieldOps shell to contain %q, got %q", expected, app)
+		}
+	}
+	if strings.Contains(app, "APEX recovered preview") {
+		t.Fatalf("expected FieldOps shell instead of generic recovered preview, got %q", app)
+	}
+}
+
 func TestValidateFinalBuildReadinessEmitsSurfaceVerificationReports(t *testing.T) {
 	t.Parallel()
 
@@ -5340,7 +5400,7 @@ func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShe
 	am := &AgentManager{}
 	build := &Build{
 		ID:          "build-fieldops-placeholder",
-		Description: "Build a complete production-ready full-stack SaaS web app called Apex FieldOps AI for contractors with job pipeline, estimate builder, crew management, and Estimate Swarm.",
+		Description: strings.Repeat("Create a polished SaaS operations command center with analytics, secure settings, responsive navigation, and investor-ready dashboards. ", 3) + "Then build a complete production-ready full-stack SaaS web app called Apex FieldOps AI for contractors with job pipeline, estimate builder, crew management, and Estimate Swarm.",
 		TechStack: &TechStack{
 			Frontend: "React",
 			Backend:  "Express",

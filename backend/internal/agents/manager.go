@@ -16610,7 +16610,11 @@ function AgentPanel({ name, lines, step }: { name: string; lines: string[]; step
 }
 
 func syntheticFrontendAppTSX(title string, summary string, backendEntry string, backendPort int) string {
-	if promptLooksLikeFieldOpsApp(title + " " + summary) {
+	return syntheticFrontendAppTSXWithDescription(title, summary, title+" "+summary, backendEntry, backendPort)
+}
+
+func syntheticFrontendAppTSXWithDescription(title string, summary string, description string, backendEntry string, backendPort int) string {
+	if promptLooksLikeFieldOpsApp(description) || promptLooksLikeFieldOpsApp(title+" "+summary) {
 		return syntheticFieldOpsAppTSX()
 	}
 	backendNote := "Backend runtime files were generated separately and can be launched alongside this preview."
@@ -16969,6 +16973,7 @@ func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *T
 
 	buildTitle := "Recovered Preview"
 	buildSummary := "A deterministic APEX frontend shell was restored to keep the preview usable."
+	buildDescription := buildTitle + " " + buildSummary
 	backendEntry := ""
 	backendPort := 3001
 	backendName := ""
@@ -16976,6 +16981,7 @@ func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *T
 	if build != nil {
 		build.mu.RLock()
 		if trimmed := strings.TrimSpace(build.Description); trimmed != "" {
+			buildDescription = trimmed
 			buildTitle = synthesizedFrontendShellAppName(trimmed)
 			buildSummary = synthesizedFrontendShellSummary(trimmed)
 		}
@@ -17003,7 +17009,7 @@ func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *T
 	case "src/main.tsx":
 		return syntheticFrontendMainTSX(), "typescript", true
 	case "src/App.tsx":
-		return syntheticFrontendAppTSX(buildTitle, buildSummary, backendEntry, backendPort), "typescript", true
+		return syntheticFrontendAppTSXWithDescription(buildTitle, buildSummary, buildDescription, backendEntry, backendPort), "typescript", true
 	case "vite.config.ts":
 		return syntheticFrontendViteConfig(backendPort), "typescript", true
 	case "tailwind.config.js":
@@ -17244,7 +17250,7 @@ func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Buil
 
 	createIfMissing("index.html", syntheticFrontendIndexHTML(title), "html")
 	createIfMissing("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
-	createIfMissing("src/App.tsx", syntheticFrontendAppTSX(title, summary, backendEntry, backendPort), "typescript")
+	createIfMissing("src/App.tsx", syntheticFrontendAppTSXWithDescription(title, summary, description, backendEntry, backendPort), "typescript")
 	createIfMissing("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
 	createIfMissing("tailwind.config.js", syntheticFrontendTailwindConfig(), "javascript")
 	createIfMissing("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript")
