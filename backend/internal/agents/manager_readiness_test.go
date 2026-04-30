@@ -6176,6 +6176,12 @@ export default function App() {
 		if content == "" {
 			t.Fatalf("expected %s to exist", path)
 		}
+		if strings.Contains(content, "''") {
+			t.Fatalf("expected %s fallback to avoid doubled single-quote normalizer trigger, got %s", path, content)
+		}
+		if strings.Contains(content, "className = '") {
+			t.Fatalf("expected %s fallback defaults to use double quotes, got %s", path, content)
+		}
 		for _, needle := range needles {
 			if !strings.Contains(content, needle) {
 				t.Fatalf("expected %s in %s, got %s", needle, path, content)

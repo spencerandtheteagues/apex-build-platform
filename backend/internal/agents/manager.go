@@ -12327,7 +12327,7 @@ func shadcnUIFallbackModuleContent(module string, importedNames []string) string
 	b.WriteString("}\n\n")
 	b.WriteString("type PrimitiveProps = React.HTMLAttributes<HTMLDivElement> & {\n")
 	b.WriteString("  asChild?: boolean;\n  variant?: string;\n  size?: string;\n  value?: string;\n  placeholder?: string;\n  checked?: boolean;\n  onValueChange?: (value: string) => void;\n  onCheckedChange?: (checked: boolean) => void;\n};\n\n")
-	b.WriteString("function Primitive({ className = '', children, ...props }: PrimitiveProps) {\n")
+	b.WriteString("function Primitive({ className = \"\", children, ...props }: PrimitiveProps) {\n")
 	b.WriteString("  const { asChild: _asChild, variant: _variant, size: _size, value: _value, placeholder: _placeholder, checked: _checked, onValueChange: _onValueChange, onCheckedChange: _onCheckedChange, ...rest } = props;\n")
 	b.WriteString("  return <div className={cx('rounded-xl border border-slate-700/70 bg-slate-900/70 text-slate-100 shadow-sm', className)} {...rest}>{children}</div>;\n")
 	b.WriteString("}\n\n")
@@ -12337,7 +12337,7 @@ func shadcnUIFallbackModuleContent(module string, importedNames []string) string
 		if name == "" {
 			return
 		}
-		b.WriteString(fmt.Sprintf("export function %s({ className = '', children, ...props }: %s) {\n", name, propsType))
+		b.WriteString(fmt.Sprintf("export function %s({ className = \"\", children, ...props }: %s) {\n", name, propsType))
 		if propsType == "PrimitiveProps" {
 			b.WriteString("  return <Primitive className={cx('" + baseClass + "', className)} {...props}>{children}</Primitive>;\n")
 		} else {
@@ -12355,27 +12355,27 @@ func shadcnUIFallbackModuleContent(module string, importedNames []string) string
 		written[name] = true
 		switch name {
 		case "Badge":
-			b.WriteString("export function Badge({ className = '', children, ...props }: React.HTMLAttributes<HTMLSpanElement> & { variant?: string }) {\n")
+			b.WriteString("export function Badge({ className = \"\", children, ...props }: React.HTMLAttributes<HTMLSpanElement> & { variant?: string }) {\n")
 			b.WriteString("  const { variant: _variant, ...rest } = props;\n")
 			b.WriteString("  return <span className={cx('inline-flex items-center rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-100', className)} {...rest}>{children}</span>;\n")
 			b.WriteString("}\n\n")
 		case "badgeVariants", "buttonVariants":
-			b.WriteString(fmt.Sprintf("export function %s(..._args: unknown[]) {\n  return '';\n}\n\n", name))
+			b.WriteString(fmt.Sprintf("export function %s(..._args: unknown[]) {\n  return \"\";\n}\n\n", name))
 		case "Button":
-			b.WriteString("export function Button({ className = '', children, type = 'button', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string; asChild?: boolean }) {\n")
+			b.WriteString("export function Button({ className = \"\", children, type = 'button', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string; asChild?: boolean }) {\n")
 			b.WriteString("  const { variant: _variant, size: _size, asChild: _asChild, ...rest } = props;\n")
 			b.WriteString("  return <button type={type} className={cx('inline-flex items-center justify-center rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-400/20 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60', className)} {...rest}>{children}</button>;\n")
 			b.WriteString("}\n\n")
 		case "Input":
-			b.WriteString("export function Input({ className = '', ...props }: React.InputHTMLAttributes<HTMLInputElement>) {\n")
+			b.WriteString("export function Input({ className = \"\", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {\n")
 			b.WriteString("  return <input className={cx('h-10 w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20', className)} {...props} />;\n")
 			b.WriteString("}\n\n")
 		case "Label":
-			b.WriteString("export function Label({ className = '', children, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {\n")
+			b.WriteString("export function Label({ className = \"\", children, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {\n")
 			b.WriteString("  return <label className={cx('text-sm font-medium text-slate-200', className)} {...props}>{children}</label>;\n")
 			b.WriteString("}\n\n")
 		case "Textarea":
-			b.WriteString("export function Textarea({ className = '', ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {\n")
+			b.WriteString("export function Textarea({ className = \"\", ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {\n")
 			b.WriteString("  return <textarea className={cx('min-h-24 w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20', className)} {...props} />;\n")
 			b.WriteString("}\n\n")
 		case "Card":
@@ -12403,11 +12403,11 @@ func shadcnUIFallbackModuleContent(module string, importedNames []string) string
 		case "TableCaption":
 			writeComponent(name, "caption", "React.HTMLAttributes<HTMLTableCaptionElement>", "mt-4 text-sm text-slate-500")
 		case "Checkbox", "Switch":
-			b.WriteString(fmt.Sprintf("export function %s({ className = '', checked, onCheckedChange, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { checked?: boolean; onCheckedChange?: (checked: boolean) => void }) {\n", name))
+			b.WriteString(fmt.Sprintf("export function %s({ className = \"\", checked, onCheckedChange, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { checked?: boolean; onCheckedChange?: (checked: boolean) => void }) {\n", name))
 			b.WriteString("  return <button type=\"button\" aria-pressed={checked} className={cx('h-5 w-9 rounded-full border border-cyan-400/40 bg-slate-900 text-cyan-200', className)} onClick={() => onCheckedChange?.(!checked)} {...props} />;\n")
 			b.WriteString("}\n\n")
 		case "Progress":
-			b.WriteString("export function Progress({ className = '', value = 0, ...props }: React.HTMLAttributes<HTMLDivElement> & { value?: number }) {\n")
+			b.WriteString("export function Progress({ className = \"\", value = 0, ...props }: React.HTMLAttributes<HTMLDivElement> & { value?: number }) {\n")
 			b.WriteString("  return <div className={cx('h-2 overflow-hidden rounded-full bg-slate-800', className)} {...props}><div className='h-full bg-cyan-400' style={{ width: `${Math.max(0, Math.min(100, value))}%` }} /></div>;\n")
 			b.WriteString("}\n\n")
 		default:
