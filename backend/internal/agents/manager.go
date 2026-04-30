@@ -8081,6 +8081,8 @@ func dependencyVersionHint(pkg string) string {
 		return "^29.7.0"
 	case "@types/jest":
 		return "^29.5.14"
+	case "@types/lodash":
+		return "^4.17.13"
 	case "jest-environment-jsdom":
 		return "^29.7.0"
 	case "ts-jest":
@@ -11515,6 +11517,116 @@ func (am *AgentManager) clearStaleImportValidationError(build *Build, readinessE
 	return "stale import validation on " + strings.Join(cleared, ", ")
 }
 
+func (am *AgentManager) clearStaleDependencyValidationError(build *Build, readinessErrors []string) string {
+	if build == nil || len(readinessErrors) == 0 {
+		return ""
+	}
+
+	frontendPkgs, backendPkgs := parseMissingDependenciesByVerificationScope(readinessErrors)
+	if len(frontendPkgs) == 0 && len(backendPkgs) == 0 {
+		return ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return ""
+	}
+
+	manifestContent := func(candidates []string) (string, string) {
+		path := findGeneratedManifestPath(files, candidates)
+		if path == "" {
+			return "", ""
+		}
+		return path, plan.content(path)
+	}
+	allDeclared := func(content string, pkgs []string) bool {
+		if strings.TrimSpace(content) == "" || len(pkgs) == 0 {
+			return false
+		}
+		var manifest previewManifest
+		if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+			return false
+		}
+		for _, pkg := range pkgs {
+			if !manifestDeclaresDependency(manifest, pkg) {
+				return false
+			}
+		}
+		return true
+	}
+
+	cleared := make([]string, 0, 2)
+	if len(frontendPkgs) > 0 {
+		path, content := manifestContent([]string{
+			"frontend/package.json",
+			"client/package.json",
+			"web/package.json",
+			"apps/web/package.json",
+			"apps/frontend/package.json",
+			"packages/web/package.json",
+			"packages/frontend/package.json",
+			"package.json",
+		})
+		if !allDeclared(content, frontendPkgs) {
+			return ""
+		}
+		cleared = append(cleared, fmt.Sprintf("frontend %s has %s", path, strings.Join(frontendPkgs, ", ")))
+	}
+	if len(backendPkgs) > 0 {
+		path, content := manifestContent([]string{
+			"backend/package.json",
+			"api/package.json",
+			"server/package.json",
+			"apps/api/package.json",
+			"apps/server/package.json",
+			"packages/backend/package.json",
+			"packages/api/package.json",
+			"package.json",
+		})
+		if !allDeclared(content, backendPkgs) {
+			return ""
+		}
+		cleared = append(cleared, fmt.Sprintf("backend %s has %s", path, strings.Join(backendPkgs, ", ")))
+	}
+	if len(cleared) == 0 {
+		return ""
+	}
+
+	sort.Strings(cleared)
+	return "stale dependency validation on " + strings.Join(cleared, "; ")
+}
+
+func (am *AgentManager) clearStaleLocalModuleValidationError(build *Build, readinessErrors []string) string {
+	if build == nil || len(readinessErrors) == 0 {
+		return ""
+	}
+
+	targets := parseMissingLocalModuleRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return ""
+	}
+
+	cleared := make([]string, 0, len(targets))
+	for _, target := range targets {
+		sourceContent := plan.content(target.SourcePath)
+		if strings.TrimSpace(sourceContent) != "" && sourceContentImportsSpecifier(sourceContent, target.Specifier) && strings.TrimSpace(plan.content(target.TargetPath)) == "" {
+			return ""
+		}
+		cleared = append(cleared, fmt.Sprintf("%s -> %s", target.SourcePath, target.TargetPath))
+	}
+	if len(cleared) == 0 {
+		return ""
+	}
+
+	sort.Strings(cleared)
+	return "stale local-module validation on " + strings.Join(cleared, ", ")
+}
+
 func parseExportMismatchRepairTargets(errors []string) []exportMismatchRepairTarget {
 	if len(errors) == 0 {
 		return nil
@@ -12198,7 +12310,7 @@ func typePackageForModule(module string) string {
 		return ""
 	}
 	switch module {
-	case "express", "cors", "jsonwebtoken", "body-parser", "bcrypt", "uuid", "pg":
+	case "express", "cors", "jsonwebtoken", "body-parser", "bcrypt", "uuid", "pg", "lodash", "lodash-es":
 		return "@types/" + module
 	case "react", "react/jsx-runtime":
 		return "@types/react"
@@ -15922,6 +16034,36 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			readinessErrors,
 			"Cleared stale import validation against current generated files. Re-running final validation before solver recovery.",
 			"stale_import_validation_reset",
+			summary,
+		)
+		am.checkBuildCompletion(build)
+		return true
+	}
+	if summary := am.clearStaleDependencyValidationError(build, readinessErrors); summary != "" {
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
+		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale dependency validation: %s)", errorSummary, summary))
+		am.broadcastValidationRepair(
+			build.ID,
+			now,
+			progress,
+			readinessErrors,
+			"Cleared stale package dependency validation against the current package.json. Re-running final validation before solver recovery.",
+			"stale_dependency_validation_reset",
+			summary,
+		)
+		am.checkBuildCompletion(build)
+		return true
+	}
+	if summary := am.clearStaleLocalModuleValidationError(build, readinessErrors); summary != "" {
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
+		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale local-module validation: %s)", errorSummary, summary))
+		am.broadcastValidationRepair(
+			build.ID,
+			now,
+			progress,
+			readinessErrors,
+			"Cleared stale local-module validation against the current generated file tree. Re-running final validation before solver recovery.",
+			"stale_local_module_validation_reset",
 			summary,
 		)
 		am.checkBuildCompletion(build)

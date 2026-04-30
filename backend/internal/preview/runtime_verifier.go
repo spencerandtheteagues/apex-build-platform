@@ -157,7 +157,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 
 	// ── 4. Start Vite dev server ─────────────────────────────────────────
 	viteBin := rv.viteBinary(dir)
-	viteCmd, viteStderr, viteErr := rv.startVite(bootCtx, dir, viteBin, port)
+	viteCmd, viteLogs, viteErr := rv.startVite(bootCtx, dir, viteBin, port)
 	if viteErr != nil {
 		return rv.rtFail("boot_failed",
 			fmt.Sprintf("failed to start Vite process: %v", viteErr),
@@ -165,11 +165,18 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			start,
 		)
 	}
+	viteExited := false
+	viteExitCh := make(chan error, 1)
+	go func() {
+		viteExitCh <- viteCmd.Wait()
+	}()
 	defer func() {
-		if viteCmd.Process != nil {
+		if !viteExited && viteCmd.Process != nil {
 			viteCmd.Process.Kill() //nolint:errcheck
 		}
-		viteCmd.Wait() //nolint:errcheck
+		if !viteExited {
+			<-viteExitCh //nolint:errcheck
+		}
 	}()
 
 	// ── 5. Wait for port ready ───────────────────────────────────────────
@@ -181,8 +188,23 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			readyTimeout = remaining
 		}
 	}
-	if !waitForTCPPort(port, readyTimeout, stop) {
-		serverLogs := truncateLog(viteStderr.String(), 1500)
+	if ready, exited, exitErr := waitForTCPPortOrExit(port, readyTimeout, stop, viteExitCh); !ready {
+		serverLogs := truncateLog(viteLogs.String(), 1500)
+		if exited {
+			viteExited = true
+			detail := "Vite dev server exited before becoming ready"
+			if exitErr != nil {
+				detail = fmt.Sprintf("%s: %v", detail, exitErr)
+			}
+			if trimmed := strings.TrimSpace(serverLogs); trimmed != "" {
+				detail = fmt.Sprintf("%s — %s", detail, trimmed)
+			}
+			return rv.rtFailWithLogs("boot_failed",
+				detail,
+				"Fix the first Vite startup error in the server logs, usually an unresolved import, invalid config, or TypeScript dependency gap.",
+				start, serverLogs,
+			)
+		}
 		return rv.rtFailWithLogs("boot_failed",
 			fmt.Sprintf("Vite dev server did not become ready on port %d within %s", port, formatRuntimeTimeout(readyTimeout)),
 			"Check vite.config.ts for syntax errors. Ensure all imports resolve. Common cause: missing or misconfigured entry point.",
@@ -200,7 +222,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	htmlBody, rootCheck := rv.checkRootPage(bootCtx, httpClient, baseURL)
 	result.Checks = append(result.Checks, rootCheck)
 	if !rootCheck.Passed {
-		logs := truncateLog(viteStderr.String(), 1500)
+		logs := truncateLog(viteLogs.String(), 1500)
 		return rv.rtFailWithLogs("blank_screen", rootCheck.Detail,
 			"Ensure index.html has a non-empty <body> with the app mount point. Fix any errors reported by the Vite dev server.",
 			start, logs)
@@ -239,7 +261,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 		entryCheck := rv.checkEntryModule(bootCtx, httpClient, baseURL, src)
 		result.Checks = append(result.Checks, entryCheck)
 		if !entryCheck.Passed {
-			logs := truncateLog(viteStderr.String(), 1500)
+			logs := truncateLog(viteLogs.String(), 1500)
 			return rv.rtFailWithLogs("boot_failed", entryCheck.Detail,
 				fmt.Sprintf("Fix the error in %s. Common causes: TypeScript syntax errors, missing imports, undefined exports.", src),
 				start, logs)
@@ -272,7 +294,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			)
 		}
 		if !br.Passed {
-			serverLogs := truncateLog(viteStderr.String(), 1500)
+			serverLogs := truncateLog(viteLogs.String(), 1500)
 			hint := ""
 			if len(br.RepairHints) > 0 {
 				hint = br.RepairHints[0]
@@ -292,7 +314,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	}
 
 	result.Duration = time.Since(start)
-	result.ServerLogs = truncateLog(viteStderr.String(), 500)
+	result.ServerLogs = truncateLog(viteLogs.String(), 500)
 	log.Printf("[runtime_verifier] Vite boot checks passed in %s", result.Duration.Round(time.Millisecond))
 	return result
 }
@@ -554,14 +576,14 @@ func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string, p
 		"FORCE_COLOR=0",
 	}
 
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	cmd.Stdout = io.Discard
+	var logs bytes.Buffer
+	cmd.Stderr = &logs
+	cmd.Stdout = &logs
 
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
 	}
-	return cmd, &stderr, nil
+	return cmd, &logs, nil
 }
 
 func (rv *RuntimeVerifier) freePort() (int, error) {
@@ -593,6 +615,28 @@ func waitForTCPPort(port int, timeout time.Duration, stop <-chan struct{}) bool 
 		}
 	}
 	return false
+}
+
+func waitForTCPPortOrExit(port int, timeout time.Duration, stop <-chan struct{}, exitCh <-chan error) (ready bool, exited bool, err error) {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(150 * time.Millisecond)
+	defer ticker.Stop()
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	for time.Now().Before(deadline) {
+		select {
+		case <-stop:
+			return false, false, nil
+		case err := <-exitCh:
+			return false, true, err
+		case <-ticker.C:
+			conn, err := net.DialTimeout("tcp", addr, 150*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				return true, false, nil
+			}
+		}
+	}
+	return false, false, nil
 }
 
 // ── HTTP check helpers ────────────────────────────────────────────────────────

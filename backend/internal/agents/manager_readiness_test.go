@@ -3107,6 +3107,81 @@ func TestMissingLocalModulePlaceholderSupportsNamedComponentImport(t *testing.T)
 	}
 }
 
+func TestClearStaleDependencyValidationAfterManifestRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-dependency-validation",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": { "build": "vite build", "dev": "vite" },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "*",
+    "sonner": "*",
+    "uuid": "*"
+  },
+  "devDependencies": { "vite": "^5.4.10", "typescript": "^5.6.3" }
+}`,
+				IsNew: true,
+			},
+			{
+				Path:    "src/App.tsx",
+				Content: `import { toast } from "sonner"; import { v4 } from "uuid"; export default function App(){ toast.message(v4()); return null; }`,
+				IsNew:   true,
+			},
+		},
+	}
+
+	summary := am.clearStaleDependencyValidationError(build, []string{
+		`Preview verification dependency check failed: source imports "sonner" but package.json does not declare dependency "sonner"`,
+		`Preview verification dependency check failed: source imports "uuid" but package.json does not declare dependency "uuid"`,
+	})
+	if !strings.Contains(summary, "stale dependency validation") {
+		t.Fatalf("expected stale dependency validation reset summary, got %q", summary)
+	}
+}
+
+func TestClearStaleLocalModuleValidationAfterPlaceholderRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-local-module-validation",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "src/App.tsx",
+				Content: `import DashboardPage from "@/components/DashboardPage"; export default function App(){ return <DashboardPage />; }`,
+				IsNew:   true,
+			},
+			{
+				Path:    "src/components/DashboardPage.tsx",
+				Content: `export default function DashboardPage(){ return <div>Dashboard</div>; }`,
+				IsNew:   true,
+			},
+		},
+	}
+
+	summary := am.clearStaleLocalModuleValidationError(build, []string{
+		`Preview verification local import check failed: source imports local module "@/components/DashboardPage" from "src/App.tsx" but generated file "src/components/DashboardPage.tsx" is missing`,
+	})
+	if !strings.Contains(summary, "stale local-module validation") {
+		t.Fatalf("expected stale local-module validation reset summary, got %q", summary)
+	}
+}
+
 func TestParseMissingDependencyNamesFromTypeScriptCannotFindModule(t *testing.T) {
 	t.Parallel()
 
@@ -5269,11 +5344,12 @@ func TestParseMissingTypePackagesFromBuildErrors(t *testing.T) {
 			"src/App.tsx(1,19): error TS7016: Could not find a declaration file for module 'react'.\n" +
 			"src/main.tsx(2,22): error TS7016: Could not find a declaration file for module 'react-dom/client'.\n" +
 			"server/migrate.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'.\n" +
+			"node_modules/recharts/types/chart/generateCategoricalChart.d.ts(2,36): error TS7016: Could not find a declaration file for module 'lodash'.\n" +
 			"src/lib/x.ts(3,1): error TS7016: Could not find a declaration file for module '@scoped/pkg'.",
 	}
 
 	got := strings.Join(parseMissingTypePackagesFromBuildErrors(errs), ",")
-	want := "@types/cors,@types/express,@types/pg,@types/react,@types/react-dom"
+	want := "@types/cors,@types/express,@types/lodash,@types/pg,@types/react,@types/react-dom"
 	if got != want {
 		t.Fatalf("unexpected parsed type packages: got %q want %q", got, want)
 	}
