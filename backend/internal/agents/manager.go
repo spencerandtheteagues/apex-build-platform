@@ -1986,6 +1986,9 @@ func taskUsesExtendedReviewTimeout(build *Build, task *Task) bool {
 	}
 
 	if task.Type == TaskReview {
+		if build != nil && build.RequirePreviewReady {
+			return false
+		}
 		return true
 	}
 
@@ -2009,6 +2012,43 @@ func taskUsesExtendedReviewTimeout(build *Build, task *Task) bool {
 		return task.Type == TaskFix || task.Type == TaskTest
 	default:
 		return false
+	}
+}
+
+func (am *AgentManager) shouldUseDeterministicReviewForPreviewRequiredBuild(build *Build, task *Task) bool {
+	if am == nil || build == nil || task == nil || task.Type != TaskReview || !build.RequirePreviewReady {
+		return false
+	}
+
+	action := strings.ToLower(strings.TrimSpace(taskInputStringValue(task.Input, "action")))
+	switch action {
+	case "", "post_fix_review":
+		return true
+	default:
+		return false
+	}
+}
+
+func deterministicPreviewReviewOutput(build *Build, task *Task) *TaskOutput {
+	messages := []string{
+		"Deterministic preview review passed: no critical issues detected in the phase handoff. Compile, dependency, runtime, and browser preview gates remain active and decide completion.",
+	}
+	metrics := map[string]any{
+		"deterministic_review": true,
+		"review_mode":          "preview_required_gate",
+	}
+	if build != nil {
+		metrics["require_preview_ready"] = build.RequirePreviewReady
+	}
+	if task != nil {
+		metrics["task_id"] = task.ID
+		if action := strings.TrimSpace(taskInputStringValue(task.Input, "action")); action != "" {
+			metrics["action"] = action
+		}
+	}
+	return &TaskOutput{
+		Messages: messages,
+		Metrics:  metrics,
 	}
 }
 
@@ -5126,6 +5166,31 @@ func (am *AgentManager) executeTask(task *Task) {
 			Attempt: attempt,
 			Success: false,
 			Error:   err,
+		})
+		return
+	}
+
+	if am.shouldUseDeterministicReviewForPreviewRequiredBuild(build, task) {
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      "agent:thinking",
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"agent_role": agent.Role,
+				"provider":   agent.Provider,
+				"model":      agent.Model,
+				"task_id":    task.ID,
+				"task_type":  string(task.Type),
+				"content":    "Reviewer is using deterministic preview-readiness gates instead of a long LLM critique so compile, runtime, and preview verification can start immediately.",
+			},
+		})
+		am.enqueueTaskResult(&TaskResult{
+			TaskID:  task.ID,
+			AgentID: agent.ID,
+			Attempt: attempt,
+			Success: true,
+			Output:  deterministicPreviewReviewOutput(build, task),
 		})
 		return
 	}

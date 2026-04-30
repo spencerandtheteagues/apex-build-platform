@@ -36,6 +36,90 @@ func TestTaskExecutionTimeoutForTask_ExtendsReviewTasks(t *testing.T) {
 	}
 }
 
+func TestTaskExecutionTimeoutForTask_DoesNotExtendPreviewRequiredReviewTasks(t *testing.T) {
+	t.Parallel()
+
+	manager := newTestIterationManager(nil)
+	build := &Build{
+		ID:                  "preview-review-timeout-build",
+		Status:              BuildReviewing,
+		Mode:                ModeFull,
+		PowerMode:           PowerBalanced,
+		RequirePreviewReady: true,
+	}
+	agent := &Agent{
+		ID:       "reviewer-1",
+		BuildID:  build.ID,
+		Role:     RoleReviewer,
+		Provider: ai.ProviderGPT4,
+	}
+	task := &Task{
+		ID:          "review-task",
+		Type:        TaskReview,
+		Description: "Final review",
+		Status:      TaskPending,
+	}
+
+	if got := manager.taskExecutionTimeoutForTask(build, task, agent); got >= 12*time.Minute {
+		t.Fatalf("preview-required review timeout = %v, want below extended 12m floor", got)
+	}
+}
+
+func TestExecuteTaskBypassesLLMReviewForPreviewRequiredBuild(t *testing.T) {
+	t.Parallel()
+
+	manager := newTestIterationManager(nil)
+	build := &Build{
+		ID:                  "preview-review-bypass-build",
+		Status:              BuildReviewing,
+		Mode:                ModeFull,
+		PowerMode:           PowerBalanced,
+		RequirePreviewReady: true,
+		Agents:              map[string]*Agent{},
+	}
+	task := &Task{
+		ID:          "review-task",
+		Type:        TaskReview,
+		Description: "Final review",
+		AssignedTo:  "reviewer-1",
+		Status:      TaskInProgress,
+		MaxRetries:  2,
+		Input: map[string]any{
+			"agent_role": string(RoleReviewer),
+		},
+	}
+	agent := &Agent{
+		ID:          task.AssignedTo,
+		BuildID:     build.ID,
+		Role:        RoleReviewer,
+		Provider:    ai.ProviderGPT4,
+		Status:      StatusWorking,
+		CurrentTask: task,
+	}
+	build.Agents[agent.ID] = agent
+	build.Tasks = []*Task{task}
+	manager.builds[build.ID] = build
+	manager.agents[agent.ID] = agent
+
+	manager.executeTask(task)
+
+	select {
+	case result := <-manager.resultQueue:
+		if !result.Success {
+			t.Fatalf("expected deterministic review success, got %+v", result)
+		}
+		if result.Output == nil || taskOutputMetricString(result.Output, "review_mode") != "preview_required_gate" {
+			t.Fatalf("expected deterministic preview review output, got %+v", result.Output)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected deterministic review result without provider call")
+	}
+
+	if build.RequestsUsed != 0 {
+		t.Fatalf("deterministic review should not consume AI request budget, got %d", build.RequestsUsed)
+	}
+}
+
 func TestTaskExecutionTimeoutForTask_ExtendsReviewStageRecoveryTasks(t *testing.T) {
 	t.Parallel()
 
