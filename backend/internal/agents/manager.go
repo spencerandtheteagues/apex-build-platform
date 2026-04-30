@@ -10853,17 +10853,33 @@ func missingLocalModulePlaceholderContent(targetPath string, binding generatedIm
 	if componentLike {
 		componentName := placeholderComponentIdentifier(targetPath, binding)
 		label := strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
+		namedImports := make([]string, 0, len(binding.NamedImports))
+		componentIsNamedExport := false
+		for _, name := range binding.NamedImports {
+			name = sanitizeGeneratedIdentifier(name)
+			if name == "" {
+				continue
+			}
+			if name == componentName {
+				componentIsNamedExport = true
+			}
+			namedImports = append(namedImports, name)
+		}
+
 		var b strings.Builder
 		b.WriteString("import React from 'react';\n\n")
 		b.WriteString("type PlaceholderProps = Record<string, unknown>;\n\n")
-		b.WriteString(fmt.Sprintf("const %s: React.FC<PlaceholderProps> = () => (\n", componentName))
+		if componentIsNamedExport {
+			b.WriteString(fmt.Sprintf("export const %s: React.FC<PlaceholderProps> = () => (\n", componentName))
+		} else {
+			b.WriteString(fmt.Sprintf("const %s: React.FC<PlaceholderProps> = () => (\n", componentName))
+		}
 		b.WriteString("  <div className='rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 p-4 text-sm text-slate-300'>\n")
 		b.WriteString(fmt.Sprintf("    %s placeholder\n", label))
 		b.WriteString("  </div>\n")
 		b.WriteString(");\n\n")
-		for _, name := range binding.NamedImports {
-			name = sanitizeGeneratedIdentifier(name)
-			if name == "" {
+		for _, name := range namedImports {
+			if name == componentName {
 				continue
 			}
 			if isLikelyReactComponentName(name) {

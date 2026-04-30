@@ -3047,6 +3047,66 @@ func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder
 	}
 }
 
+func TestMissingLocalModulePlaceholderSupportsNamedComponentImport(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-missing-named-component-module-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path:    "src/App.tsx",
+				Content: "import { AppShell } from '@/components/AppShell';\nexport default function App(){ return <AppShell /> }\n",
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification local import check failed: source imports local module "@/components/AppShell" from "src/App.tsx" but generated file "src/components/AppShell.tsx" is missing`},
+		"missing named local component module",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected missing local module repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var placeholder string
+	for i := range files {
+		if files[i].Path == "src/components/AppShell.tsx" {
+			placeholder = files[i].Content
+			break
+		}
+	}
+	if strings.TrimSpace(placeholder) == "" {
+		t.Fatalf("expected AppShell placeholder file to be created, got %+v", files)
+	}
+	if !strings.Contains(placeholder, "export const AppShell") {
+		t.Fatalf("expected named AppShell export for named import, got %q", placeholder)
+	}
+	if strings.Contains(placeholder, "export const AppShell = AppShell") {
+		t.Fatalf("placeholder must not redeclare AppShell while satisfying named import, got %q", placeholder)
+	}
+	if !strings.Contains(placeholder, "export default AppShell") {
+		t.Fatalf("expected default export to remain available, got %q", placeholder)
+	}
+}
+
 func TestParseMissingDependencyNamesFromTypeScriptCannotFindModule(t *testing.T) {
 	t.Parallel()
 
