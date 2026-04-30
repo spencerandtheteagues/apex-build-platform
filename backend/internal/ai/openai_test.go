@@ -33,7 +33,7 @@ func TestOpenAIGenerateDoesNotSilentlyDowngradeExplicitGPT5Model(t *testing.T) {
 	_, err := client.Generate(context.Background(), &AIRequest{
 		ID:          "explicit-gpt5",
 		Provider:    ProviderGPT4,
-		Model:       "gpt-5.4-codex",
+		Model:       "gpt-5.4",
 		Capability:  CapabilityCodeGeneration,
 		Prompt:      "Build a product page",
 		Temperature: 0.3,
@@ -67,10 +67,10 @@ func TestOpenAIGenerateNormalizesUnavailableCodexOverride(t *testing.T) {
 		if err := json.Unmarshal(body, &payload); err != nil {
 			t.Fatalf("failed unmarshalling request body: %v", err)
 		}
-		if got := payload["model"]; got != "gpt-5.4-codex" {
-			t.Fatalf("OpenAI request model = %v, want gpt-5.4-codex", got)
+		if got := payload["model"]; got != "gpt-5.4" {
+			t.Fatalf("OpenAI request model = %v, want gpt-5.4", got)
 		}
-		response := []byte(`{"id":"resp_test","model":"gpt-5.4-codex","output_text":"ok","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+		response := []byte(`{"id":"resp_test","model":"gpt-5.4","output_text":"ok","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(bytes.NewReader(response)),

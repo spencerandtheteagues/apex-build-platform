@@ -244,7 +244,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		return "claude-haiku-4-5-20251001"
 	case "gpt4":
 		if mode == ModeMax {
-			return "gpt-5.4-codex"
+			return "gpt-5.4"
 		}
 		if mode == ModeBalanced {
 			return "gpt-4.1"

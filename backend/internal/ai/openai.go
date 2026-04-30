@@ -495,9 +495,8 @@ func normalizeOpenAIModelAlias(model string) string {
 		strings.HasPrefix(normalized, "chatgpt-5.5"),
 		strings.HasPrefix(normalized, "gpt-codex-5.4"),
 		strings.HasPrefix(normalized, "chatgpt-5.4-codex"),
-		strings.HasPrefix(normalized, "gpt-5.4-codex"),
-		strings.HasPrefix(normalized, "gpt-5.4-pro"):
-		return "gpt-5.4-codex"
+		strings.HasPrefix(normalized, "gpt-5.4-codex"):
+		return "gpt-5.4"
 	default:
 		return strings.TrimSpace(model)
 	}

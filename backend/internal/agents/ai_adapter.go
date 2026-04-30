@@ -22,7 +22,7 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "claude-haiku-4-5-20251001",
 	},
 	ai.ProviderGPT4: {
-		PowerMax:      "gpt-5.4-codex",
+		PowerMax:      "gpt-5.4",
 		PowerBalanced: "gpt-4.1",
 		PowerFast:     "gpt-4o-mini",
 	},
@@ -48,7 +48,8 @@ var flagshipModelsByProvider = map[ai.AIProvider]map[string]bool{
 		"claude-opus-4-7": true,
 	},
 	ai.ProviderGPT4: {
-		"gpt-5.4-codex": true,
+		"gpt-5.4":     true,
+		"gpt-5.4-pro": true,
 	},
 	ai.ProviderGemini: {
 		"gemini-3.1-pro":         true,
@@ -154,12 +155,11 @@ func canonicalizeProviderModelAlias(provider ai.AIProvider, model string) string
 		case strings.HasPrefix(normalized, "gpt-codex-5.5"),
 			strings.HasPrefix(normalized, "gpt-5.5"),
 			strings.HasPrefix(normalized, "chatgpt-5.5"):
-			return "gpt-5.4-codex"
+			return "gpt-5.4"
 		case strings.HasPrefix(normalized, "gpt-codex-5.4"),
 			strings.HasPrefix(normalized, "chatgpt-5.4-codex"),
-			strings.HasPrefix(normalized, "gpt-5.4-codex"),
-			strings.HasPrefix(normalized, "gpt-5.4-pro"):
-			return "gpt-5.4-codex"
+			strings.HasPrefix(normalized, "gpt-5.4-codex"):
+			return "gpt-5.4"
 		}
 	}
 	if provider == ai.ProviderClaude {

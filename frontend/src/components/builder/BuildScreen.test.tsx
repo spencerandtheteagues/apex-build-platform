@@ -68,7 +68,7 @@ const baseProps = () => ({
   },
   providerModelOptions: {
     claude: [{ id: "claude-opus-4-7", name: "Claude Opus 4.7" }],
-    gpt4: [{ id: "gpt-5.4-codex", name: "ChatGPT 5.4 Codex" }],
+    gpt4: [{ id: "gpt-5.4", name: "ChatGPT 5.4" }],
     gemini: [{ id: "gemini-3.1-pro", name: "Gemini 3.1 Pro" }],
     grok: [{ id: "grok-4.20-0309-reasoning", name: "Grok 4.20" }],
     ollama: [{ id: "kimi-k2.6", name: "Kimi K2.6" }],

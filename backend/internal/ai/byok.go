@@ -792,7 +792,8 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "FAST — cheapest Claude tier"},
 		},
 		"gpt4": {
-			{ID: "gpt-5.4-codex", Name: "ChatGPT 5.4 Codex", Speed: "slow", CostTier: "high", Description: "MAX - current OpenAI Codex route"},
+			{ID: "gpt-5.4", Name: "ChatGPT 5.4", Speed: "slow", CostTier: "high", Description: "MAX - current OpenAI flagship route"},
+			{ID: "gpt-5.4-pro", Name: "ChatGPT 5.4 Pro", Speed: "slow", CostTier: "high", Description: "MAX fallback - higher-depth OpenAI route"},
 			{ID: "gpt-4.1", Name: "GPT-4.1", Speed: "medium", CostTier: "medium", Description: "BALANCED — best current mid-tier OpenAI coding model"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "FAST — mini OpenAI tier"},
 		},

@@ -657,6 +657,9 @@ func classifyProviderError(err error) string {
 		strings.Contains(msg, "key is disabled") ||
 		strings.Contains(msg, "key disabled") ||
 		strings.Contains(msg, "cannot be used") ||
+		strings.Contains(msg, "model_not_found") ||
+		strings.Contains(msg, "model does not exist") ||
+		strings.Contains(msg, "requested model") && strings.Contains(msg, "does not exist") ||
 		strings.Contains(msg, "permission denied") ||
 		strings.Contains(msg, " 401") ||
 		strings.Contains(msg, " 403"):

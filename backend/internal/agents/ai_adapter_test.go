@@ -62,7 +62,7 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 		want     string
 	}{
 		{name: "claude max uses opus", provider: ai.ProviderClaude, mode: PowerMax, want: "claude-opus-4-7"},
-		{name: "openai max uses chatgpt codex 5.4", provider: ai.ProviderGPT4, mode: PowerMax, want: "gpt-5.4-codex"},
+		{name: "openai max uses chatgpt 5.4", provider: ai.ProviderGPT4, mode: PowerMax, want: "gpt-5.4"},
 		{name: "openai fast owns gpt 4o mini", provider: ai.ProviderGPT4, mode: PowerFast, want: "gpt-4o-mini"},
 		{name: "gemini max uses pro before preview", provider: ai.ProviderGemini, mode: PowerMax, want: "gemini-3.1-pro"},
 		{name: "grok max uses 4.20", provider: ai.ProviderGrok, mode: PowerMax, want: "grok-4.20-0309-reasoning"},
@@ -82,14 +82,14 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 func TestNormalizeProviderModelOverrideDowngradesUnavailableOpenAIMaxAlias(t *testing.T) {
 	t.Parallel()
 
-	if got := normalizeProviderModelOverride(ai.ProviderGPT4, "gpt-codex-5.5"); got != "gpt-5.4-codex" {
-		t.Fatalf("stale codex 5.5 override = %q, want gpt-5.4-codex", got)
+	if got := normalizeProviderModelOverride(ai.ProviderGPT4, "gpt-codex-5.5"); got != "gpt-5.4" {
+		t.Fatalf("stale codex 5.5 override = %q, want gpt-5.4", got)
 	}
-	if got := normalizeModelForProvider(ai.ProviderGPT4, "gpt-5.5", PowerMax); got != "gpt-5.4-codex" {
-		t.Fatalf("stale gpt 5.5 model = %q, want gpt-5.4-codex", got)
+	if got := normalizeModelForProvider(ai.ProviderGPT4, "gpt-5.5", PowerMax); got != "gpt-5.4" {
+		t.Fatalf("stale gpt 5.5 model = %q, want gpt-5.4", got)
 	}
-	if got := normalizeProviderModelOverride(ai.ProviderGPT4, "gpt-5.4-pro"); got != "gpt-5.4-codex" {
-		t.Fatalf("stale gpt 5.4 pro override = %q, want gpt-5.4-codex", got)
+	if got := normalizeProviderModelOverride(ai.ProviderGPT4, "gpt-5.4-pro"); got != "gpt-5.4-pro" {
+		t.Fatalf("gpt 5.4 pro override = %q, want gpt-5.4-pro", got)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestNormalizeExecutionModelForProvider_DowngradesFlagshipOverridesInBalance
 		want     string
 	}{
 		{name: "claude opus", provider: ai.ProviderClaude, model: "claude-opus-4-7", want: "claude-sonnet-4-6"},
-		{name: "openai codex", provider: ai.ProviderGPT4, model: "gpt-5.4-codex", want: "gpt-4.1"},
+		{name: "openai flagship", provider: ai.ProviderGPT4, model: "gpt-5.4", want: "gpt-4.1"},
 		{name: "gemini pro", provider: ai.ProviderGemini, model: "gemini-3.1-pro-preview", want: "gemini-2.5-pro"},
 		{name: "grok reasoning", provider: ai.ProviderGrok, model: "grok-4.20-0309-reasoning", want: "grok-3"},
 	}
@@ -145,8 +145,8 @@ func TestCreateBuildNormalizesUnavailableOpenAIProviderModelOverride(t *testing.
 	if err != nil {
 		t.Fatalf("CreateBuild returned error: %v", err)
 	}
-	if got := build.ProviderModelOverrides["gpt4"]; got != "gpt-5.4-codex" {
-		t.Fatalf("stored OpenAI override = %q, want gpt-5.4-codex", got)
+	if got := build.ProviderModelOverrides["gpt4"]; got != "gpt-5.4" {
+		t.Fatalf("stored OpenAI override = %q, want gpt-5.4", got)
 	}
 	if _, exists := build.ProviderModelOverrides["gemini"]; exists {
 		t.Fatalf("auto override should not be persisted, got %+v", build.ProviderModelOverrides)
@@ -162,7 +162,7 @@ func TestCreateBuildDowngradesFlagshipOverridesInBalanced(t *testing.T) {
 		Description: "Build a production-ready operations dashboard",
 		PowerMode:   PowerBalanced,
 		ProviderModelOverrides: map[string]string{
-			"gpt4":   "gpt-5.4-codex",
+			"gpt4":   "gpt-5.4",
 			"claude": "claude-opus-4-7",
 			"gemini": "gemini-3.1-pro-preview",
 			"grok":   "grok-4.20-0309-reasoning",

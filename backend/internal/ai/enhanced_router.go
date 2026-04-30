@@ -122,12 +122,12 @@ func (ear *EnhancedAIRouter) initializeProviders() {
 		},
 	}
 
-	// ChatGPT 5.4 Codex - Best for code generation and documentation
+	// ChatGPT 5.4 - Best for code generation and documentation
 	ear.providers["gpt4"] = &GPTProvider{
-		Name:    "ChatGPT 5.4 Codex",
-		Version: "gpt-5.4-codex",
+		Name:    "ChatGPT 5.4",
+		Version: "gpt-5.4",
 		Capabilities: &ProviderCapabilities{
-			Name:                "ChatGPT 5.4 Codex",
+			Name:                "ChatGPT 5.4",
 			Version:             "5.4",
 			MaxTokens:           128000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp", "html", "css"},

@@ -78,7 +78,7 @@ export const AICodeAssistant: React.FC<AICodeAssistantProps> = ({
       id: 'gpt4',
       name: 'OpenAI',
       icon: '⚡',
-      capabilities: ['ChatGPT 5.4 Codex', 'GPT-4.1', 'GPT-4o Mini'],
+      capabilities: ['ChatGPT 5.4', 'GPT-4.1', 'GPT-4o Mini'],
       performance: 92
     },
     {

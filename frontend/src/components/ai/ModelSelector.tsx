@@ -51,7 +51,7 @@ const FALLBACK_MODELS: Record<string, ModelInfo[]> = {
     { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],
   gpt4: [
-    { id: 'gpt-5.4-codex', name: 'ChatGPT 5.4 Codex', speed: 'slow', cost_tier: 'high', description: 'Max tier - current OpenAI Codex route' },
+    { id: 'gpt-5.4', name: 'ChatGPT 5.4', speed: 'slow', cost_tier: 'high', description: 'Max tier - current OpenAI flagship route' },
     { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — best current mid-tier coder' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],

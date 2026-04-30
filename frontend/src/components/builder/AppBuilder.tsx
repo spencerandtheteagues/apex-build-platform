@@ -492,7 +492,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
   },
   max: {
     claude: { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
-    gpt4: { id: 'gpt-5.4-codex', name: 'ChatGPT 5.4 Codex' },
+    gpt4: { id: 'gpt-5.4', name: 'ChatGPT 5.4' },
     gemini: { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
     grok: { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' },
     ollama: { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
@@ -600,13 +600,13 @@ const canonicalizeModelId = (model?: string) => {
   if (!value) return ''
   if (value.toLowerCase() === 'auto') return 'auto'
 
-  if (value.startsWith('gpt-codex-5.5')) return 'gpt-5.4-codex'
-  if (value.startsWith('gpt-5.5')) return 'gpt-5.4-codex'
-  if (value.startsWith('chatgpt-5.5')) return 'gpt-5.4-codex'
-  if (value.startsWith('gpt-codex-5.4')) return 'gpt-5.4-codex'
-  if (value.startsWith('chatgpt-5.4-codex')) return 'gpt-5.4-codex'
-  if (value.startsWith('gpt-5.4-codex')) return 'gpt-5.4-codex'
-  if (value.startsWith('gpt-5.4-pro')) return 'gpt-5.4-codex'
+  if (value.startsWith('gpt-codex-5.5')) return 'gpt-5.4'
+  if (value.startsWith('gpt-5.5')) return 'gpt-5.4'
+  if (value.startsWith('chatgpt-5.5')) return 'gpt-5.4'
+  if (value.startsWith('gpt-codex-5.4')) return 'gpt-5.4'
+  if (value.startsWith('chatgpt-5.4-codex')) return 'gpt-5.4'
+  if (value.startsWith('gpt-5.4-codex')) return 'gpt-5.4'
+  if (value.startsWith('gpt-5.4-pro')) return value
   if (value.startsWith('gpt-5.4')) return value
   if (value.startsWith('gpt-4.1')) return 'gpt-4.1'
   if (value.startsWith('gpt-4o-mini')) return 'gpt-4o-mini'

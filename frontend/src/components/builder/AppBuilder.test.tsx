@@ -554,7 +554,7 @@ describe('AppBuilder control surface', () => {
 
     expect((await screen.findAllByText('Claude Opus 4.7')).length).toBeGreaterThan(0)
     expect(screen.queryAllByText('GPT-4o Mini').filter((el) => el.tagName !== 'OPTION')).toHaveLength(0)
-    expect(screen.getAllByText('ChatGPT 5.4 Codex').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('ChatGPT 5.4').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Gemini 3.1 Pro Preview').length).toBeGreaterThan(0)
   })
 

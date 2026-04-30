@@ -57,7 +57,7 @@ const PROVIDERS: ProviderConfig[] = [
     activeBorder: 'border-green-500',
     placeholder: 'sk-...',
     models: [
-      { id: 'gpt-5.4-codex', name: 'ChatGPT 5.4 Codex', speed: 'slow', cost: 'high', description: 'Max tier - current OpenAI Codex route' },
+      { id: 'gpt-5.4', name: 'ChatGPT 5.4', speed: 'slow', cost: 'high', description: 'Max tier - current OpenAI flagship route' },
       { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost: 'medium', description: 'Balanced tier — best current mid-tier coder' },
       { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost: 'low', description: 'Fast mini tier' },
     ],
