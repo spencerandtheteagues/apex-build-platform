@@ -5300,6 +5300,86 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsFixesReactNamespaceImport(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-react-namespace-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerMax,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path: "src/App.tsx",
+				Content: `import { useMemo, useState, useCallback, useEffect } from "react";
+
+interface AppShellProps {
+  setState: React.Dispatch<React.SetStateAction<{ count: number }>>;
+  children?: React.ReactNode;
+}
+
+function AppShell({ children }: AppShellProps) {
+  return <main>{children}</main>;
+}
+
+export default function App() {
+  const [count] = useState(0);
+  const label = useMemo(() => String(count), [count]);
+  useEffect(() => undefined, []);
+  const noop = useCallback(() => undefined, []);
+  noop();
+  return <AppShell setState={() => undefined}>{label}</AppShell>;
+}
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	readinessErrors := []string{`Final output validation failed: Preview verification build failed: src/App.tsx(57,13): error TS2503: Cannot find namespace 'React'.
+src/App.tsx(57,28): error TS2503: Cannot find namespace 'React'.`}
+	targets := parseReactNamespaceRepairTargets(readinessErrors)
+	if len(targets) != 1 || targets[0] != "src/App.tsx" {
+		t.Fatalf("unexpected React namespace target files: %+v", targets)
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		readinessErrors,
+		"missing React namespace",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected React namespace import repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "src/App.tsx" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired app file to exist, got %+v", files)
+	}
+	if !strings.Contains(repairedFile.Content, `import React, { useMemo, useState, useCallback, useEffect } from "react";`) {
+		t.Fatalf("expected React namespace import to be injected, got %q", repairedFile.Content)
+	}
+}
+
 func TestApplyDeterministicValidationRepairsFixesDefaultExportMismatch(t *testing.T) {
 	t.Parallel()
 

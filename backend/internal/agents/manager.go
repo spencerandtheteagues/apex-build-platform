@@ -11288,6 +11288,82 @@ func ensureReactDefaultImport(content string) string {
 	return "import React from 'react';\n" + content
 }
 
+func parseReactNamespaceRepairTargets(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\):\s+error\s+TS2503:\s+Cannot find namespace 'React'`)
+	seen := make(map[string]bool)
+	targets := make([]string, 0)
+	for _, errText := range errors {
+		for _, match := range re.FindAllStringSubmatch(errText, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			target := sanitizeFilePath(match[1])
+			if target == "" || seen[target] {
+				continue
+			}
+			seen[target] = true
+			targets = append(targets, target)
+		}
+	}
+	return targets
+}
+
+func repairMissingReactNamespaceImport(path, content string) (string, bool) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".tsx" && ext != ".ts" && ext != ".jsx" && ext != ".js" {
+		return content, false
+	}
+	if !strings.Contains(content, "React.") {
+		return content, false
+	}
+	repaired := ensureReactDefaultImport(content)
+	repaired = normalizeGeneratedFileContent(path, repaired)
+	if strings.TrimSpace(repaired) == strings.TrimSpace(content) {
+		return content, false
+	}
+	return repaired, true
+}
+
+func (am *AgentManager) applyDeterministicReactNamespaceImportRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+	targets := parseReactNamespaceRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		repaired, changed := repairMissingReactNamespaceImport(target, content)
+		if !changed {
+			continue
+		}
+		if !plan.patchFile(target, repaired, am.detectLanguage(target)) {
+			continue
+		}
+		applied = append(applied, target)
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "React namespace import on " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "react_namespace_import_repair: "+summary), summary
+}
+
 func repairJSXInNonTSXFile(path, content string) (string, bool) {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext != ".ts" && ext != ".js" {
@@ -18661,6 +18737,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied missing known import repair: %s)",
 			message:     "Applied deterministic missing framework import repair for generated frontend modules. Re-running final validation before solver recovery.",
 			summaryKey:  "missing_known_import_repair",
+		},
+		{
+			apply:       am.applyDeterministicReactNamespaceImportRepair,
+			errorFormat: "Final output validation failed: %s (applied React namespace import repair: %s)",
+			message:     "Applied deterministic React namespace import repair for generated frontend modules. Re-running final validation before solver recovery.",
+			summaryKey:  "react_namespace_import_repair",
 		},
 		{
 			apply:       am.applyDeterministicExternalImportExportRepair,
