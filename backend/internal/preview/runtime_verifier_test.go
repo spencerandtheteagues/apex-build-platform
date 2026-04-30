@@ -524,13 +524,30 @@ func TestViteBinaryRequiresLocalProjectInstall(t *testing.T) {
 	}
 }
 
-func TestViteServerArgsUseViteOwnedEphemeralPort(t *testing.T) {
-	args := strings.Join(viteServerArgs(), " ")
-	for _, want := range []string{"--port 0", "--strictPort", "--clearScreen false", "--logLevel info"} {
+func TestViteServerArgsUseReservedPort(t *testing.T) {
+	args := strings.Join(viteServerArgs(43210), " ")
+	for _, want := range []string{"--port 43210", "--strictPort", "--clearScreen false", "--logLevel info"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("expected Vite startup args to include %q, got %q", want, args)
 		}
 	}
+}
+
+func TestReserveRuntimeVitePortReturnsConnectablePortAfterRelease(t *testing.T) {
+	port, release, err := reserveRuntimeVitePort()
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+			t.Skipf("local listener unavailable in this environment: %v", err)
+		}
+		t.Fatal(err)
+	}
+	release()
+
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("expected reserved port %d to be reusable after release: %v", port, err)
+	}
+	_ = ln.Close()
 }
 
 func TestExtractViteLocalURL(t *testing.T) {

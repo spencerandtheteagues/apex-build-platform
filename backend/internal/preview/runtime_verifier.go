@@ -151,17 +151,24 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	}
 
 	// ── 3. Start Vite dev server ─────────────────────────────────────────
-	// Vite owns port selection. Pre-allocating a "free" port and releasing it
-	// before process start has a TOCTOU race under concurrent verifications.
+	vitePort, releaseVitePort, portErr := reserveRuntimeVitePort()
+	if portErr != nil {
+		return rv.rtFail("boot_failed",
+			fmt.Sprintf("failed to reserve a local preview port: %v", portErr),
+			"Ensure the preview runtime can bind localhost TCP ports.",
+			start,
+		)
+	}
 	viteBin, viteBinErr := rv.viteBinary(dir)
 	if viteBinErr != nil {
+		releaseVitePort()
 		return rv.rtFail("boot_failed",
 			viteBinErr.Error(),
 			"Ensure package.json declares vite in dependencies or devDependencies. Runtime verification intentionally refuses to download tooling with npx.",
 			start,
 		)
 	}
-	viteCmd, viteLogs, viteErr := rv.startVite(bootCtx, dir, viteBin)
+	viteCmd, viteLogs, viteErr := rv.startVite(bootCtx, dir, viteBin, vitePort, releaseVitePort)
 	if viteErr != nil {
 		return rv.rtFail("boot_failed",
 			fmt.Sprintf("failed to start Vite process: %v", viteErr),
@@ -183,7 +190,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 		}
 	}()
 
-	// ── 4. Wait for Vite to report its actual URL ─────────────────────────
+	// ── 4. Wait for Vite to accept connections on the reserved URL ────────
 	stop := make(chan struct{})
 	defer close(stop)
 	readyTimeout := rv.runtimeServerReadyTimeout(totalTimeout, installTimeout)
@@ -192,8 +199,9 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			readyTimeout = remaining
 		}
 	}
-	baseURL, exited, exitErr := waitForViteURLOrExit(readyTimeout, stop, viteExitCh, viteLogs)
-	if baseURL == "" {
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", vitePort)
+	ready, exited, exitErr := waitForTCPPortOrExit(vitePort, readyTimeout, stop, viteExitCh)
+	if !ready {
 		serverLogs := truncateLog(viteLogs.String(), 1500)
 		if exited {
 			viteExited = true
@@ -211,7 +219,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			)
 		}
 		return rv.rtFailWithLogs("boot_failed",
-			fmt.Sprintf("Vite dev server did not report a local URL within %s", formatRuntimeTimeout(readyTimeout)),
+			fmt.Sprintf("Vite dev server did not accept connections at %s within %s", baseURL, formatRuntimeTimeout(readyTimeout)),
 			"Check vite.config.ts for syntax errors. Ensure all imports resolve. Common cause: missing or misconfigured entry point.",
 			start, serverLogs,
 		)
@@ -579,8 +587,8 @@ func (rv *RuntimeVerifier) viteBinary(dir string) (string, error) {
 	return "", fmt.Errorf("local Vite binary was not installed at %s after npm install", local)
 }
 
-func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string) (*exec.Cmd, *bytes.Buffer, error) {
-	args := viteServerArgs()
+func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string, port int, releasePort func()) (*exec.Cmd, *bytes.Buffer, error) {
+	args := viteServerArgs(port)
 	cmd := exec.CommandContext(ctx, viteBin, args...)
 	cmd.Dir = dir
 	// Restrict env to avoid leaking secrets
@@ -595,14 +603,32 @@ func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string) (
 	cmd.Stderr = &logs
 	cmd.Stdout = &logs
 
+	releasePort()
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
 	}
 	return cmd, &logs, nil
 }
 
-func viteServerArgs() []string {
-	return []string{"--port", "0", "--host", "127.0.0.1", "--strictPort", "--clearScreen", "false", "--logLevel", "info"}
+func reserveRuntimeVitePort() (int, func(), error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, func() {}, err
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	released := false
+	release := func() {
+		if released {
+			return
+		}
+		released = true
+		_ = ln.Close()
+	}
+	return port, release, nil
+}
+
+func viteServerArgs(port int) []string {
+	return []string{"--port", strconv.Itoa(port), "--host", "127.0.0.1", "--strictPort", "--clearScreen", "false", "--logLevel", "info"}
 }
 
 // waitForTCPPort polls until the given port accepts TCP connections or timeout.
