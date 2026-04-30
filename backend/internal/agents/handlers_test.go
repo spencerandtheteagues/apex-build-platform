@@ -610,6 +610,127 @@ func TestGetBuildDetailsFallsBackToSnapshotWhenLiveReadStalls(t *testing.T) {
 	}
 }
 
+func TestGetBuildDetailsRestoresStaleSnapshotWhenLiveReadStalls(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	staleHeartbeat := now.Add(-2 * activeBuildLeaseStaleAfter())
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"reviewing",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"old-instance",
+			"active_owner_heartbeat_at":%q
+		},
+		"quality_gate_status":"running",
+		"quality_gate_stage":"review"
+	}`, staleHeartbeat.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-details-stale-read-stall",
+		UserID:      1,
+		Description: "Restore stale snapshot when live details read blocks",
+		Status:      string(BuildReviewing),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    96,
+		FilesJSON:   `[{"path":"src/App.tsx","content":"export default function App(){return null}","language":"typescript"}]`,
+		AgentsJSON: `[{
+			"id":"frontend-1",
+			"role":"frontend",
+			"provider":"grok",
+			"status":"working",
+			"build_id":"active-details-stale-read-stall",
+			"progress":96
+		}]`,
+		TasksJSON: `[{
+			"id":"task-fix",
+			"type":"fix",
+			"description":"Apply final review patch",
+			"assigned_to":"frontend-1",
+			"status":"in_progress",
+			"created_at":"2026-03-30T07:00:00Z",
+			"started_at":"2026-03-30T07:00:00Z",
+			"input":{"action":"fix_review_issues"}
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: now.Add(-20 * time.Minute),
+		UpdatedAt: now.Add(-10 * time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		taskQueue:   make(chan *Task, 8),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+	blockedBuild := &Build{
+		ID:          "active-details-stale-read-stall",
+		UserID:      1,
+		Description: "Wedged live build with blocked details read",
+		Status:      BuildReviewing,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Progress:    96,
+	}
+	am.builds[blockedBuild.ID] = blockedBuild
+
+	previousTimeout := readableBuildStateTimeout
+	readableBuildStateTimeout = 50 * time.Millisecond
+	defer func() { readableBuildStateTimeout = previousTimeout }()
+
+	blockedBuild.mu.Lock()
+	defer blockedBuild.mu.Unlock()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/build/active-details-stale-read-stall", nil)
+		testRouter(am).ServeHTTP(w, req)
+		done <- w
+	}()
+
+	select {
+	case w := <-done:
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if body["live"] != true {
+			t.Fatalf("expected stale snapshot to restore as live after stalled details read, got live=%v", body["live"])
+		}
+		if body["restored_from_snapshot"] != true {
+			t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+		}
+		if am.builds["active-details-stale-read-stall"] == blockedBuild {
+			t.Fatal("expected wedged live build instance to be replaced")
+		}
+		select {
+		case resumed := <-am.taskQueue:
+			if resumed == nil || resumed.ID != "task-fix" {
+				t.Fatalf("expected restored task-fix to be requeued, got %+v", resumed)
+			}
+		default:
+			t.Fatal("expected restored in-progress task to be requeued")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected stale snapshot restore to return promptly when live state read blocks")
+	}
+}
+
 func TestGetBuildStatusKeepsFreshLeasedActiveSnapshotReadOnly(t *testing.T) {
 	db := openBuildTestDB(t)
 	now := time.Now().UTC()

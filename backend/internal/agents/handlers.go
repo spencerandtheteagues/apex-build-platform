@@ -735,6 +735,23 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 			writeBuildLookupError(c, readErr, readErr)
 			return
 		}
+		if errors.Is(readErr, errBuildReadTimeout) {
+			if restoredBuild, restoredSnapshot, restoredSession, restoreErr := h.restoreReadableSnapshotAfterStalledLiveRead(uid, snapshot); restoreErr == nil && restoredBuild != nil {
+				snapshot = restoredSnapshot
+				payload, secondReadErr := h.readLiveBuildStatusPayload(restoredBuild, userPlan, restoredSession)
+				if secondReadErr == nil {
+					if uid != payload.ownerID {
+						c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+						return
+					}
+					c.JSON(http.StatusOK, payload.response)
+					return
+				}
+				log.Printf("Build %s: restored stale snapshot after live status read timeout but live reread still failed: %v", buildID, secondReadErr)
+			} else if restoreErr != nil {
+				log.Printf("Build %s: failed to restore stale snapshot after live status read timeout: %v", buildID, restoreErr)
+			}
+		}
 	}
 
 	if err != nil {
@@ -1094,6 +1111,23 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 			writeBuildLookupError(c, readErr, readErr)
 			return
 		}
+		if errors.Is(readErr, errBuildReadTimeout) {
+			if restoredBuild, restoredSnapshot, restoredSession, restoreErr := h.restoreReadableSnapshotAfterStalledLiveRead(uid, snapshot); restoreErr == nil && restoredBuild != nil {
+				snapshot = restoredSnapshot
+				payload, secondReadErr := h.readLiveBuildDetailsPayload(restoredBuild, userPlan, restoredSession)
+				if secondReadErr == nil {
+					if uid != payload.ownerID {
+						c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+						return
+					}
+					c.JSON(http.StatusOK, payload.response)
+					return
+				}
+				log.Printf("Build %s: restored stale snapshot after live details read timeout but live reread still failed: %v", buildID, secondReadErr)
+			} else if restoreErr != nil {
+				log.Printf("Build %s: failed to restore stale snapshot after live details read timeout: %v", buildID, restoreErr)
+			}
+		}
 	}
 
 	if err != nil {
@@ -1187,6 +1221,35 @@ func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *
 	}
 
 	return nil, snapshot, false, nil
+}
+
+func (h *BuildHandler) restoreReadableSnapshotAfterStalledLiveRead(userID uint, snapshot *models.CompletedBuild) (*Build, *models.CompletedBuild, bool, error) {
+	if h == nil || h.manager == nil || snapshot == nil {
+		return nil, snapshot, false, nil
+	}
+
+	claimedSnapshot, claimed, err := h.manager.claimActiveSnapshotTakeover(snapshot)
+	if err != nil {
+		return nil, snapshot, false, err
+	}
+	if claimedSnapshot != nil {
+		snapshot = claimedSnapshot
+	}
+	if !claimed {
+		return nil, snapshot, false, nil
+	}
+
+	h.manager.evictLiveBuildSessionForSnapshotRestore(snapshot)
+	build, restored, err := h.manager.restoreBuildSessionFromSnapshotWithOptions(snapshot, restoreBuildSessionOptions{
+		resumeExecution: true,
+	})
+	if err != nil {
+		return nil, snapshot, false, err
+	}
+	if build.UserID != userID {
+		return nil, snapshot, false, errBuildAccessDenied
+	}
+	return build, snapshot, restored, nil
 }
 
 type liveBuildReadPayload struct {

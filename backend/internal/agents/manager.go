@@ -19501,6 +19501,32 @@ type restoreBuildSessionOptions struct {
 	resumeExecution bool
 }
 
+func (am *AgentManager) evictLiveBuildSessionForSnapshotRestore(snapshot *models.CompletedBuild) {
+	if am == nil || snapshot == nil {
+		return
+	}
+	buildID := strings.TrimSpace(snapshot.BuildID)
+	if buildID == "" {
+		return
+	}
+
+	for _, task := range parseBuildTasks(snapshot.TasksJSON) {
+		if task == nil || task.Status != TaskInProgress {
+			continue
+		}
+		am.cancelTaskExecution(task.ID)
+	}
+
+	am.mu.Lock()
+	delete(am.builds, buildID)
+	for agentID, agent := range am.agents {
+		if agent != nil && agent.BuildID == buildID {
+			delete(am.agents, agentID)
+		}
+	}
+	am.mu.Unlock()
+}
+
 func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.CompletedBuild) (*Build, bool, error) {
 	return am.restoreBuildSessionFromSnapshotWithOptions(snapshot, restoreBuildSessionOptions{resumeExecution: true})
 }
