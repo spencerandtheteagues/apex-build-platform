@@ -122,7 +122,8 @@ func ExecuteTaskWithGuarantee(
 	// If the task carries a build plan in its input, ensure it is well-formed before
 	// dispatching to the guarantee engine — a plan with no files or missing spec hash
 	// will produce a vacuous build that passes validation with an empty artifact set.
-	if plan, ok := task.Input["build_plan"]; ok && plan != nil {
+	inputSnapshot := cloneTaskInputForSnapshot(task)
+	if plan, ok := inputSnapshot["build_plan"]; ok && plan != nil {
 		if bp, ok := plan.(*BuildPlan); ok {
 			if bp.SpecHash == "" || len(bp.Files) == 0 {
 				return nil, fmt.Errorf("ExecuteTaskWithGuarantee: task %s has degenerate build plan (spec_hash=%q files=%d)", task.ID, bp.SpecHash, len(bp.Files))
@@ -135,11 +136,10 @@ func ExecuteTaskWithGuarantee(
 	result, err := fsmCtx.Engine.ExecuteWithGuarantee(ctx, stepName, func(ctx context.Context, retryCtx *guarantee.RetryContext) ([]core.BuildArtifact, error) {
 		// Pass correction hints to the task input if this is a retry
 		if retryCtx.IsRetry && len(retryCtx.CorrectionHints) > 0 {
-			if task.Input == nil {
-				task.Input = make(map[string]any)
-			}
-			task.Input["correction_hints"] = retryCtx.CorrectionHints
-			task.Input["attempt_number"] = retryCtx.AttemptNumber
+			setTaskInputValues(task, map[string]any{
+				"correction_hints": retryCtx.CorrectionHints,
+				"attempt_number":   retryCtx.AttemptNumber,
+			})
 		}
 
 		// Execute the actual task
@@ -170,9 +170,9 @@ func ExecuteTaskWithGuarantee(
 	output := &TaskOutput{
 		Files: make([]GeneratedFile, 0, len(result.Artifacts)),
 		Metrics: map[string]any{
-			"guarantee_attempts":  result.Attempts,
-			"guarantee_score":     result.Validation.Score,
-			"guarantee_verdict":   string(result.Validation.Verdict),
+			"guarantee_attempts":    result.Attempts,
+			"guarantee_score":       result.Validation.Score,
+			"guarantee_verdict":     string(result.Validation.Verdict),
 			"guarantee_rolled_back": result.RolledBack,
 			"guarantee_duration_ms": result.DurationMs,
 		},

@@ -65,7 +65,7 @@ func compileTaskWorkOrder(task *Task) compiledWorkOrder {
 	if task.RetryCount >= 2 && compiled.RiskLevel != RiskCritical {
 		compiled.RiskLevel = RiskHigh
 	}
-	compiled.Scope = inferScopeFromTaskInput(task.Input)
+	compiled.Scope = inferScopeFromTaskInput(cloneTaskInputForSnapshot(task))
 	return compiled
 }
 

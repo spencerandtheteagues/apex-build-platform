@@ -233,18 +233,20 @@ func extractTaskCheckins(response string) (string, *TaskStartAck, *TaskCompletio
 }
 
 func taskRequiresCoordinationCheckins(task *Task) bool {
-	if task == nil || task.Input == nil {
+	input := cloneTaskInputForSnapshot(task)
+	if len(input) == 0 {
 		return false
 	}
-	required, _ := task.Input["require_checkins"].(bool)
+	required, _ := input["require_checkins"].(bool)
 	return required
 }
 
 func taskArtifactWorkOrderFromInput(task *Task) *WorkOrder {
-	if task == nil || task.Input == nil {
+	input := cloneTaskInputForSnapshot(task)
+	if len(input) == 0 {
 		return nil
 	}
-	switch raw := task.Input["work_order_artifact"].(type) {
+	switch raw := input["work_order_artifact"].(type) {
 	case *WorkOrder:
 		if raw == nil {
 			return nil
@@ -269,10 +271,11 @@ func taskArtifactWorkOrderFromInput(task *Task) *WorkOrder {
 }
 
 func taskWorkOrderFromInput(task *Task) *BuildWorkOrder {
-	if task == nil || task.Input == nil {
+	input := cloneTaskInputForSnapshot(task)
+	if len(input) == 0 {
 		return nil
 	}
-	switch raw := task.Input["work_order"].(type) {
+	switch raw := input["work_order"].(type) {
 	case *BuildWorkOrder:
 		if raw == nil {
 			return nil

@@ -1609,7 +1609,7 @@ func (am *AgentManager) runInactivityMonitor(buildID string) (normalExit bool) {
 			}
 
 			if task.Status == TaskPending || task.Status == TaskInProgress {
-				if action, _ := task.Input["action"].(string); action != "" {
+				if action, _ := cloneTaskInputForSnapshot(task)["action"].(string); action != "" {
 					switch action {
 					case "fix_review_issues", "fix_tests", "fix_integration_contract", "regression_test", "post_fix_review", "solve_build_failure":
 						activeRecoveryTasks++
@@ -1992,7 +1992,7 @@ func taskUsesExtendedReviewTimeout(build *Build, task *Task) bool {
 		return true
 	}
 
-	action := strings.ToLower(taskInputStringValue(task.Input, "action"))
+	action := strings.ToLower(taskInputStringValue(cloneTaskInputForSnapshot(task), "action"))
 	switch action {
 	case "solve_build_failure", "post_fix_review", "regression_test", "fix_review_issues", "fix_preview_verification":
 		return true
@@ -2020,7 +2020,7 @@ func (am *AgentManager) shouldUseDeterministicReviewForPreviewRequiredBuild(buil
 		return false
 	}
 
-	action := strings.ToLower(strings.TrimSpace(taskInputStringValue(task.Input, "action")))
+	action := strings.ToLower(strings.TrimSpace(taskInputStringValue(cloneTaskInputForSnapshot(task), "action")))
 	switch action {
 	case "", "post_fix_review":
 		return true
@@ -2042,7 +2042,7 @@ func deterministicPreviewReviewOutput(build *Build, task *Task) *TaskOutput {
 	}
 	if task != nil {
 		metrics["task_id"] = task.ID
-		if action := strings.TrimSpace(taskInputStringValue(task.Input, "action")); action != "" {
+		if action := strings.TrimSpace(taskInputStringValue(cloneTaskInputForSnapshot(task), "action")); action != "" {
 			metrics["action"] = action
 		}
 	}
@@ -2137,15 +2137,11 @@ func (am *AgentManager) recoverStaleInProgressTasks(build *Build, idleFor time.D
 		if staleFor < timeout {
 			continue
 		}
-		if task.Input != nil {
-			if _, marked := task.Input["stale_recovery_attempt"]; marked && taskInputInt(task.Input, "stale_recovery_attempt") == task.RetryCount {
-				continue
-			}
+		inputSnapshot := cloneTaskInputForSnapshot(task)
+		if _, marked := inputSnapshot["stale_recovery_attempt"]; marked && taskInputInt(inputSnapshot, "stale_recovery_attempt") == task.RetryCount {
+			continue
 		}
-		if task.Input == nil {
-			task.Input = map[string]any{}
-		}
-		task.Input["stale_recovery_attempt"] = task.RetryCount
+		setTaskInputValue(task, "stale_recovery_attempt", task.RetryCount)
 		build.UpdatedAt = now
 		recoveries = append(recoveries, staleTaskRecovery{
 			taskID:      task.ID,
@@ -3107,7 +3103,7 @@ func (am *AgentManager) hasActiveAutomatedFixWriterTask(build *Build) bool {
 		if task.Status != TaskPending && task.Status != TaskInProgress {
 			continue
 		}
-		if isAutomatedFixWriterAction(taskInputStringValue(task.Input, "action")) {
+		if isAutomatedFixWriterAction(taskInputStringValue(cloneTaskInputForSnapshot(task), "action")) {
 			return true
 		}
 	}
@@ -3149,13 +3145,14 @@ func removeBuildTaskByID(tasks []*Task, taskID string) []*Task {
 }
 
 func taskPreferredProvider(task *Task) ai.AIProvider {
-	if task == nil || task.Input == nil {
+	if task == nil {
 		return ""
 	}
 	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil && artifact.PreferredProvider != "" {
 		return artifact.PreferredProvider
 	}
-	if raw, ok := task.Input["preferred_provider"]; ok {
+	inputSnapshot := cloneTaskInputForSnapshot(task)
+	if raw, ok := inputSnapshot["preferred_provider"]; ok {
 		if provider := ai.AIProvider(strings.TrimSpace(fmt.Sprintf("%v", raw))); provider != "" {
 			return provider
 		}
@@ -3224,18 +3221,16 @@ func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, ta
 	if build == nil || agent == nil || task == nil {
 		return
 	}
-	if task.Input == nil {
-		task.Input = map[string]any{}
-	}
 
 	artifact := taskArtifactWorkOrderFromInput(task)
 	if artifact == nil && task.Type == TaskFix {
 		artifact = am.buildRepairWorkOrderArtifact(build, agent, task)
 		if artifact != nil {
-			task.Input["work_order_artifact"] = artifact
-			if _, exists := task.Input["repair_hints"]; !exists {
+			setTaskInputValue(task, "work_order_artifact", artifact)
+			inputSnapshot := cloneTaskInputForSnapshot(task)
+			if _, exists := inputSnapshot["repair_hints"]; !exists {
 				if hints := am.repairHintsForTask(build, task); len(hints) > 0 {
-					task.Input["repair_hints"] = hints
+					setTaskInputValue(task, "repair_hints", hints)
 				}
 			}
 		}
@@ -3260,48 +3255,53 @@ func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, ta
 	}
 
 	if artifact != nil {
-		task.Input["work_order_artifact"] = artifact
-		task.Input["work_order_summary"] = strings.TrimSpace(artifact.Summary)
-		task.Input["owned_files"] = append([]string(nil), artifact.OwnedFiles...)
-		task.Input["required_files"] = append([]string(nil), artifact.RequiredFiles...)
-		task.Input["readable_files"] = append([]string(nil), artifact.ReadableFiles...)
-		task.Input["forbidden_files"] = append([]string(nil), artifact.ForbiddenFiles...)
-		task.Input["acceptance_checks"] = append([]string(nil), artifact.SurfaceLocalChecks...)
-		task.Input["required_outputs"] = append([]string(nil), artifact.RequiredOutputs...)
-		task.Input["required_exports"] = append([]string(nil), artifact.RequiredSymbols...)
-		task.Input["contract_slice"] = artifact.ContractSlice
-		task.Input["routing_mode"] = string(artifact.RoutingMode)
-		task.Input["risk_level"] = string(artifact.RiskLevel)
-		task.Input["max_context_budget"] = artifact.MaxContextBudget
-		if artifact.PreferredProvider != "" {
-			task.Input["preferred_provider"] = string(artifact.PreferredProvider)
+		values := map[string]any{
+			"work_order_artifact": artifact,
+			"work_order_summary":  strings.TrimSpace(artifact.Summary),
+			"owned_files":         append([]string(nil), artifact.OwnedFiles...),
+			"required_files":      append([]string(nil), artifact.RequiredFiles...),
+			"readable_files":      append([]string(nil), artifact.ReadableFiles...),
+			"forbidden_files":     append([]string(nil), artifact.ForbiddenFiles...),
+			"acceptance_checks":   append([]string(nil), artifact.SurfaceLocalChecks...),
+			"required_outputs":    append([]string(nil), artifact.RequiredOutputs...),
+			"required_exports":    append([]string(nil), artifact.RequiredSymbols...),
+			"contract_slice":      artifact.ContractSlice,
+			"routing_mode":        string(artifact.RoutingMode),
+			"risk_level":          string(artifact.RiskLevel),
+			"max_context_budget":  artifact.MaxContextBudget,
 		}
+		if artifact.PreferredProvider != "" {
+			values["preferred_provider"] = string(artifact.PreferredProvider)
+		}
+		setTaskInputValues(task, values)
 	}
 
 	if legacy != nil {
-		task.Input["work_order"] = legacy
-		if _, exists := task.Input["work_order_summary"]; !exists || strings.TrimSpace(fmt.Sprintf("%v", task.Input["work_order_summary"])) == "" {
-			task.Input["work_order_summary"] = strings.TrimSpace(legacy.Summary)
+		values := map[string]any{"work_order": legacy}
+		inputSnapshot := cloneTaskInputForSnapshot(task)
+		if _, exists := inputSnapshot["work_order_summary"]; !exists || strings.TrimSpace(fmt.Sprintf("%v", inputSnapshot["work_order_summary"])) == "" {
+			values["work_order_summary"] = strings.TrimSpace(legacy.Summary)
 		}
-		if _, exists := task.Input["owned_files"]; !exists {
-			task.Input["owned_files"] = append([]string(nil), legacy.OwnedFiles...)
+		if _, exists := inputSnapshot["owned_files"]; !exists {
+			values["owned_files"] = append([]string(nil), legacy.OwnedFiles...)
 		}
-		if _, exists := task.Input["required_files"]; !exists {
-			task.Input["required_files"] = append([]string(nil), legacy.RequiredFiles...)
+		if _, exists := inputSnapshot["required_files"]; !exists {
+			values["required_files"] = append([]string(nil), legacy.RequiredFiles...)
 		}
-		if _, exists := task.Input["acceptance_checks"]; !exists {
-			task.Input["acceptance_checks"] = append([]string(nil), legacy.AcceptanceChecks...)
+		if _, exists := inputSnapshot["acceptance_checks"]; !exists {
+			values["acceptance_checks"] = append([]string(nil), legacy.AcceptanceChecks...)
 		}
-		if _, exists := task.Input["forbidden_files"]; !exists {
-			task.Input["forbidden_files"] = append([]string(nil), legacy.ForbiddenFiles...)
+		if _, exists := inputSnapshot["forbidden_files"]; !exists {
+			values["forbidden_files"] = append([]string(nil), legacy.ForbiddenFiles...)
 		}
-		if _, exists := task.Input["required_outputs"]; !exists {
-			task.Input["required_outputs"] = append([]string(nil), legacy.RequiredOutputs...)
+		if _, exists := inputSnapshot["required_outputs"]; !exists {
+			values["required_outputs"] = append([]string(nil), legacy.RequiredOutputs...)
 		}
+		setTaskInputValues(task, values)
 	}
 
 	if am.isCodeGenerationTask(task.Type) {
-		task.Input["patch_baseline_files"] = am.captureTaskPatchBaseline(build, task)
+		setTaskInputValue(task, "patch_baseline_files", am.captureTaskPatchBaseline(build, task))
 	}
 }
 
@@ -3378,9 +3378,10 @@ func repairErrorStringsFromValue(raw any) []string {
 }
 
 func repairTaskErrors(task *Task) []string {
-	if task == nil || task.Input == nil {
+	if task == nil {
 		return nil
 	}
+	inputSnapshot := cloneTaskInputForSnapshot(task)
 	keys := []string{
 		"failure_error",
 		"previous_errors",
@@ -3391,7 +3392,7 @@ func repairTaskErrors(task *Task) []string {
 	}
 	out := make([]string, 0, len(keys)+len(task.ErrorHistory))
 	for _, key := range keys {
-		out = append(out, repairErrorStringsFromValue(task.Input[key])...)
+		out = append(out, repairErrorStringsFromValue(inputSnapshot[key])...)
 	}
 	out = append(out, repairErrorStringsFromValue(task.ErrorHistory)...)
 	if trimmed := strings.TrimSpace(task.Error); trimmed != "" {
@@ -3533,7 +3534,8 @@ func (am *AgentManager) repairHintsForTask(build *Build, task *Task) []string {
 		return heuristicHints
 	}
 
-	failedTaskID, _ := task.Input["failed_task_id"].(string)
+	taskInput := cloneTaskInputForSnapshot(task)
+	failedTaskID, _ := taskInput["failed_task_id"].(string)
 	relevantFiles := am.repairRelevantFiles(build, task, findBuildTaskByID(build, failedTaskID), rawErrors)
 	if len(relevantFiles) == 0 {
 		return heuristicHints
@@ -3563,7 +3565,8 @@ func (am *AgentManager) buildRepairWorkOrderArtifact(build *Build, agent *Agent,
 	}
 
 	var failedTask *Task
-	failedTaskID, _ := task.Input["failed_task_id"].(string)
+	taskInput := cloneTaskInputForSnapshot(task)
+	failedTaskID, _ := taskInput["failed_task_id"].(string)
 	if failedTaskID != "" {
 		failedTask = findBuildTaskByID(build, failedTaskID)
 	}
@@ -3585,7 +3588,7 @@ func (am *AgentManager) buildRepairWorkOrderArtifact(build *Build, agent *Agent,
 		}
 	}
 	// Also factor in files from the current (retry) task's input if it carries prior context
-	if priorCtx, ok := task.Input["previously_selected_context"].([]any); ok {
+	if priorCtx, ok := taskInput["previously_selected_context"].([]any); ok {
 		if previousSelections == nil {
 			previousSelections = make(map[string]int, len(priorCtx))
 		}
@@ -3607,16 +3610,14 @@ func (am *AgentManager) buildRepairWorkOrderArtifact(build *Build, agent *Agent,
 	// Persist the selected context paths in the task input so the next retry
 	// attempt can build a cumulative penalty map via previously_selected_context.
 	if len(relevantPaths) > 0 {
-		if task.Input == nil {
-			task.Input = make(map[string]any)
-		}
-		existing, _ := task.Input["previously_selected_context"].([]any)
+		inputSnapshot := cloneTaskInputForSnapshot(task)
+		existing, _ := inputSnapshot["previously_selected_context"].([]any)
 		merged := make([]any, len(existing), len(existing)+len(relevantPaths))
 		copy(merged, existing)
 		for _, p := range relevantPaths {
 			merged = append(merged, p)
 		}
-		task.Input["previously_selected_context"] = merged
+		setTaskInputValue(task, "previously_selected_context", merged)
 	}
 
 	ownedFiles := append([]string(nil), relevantPaths...)
@@ -3676,7 +3677,7 @@ func (am *AgentManager) buildRepairWorkOrderArtifact(build *Build, agent *Agent,
 
 	surface := deriveRepairSurface(ownedFiles, failedArtifact, agent.Role)
 	acceptanceChecks = repairAcceptanceChecks(contract, surface, acceptanceChecks)
-	action, _ := task.Input["action"].(string)
+	action, _ := taskInput["action"].(string)
 	if action == "" {
 		action = "repair"
 	}
@@ -3997,10 +3998,11 @@ Contract:
 }
 
 func taskPatchBaselineFromInput(task *Task) []GeneratedFile {
-	if task == nil || task.Input == nil {
+	if task == nil {
 		return nil
 	}
-	raw, exists := task.Input["patch_baseline_files"]
+	inputSnapshot := cloneTaskInputForSnapshot(task)
+	raw, exists := inputSnapshot["patch_baseline_files"]
 	if !exists || raw == nil {
 		return nil
 	}
@@ -4084,14 +4086,15 @@ func taskInputStringList(raw any) []string {
 }
 
 func taskPatchBaselinePatterns(task *Task) []string {
-	if task == nil || task.Input == nil {
+	if task == nil {
 		return nil
 	}
+	inputSnapshot := cloneTaskInputForSnapshot(task)
 	patterns := make([]string, 0, 8)
-	patterns = append(patterns, taskInputStringList(task.Input["owned_files"])...)
-	patterns = append(patterns, taskInputStringList(task.Input["required_files"])...)
+	patterns = append(patterns, taskInputStringList(inputSnapshot["owned_files"])...)
+	patterns = append(patterns, taskInputStringList(inputSnapshot["required_files"])...)
 	for _, key := range []string{"file_path", "target_file", "path"} {
-		patterns = append(patterns, taskInputStringList(task.Input[key])...)
+		patterns = append(patterns, taskInputStringList(inputSnapshot[key])...)
 	}
 	if len(patterns) == 0 {
 		if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
@@ -4588,7 +4591,7 @@ func taskRepairPath(task *Task, verificationObserved bool) []string {
 			path = append(path, string(artifact.RoutingMode))
 		}
 	}
-	if action, _ := task.Input["action"].(string); strings.TrimSpace(action) != "" {
+	if action, _ := cloneTaskInputForSnapshot(task)["action"].(string); strings.TrimSpace(action) != "" {
 		path = append(path, strings.TrimSpace(action))
 	}
 	if strategy := strings.TrimSpace(string(task.RetryStrategy)); strategy != "" {
@@ -4821,6 +4824,8 @@ func updateTaskRecoveryTokenCost(task *Task, attemptTokens int) int {
 	if task == nil {
 		return attemptTokens
 	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
 	if task.Input == nil {
 		task.Input = map[string]any{}
 	}
@@ -4967,14 +4972,33 @@ func recordedProviderForOutput(output *TaskOutput, fallback ai.AIProvider) ai.AI
 	return firstNonEmptyProvider(fallback)
 }
 
-func ensureTaskInputMap(task *Task) map[string]any {
-	if task == nil {
-		return nil
+func setTaskInputValue(task *Task, key string, value any) {
+	if task == nil || strings.TrimSpace(key) == "" {
+		return
 	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
 	if task.Input == nil {
 		task.Input = map[string]any{}
 	}
-	return task.Input
+	task.Input[key] = value
+}
+
+func setTaskInputValues(task *Task, values map[string]any) {
+	if task == nil || len(values) == 0 {
+		return
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	if task.Input == nil {
+		task.Input = map[string]any{}
+	}
+	for key, value := range values {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		task.Input[key] = value
+	}
 }
 
 // taskDispatcher processes tasks from the queue.
@@ -6009,9 +6033,10 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					}
 					task.RetryCount++
 					task.Status = TaskPending
-					taskInput := ensureTaskInputMap(task)
-					taskInput["coordination_errors"] = coordinationErrors
-					taskInput["retry_guidance"] = "Previous output violated the frozen scaffold or check-in protocol. Fix the coordination issues first."
+					setTaskInputValues(task, map[string]any{
+						"coordination_errors": coordinationErrors,
+						"retry_guidance":      "Previous output violated the frozen scaffold or check-in protocol. Fix the coordination issues first.",
+					})
 
 					agent.Status = StatusWorking
 					agent.mu.Unlock()
@@ -6084,13 +6109,12 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					task.RetryCount++
 					task.Status = TaskPending
 					task.Error = ""
-					taskInput := ensureTaskInputMap(task)
-					taskInput["verification_errors"] = verifyErrors
-					taskInput["previous_errors"] = task.ErrorHistory
-					taskInput["retry_strategy"] = retryStrategy
-					taskInput["retry_guidance"] = "Previous code failed build verification. Fix the following errors:"
-					taskInput["previous_errors"] = task.ErrorHistory
-					taskInput["retry_strategy"] = retryStrategy
+					setTaskInputValues(task, map[string]any{
+						"verification_errors": verifyErrors,
+						"previous_errors":     task.ErrorHistory,
+						"retry_strategy":      retryStrategy,
+						"retry_guidance":      "Previous code failed build verification. Fix the following errors:",
+					})
 
 					agent.Status = StatusWorking
 					agent.Error = ""
@@ -6119,10 +6143,11 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					return
 				}
 
-				taskInput := ensureTaskInputMap(task)
-				taskInput["verification_errors"] = verifyErrors
-				taskInput["retry_guidance"] = "Previous code failed build verification. Fix the following errors:"
-				taskInput["retry_strategy"] = retryStrategy
+				setTaskInputValues(task, map[string]any{
+					"verification_errors": verifyErrors,
+					"retry_guidance":      "Previous code failed build verification. Fix the following errors:",
+					"retry_strategy":      retryStrategy,
+				})
 				if retryStrategy == "spawn_solver" {
 					task.RetryStrategy = RetryStrategy(retryStrategy)
 					result.Success = false
@@ -6253,11 +6278,10 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		// and no amount of retrying, provider switching, or solver spawning will fix them.
 		if !insufficientCredits && !nonRetriable && buildErr == nil && am.shouldRunFailureConsensus(build, task, errorMsg, retryStrategy) {
 			decision, votes := am.runFailureConsensus(build, agent, task, result.Error, retryStrategy)
-			if task.Input == nil {
-				task.Input = map[string]any{}
-			}
-			task.Input["consensus_decision"] = string(decision)
-			task.Input["consensus_votes"] = votes
+			setTaskInputValues(task, map[string]any{
+				"consensus_decision": string(decision),
+				"consensus_votes":    votes,
+			})
 
 			switch decision {
 			case decisionSwitchProvider:
@@ -6326,10 +6350,11 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			})
 
 			// Re-queue the task with error context for learning
-			taskInput := ensureTaskInputMap(task)
-			taskInput["previous_errors"] = task.ErrorHistory
-			taskInput["retry_guidance"] = "Previous attempt failed. Analyze the error and try a different approach."
-			taskInput["retry_strategy"] = retryStrategy
+			setTaskInputValues(task, map[string]any{
+				"previous_errors": task.ErrorHistory,
+				"retry_guidance":  "Previous attempt failed. Analyze the error and try a different approach.",
+				"retry_strategy":  retryStrategy,
+			})
 
 			// Put task back in queue
 			am.enqueueTaskQueue(task)
@@ -6416,7 +6441,7 @@ func (am *AgentManager) handleTaskCompletion(buildID string, task *Task, output 
 	case TaskFix:
 		// Integration-preflight fixes stay inside the phased pipeline and should not
 		// spawn duplicate validation tasks before the dedicated integration/review phases.
-		if skip, _ := task.Input["skip_post_fix_validation"].(bool); !skip {
+		if skip, _ := cloneTaskInputForSnapshot(task)["skip_post_fix_validation"].(bool); !skip {
 			// Any other fix task is followed by fresh tests and review before completion.
 			am.schedulePostFixValidation(build, task)
 		}
@@ -6948,11 +6973,12 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	// Track recovery depth to allow one 2nd-level recovery but prevent infinite loops.
 	currentRecoveryDepth := 0
 	if failedTask.Type == TaskFix {
-		if action, ok := failedTask.Input["action"].(string); ok && action == "solve_build_failure" {
+		failedTaskInput := cloneTaskInputForSnapshot(failedTask)
+		if action, ok := failedTaskInput["action"].(string); ok && action == "solve_build_failure" {
 			// Use taskInputInt to safely read the depth regardless of whether the
 			// value was stored as int (in-process) or float64 (after JSON round-trip
 			// through cloneTaskInput / snapshot restore).
-			currentRecoveryDepth = taskInputInt(failedTask.Input, "recovery_depth")
+			currentRecoveryDepth = taskInputInt(failedTaskInput, "recovery_depth")
 			if currentRecoveryDepth >= 2 {
 				log.Printf("Build %s: recovery depth limit reached for task %s, skipping further recovery", buildID, failedTask.ID)
 				return false
@@ -7027,15 +7053,16 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 		recoveryInput["failed_task_provider_verification_report"] = failedTaskVerificationReport
 	}
 
+	if flag, ok := cloneTaskInputForSnapshot(failedTask)["recovery_queued"].(bool); ok && flag {
+		return false
+	}
+
 	build.mu.Lock()
-	if flag, ok := failedTask.Input["recovery_queued"].(bool); ok && flag {
+	if flag, ok := cloneTaskInputForSnapshot(failedTask)["recovery_queued"].(bool); ok && flag {
 		build.mu.Unlock()
 		return false
 	}
-	if failedTask.Input == nil {
-		failedTask.Input = map[string]any{}
-	}
-	failedTask.Input["recovery_queued"] = true
+	setTaskInputValue(failedTask, "recovery_queued", true)
 
 	recoveryTask := &Task{
 		ID:          uuid.New().String(),
@@ -7050,7 +7077,7 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	// Supersede the failed task with an explicit recovery flow so the build can
 	// still converge to success if solver + validation tasks pass.
 	failedTask.Status = TaskCancelled
-	failedTask.Input["superseded_by_recovery"] = recoveryTask.ID
+	setTaskInputValue(failedTask, "superseded_by_recovery", recoveryTask.ID)
 
 	build.Tasks = append(build.Tasks, recoveryTask)
 	build.UpdatedAt = time.Now()
@@ -7058,12 +7085,14 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 
 	rollbackRecoveryTask := func(reason string) {
 		build.mu.Lock()
+		failedTask.mu.Lock()
 		if failedTask.Input != nil {
 			delete(failedTask.Input, "recovery_queued")
 			if taskInputStringValue(failedTask.Input, "superseded_by_recovery") == recoveryTask.ID {
 				delete(failedTask.Input, "superseded_by_recovery")
 			}
 		}
+		failedTask.mu.Unlock()
 		failedTask.Status = TaskFailed
 		if strings.TrimSpace(failedTask.Error) == "" {
 			failedTask.Error = failureMessage
@@ -7128,6 +7157,7 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 
 	newTasks := make([]*Task, 0, 1)
 	now := time.Now()
+	sourceTaskInput := cloneTaskInputForSnapshot(sourceTask)
 
 	if testAgent != nil {
 		newTasks = append(newTasks, &Task{
@@ -7141,7 +7171,7 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 				"action":                   "regression_test",
 				"trigger_task":             sourceTask.ID,
 				"app_description":          build.Description,
-				"fix_context_action":       sourceTask.Input["action"],
+				"fix_context_action":       sourceTaskInput["action"],
 				"schedule_post_fix_review": reviewAgent != nil,
 			},
 			CreatedAt: now,
@@ -7158,7 +7188,7 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 				"action":             "post_fix_review",
 				"trigger_task":       sourceTask.ID,
 				"app_description":    build.Description,
-				"fix_context_action": sourceTask.Input["action"],
+				"fix_context_action": sourceTaskInput["action"],
 			},
 			CreatedAt: now,
 		})
@@ -7235,7 +7265,7 @@ func (am *AgentManager) schedulePostFixReviewAfterRegression(build *Build, sourc
 			"action":             "post_fix_review",
 			"trigger_task":       sourceTask.ID,
 			"app_description":    build.Description,
-			"fix_context_action": sourceTask.Input["fix_context_action"],
+			"fix_context_action": cloneTaskInputForSnapshot(sourceTask)["fix_context_action"],
 		},
 		CreatedAt: time.Now(),
 	}
@@ -7331,7 +7361,7 @@ func (am *AgentManager) handleTestCompletion(build *Build, sourceTask *Task, out
 			CreatedAt: time.Now(),
 		}
 		if sourceTask != nil {
-			fixTask.Input["trigger_task"] = sourceTask.ID
+			setTaskInputValue(fixTask, "trigger_task", sourceTask.ID)
 		}
 
 		agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
@@ -7370,7 +7400,7 @@ func (am *AgentManager) handleTestCompletion(build *Build, sourceTask *Task, out
 	}
 
 	if !hasFailures && sourceTask != nil {
-		if scheduleReview, _ := sourceTask.Input["schedule_post_fix_review"].(bool); scheduleReview {
+		if scheduleReview, _ := cloneTaskInputForSnapshot(sourceTask)["schedule_post_fix_review"].(bool); scheduleReview {
 			am.schedulePostFixReviewAfterRegression(build, sourceTask)
 		}
 	}
@@ -7540,7 +7570,7 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 			CreatedAt: time.Now(),
 		}
 		if sourceTask != nil {
-			fixTask.Input["trigger_task"] = sourceTask.ID
+			setTaskInputValue(fixTask, "trigger_task", sourceTask.ID)
 		}
 
 		agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
@@ -7614,7 +7644,7 @@ func (am *AgentManager) canCreateAutomatedFixTask(build *Build, action string) b
 		if task == nil || task.Type != TaskFix {
 			continue
 		}
-		taskAction, _ := task.Input["action"].(string)
+		taskAction, _ := cloneTaskInputForSnapshot(task)["action"].(string)
 		if taskAction == action {
 			count++
 		}
@@ -7638,7 +7668,7 @@ func (am *AgentManager) hasRecentOrActiveAutomatedFixTask(build *Build, action s
 		if task == nil || task.Type != TaskFix {
 			continue
 		}
-		taskAction, _ := task.Input["action"].(string)
+		taskAction, _ := cloneTaskInputForSnapshot(task)["action"].(string)
 		if taskAction != action {
 			continue
 		}
@@ -7715,7 +7745,7 @@ func (am *AgentManager) launchIntegrationPreflightRecovery(build *Build, issues 
 		CreatedAt: now,
 	}
 	if hints := extractDependencyRepairHintsFromReadinessErrors(issues); len(hints) > 0 {
-		fixTask.Input["repair_hints"] = hints
+		setTaskInputValue(fixTask, "repair_hints", hints)
 	}
 
 	build.mu.Lock()
@@ -10940,7 +10970,7 @@ func parseMissingLocalModuleRepairTargets(errors []string) []missingLocalModuleR
 			if len(match) != 3 {
 				continue
 			}
-			sourcePath := sanitizeFilePath(strings.TrimSpace(match[1]))
+			sourcePath := normalizePreviewSyntaxErrorPath(match[1])
 			specifier := strings.TrimSpace(match[2])
 			if sourcePath == "" || specifier == "" {
 				continue
@@ -11830,6 +11860,18 @@ func generatedPostCSSConfigSatisfied(files []GeneratedFile, plan *generatedFileP
 	return false
 }
 
+func generatedTailwindConfigSatisfied(files []GeneratedFile, plan *generatedFilePatchPlan, packageUsesESM bool) bool {
+	for _, f := range files {
+		p := filepath.ToSlash(strings.TrimSpace(f.Path))
+		if p != "tailwind.config.js" && p != "tailwind.config.cjs" && p != "tailwind.config.mjs" && p != "tailwind.config.ts" {
+			continue
+		}
+		content := plan.content(p)
+		return strings.TrimSpace(content) != "" && !configSyntaxConflictsWithModuleMode(p, content, packageUsesESM)
+	}
+	return true
+}
+
 func (am *AgentManager) clearStaleDependencyValidationError(build *Build, readinessErrors []string) string {
 	if build == nil || len(readinessErrors) == 0 {
 		return ""
@@ -11906,7 +11948,8 @@ func (am *AgentManager) clearStaleDependencyValidationError(build *Build, readin
 		if !allDeclared(frontendContent, []string{"postcss", "tailwindcss", "autoprefixer"}) {
 			return ""
 		}
-		if !generatedPostCSSConfigSatisfied(files, plan, manifestContentUsesESModulePackage(frontendContent)) {
+		packageUsesESM := manifestContentUsesESModulePackage(frontendContent)
+		if !generatedPostCSSConfigSatisfied(files, plan, packageUsesESM) || !generatedTailwindConfigSatisfied(files, plan, packageUsesESM) {
 			return ""
 		}
 		cleared = append(cleared, fmt.Sprintf("frontend %s has compatible PostCSS/Tailwind config", frontendPath))
@@ -18014,7 +18057,7 @@ func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 		if task.Status != TaskPending && task.Status != TaskInProgress {
 			continue
 		}
-		action, _ := task.Input["action"].(string)
+		action, _ := cloneTaskInputForSnapshot(task)["action"].(string)
 		if !isRecoveryAction(action) {
 			continue
 		}
@@ -18736,7 +18779,7 @@ func (am *AgentManager) launchFinalValidationSolverRecovery(
 		},
 	}
 	if hints := am.finalValidationRepairHints(readinessErrors, allFiles, build.UserID); len(hints) > 0 {
-		failedTask.Input["repair_hints"] = hints
+		setTaskInputValue(failedTask, "repair_hints", hints)
 	}
 
 	return am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary))
@@ -19751,10 +19794,10 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 // task was explicitly told not to touch. This enforces work-order boundaries at runtime
 // rather than relying solely on prompt instructions. Violations are logged as warnings.
 func stripForbiddenFilesFromOutput(task *Task) {
-	if task == nil || task.Output == nil || task.Input == nil {
+	if task == nil || task.Output == nil {
 		return
 	}
-	forbidden := taskInputStringList(task.Input["forbidden_files"])
+	forbidden := taskInputStringList(cloneTaskInputForSnapshot(task)["forbidden_files"])
 	if len(forbidden) == 0 {
 		return
 	}
@@ -21151,6 +21194,45 @@ func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, 
 			taskDescription = workOrder.Summary
 		}
 
+		taskInput := map[string]any{
+			"app_description":  description,
+			"agent_role":       string(agent.Role),
+			"require_checkins": true,
+		}
+		if build.Plan != nil {
+			taskInput["build_spec_hash"] = build.Plan.SpecHash
+			taskInput["scaffold_id"] = build.Plan.ScaffoldID
+			taskInput["build_plan"] = build.Plan
+			taskInput["api_contract"] = build.Plan.APIContract
+		}
+		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ValidatedBuildSpec != nil {
+			taskInput["validated_build_spec"] = orchestration.ValidatedBuildSpec
+			if security := limitBuildSpecAdvisoriesForRole(agent.Role, orchestration.ValidatedBuildSpec.SecurityAdvisories); len(security) > 0 {
+				taskInput["validated_security_advisories"] = append([]BuildSpecAdvisory(nil), security...)
+			}
+			if performance := limitBuildSpecAdvisoriesForRole(agent.Role, orchestration.ValidatedBuildSpec.PerformanceAdvisories); len(performance) > 0 {
+				taskInput["validated_performance_advisories"] = append([]BuildSpecAdvisory(nil), performance...)
+			}
+		}
+		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ReliabilitySummary != nil {
+			taskInput["reliability_summary"] = orchestration.ReliabilitySummary
+		}
+		if workOrder != nil {
+			taskInput["work_order"] = workOrder
+			taskInput["owned_files"] = append([]string(nil), workOrder.OwnedFiles...)
+			taskInput["required_files"] = append([]string(nil), workOrder.RequiredFiles...)
+			taskInput["acceptance_checks"] = append([]string(nil), workOrder.AcceptanceChecks...)
+			taskInput["forbidden_files"] = append([]string(nil), workOrder.ForbiddenFiles...)
+		}
+		if agent.Role == RoleTesting {
+			testContract := derivedTestContract(build.Plan)
+			if testContract != nil {
+				taskInput["test_frameworks"] = append([]string(nil), testContract.Frameworks...)
+				taskInput["owned_test_paths"] = append([]string(nil), testContract.OwnedTestPaths...)
+				taskInput["test_contract"] = testContract
+			}
+		}
+
 		task := &Task{
 			ID:          uuid.New().String(),
 			Type:        am.getTaskTypeForRole(agent.Role),
@@ -21158,45 +21240,8 @@ func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, 
 			Priority:    ap.priority,
 			Status:      TaskPending,
 			MaxRetries:  build.MaxRetries,
-			Input: map[string]any{
-				"app_description":  description,
-				"agent_role":       string(agent.Role),
-				"require_checkins": true,
-			},
-			CreatedAt: time.Now(),
-		}
-		if build.Plan != nil {
-			task.Input["build_spec_hash"] = build.Plan.SpecHash
-			task.Input["scaffold_id"] = build.Plan.ScaffoldID
-			task.Input["build_plan"] = build.Plan
-			task.Input["api_contract"] = build.Plan.APIContract
-		}
-		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ValidatedBuildSpec != nil {
-			task.Input["validated_build_spec"] = orchestration.ValidatedBuildSpec
-			if security := limitBuildSpecAdvisoriesForRole(agent.Role, orchestration.ValidatedBuildSpec.SecurityAdvisories); len(security) > 0 {
-				task.Input["validated_security_advisories"] = append([]BuildSpecAdvisory(nil), security...)
-			}
-			if performance := limitBuildSpecAdvisoriesForRole(agent.Role, orchestration.ValidatedBuildSpec.PerformanceAdvisories); len(performance) > 0 {
-				task.Input["validated_performance_advisories"] = append([]BuildSpecAdvisory(nil), performance...)
-			}
-		}
-		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ReliabilitySummary != nil {
-			task.Input["reliability_summary"] = orchestration.ReliabilitySummary
-		}
-		if workOrder != nil {
-			task.Input["work_order"] = workOrder
-			task.Input["owned_files"] = append([]string(nil), workOrder.OwnedFiles...)
-			task.Input["required_files"] = append([]string(nil), workOrder.RequiredFiles...)
-			task.Input["acceptance_checks"] = append([]string(nil), workOrder.AcceptanceChecks...)
-			task.Input["forbidden_files"] = append([]string(nil), workOrder.ForbiddenFiles...)
-		}
-		if agent.Role == RoleTesting {
-			testContract := derivedTestContract(build.Plan)
-			if testContract != nil {
-				task.Input["test_frameworks"] = append([]string(nil), testContract.Frameworks...)
-				task.Input["owned_test_paths"] = append([]string(nil), testContract.OwnedTestPaths...)
-				task.Input["test_contract"] = testContract
-			}
+			Input:       taskInput,
+			CreatedAt:   time.Now(),
 		}
 
 		build.mu.Lock()
@@ -21395,7 +21440,8 @@ func relatedPhaseTaskIDs(tasks []*Task, roots map[string]struct{}) map[string]st
 				continue
 			}
 			if _, ok := related[task.ID]; ok {
-				if childID := taskInputStringValue(task.Input, "superseded_by_recovery"); childID != "" {
+				inputSnapshot := cloneTaskInputForSnapshot(task)
+				if childID := taskInputStringValue(inputSnapshot, "superseded_by_recovery"); childID != "" {
 					if _, seen := related[childID]; !seen {
 						related[childID] = struct{}{}
 						changed = true
@@ -21403,9 +21449,10 @@ func relatedPhaseTaskIDs(tasks []*Task, roots map[string]struct{}) map[string]st
 				}
 				continue
 			}
+			inputSnapshot := cloneTaskInputForSnapshot(task)
 			for _, ref := range []string{
-				taskInputStringValue(task.Input, "failed_task_id"),
-				taskInputStringValue(task.Input, "trigger_task"),
+				taskInputStringValue(inputSnapshot, "failed_task_id"),
+				taskInputStringValue(inputSnapshot, "trigger_task"),
 			} {
 				if ref == "" {
 					continue
@@ -21433,11 +21480,12 @@ func relatedPhaseTaskHasChild(tasks []*Task, related map[string]struct{}, taskID
 		if _, ok := related[task.ID]; !ok {
 			continue
 		}
-		if taskInputStringValue(task.Input, "failed_task_id") == taskID || taskInputStringValue(task.Input, "trigger_task") == taskID {
+		inputSnapshot := cloneTaskInputForSnapshot(task)
+		if taskInputStringValue(inputSnapshot, "failed_task_id") == taskID || taskInputStringValue(inputSnapshot, "trigger_task") == taskID {
 			return true
 		}
 		if task.ID == taskID {
-			childID := taskInputStringValue(task.Input, "superseded_by_recovery")
+			childID := taskInputStringValue(inputSnapshot, "superseded_by_recovery")
 			if childID != "" {
 				if _, ok := related[childID]; ok {
 					return true
@@ -24277,9 +24325,10 @@ PATCH RULES:
 }
 
 func (am *AgentManager) buildTaskPrompt(task *Task, build *Build, agent *Agent) string {
+	taskInput := cloneTaskInputForSnapshot(task)
 	// Check if there are previous errors to learn from (pruned to last 2 attempts)
 	errorContext := ""
-	if prevErrors, ok := task.Input["previous_errors"]; ok {
+	if prevErrors, ok := taskInput["previous_errors"]; ok {
 		errStr := fmt.Sprintf("%v", prevErrors)
 		// Prune error context: keep only last 3000 chars
 		if len(errStr) > 3000 {
@@ -24287,7 +24336,7 @@ func (am *AgentManager) buildTaskPrompt(task *Task, build *Build, agent *Agent) 
 		}
 
 		fixGuidance := ""
-		if strategy, ok := task.Input["retry_strategy"]; ok && strategy == "fix_and_retry" {
+		if strategy, ok := taskInput["retry_strategy"]; ok && strategy == "fix_and_retry" {
 			fixGuidance = `
 CRITICAL: This is a FIX AND RETRY attempt. You MUST:
 1. Carefully read the exact error messages below
@@ -24307,23 +24356,23 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 	// For restart_failed_build tasks, inject a rich failure context block so the solver
 	// knows exactly what broke and what needs to be fixed/generated.
 	restartFailureContext := ""
-	if action, _ := task.Input["action"].(string); action == "restart_failed_build" {
+	if action, _ := taskInput["action"].(string); action == "restart_failed_build" {
 		var sb strings.Builder
 		sb.WriteString("\n<build_failure_context>\n")
 		sb.WriteString("URGENT BUILD RESTART — This build previously failed and you are the recovery agent.\n")
 		sb.WriteString("Your job: diagnose ALL failures, fix every broken file, and ensure the build reaches a runnable state.\n\n")
 
-		if buildErr, _ := task.Input["build_error"].(string); buildErr != "" {
+		if buildErr, _ := taskInput["build_error"].(string); buildErr != "" {
 			sb.WriteString(fmt.Sprintf("Build failure reason: %s\n\n", buildErr))
 		}
 
-		if summaries, _ := task.Input["failed_task_summaries"].([]string); len(summaries) > 0 {
+		if summaries, _ := taskInput["failed_task_summaries"].([]string); len(summaries) > 0 {
 			sb.WriteString("Failed tasks:\n")
 			for _, s := range summaries {
 				sb.WriteString(fmt.Sprintf("  - %s\n", s))
 			}
 			sb.WriteString("\n")
-		} else if summaries, _ := task.Input["failed_task_summaries"].([]any); len(summaries) > 0 {
+		} else if summaries, _ := taskInput["failed_task_summaries"].([]any); len(summaries) > 0 {
 			sb.WriteString("Failed tasks:\n")
 			for _, s := range summaries {
 				sb.WriteString(fmt.Sprintf("  - %s\n", s))
@@ -24331,9 +24380,9 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 			sb.WriteString("\n")
 		}
 
-		if incomplete, _ := task.Input["incomplete_task_types"].([]string); len(incomplete) > 0 {
+		if incomplete, _ := taskInput["incomplete_task_types"].([]string); len(incomplete) > 0 {
 			sb.WriteString(fmt.Sprintf("Incomplete/missing task types: %s\n\n", strings.Join(incomplete, ", ")))
-		} else if incomplete, _ := task.Input["incomplete_task_types"].([]any); len(incomplete) > 0 {
+		} else if incomplete, _ := taskInput["incomplete_task_types"].([]any); len(incomplete) > 0 {
 			items := make([]string, 0, len(incomplete))
 			for _, v := range incomplete {
 				items = append(items, fmt.Sprintf("%v", v))
@@ -24351,8 +24400,8 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 	}
 
 	repairHintsContext := ""
-	if task != nil && task.Input != nil {
-		if hints, ok := task.Input["repair_hints"]; ok {
+	if task != nil {
+		if hints, ok := taskInput["repair_hints"]; ok {
 			switch v := hints.(type) {
 			case []string:
 				if len(v) > 0 {
@@ -24373,8 +24422,8 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 	}
 
 	coordinationErrorContext := ""
-	if task != nil && task.Input != nil {
-		if errs, ok := task.Input["coordination_errors"]; ok {
+	if task != nil {
+		if errs, ok := taskInput["coordination_errors"]; ok {
 			switch v := errs.(type) {
 			case []string:
 				if len(v) > 0 {
@@ -24509,25 +24558,25 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 				agentContext += fmt.Sprintf("\n<%s>\n%s</%s>\n", block, content, block)
 			}
 		}
-		if agent.Role == RoleSolver && task != nil && task.Input != nil {
-			failedTaskID, _ := task.Input["failed_task_id"].(string)
-			failedTaskType, _ := task.Input["failed_task_type"].(string)
-			failedTaskDesc, _ := task.Input["failed_task_description"].(string)
-			failureErr, _ := task.Input["failure_error"].(string)
+		if agent.Role == RoleSolver && task != nil {
+			failedTaskID, _ := taskInput["failed_task_id"].(string)
+			failedTaskType, _ := taskInput["failed_task_type"].(string)
+			failedTaskDesc, _ := taskInput["failed_task_description"].(string)
+			failureErr, _ := taskInput["failure_error"].(string)
 			if failedTaskID != "" || failedTaskType != "" || failedTaskDesc != "" || failureErr != "" {
 				agentContext += fmt.Sprintf("\n<failure_context>\nfailed_task_id: %s\nfailed_task_type: %s\nfailed_task_description: %s\nerror: %s\n</failure_context>\n",
 					failedTaskID, failedTaskType, failedTaskDesc, failureErr)
 			}
-			if originalPrompt := taskInputStringValue(task.Input, "failed_task_original_prompt"); originalPrompt != "" {
+			if originalPrompt := taskInputStringValue(taskInput, "failed_task_original_prompt"); originalPrompt != "" {
 				agentContext += fmt.Sprintf("\n<failed_task_original_prompt>\n%s\n</failed_task_original_prompt>\n", originalPrompt)
 			}
-			if systemPrompt := taskInputStringValue(task.Input, "failed_task_system_prompt"); systemPrompt != "" {
+			if systemPrompt := taskInputStringValue(taskInput, "failed_task_system_prompt"); systemPrompt != "" {
 				agentContext += fmt.Sprintf("\n<failed_task_system_prompt>\n%s\n</failed_task_system_prompt>\n", systemPrompt)
 			}
-			if partialOutput := taskInputStringValue(task.Input, "failed_task_partial_output"); partialOutput != "" {
+			if partialOutput := taskInputStringValue(taskInput, "failed_task_partial_output"); partialOutput != "" {
 				agentContext += fmt.Sprintf("\n<failed_task_partial_output>\n%s\n</failed_task_partial_output>\n", partialOutput)
 			}
-			if verificationReport := taskInputStringValue(task.Input, "failed_task_provider_verification_report"); verificationReport != "" {
+			if verificationReport := taskInputStringValue(taskInput, "failed_task_provider_verification_report"); verificationReport != "" {
 				agentContext += fmt.Sprintf("\n<failed_task_provider_verification_report>\n%s\n</failed_task_provider_verification_report>\n", verificationReport)
 			}
 		}
@@ -29491,13 +29540,14 @@ func taskNeedsProactiveTokenBoost(task *Task, role AgentRole) bool {
 	case RoleFrontend, RoleBackend, RoleDatabase, RoleTesting:
 		return true
 	}
-	if len(taskInputStringList(task.Input["required_files"])) >= 4 ||
-		len(taskInputStringList(task.Input["owned_files"])) >= 4 {
+	taskInput := cloneTaskInputForSnapshot(task)
+	if len(taskInputStringList(taskInput["required_files"])) >= 4 ||
+		len(taskInputStringList(taskInput["owned_files"])) >= 4 {
 		return true
 	}
 	descriptiveChars := len(task.Description) +
-		len(taskInputStringValue(task.Input, "work_order_summary")) +
-		len(taskInputStringValue(task.Input, "description"))
+		len(taskInputStringValue(taskInput, "work_order_summary")) +
+		len(taskInputStringValue(taskInput, "description"))
 	return descriptiveChars >= 1400
 }
 
@@ -29587,9 +29637,10 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 		task.Status = TaskPending
 		task.Error = ""
 		task.RetryStrategy = RetryStrategy(retryStrategy)
-		taskInput := ensureTaskInputMap(task)
-		taskInput["previous_errors"] = task.ErrorHistory
-		taskInput["retry_strategy"] = retryStrategy
+		inputUpdates := map[string]any{
+			"previous_errors": task.ErrorHistory,
+			"retry_strategy":  retryStrategy,
+		}
 		if task.Type == TaskPlan && isProviderLevelFailure(result.Error) && build != nil {
 			oldProvider := agent.Provider
 			triedProviders := map[ai.AIProvider]bool{oldProvider: true}
@@ -29598,7 +29649,7 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 				nextProvider := fallbacks[0]
 				agent.Provider = nextProvider
 				agent.Model = selectBuildModelForProvider(build, nextProvider)
-				taskInput["retry_provider_rotation"] = fmt.Sprintf("%s -> %s", oldProvider, nextProvider)
+				inputUpdates["retry_provider_rotation"] = fmt.Sprintf("%s -> %s", oldProvider, nextProvider)
 				am.broadcast(agent.BuildID, &WSMessage{
 					Type:      "agent:provider_fallback",
 					BuildID:   agent.BuildID,
@@ -29616,6 +29667,7 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 				})
 			}
 		}
+		setTaskInputValues(task, inputUpdates)
 
 		agent.Status = StatusWorking
 		agent.Error = ""
@@ -30097,9 +30149,10 @@ func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, erro
 	// on every recovery retry wastes tokens without benefit — they fail due to code
 	// complexity, not provider availability.
 	if task.RetryCount >= 1 {
+		taskInput := cloneTaskInputForSnapshot(task)
 		isRecoveryTask := task.Type == TaskFix &&
-			task.Input != nil &&
-			task.Input["action"] == "solve_build_failure"
+			taskInput != nil &&
+			taskInput["action"] == "solve_build_failure"
 		if !isRecoveryTask {
 			switch task.Type {
 			case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix:
@@ -30620,10 +30673,10 @@ func (am *AgentManager) executeChunkedFileRepair(
 // the repair_hints stored in task.Input.  Hints follow the format produced by
 // RepairPlan.RepairHints(): "[file_path] instruction\nSuggested fix:\ncode".
 func (am *AgentManager) parseRepairHintTargets(task *Task) map[string]string {
-	if task == nil || task.Input == nil {
+	if task == nil {
 		return nil
 	}
-	rawHints, ok := task.Input["repair_hints"]
+	rawHints, ok := cloneTaskInputForSnapshot(task)["repair_hints"]
 	if !ok {
 		return nil
 	}

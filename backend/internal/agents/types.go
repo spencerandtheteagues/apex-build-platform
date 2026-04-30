@@ -106,6 +106,8 @@ type Task struct {
 	MaxRetries    int            `json:"max_retries"`             // Maximum retry attempts (default: 5)
 	ErrorHistory  []ErrorAttempt `json:"error_history,omitempty"` // History of errors for learning
 	RetryStrategy RetryStrategy  `json:"retry_strategy"`          // How to retry on failure
+
+	mu sync.RWMutex
 }
 
 // ErrorAttempt tracks a failed attempt for learning

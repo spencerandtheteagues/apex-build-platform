@@ -139,11 +139,12 @@ func repairFingerprintFailureClassForTask(task *Task) string {
 	if task.Error != "" {
 		return normalizeFailureClass(task.Error)
 	}
-	if task.Input == nil {
+	inputSnapshot := cloneTaskInputForSnapshot(task)
+	if inputSnapshot == nil {
 		return ""
 	}
 	for _, key := range []string{"failure_class", "failure_error", "build_error", "previous_errors"} {
-		raw, ok := task.Input[key]
+		raw, ok := inputSnapshot[key]
 		if !ok || raw == nil {
 			continue
 		}
@@ -166,10 +167,11 @@ func repairFingerprintRetryStrategyForTask(task *Task) string {
 	if task.RetryStrategy != "" {
 		return strings.TrimSpace(string(task.RetryStrategy))
 	}
-	if task.Input == nil {
+	inputSnapshot := cloneTaskInputForSnapshot(task)
+	if inputSnapshot == nil {
 		return ""
 	}
-	if raw, ok := task.Input["retry_strategy"]; ok && raw != nil {
+	if raw, ok := inputSnapshot["retry_strategy"]; ok && raw != nil {
 		return strings.TrimSpace(fmt.Sprintf("%v", raw))
 	}
 	return ""

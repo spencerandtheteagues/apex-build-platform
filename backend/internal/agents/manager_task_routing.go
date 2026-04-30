@@ -14,13 +14,14 @@ import (
 )
 
 func taskRoutingMode(task *Task) ProviderRoutingMode {
-	if task == nil || task.Input == nil {
+	if task == nil {
 		return RoutingModeSingleProvider
 	}
 	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil && artifact.RoutingMode != "" {
 		return artifact.RoutingMode
 	}
-	if raw, ok := task.Input["routing_mode"]; ok {
+	inputSnapshot := cloneTaskInputForSnapshot(task)
+	if raw, ok := inputSnapshot["routing_mode"]; ok {
 		if mode := ProviderRoutingMode(strings.TrimSpace(fmt.Sprintf("%v", raw))); mode != "" {
 			return mode
 		}
@@ -35,11 +36,10 @@ func taskRiskLevel(task *Task) TaskRiskLevel {
 	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil && artifact.RiskLevel != "" {
 		return artifact.RiskLevel
 	}
-	if task.Input != nil {
-		if raw, ok := task.Input["risk_level"]; ok {
-			if risk := TaskRiskLevel(strings.TrimSpace(fmt.Sprintf("%v", raw))); risk != "" {
-				return risk
-			}
+	inputSnapshot := cloneTaskInputForSnapshot(task)
+	if raw, ok := inputSnapshot["risk_level"]; ok {
+		if risk := TaskRiskLevel(strings.TrimSpace(fmt.Sprintf("%v", raw))); risk != "" {
+			return risk
 		}
 	}
 	return RiskMedium
@@ -666,7 +666,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		am.completeTruncatedFiles(ctx, task, build, &candidateAgent, output)
 	}
 	if am.isCodeGenerationTask(task.Type) {
-		if rawHints := task.Input["repair_hints"]; rawHints != nil {
+		if rawHints := cloneTaskInputForSnapshot(task)["repair_hints"]; rawHints != nil {
 			am.applyChunkedRepairToLargeFiles(ctx, task, build, &candidateAgent, output)
 		}
 	}

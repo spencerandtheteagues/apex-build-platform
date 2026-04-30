@@ -13,15 +13,15 @@ const (
 
 // TaskTriageResult is the enriched output of triageTaskForWaterfall.
 type TaskTriageResult struct {
-	TaskShape           TaskShape
-	RiskLevel           TaskRiskLevel
-	Scope               string
-	LocalRepair         bool
-	CrossSurface        bool
-	RepairComplexity    RepairComplexity
-	ShouldUseDualCand   bool             // recommend dual-candidate routing
-	ShouldUseVerifier   bool             // recommend single-with-verifier routing
-	RoutingSuggestion   ProviderRoutingMode
+	TaskShape         TaskShape
+	RiskLevel         TaskRiskLevel
+	Scope             string
+	LocalRepair       bool
+	CrossSurface      bool
+	RepairComplexity  RepairComplexity
+	ShouldUseDualCand bool // recommend dual-candidate routing
+	ShouldUseVerifier bool // recommend single-with-verifier routing
+	RoutingSuggestion ProviderRoutingMode
 }
 
 // triageTaskForWaterfall derives routing metadata from a task.
@@ -41,15 +41,15 @@ func triageTaskForWaterfall(task *Task) TaskTriageResult {
 		result.RiskLevel = RiskMedium
 	}
 	result.CrossSurface = result.Scope == "cross_surface"
-	result.LocalRepair = result.Scope == "local" && (
-		result.TaskShape == TaskShapeRepair ||
+	result.LocalRepair = result.Scope == "local" && (result.TaskShape == TaskShapeRepair ||
 		result.TaskShape == TaskShapeFrontendPatch ||
 		result.TaskShape == TaskShapeBackendPatch)
 
 	// ── Enrich risk level from description signals ────────────────────────
 	if task != nil {
-		inputDesc, _ := task.Input["description"].(string)
-		inputPrompt, _ := task.Input["prompt"].(string)
+		inputSnapshot := cloneTaskInputForSnapshot(task)
+		inputDesc, _ := inputSnapshot["description"].(string)
+		inputPrompt, _ := inputSnapshot["prompt"].(string)
 		desc := strings.ToLower(task.Description + " " + inputDesc + " " + inputPrompt)
 		if containsAny(desc, "migration", "migrate", "schema change", "drop table", "alter table") {
 			result.RiskLevel = escalateRisk(result.RiskLevel, RiskHigh)

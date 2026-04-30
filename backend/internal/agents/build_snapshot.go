@@ -201,7 +201,7 @@ func copyBuildTaskSnapshotsLocked(build *Build) []buildTaskSnapshot {
 			Dependencies:  dependencies,
 			AssignedTo:    task.AssignedTo,
 			Status:        task.Status,
-			Input:         cloneTaskInput(task.Input),
+			Input:         cloneTaskInputForSnapshot(task),
 			Output:        cloneTaskOutput(task.Output),
 			CreatedAt:     task.CreatedAt,
 			StartedAt:     task.StartedAt,
@@ -467,6 +467,15 @@ func cloneTaskInput(input map[string]any) map[string]any {
 		return cloned
 	}
 	return decoded
+}
+
+func cloneTaskInputForSnapshot(task *Task) map[string]any {
+	if task == nil {
+		return nil
+	}
+	task.mu.RLock()
+	defer task.mu.RUnlock()
+	return cloneTaskInput(task.Input)
 }
 
 func cloneTaskOutput(output *TaskOutput) *TaskOutput {

@@ -1028,7 +1028,9 @@ func (am *AgentManager) enqueueRevisionTask(build *Build, userRequest string, op
 	// as user_change_request tasks; otherwise follow-up edits are misclassified as
 	// aggressive restart recoveries.
 	if opts.restartRecovery {
-		task.Input["action"] = "restart_failed_build"
+		restartInputUpdates := map[string]any{
+			"action": "restart_failed_build",
+		}
 		task.Priority = 999
 
 		build.mu.RLock()
@@ -1062,14 +1064,15 @@ func (am *AgentManager) enqueueRevisionTask(build *Build, userRequest string, op
 		build.mu.RUnlock()
 
 		if buildErr != "" {
-			task.Input["build_error"] = buildErr
+			restartInputUpdates["build_error"] = buildErr
 		}
 		if len(failedSummaries) > 0 {
-			task.Input["failed_task_summaries"] = failedSummaries
+			restartInputUpdates["failed_task_summaries"] = failedSummaries
 		}
 		if len(incompleteTypes) > 0 {
-			task.Input["incomplete_task_types"] = incompleteTypes
+			restartInputUpdates["incomplete_task_types"] = incompleteTypes
 		}
+		setTaskInputValues(task, restartInputUpdates)
 		if task.MaxRetries < 4 {
 			task.MaxRetries = 4
 		}
@@ -1098,7 +1101,7 @@ func (am *AgentManager) enqueueRevisionTask(build *Build, userRequest string, op
 	phase := "user_feedback"
 	qualityGateStage := "revision"
 	restartRecovery := false
-	if action, _ := task.Input["action"].(string); action == "restart_failed_build" {
+	if action, _ := cloneTaskInputForSnapshot(task)["action"].(string); action == "restart_failed_build" {
 		broadcastMsg = "Build restart triggered. Launching aggressive recovery — fixing all failures and resuming pipeline."
 		phase = "restart_recovery"
 		qualityGateStage = "Recovery"

@@ -3311,7 +3311,7 @@ func TestApplyDeterministicValidationRepairsCreatesAliasModuleFromTypeScriptTS23
 
 	repaired := am.applyDeterministicValidationRepairs(
 		build,
-		[]string{`src/App.tsx(3,22): error TS2307: Cannot find module '@/components/AppShell' or its corresponding type declarations.`},
+		[]string{`/tmp/apex-preview-123/src/App.tsx(3,22): error TS2307: Cannot find module '@/components/AppShell' or its corresponding type declarations.`},
 		"raw TypeScript missing local module",
 		time.Now(),
 	)
@@ -6654,6 +6654,11 @@ func TestClearStaleDependencyValidationClearsSatisfiedPostCSSConfigFailure(t *te
   }
 };`,
 				IsNew: true,
+			},
+			{
+				Path:    "tailwind.config.js",
+				Content: `module.exports = { content: ["./index.html", "./src/**/*.{ts,tsx}"], theme: { extend: {} }, plugins: [] };`,
+				IsNew:   true,
 			},
 		},
 	}
