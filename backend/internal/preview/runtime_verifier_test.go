@@ -392,6 +392,109 @@ func TestRuntimeVerifierServerReadyTimeoutEnvOverride(t *testing.T) {
 	}
 }
 
+func TestRunNpmInstallIncludesDevDependenciesInProductionEnv(t *testing.T) {
+	t.Setenv("NODE_ENV", "production")
+	t.Setenv("NPM_CONFIG_PRODUCTION", "true")
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	argsFile := filepath.Join(root, "args.txt")
+	nodeEnvFile := filepath.Join(root, "node-env.txt")
+	productionFile := filepath.Join(root, "production.txt")
+	npmPath := filepath.Join(root, "npm")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" > %q
+printf '%%s\n' "$NODE_ENV" > %q
+printf '%%s\n' "$NPM_CONFIG_PRODUCTION" > %q
+exit 0
+`, argsFile, nodeEnvFile, productionFile)
+	if err := os.WriteFile(npmPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (&RuntimeVerifier{}).runNpmInstall(context.Background(), appDir, npmPath)
+	if err != nil {
+		t.Fatalf("runNpmInstall failed: %v\n%s", err, out)
+	}
+
+	argsRaw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.TrimSpace(string(argsRaw))
+	if !strings.Contains(args, "install --include=dev") {
+		t.Fatalf("expected npm install to include dev dependencies, got args %q", args)
+	}
+
+	nodeEnvRaw, _ := os.ReadFile(nodeEnvFile)
+	if got := strings.TrimSpace(string(nodeEnvRaw)); got != "development" {
+		t.Fatalf("expected NODE_ENV=development for preview install, got %q", got)
+	}
+	productionRaw, _ := os.ReadFile(productionFile)
+	if got := strings.TrimSpace(string(productionRaw)); got != "false" {
+		t.Fatalf("expected NPM_CONFIG_PRODUCTION=false for preview install, got %q", got)
+	}
+}
+
+func TestRunNpmInstallCIIncludesDevDependencies(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "package-lock.json"), []byte(`{"lockfileVersion":3}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	argsFile := filepath.Join(root, "args.txt")
+	npmPath := filepath.Join(root, "npm")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" > %q\nexit 0\n", argsFile)
+	if err := os.WriteFile(npmPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (&RuntimeVerifier{}).runNpmInstall(context.Background(), appDir, npmPath)
+	if err != nil {
+		t.Fatalf("runNpmInstall failed: %v\n%s", err, out)
+	}
+	argsRaw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.TrimSpace(string(argsRaw)); !strings.Contains(args, "ci --include=dev") {
+		t.Fatalf("expected npm ci to include dev dependencies, got args %q", args)
+	}
+}
+
+func TestViteBinaryRequiresLocalProjectInstall(t *testing.T) {
+	root := t.TempDir()
+	rv := &RuntimeVerifier{}
+
+	if got, err := rv.viteBinary(root); err == nil || got != "" {
+		t.Fatalf("expected missing local vite binary to fail, got path=%q err=%v", got, err)
+	}
+
+	local := filepath.Join(root, "node_modules", ".bin", "vite")
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := rv.viteBinary(root)
+	if err != nil {
+		t.Fatalf("expected local vite binary to be accepted: %v", err)
+	}
+	if got != local {
+		t.Fatalf("expected local vite path %q, got %q", local, got)
+	}
+}
+
 func TestApplyAdvisoryBrowserSignalsAddsVisionAndCanaryMetadata(t *testing.T) {
 	rv := &RuntimeVerifier{
 		visionVerifier: &stubRuntimeVisionVerifier{

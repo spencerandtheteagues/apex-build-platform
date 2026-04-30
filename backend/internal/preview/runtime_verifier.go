@@ -156,7 +156,14 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	}
 
 	// ── 4. Start Vite dev server ─────────────────────────────────────────
-	viteBin := rv.viteBinary(dir)
+	viteBin, viteBinErr := rv.viteBinary(dir)
+	if viteBinErr != nil {
+		return rv.rtFail("boot_failed",
+			viteBinErr.Error(),
+			"Ensure package.json declares vite in dependencies or devDependencies. Runtime verification intentionally refuses to download tooling with npx.",
+			start,
+		)
+	}
 	viteCmd, viteLogs, viteErr := rv.startVite(bootCtx, dir, viteBin, port)
 	if viteErr != nil {
 		return rv.rtFail("boot_failed",
@@ -406,12 +413,17 @@ func (rv *RuntimeVerifier) prepareWorkDir(files []VerifiableFile) (dir string, c
 }
 
 func (rv *RuntimeVerifier) runNpmInstall(ctx context.Context, dir, npmPath string) ([]byte, error) {
-	args := []string{"install", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error"}
+	args := []string{"install", "--include=dev", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error"}
 	if _, err := os.Stat(filepath.Join(dir, "package-lock.json")); err == nil {
-		args = []string{"ci", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error"}
+		args = []string{"ci", "--include=dev", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error"}
 	}
 	cmd := exec.CommandContext(ctx, npmPath, args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"NODE_ENV=development",
+		"NPM_CONFIG_PRODUCTION=false",
+		"npm_config_production=false",
+	)
 	return cmd.CombinedOutput()
 }
 
@@ -546,25 +558,16 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (rv *RuntimeVerifier) viteBinary(dir string) string {
+func (rv *RuntimeVerifier) viteBinary(dir string) (string, error) {
 	local := filepath.Join(dir, "node_modules", ".bin", "vite")
 	if _, err := os.Stat(local); err == nil {
-		return local
+		return local, nil
 	}
-	// Fallback to global npx (will use cached vite if available)
-	if p, err := exec.LookPath("npx"); err == nil {
-		return p
-	}
-	return "npx"
+	return "", fmt.Errorf("local Vite binary was not installed at %s after npm install", local)
 }
 
 func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string, port int) (*exec.Cmd, *bytes.Buffer, error) {
-	var args []string
-	if strings.HasSuffix(viteBin, "npx") || viteBin == "npx" {
-		args = []string{"vite", "--port", strconv.Itoa(port), "--host", "127.0.0.1", "--logLevel", "error"}
-	} else {
-		args = []string{"--port", strconv.Itoa(port), "--host", "127.0.0.1", "--logLevel", "error"}
-	}
+	args := []string{"--port", strconv.Itoa(port), "--host", "127.0.0.1", "--logLevel", "error"}
 
 	cmd := exec.CommandContext(ctx, viteBin, args...)
 	cmd.Dir = dir
