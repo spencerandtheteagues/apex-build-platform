@@ -42,6 +42,7 @@ type ContainerPreviewServer struct {
 	cleanupTicker         *time.Ticker
 	stopCleanup           chan struct{}
 	containerRunningCheck func(containerID string) bool
+	sessionRecoverer      func(projectID uint) *ContainerSession
 }
 
 // ContainerSession represents an active container-based preview
@@ -671,6 +672,9 @@ func (s *ContainerPreviewServer) GetContainerPreviewStatus(projectID uint) *Prev
 	s.containerMu.RUnlock()
 
 	if !exists {
+		if recovered := s.recoverContainerSession(projectID); recovered != nil {
+			return s.getContainerStatus(recovered)
+		}
 		return &PreviewStatus{
 			ProjectID: projectID,
 			Active:    false,
@@ -693,6 +697,95 @@ func (s *ContainerPreviewServer) GetContainerPreviewStatus(projectID uint) *Prev
 	}
 
 	return s.getContainerStatus(session)
+}
+
+func (s *ContainerPreviewServer) recoverContainerSession(projectID uint) *ContainerSession {
+	if s == nil || !s.dockerAvailable {
+		return nil
+	}
+	if s.sessionRecoverer != nil {
+		return s.sessionRecoverer(projectID)
+	}
+
+	containerName := s.previewContainerName(projectID)
+	if !s.isContainerRunning(containerName) {
+		return nil
+	}
+
+	port, internalPort := s.inspectPublishedPreviewPort(containerName)
+	if port <= 0 {
+		return nil
+	}
+	if internalPort <= 0 {
+		internalPort = 80
+	}
+
+	session := &ContainerSession{
+		ProjectID:     projectID,
+		ContainerID:   containerName,
+		ContainerName: containerName,
+		ImageName:     s.previewImageName(projectID),
+		Port:          port,
+		InternalPort:  internalPort,
+		StartedAt:     time.Now(),
+		LastAccess:    time.Now(),
+		Config:        &ContainerConfig{},
+		stopChan:      make(chan struct{}),
+	}
+
+	s.containerMu.Lock()
+	if existing, ok := s.containerSessions[projectID]; ok {
+		s.containerMu.Unlock()
+		return existing
+	}
+	s.containerSessions[projectID] = session
+	s.containerMu.Unlock()
+
+	s.portMu.Lock()
+	if s.portMap != nil {
+		s.portMap[projectID] = port
+	}
+	s.portMu.Unlock()
+
+	if s.stats != nil {
+		atomic.AddInt32(&s.stats.ActiveContainers, 1)
+	}
+	return session
+}
+
+func (s *ContainerPreviewServer) inspectPublishedPreviewPort(containerName string) (int, int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := s.dockerCommandContext(ctx, "inspect", "--format", "{{json .NetworkSettings.Ports}}", containerName).Output()
+	if err != nil {
+		return 0, 0
+	}
+
+	type binding struct {
+		HostIP   string `json:"HostIp"`
+		HostPort string `json:"HostPort"`
+	}
+	var ports map[string][]binding
+	if err := json.Unmarshal(bytes.TrimSpace(out), &ports); err != nil {
+		return 0, 0
+	}
+
+	for containerPort, bindings := range ports {
+		if len(bindings) == 0 {
+			continue
+		}
+		hostPort, err := strconv.Atoi(strings.TrimSpace(bindings[0].HostPort))
+		if err != nil || hostPort <= 0 {
+			continue
+		}
+		internalPort := 0
+		if slash := strings.Index(containerPort, "/"); slash > 0 {
+			internalPort, _ = strconv.Atoi(containerPort[:slash])
+		}
+		return hostPort, internalPort
+	}
+	return 0, 0
 }
 
 func (s *ContainerPreviewServer) isContainerRunning(containerID string) bool {

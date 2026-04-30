@@ -151,3 +151,41 @@ func TestContainerPreviewStatusDropsDeadSession(t *testing.T) {
 		t.Fatalf("active container count = %d, want 0", got)
 	}
 }
+
+func TestContainerPreviewStatusRecoversMissingLiveSession(t *testing.T) {
+	t.Parallel()
+
+	projectID := uint(58)
+	server := &ContainerPreviewServer{
+		PreviewServer: &PreviewServer{
+			portMap: map[uint]int{},
+		},
+		containerSessions: map[uint]*ContainerSession{},
+		config:            &ContainerPreviewConfig{ConnectHost: "177.7.36.223"},
+		stats:             &ContainerPreviewStats{},
+		dockerAvailable:   true,
+		sessionRecoverer: func(projectID uint) *ContainerSession {
+			return &ContainerSession{
+				ProjectID:     projectID,
+				ContainerID:   "apex-preview-58",
+				ContainerName: "apex-preview-58",
+				Port:          10000,
+				InternalPort:  3000,
+				StartedAt:     time.Now(),
+				LastAccess:    time.Now(),
+				stopChan:      make(chan struct{}),
+			}
+		},
+	}
+
+	status := server.GetContainerPreviewStatus(projectID)
+	if !status.Active {
+		t.Fatalf("expected recovered container session to be active: %+v", status)
+	}
+	if status.Port != 10000 {
+		t.Fatalf("port = %d, want 10000", status.Port)
+	}
+	if status.URL != "http://177.7.36.223:10000" {
+		t.Fatalf("url = %q, want remote preview URL", status.URL)
+	}
+}
