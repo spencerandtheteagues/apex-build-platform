@@ -621,6 +621,13 @@ func (am *AgentManager) cvRunInlineRepair(
 
 	if build != nil && allFiles != nil {
 		if readinessErrors := cvReadinessErrorsFromParsedBuildErrors(errors); len(readinessErrors) > 0 {
+			if bundle, summary := am.applyDeterministicMissingKnownImportRepair(build, readinessErrors); bundle != nil {
+				if am.applyPatchBundleToBuild(build, bundle) {
+					*allFiles = am.collectGeneratedFiles(build)
+					log.Printf("[compile_validator] build %s: applied deterministic missing known import repair: %s", build.ID, summary)
+					return true
+				}
+			}
 			if bundle, summary := am.applyDeterministicExternalImportExportRepair(build, readinessErrors); bundle != nil {
 				if am.applyPatchBundleToBuild(build, bundle) {
 					*allFiles = am.collectGeneratedFiles(build)

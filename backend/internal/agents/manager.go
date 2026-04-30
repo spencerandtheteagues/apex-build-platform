@@ -11519,6 +11519,12 @@ type exportMismatchRepairTarget struct {
 	PreferNamedImport bool
 }
 
+type missingKnownImportRepairTarget struct {
+	Path   string
+	Symbol string
+	Module string
+}
+
 func parseStaleImportValidationTargets(errors []string) []staleImportValidationTarget {
 	if len(errors) == 0 {
 		return nil
@@ -12116,6 +12122,166 @@ func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, rea
 
 	summary := "export mismatch repair: " + strings.Join(applied, ", ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "export_mismatch_repair: "+summary), summary
+}
+
+func knownMissingIdentifierModule(symbol string) string {
+	switch strings.TrimSpace(symbol) {
+	case "BrowserRouter", "Routes", "Route", "Navigate", "Outlet", "Link", "NavLink",
+		"useNavigate", "useLocation", "useParams", "useSearchParams":
+		return "react-router-dom"
+	case "toast", "Toaster":
+		return "sonner"
+	case "DragDropContext", "Droppable", "Draggable":
+		return "react-beautiful-dnd"
+	case "ResponsiveContainer", "LineChart", "Line", "AreaChart", "Area", "BarChart", "Bar",
+		"XAxis", "YAxis", "CartesianGrid", "Tooltip", "PieChart", "Pie", "Cell":
+		return "recharts"
+	default:
+		return ""
+	}
+}
+
+func parseMissingKnownImportRepairTargets(errors []string) []missingKnownImportRepairTarget {
+	if len(errors) == 0 {
+		return nil
+	}
+
+	re := regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS(?:2304|2552): Cannot find name ['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+	seen := map[string]bool{}
+	targets := make([]missingKnownImportRepairTarget, 0)
+	for _, msg := range errors {
+		for _, match := range re.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 3 {
+				continue
+			}
+			path := sanitizeFilePath(strings.TrimSpace(match[1]))
+			symbol := sanitizeGeneratedIdentifier(match[2])
+			module := knownMissingIdentifierModule(symbol)
+			if path == "" || symbol == "" || module == "" {
+				continue
+			}
+			key := strings.ToLower(path + "::" + symbol + "::" + module)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			targets = append(targets, missingKnownImportRepairTarget{
+				Path:   path,
+				Symbol: symbol,
+				Module: module,
+			})
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].Path == targets[j].Path {
+			return targets[i].Symbol < targets[j].Symbol
+		}
+		return targets[i].Path < targets[j].Path
+	})
+	return targets
+}
+
+func namedImportAlreadyPresent(content, module, symbol string) bool {
+	importRe := regexp.MustCompile(`(?ms)import\s*\{([^}]*)\}\s*from\s*['"]` + regexp.QuoteMeta(module) + `['"]`)
+	for _, match := range importRe.FindAllStringSubmatch(content, -1) {
+		if len(match) != 2 {
+			continue
+		}
+		for _, raw := range strings.Split(match[1], ",") {
+			item := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "type "))
+			if item == "" {
+				continue
+			}
+			parts := regexp.MustCompile(`\s+as\s+`).Split(item, 2)
+			imported := strings.TrimSpace(parts[0])
+			local := imported
+			if len(parts) == 2 {
+				local = strings.TrimSpace(parts[1])
+			}
+			if imported == symbol || local == symbol {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func addNamedImportForMissingSymbol(content, module, symbol string) (string, bool) {
+	if strings.TrimSpace(content) == "" || module == "" || symbol == "" {
+		return content, false
+	}
+	if namedImportAlreadyPresent(content, module, symbol) {
+		return content, false
+	}
+
+	importRe := regexp.MustCompile(`(?ms)import\s*\{([^}]*)\}\s*from\s*['"]` + regexp.QuoteMeta(module) + `['"]\s*;?`)
+	if loc := importRe.FindStringSubmatchIndex(content); loc != nil && len(loc) >= 4 {
+		inside := strings.TrimSpace(content[loc[2]:loc[3]])
+		if inside == "" {
+			inside = symbol
+		} else {
+			inside = inside + ", " + symbol
+		}
+		replacement := "import { " + inside + " } from " + strconv.Quote(module) + ";"
+		return content[:loc[0]] + replacement + content[loc[1]:], true
+	}
+
+	sideEffectRe := regexp.MustCompile(`(?m)^\s*import\s+['"][^'"]+['"]\s*;?\s*$`)
+	importLineRe := regexp.MustCompile(`(?m)^\s*import\s+.*?;\s*$`)
+	insertAt := 0
+	for _, loc := range importLineRe.FindAllStringIndex(content, -1) {
+		if loc[1] > insertAt {
+			insertAt = loc[1]
+		}
+	}
+	for _, loc := range sideEffectRe.FindAllStringIndex(content, -1) {
+		if loc[1] > insertAt {
+			insertAt = loc[1]
+		}
+	}
+	newImport := "import { " + symbol + " } from " + strconv.Quote(module) + ";\n"
+	if insertAt > 0 {
+		return content[:insertAt] + "\n" + newImport + content[insertAt:], true
+	}
+	return newImport + content, true
+}
+
+func (am *AgentManager) applyDeterministicMissingKnownImportRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	targets := parseMissingKnownImportRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target.Path)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		updated, changed := addNamedImportForMissingSymbol(content, target.Module, target.Symbol)
+		if !changed {
+			continue
+		}
+		if plan.patchFile(target.Path, updated, am.detectLanguage(target.Path)) {
+			applied = append(applied, fmt.Sprintf("%s imports %s from %s", target.Path, target.Symbol, target.Module))
+		}
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	sort.Strings(applied)
+	summary := "missing known import repair: " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "missing_known_import_repair: "+summary), summary
 }
 
 func isExternalGeneratedModuleSpecifier(specifier string) bool {
@@ -16505,6 +16671,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied missing local module repair: %s)",
 			message:     "Applied deterministic local module repair for missing generated frontend files. Re-running final validation before solver recovery.",
 			summaryKey:  "missing_local_module_repair",
+		},
+		{
+			apply:       am.applyDeterministicMissingKnownImportRepair,
+			errorFormat: "Final output validation failed: %s (applied missing known import repair: %s)",
+			message:     "Applied deterministic missing framework import repair for generated frontend modules. Re-running final validation before solver recovery.",
+			summaryKey:  "missing_known_import_repair",
 		},
 		{
 			apply:       am.applyDeterministicExternalImportExportRepair,

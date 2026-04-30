@@ -3961,6 +3961,63 @@ export function AppShell() {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsAddsMissingKnownFrameworkImport(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-missing-known-import",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: `{"name":"fieldops","private":true,"dependencies":{"react-router-dom":"^6.30.1"}}`,
+				IsNew:   true,
+			},
+			{
+				Path: "src/components/AppShell.tsx",
+				Content: `import { Routes, Route } from "react-router-dom";
+
+export function AppShell() {
+  return <Routes><Route path="*" element={<Navigate to="/" replace />} /></Routes>;
+}
+`,
+				Language: "typescript",
+				IsNew:    true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification build failed: src/components/AppShell.tsx(4,39): error TS2552: Cannot find name 'Navigate'. Did you mean 'Navigator'?`},
+		"missing Navigate import",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected missing known import repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var appShell string
+	for _, file := range files {
+		if file.Path == "src/components/AppShell.tsx" {
+			appShell = file.Content
+			break
+		}
+	}
+	if !strings.Contains(appShell, `import { Routes, Route, Navigate } from "react-router-dom";`) {
+		t.Fatalf("expected Navigate to be added to react-router-dom import, got %q", appShell)
+	}
+}
+
 func TestApplyDeterministicValidationRepairsRepairsReactPropMismatch(t *testing.T) {
 	t.Parallel()
 
