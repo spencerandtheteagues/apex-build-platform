@@ -451,6 +451,7 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 				break
 			}
 		}
+		stack = applyRuntimeTemplateStackDefaults(stack, appType, detectedTemplates)
 	}
 	scaffold := selectBuildScaffold(appType, stack)
 
@@ -531,6 +532,35 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 	}
 
 	return plan
+}
+
+func applyRuntimeTemplateStackDefaults(stack TechStack, appType string, templates []*AppTemplate) TechStack {
+	if appType != "fullstack" {
+		return stack
+	}
+	requiresRuntimeTemplate := false
+	for _, tmpl := range templates {
+		if templateRequiresRuntime(tmpl) {
+			requiresRuntimeTemplate = true
+			break
+		}
+	}
+	if !requiresRuntimeTemplate {
+		return stack
+	}
+	if strings.TrimSpace(stack.Frontend) == "" {
+		stack.Frontend = "React"
+	}
+	if strings.TrimSpace(stack.Backend) == "" {
+		stack.Backend = "Express"
+	}
+	if strings.TrimSpace(stack.Database) == "" {
+		stack.Database = "PostgreSQL"
+	}
+	if strings.TrimSpace(stack.Styling) == "" {
+		stack.Styling = "Tailwind"
+	}
+	return stack
 }
 
 func applyBuildAssurancePolicyToPlan(build *Build, plan *BuildPlan) *BuildPlan {

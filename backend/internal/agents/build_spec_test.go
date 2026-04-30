@@ -628,6 +628,138 @@ waitlist signup, lead capture, pricing, testimonials, and a demo request CTA.`
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundleAppliesAllTemplateBlueprints(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name             string
+		description      string
+		wantTemplateID   string
+		wantPrefix       string
+		wantRuntimeStack bool
+	}{
+		{
+			name:             "ai saas",
+			description:      "Build an AI SaaS app for document analysis with BYOK, provider routing, token usage tracking, generation history, and a model selector.",
+			wantTemplateID:   "ai-saas",
+			wantPrefix:       "ai-saas-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "saas dashboard",
+			description:      "Build an operations dashboard and admin panel management system with RBAC, audit log, reporting, team management, workspace settings, and paginated data tables.",
+			wantTemplateID:   "saas-dashboard",
+			wantPrefix:       "dashboard-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "crm",
+			description:      "Build a sales CRM with lead tracking, deal tracking, pipeline stages, sales activities, weighted forecast, and a pipeline board.",
+			wantTemplateID:   "crm",
+			wantPrefix:       "crm-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "client portal",
+			description:      "Build a client portal with client login, portal access, customer documents, account dashboard, support tickets, and invoice history.",
+			wantTemplateID:   "client-portal",
+			wantPrefix:       "portal-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "marketplace",
+			description:      "Build a two-sided marketplace with vendor directory listings, buyer seller workflows, provider profiles, search filters, and booking requests.",
+			wantTemplateID:   "marketplace",
+			wantPrefix:       "marketplace-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "booking",
+			description:      "Build an appointment booking and scheduling app with availability calendar, time slot booking, reservation system, and consultation booking.",
+			wantTemplateID:   "booking",
+			wantPrefix:       "booking-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "inventory",
+			description:      "Build an inventory management system with warehouse management, stock movements, stock ledger, reorder points, purchase orders, and fulfillment.",
+			wantTemplateID:   "inventory",
+			wantPrefix:       "inventory-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "project management",
+			description:      "Build a project management and task collaboration platform with a kanban board, sprint planning, task assignments, milestone tracking, comments, and team collaboration dashboards.",
+			wantTemplateID:   "project-management",
+			wantPrefix:       "project-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "community",
+			description:      "Build a social community platform with user profiles, a community feed, discussion forum threads, direct messages, reactions, bookmarks, and a moderation queue.",
+			wantTemplateID:   "community",
+			wantPrefix:       "community-",
+			wantRuntimeStack: true,
+		},
+		{
+			name:             "landing page",
+			description:      "Build a premium landing page and marketing site for a startup waitlist with lead capture, email capture, demo request CTA, pricing section, testimonials, and a sales funnel.",
+			wantTemplateID:   "landing-page",
+			wantPrefix:       "landing-",
+			wantRuntimeStack: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			plan := createBuildPlanFromPlanningBundle("build-template-"+tc.wantTemplateID, tc.description, nil, &autonomous.PlanningBundle{
+				Analysis: &autonomous.RequirementAnalysis{
+					AppType: "web",
+					TechStack: &autonomous.TechStack{
+						Frontend: "React",
+						Styling:  "Tailwind",
+					},
+				},
+				Plan: &autonomous.ExecutionPlan{
+					ID:            "plan-template-" + tc.wantTemplateID,
+					EstimatedTime: 30 * time.Minute,
+					CreatedAt:     time.Now().UTC(),
+				},
+			})
+
+			if plan == nil {
+				t.Fatal("expected build plan")
+			}
+			if plan.TemplateID != tc.wantTemplateID {
+				t.Fatalf("expected template %q, got %q", tc.wantTemplateID, plan.TemplateID)
+			}
+			if !hasAcceptanceCheckPrefix(plan.Acceptance, tc.wantPrefix) {
+				t.Fatalf("expected acceptance checks with prefix %q, got %+v", tc.wantPrefix, plan.Acceptance)
+			}
+			if tc.wantRuntimeStack {
+				if plan.AppType != "fullstack" {
+					t.Fatalf("expected runtime template to promote plan to fullstack, got %q", plan.AppType)
+				}
+				if plan.TechStack.Backend == "" || plan.TechStack.Database == "" {
+					t.Fatalf("expected runtime template to default backend/database stack, got %+v", plan.TechStack)
+				}
+				if wo := getBuildWorkOrder(plan, RoleBackend); wo == nil {
+					t.Fatalf("expected runtime template %s to create backend work order", tc.wantTemplateID)
+				}
+				return
+			}
+			if plan.AppType != "web" {
+				t.Fatalf("expected non-runtime template to stay web, got %q", plan.AppType)
+			}
+			if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+				t.Fatalf("expected non-runtime template to omit backend work order, got %+v", wo)
+			}
+		})
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundleStaticIntentOverridesRequestedBackendAndDatabase(t *testing.T) {
 	t.Parallel()
 

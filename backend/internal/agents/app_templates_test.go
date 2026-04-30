@@ -110,6 +110,19 @@ func TestAllAppTemplatesAreWiredBlueprints(t *testing.T) {
 		t.Fatalf("expected 10 app templates, got %d", len(appTemplateRegistry))
 	}
 
+	acceptancePrefixes := map[string]string{
+		"ai-saas":            "ai-saas-",
+		"saas-dashboard":     "dashboard-",
+		"crm":                "crm-",
+		"client-portal":      "portal-",
+		"marketplace":        "marketplace-",
+		"booking":            "booking-",
+		"inventory":          "inventory-",
+		"project-management": "project-",
+		"community":          "community-",
+		"landing-page":       "landing-",
+	}
+
 	seen := make(map[string]bool, len(appTemplateRegistry))
 	for _, tmpl := range appTemplateRegistry {
 		if tmpl == nil {
@@ -128,12 +141,63 @@ func TestAllAppTemplatesAreWiredBlueprints(t *testing.T) {
 		if !strings.Contains(tmpl.ArchitectureContext, "ACTIVE TEMPLATE:") {
 			t.Fatalf("template %s does not expose active architecture context", tmpl.ID)
 		}
+		if !strings.Contains(tmpl.ArchitectureContext, "SUBSYSTEM") &&
+			!strings.Contains(tmpl.ArchitectureContext, "REQUIRED SUBSYSTEMS") {
+			t.Fatalf("template %s does not define subsystem-level generation constraints", tmpl.ID)
+		}
 		if strings.TrimSpace(tmpl.CustomizationRules) == "" {
 			t.Fatalf("template %s has no customization rules", tmpl.ID)
 		}
-		if len(tmpl.AcceptanceChecks) == 0 {
-			t.Fatalf("template %s has no acceptance checks", tmpl.ID)
+		if len(tmpl.AcceptanceChecks) < 10 {
+			t.Fatalf("template %s has too few acceptance checks: %d", tmpl.ID, len(tmpl.AcceptanceChecks))
 		}
+		prefix, ok := acceptancePrefixes[tmpl.ID]
+		if !ok {
+			t.Fatalf("template %s is missing an acceptance-check prefix invariant", tmpl.ID)
+		}
+		for _, check := range tmpl.AcceptanceChecks {
+			if !strings.HasPrefix(check, prefix) {
+				t.Fatalf("template %s acceptance check %q does not use prefix %q", tmpl.ID, check, prefix)
+			}
+		}
+	}
+}
+
+func TestDetectAppTemplatesSupportsSeveralLayeredBlueprintPairs(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		description string
+		wantIDs     []string
+	}{
+		{
+			name:        "marketplace with booking",
+			description: "Build a two-sided contractor marketplace with searchable provider listings, provider profiles, inquiry forms, appointment booking, scheduling, availability calendar, and booking requests.",
+			wantIDs:     []string{"marketplace", "booking"},
+		},
+		{
+			name:        "client portal with project management",
+			description: "Build a client portal for an agency with client login, client-facing dashboard, client-visible projects, project management, tasks, milestones, approvals, files, and messages.",
+			wantIDs:     []string{"client-portal", "project-management"},
+		},
+		{
+			name:        "community with landing page",
+			description: "Build a private member community platform with user profiles, community feed, direct messages, moderation queue, plus a public marketing site landing page with waitlist and lead capture.",
+			wantIDs:     []string{"community", "landing-page"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			templates := DetectAppTemplates(tc.description, 2)
+			got := templateIDs(templates)
+			if strings.Join(got, ",") != strings.Join(tc.wantIDs, ",") {
+				t.Fatalf("expected templates %+v, got %+v", tc.wantIDs, got)
+			}
+		})
 	}
 }
 

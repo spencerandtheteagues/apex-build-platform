@@ -84,6 +84,7 @@ func DetectAppTemplates(description string, maxTemplates int) []*AppTemplate {
 				score++
 			}
 		}
+		score += templatePrimaryAnchorScore(normalized, tmpl)
 		if score > 0 {
 			candidates = append(candidates, scored{tmpl, score})
 		}
@@ -135,6 +136,58 @@ func DetectAppTemplates(description string, maxTemplates int) []*AppTemplate {
 		out = append(out, c.tmpl)
 	}
 	return out
+}
+
+func templatePrimaryAnchorScore(normalized string, tmpl *AppTemplate) int {
+	if tmpl == nil {
+		return 0
+	}
+	anchors := map[string][]string{
+		"ai-saas": {
+			"ai saas", "ai wrapper", "ai tool factory", "chatgpt wrapper", "claude wrapper",
+		},
+		"saas-dashboard": {
+			"admin panel", "admin dashboard", "operations dashboard", "management system",
+		},
+		"crm": {
+			"crm", "sales crm", "sales pipeline", "customer relationship management",
+		},
+		"client-portal": {
+			"client portal", "customer portal", "patient portal", "tenant portal",
+			"vendor portal", "partner portal", "client login", "portal access",
+		},
+		"marketplace": {
+			"marketplace", "two-sided", "business directory", "vendor directory",
+			"provider directory", "job board", "classifieds",
+		},
+		"booking": {
+			"booking app", "scheduling app", "reservation system", "appointment booking",
+			"appointment scheduler", "availability calendar", "time slot booking",
+		},
+		"inventory": {
+			"inventory management", "inventory system", "warehouse management",
+			"stock management", "order management system",
+		},
+		"project-management": {
+			"project management", "task management", "kanban board", "sprint planning",
+			"work management",
+		},
+		"community": {
+			"community platform", "social network", "discussion forum", "creator community",
+			"private member community",
+		},
+		"landing-page": {
+			"landing page", "marketing site", "startup waitlist", "sales funnel",
+			"lead capture",
+		},
+	}
+	score := 0
+	for _, anchor := range anchors[tmpl.ID] {
+		if strings.Contains(normalized, anchor) {
+			score += 4
+		}
+	}
+	return score
 }
 
 func templateEligibleForDescription(normalized string, tmpl *AppTemplate) bool {
@@ -512,8 +565,14 @@ G. MONETIZATION DEFAULTS
 		"ai-saas-auth: signup, login, and protected routes all function",
 		"ai-saas-key-vault: provider key can be saved; raw key never returned to frontend",
 		"ai-saas-tool-execution: main tool runs and output is saved to database",
+		"ai-saas-provider-router: provider/model selector calls a normalized server-side AI interface with graceful rate-limit and invalid-key errors",
 		"ai-saas-usage-metering: generations table records provider/model/tokens/cost for every run",
+		"ai-saas-plan-limits: free/pro/team generation limits are enforced server-side before provider calls",
 		"ai-saas-history: history page shows at least the most recent generation",
+		"ai-saas-history-filters: history supports provider/model/favorite/date/text filtering without cross-user leakage",
+		"ai-saas-output-actions: generated output supports copy, save/favorite, and reopen from history",
+		"ai-saas-billing-placeholder: billing page shows plan limits and upgrade path; Stripe is only live when configured",
+		"ai-saas-dashboard: dashboard shows current plan, API key status, recent generations, and monthly usage/spend",
 		"ai-saas-key-security: no API key visible in browser network tab or devtools console",
 	},
 }
@@ -735,9 +794,14 @@ J. INFER — never stop with questions when defaults are obvious
 		"dashboard-workspace: every data query is scoped to workspace_id",
 		"dashboard-rbac: mutating API routes check membership and role server-side",
 		"dashboard-audit: every create/update/archive produces an audit_logs row",
+		"dashboard-metrics: dashboard stat cards, chart, and recent activity feed load from workspace-scoped real data",
 		"dashboard-tables: list pages have search, sort, filter, pagination, empty state, loading state",
 		"dashboard-mobile: tables render as stacked cards at mobile viewport, not overflow tables",
 		"dashboard-soft-delete: archive/delete sets archived_at rather than hard-deleting",
+		"dashboard-team: team page supports invite, pending invite list, role change, and member removal with server-side permissions",
+		"dashboard-notifications: notification bell shows unread count, recent notifications, mark-read, and mark-all-read",
+		"dashboard-settings: settings page saves each section independently and preserves workspace timezone/currency/date-format values",
+		"dashboard-billing-limits: billing/plan limits are enforced server-side whenever SaaS monetization is included",
 	},
 }
 
