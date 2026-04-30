@@ -264,6 +264,9 @@ async function verifyPreview(url) {
   if (/failed to start preview|application error|vite error|runtime error/i.test(bodyText)) {
     throw new Error(`preview rendered failure text: ${bodyText.slice(0, 500)}`)
   }
+  if (/page not found|sorry,\s*that page does not exist|route not found|\b404\b[\s\S]{0,80}not found|not found[\s\S]{0,80}\b404\b/i.test(bodyText)) {
+    throw new Error(`preview rendered an app-level not-found route: ${bodyText.slice(0, 500)}`)
+  }
   const screenshotPath = path.join(artifactDir, 'preview.png')
   await page.screenshot({ path: screenshotPath, fullPage: true })
   await browser.close()

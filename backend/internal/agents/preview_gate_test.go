@@ -309,8 +309,8 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 	if !strings.Contains(entry, `import { BrowserRouter } from "react-router-dom";`) {
 		t.Fatalf("expected BrowserRouter import to be added, got %q", entry)
 	}
-	if !strings.Contains(entry, "<BrowserRouter>") || !strings.Contains(entry, "</BrowserRouter>") {
-		t.Fatalf("expected App render to be wrapped with BrowserRouter, got %q", entry)
+	if !strings.Contains(entry, "basename={window.location.pathname.match") || !strings.Contains(entry, "</BrowserRouter>") {
+		t.Fatalf("expected App render to be wrapped with preview-safe BrowserRouter, got %q", entry)
 	}
 
 	manifest := build.Tasks[0].Output.Files[1].Content

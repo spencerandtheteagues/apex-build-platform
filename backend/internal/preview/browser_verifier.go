@@ -185,7 +185,7 @@ const mountCheckJS = `JSON.stringify((function() {
 				textLength: text.length,
 				visibleText: visible.length,
 				hasContent: hasStructuralContent || hasMeaningfulText || hasMarkupOnlyContent,
-				snippet: text.substring(0, 80)
+				snippet: text.substring(0, 500)
 			};
 		}
 	}
@@ -194,7 +194,7 @@ const mountCheckJS = `JSON.stringify((function() {
   var bodyVisible = (document.body && document.body.innerText || '').trim();
   return {found: false, childCount: 0, textLength: bodyText.length,
           visibleText: bodyVisible.length,
-          hasContent: bodyVisible.length > 20, snippet: bodyText.substring(0, 80)};
+          hasContent: bodyVisible.length > 20, snippet: bodyText.substring(0, 500)};
 })())`
 
 const (
@@ -418,6 +418,24 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		}
 	}
 
+	if looksLikeAppLevelNotFound(mount.Snippet) {
+		return &BrowserPageLoadResult{
+			Passed:      false,
+			FailureKind: "app_route_not_found",
+			Details:     fmt.Sprintf("app rendered its own not-found route at the preview root: %q", mount.Snippet),
+			RepairHints: []string{
+				"Ensure the preview root route renders the requested app instead of an internal 404/not-found page.",
+				"If using react-router-dom BrowserRouter behind the Apex preview proxy, set BrowserRouter basename from window.location.pathname before '/preview/proxy/{projectID}'.",
+				"Add a valid '/' route with the main dashboard or landing screen.",
+			},
+			Duration:       time.Since(start),
+			JSErrors:       capturedJS,
+			ConsoleErrors:  capturedConsole,
+			VisibleText:    mount.VisibleText,
+			ScreenshotData: screenshotData,
+		}
+	}
+
 	return &BrowserPageLoadResult{
 		Passed:          true,
 		Duration:        time.Since(start),
@@ -428,6 +446,19 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		ConsoleErrors:   capturedConsole,
 		ScreenshotData:  screenshotData,
 	}
+}
+
+func looksLikeAppLevelNotFound(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "page not found") ||
+		strings.Contains(lower, "sorry, that page does not exist") ||
+		strings.Contains(lower, "route not found") {
+		return true
+	}
+	return strings.Contains(lower, "404") && strings.Contains(lower, "not found")
 }
 
 // filterBrowserNoise strips well-known benign browser messages that are not

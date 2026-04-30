@@ -76,6 +76,17 @@ func TestFilterBrowserNoise_EmptyInput(t *testing.T) {
 	}
 }
 
+func TestLooksLikeAppLevelNotFound(t *testing.T) {
+	t.Parallel()
+
+	if !looksLikeAppLevelNotFound("Apex FieldOps AI Dashboard Page Not Found Sorry, that page does not exist. Go to Dashboard") {
+		t.Fatal("expected app-level not-found copy to fail browser verification")
+	}
+	if looksLikeAppLevelNotFound("Dashboard Job Pipeline New Job Crew Management Settings Launch Estimate Swarm") {
+		t.Fatal("expected real app copy to pass not-found heuristic")
+	}
+}
+
 // ── BrowserVerifier.Available / skipped ──────────────────────────────────────
 
 func TestBrowserVerifier_Skipped_WhenChromePathEmpty(t *testing.T) {

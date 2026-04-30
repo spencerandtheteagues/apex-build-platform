@@ -16031,12 +16031,40 @@ func isDeterministicGeneratedPlaceholderModule(path string, content string) bool
 		strings.Contains(lower, "export const ") && strings.Contains(lower, " = generatedplaceholder")
 }
 
+func isGeneratedFrontendSkeletonShellModule(path string, content string) bool {
+	path = strings.ToLower(strings.TrimSpace(sanitizeFilePath(path)))
+	if path == "" || isTestFile(path) {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".tsx", ".jsx":
+	default:
+		return false
+	}
+
+	lower := strings.ToLower(content)
+	pulseCount := strings.Count(lower, "animate-pulse")
+	loadingCount := strings.Count(lower, "loading...")
+	disabledCount := strings.Count(lower, " disabled") + strings.Count(lower, "aria-disabled") + strings.Count(lower, "disabled={true}")
+	hasShellNaming := strings.Contains(lower, "page shells") ||
+		strings.Contains(lower, "function dashboardshell") ||
+		strings.Contains(lower, "function kanbanshell") ||
+		strings.Contains(lower, "function newjobshell") ||
+		strings.Contains(lower, "function settingsshell") ||
+		strings.Contains(lower, "function notfoundshell")
+	hasFormShell := strings.Contains(lower, "building estimate") ||
+		strings.Contains(lower, "resetting data") ||
+		strings.Contains(lower, "placeholder=\"loading...\"")
+
+	return hasShellNaming && pulseCount >= 1 && (disabledCount >= 3 || loadingCount >= 3 || hasFormShell)
+}
+
 func deterministicScaffoldPlaceholderPaths(files []GeneratedFile) []string {
 	seen := map[string]bool{}
 	paths := make([]string, 0)
 	for _, file := range files {
 		path := sanitizeFilePath(strings.TrimSpace(file.Path))
-		if path == "" || seen[path] || !isDeterministicGeneratedPlaceholderModule(path, file.Content) {
+		if path == "" || seen[path] || (!isDeterministicGeneratedPlaceholderModule(path, file.Content) && !isGeneratedFrontendSkeletonShellModule(path, file.Content)) {
 			continue
 		}
 		seen[path] = true
@@ -19959,6 +19987,7 @@ func normalizeGeneratedFileContent(path, content string) string {
 
 	if strings.TrimSpace(content) == "" || !strings.Contains(content, "''") {
 		content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
+		content = normalizeGeneratedReactRouterPreviewBasename(path, content)
 		return normalizeGeneratedTSConfigBuildExcludes(path, content)
 	}
 
@@ -19989,6 +20018,7 @@ func normalizeGeneratedFileContent(path, content string) string {
 
 	content = strings.ReplaceAll(content, "''", "'")
 	content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
+	content = normalizeGeneratedReactRouterPreviewBasename(path, content)
 	return normalizeGeneratedTSConfigBuildExcludes(path, content)
 }
 
@@ -29086,6 +29116,8 @@ func scaffoldPlaceholderValidationError(path string, content string) string {
 	case strings.Contains(contentLower, "the deterministic scaffold is live"):
 		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
 	case isDeterministicGeneratedPlaceholderModule(path, content):
+		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
+	case isGeneratedFrontendSkeletonShellModule(path, content):
 		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
 	case strings.Contains(contentLower, "replace this shell with the real experience"),
 		strings.Contains(contentLower, "replace this shell with the product-specific experience"):

@@ -1534,6 +1534,23 @@ export default function App() {
 		}
 	})
 
+	t.Run("adds_proxy_safe_browserrouter_basename", func(t *testing.T) {
+		t.Parallel()
+
+		in := `import { BrowserRouter } from "react-router-dom";
+
+export default function App() {
+  return <BrowserRouter><main>Dashboard</main></BrowserRouter>;
+}`
+		got := normalizeGeneratedFileContent("src/App.tsx", in)
+		if !strings.Contains(got, "basename={window.location.pathname.match") {
+			t.Fatalf("expected BrowserRouter basename for preview proxy paths, got %q", got)
+		}
+		if !strings.Contains(got, `preview\/proxy`) && !strings.Contains(got, "/preview/proxy") {
+			t.Fatalf("expected preview proxy path expression, got %q", got)
+		}
+	})
+
 	t.Run("does_not_touch_non_code_without_strong_indicators", func(t *testing.T) {
 		t.Parallel()
 
@@ -5626,7 +5643,7 @@ func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShe
 			{
 				Path:     "src/components/AppShell.tsx",
 				Language: "typescript",
-				Content:  `import create from 'zustand'; export default function AppShell(){ return <div /> }`,
+				Content:  `export default function AppShell(){ return <main><section>{[1,2,3,4,5,6].map(i => <div className="animate-pulse" key={i} />)}</section><input disabled placeholder="Loading..." /><input disabled placeholder="Loading..." /><button disabled aria-disabled="true">Building Estimate...</button></main> } function DashboardShell(){ return null } function KanbanShell(){ return null } function NewJobShell(){ return null } function SettingsShell(){ return null } function NotFoundShell(){ return null }`,
 			},
 			{
 				Path:     "src/components/pages/DashboardPage.tsx",
@@ -5697,7 +5714,7 @@ func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShe
 	if !reflect.DeepEqual(tsconfig.Include, []string{"src/main.tsx", "src/App.tsx", "vite.config.ts"}) {
 		t.Fatalf("expected tsconfig to restrict preview compile surface, got %+v in %q", tsconfig.Include, byPath["tsconfig.json"])
 	}
-	for _, removed := range []string{"src/components/pages/DashboardPage.tsx", "src/lib/types.tsx", "src/lib/demoData.tsx"} {
+	for _, removed := range []string{"src/components/AppShell.tsx", "src/components/pages/DashboardPage.tsx", "src/lib/types.tsx", "src/lib/demoData.tsx"} {
 		if _, ok := byPath[removed]; ok {
 			t.Fatalf("expected deterministic placeholder module %s to be deleted during repair", removed)
 		}
@@ -5716,6 +5733,18 @@ func TestScaffoldPlaceholderValidationErrorDetectsGeneratedPlaceholderModules(t 
 	msg := scaffoldPlaceholderValidationError("src/lib/types.tsx", content)
 	if !strings.Contains(msg, "deterministic scaffold placeholder content") {
 		t.Fatalf("expected generated placeholder module to fail readiness, got %q", msg)
+	}
+
+	shell := `export default function AppShell(){ return <main>
+	  <div className="animate-pulse" /><div className="animate-pulse" /><div className="animate-pulse" />
+	  <div className="animate-pulse" /><div className="animate-pulse" /><div className="animate-pulse" />
+	  <input disabled placeholder="Loading..." />
+	  <input disabled placeholder="Loading..." />
+	  <button disabled aria-disabled="true">Building Estimate...</button>
+	</main> } function DashboardShell(){ return null } function KanbanShell(){ return null } function NewJobShell(){ return null } function SettingsShell(){ return null } function NotFoundShell(){ return null }`
+	msg = scaffoldPlaceholderValidationError("src/components/AppShell.tsx", shell)
+	if !strings.Contains(msg, "deterministic scaffold placeholder content") {
+		t.Fatalf("expected skeleton shell module to fail readiness, got %q", msg)
 	}
 }
 

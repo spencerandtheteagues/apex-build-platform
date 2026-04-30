@@ -533,7 +533,7 @@ func wrapPreviewEntryWithBrowserRouter(content string) (string, bool) {
 	}
 
 	appPatterns := []string{"<App />", "<App/>"}
-	replacement := "<BrowserRouter>\n      <App />\n    </BrowserRouter>"
+	replacement := previewProxySafeBrowserRouterOpenTag() + "\n      <App />\n    </BrowserRouter>"
 	replaced := false
 	for _, pattern := range appPatterns {
 		if strings.Contains(content, pattern) {
