@@ -185,6 +185,27 @@ func TestCheckRootPage_RetriesTransient404(t *testing.T) {
 	}
 }
 
+func TestCheckRootPageSendsBrowserAcceptHeader(t *testing.T) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>`)
+	}))
+	defer srv.Close()
+
+	rv := &RuntimeVerifier{rootTimeout: time.Second}
+	body, c := rv.checkRootPage(context.Background(), &http.Client{}, srv.URL)
+	if !c.Passed {
+		t.Fatalf("expected root page check to pass with browser Accept header, got: %s", c.Detail)
+	}
+	if !strings.Contains(body, `id="root"`) {
+		t.Fatalf("expected HTML body, got %q", body)
+	}
+}
+
 func TestCheckRootPage_BlankBody(t *testing.T) {
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")

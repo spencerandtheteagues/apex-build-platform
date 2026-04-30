@@ -735,6 +735,7 @@ func (rv *RuntimeVerifier) checkRootPageOnce(ctx context.Context, client *http.C
 	if err != nil {
 		return "", check("root_page_200", false, "build request: "+err.Error())
 	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", check("root_page_200", false, "GET /: "+err.Error())
@@ -800,6 +801,7 @@ func (rv *RuntimeVerifier) checkViteClient(ctx context.Context, client *http.Cli
 	if err != nil {
 		return check("vite_client_accessible", false, "build request: "+err.Error())
 	}
+	req.Header.Set("Accept", "text/javascript,application/javascript,*/*;q=0.8")
 	resp, err := client.Do(req)
 	if err != nil {
 		return check("vite_client_accessible", false, "GET /@vite/client: "+err.Error())
@@ -820,6 +822,7 @@ func (rv *RuntimeVerifier) checkEntryModule(ctx context.Context, client *http.Cl
 	if err != nil {
 		return check(name, false, "build request: "+err.Error())
 	}
+	req.Header.Set("Accept", "text/javascript,application/javascript,*/*;q=0.8")
 	resp, err := client.Do(req)
 	if err != nil {
 		return check(name, false, "GET "+src+": "+err.Error())
@@ -863,6 +866,7 @@ func (rv *RuntimeVerifier) checkAsset(ctx context.Context, client *http.Client, 
 	if err != nil {
 		return check(name, false, err.Error())
 	}
+	req.Header.Set("Accept", "text/css,*/*;q=0.8")
 	resp, err := client.Do(req)
 	if err != nil {
 		return check(name, false, "GET "+href+": "+err.Error())
