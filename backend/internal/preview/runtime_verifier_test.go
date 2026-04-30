@@ -524,6 +524,16 @@ func TestViteBinaryRequiresLocalProjectInstall(t *testing.T) {
 	}
 }
 
+func TestViteServerArgsUseStrictPort(t *testing.T) {
+	args := strings.Join(viteServerArgs(5173), " ")
+	if !strings.Contains(args, "--strictPort") {
+		t.Fatalf("expected Vite startup args to pin the selected port, got %q", args)
+	}
+	if !strings.Contains(args, "--port 5173") {
+		t.Fatalf("expected Vite startup args to include selected port, got %q", args)
+	}
+}
+
 func TestApplyAdvisoryBrowserSignalsAddsVisionAndCanaryMetadata(t *testing.T) {
 	rv := &RuntimeVerifier{
 		visionVerifier: &stubRuntimeVisionVerifier{

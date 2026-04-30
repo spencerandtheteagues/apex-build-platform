@@ -231,7 +231,11 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	result.Checks = append(result.Checks, rootCheck)
 	if !rootCheck.Passed {
 		logs := truncateLog(viteLogs.String(), 1500)
-		return rv.rtFailWithLogs("blank_screen", rootCheck.Detail,
+		detail := rootCheck.Detail
+		if strings.TrimSpace(logs) != "" {
+			detail = fmt.Sprintf("%s — vite logs: %s", detail, logs)
+		}
+		return rv.rtFailWithLogs("blank_screen", detail,
 			"Ensure index.html has a non-empty <body> with the app mount point. Fix any errors reported by the Vite dev server.",
 			start, logs)
 	}
@@ -580,8 +584,7 @@ func (rv *RuntimeVerifier) viteBinary(dir string) (string, error) {
 }
 
 func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string, port int) (*exec.Cmd, *bytes.Buffer, error) {
-	args := []string{"--port", strconv.Itoa(port), "--host", "127.0.0.1", "--logLevel", "error"}
-
+	args := viteServerArgs(port)
 	cmd := exec.CommandContext(ctx, viteBin, args...)
 	cmd.Dir = dir
 	// Restrict env to avoid leaking secrets
@@ -600,6 +603,10 @@ func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string, p
 		return nil, nil, err
 	}
 	return cmd, &logs, nil
+}
+
+func viteServerArgs(port int) []string {
+	return []string{"--port", strconv.Itoa(port), "--host", "127.0.0.1", "--strictPort", "--logLevel", "error"}
 }
 
 func (rv *RuntimeVerifier) freePort() (int, error) {
@@ -648,6 +655,11 @@ func waitForTCPPortOrExit(port int, timeout time.Duration, stop <-chan struct{},
 			conn, err := net.DialTimeout("tcp", addr, 150*time.Millisecond)
 			if err == nil {
 				conn.Close()
+				select {
+				case err := <-exitCh:
+					return false, true, err
+				default:
+				}
 				return true, false, nil
 			}
 		}
