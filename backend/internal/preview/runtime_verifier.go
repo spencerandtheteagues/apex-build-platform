@@ -55,6 +55,7 @@ type RuntimeVerifier struct {
 	totalTimeout   time.Duration
 	installTimeout time.Duration
 	readyTimeout   time.Duration
+	rootTimeout    time.Duration
 }
 
 // NewRuntimeVerifier creates a RuntimeVerifier with HTTP checks only.
@@ -481,6 +482,18 @@ func (rv *RuntimeVerifier) runtimeServerReadyTimeout(total, install time.Duratio
 	return target
 }
 
+func (rv *RuntimeVerifier) runtimeRootReadyTimeout() time.Duration {
+	if rv.rootTimeout > 0 {
+		return rv.rootTimeout
+	}
+	if seconds := strings.TrimSpace(os.Getenv("APEX_PREVIEW_ROOT_READY_TIMEOUT_SECONDS")); seconds != "" {
+		if parsed, err := strconv.Atoi(seconds); err == nil && parsed > 0 {
+			return time.Duration(parsed) * time.Second
+		}
+	}
+	return 5 * time.Second
+}
+
 func formatRuntimeTimeout(timeout time.Duration) string {
 	if timeout%time.Second == 0 {
 		return fmt.Sprintf("%ds", int(timeout/time.Second))
@@ -645,6 +658,23 @@ func waitForTCPPortOrExit(port int, timeout time.Duration, stop <-chan struct{},
 // ── HTTP check helpers ────────────────────────────────────────────────────────
 
 func (rv *RuntimeVerifier) checkRootPage(ctx context.Context, client *http.Client, base string) (body string, c CheckResult) {
+	deadline := time.Now().Add(rv.runtimeRootReadyTimeout())
+	var lastBody string
+	var lastCheck CheckResult
+	for {
+		lastBody, lastCheck = rv.checkRootPageOnce(ctx, client, base)
+		if lastCheck.Passed || !isTransientRootPageFailure(lastCheck.Detail) || ctx.Err() != nil || time.Now().After(deadline) {
+			return lastBody, lastCheck
+		}
+		select {
+		case <-ctx.Done():
+			return lastBody, lastCheck
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+func (rv *RuntimeVerifier) checkRootPageOnce(ctx context.Context, client *http.Client, base string) (body string, c CheckResult) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/", nil)
 	if err != nil {
 		return "", check("root_page_200", false, "build request: "+err.Error())
@@ -656,7 +686,16 @@ func (rv *RuntimeVerifier) checkRootPage(ctx context.Context, client *http.Clien
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", check("root_page_200", false, fmt.Sprintf("GET / returned HTTP %d", resp.StatusCode))
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		snippet := strings.TrimSpace(string(raw))
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "…"
+		}
+		detail := fmt.Sprintf("GET / returned HTTP %d", resp.StatusCode)
+		if snippet != "" {
+			detail = fmt.Sprintf("%s — %s", detail, snippet)
+		}
+		return "", check("root_page_200", false, detail)
 	}
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
@@ -672,6 +711,16 @@ func (rv *RuntimeVerifier) checkRootPage(ctx context.Context, client *http.Clien
 	}
 
 	return bodyStr, check("root_page_200", true, fmt.Sprintf("HTTP 200, %d bytes", len(bodyStr)))
+}
+
+func isTransientRootPageFailure(detail string) bool {
+	lower := strings.ToLower(detail)
+	return strings.Contains(lower, "get / returned http 404") ||
+		strings.Contains(lower, "get / returned http 503") ||
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "connection reset") ||
+		strings.Contains(lower, "unexpected eof") ||
+		strings.Contains(lower, "server closed idle connection")
 }
 
 func (rv *RuntimeVerifier) checkMountPoint(html string) CheckResult {

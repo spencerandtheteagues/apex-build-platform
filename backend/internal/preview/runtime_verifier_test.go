@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -159,6 +160,31 @@ func TestCheckRootPage_OK(t *testing.T) {
 	}
 }
 
+func TestCheckRootPage_RetriesTransient404(t *testing.T) {
+	var calls int32
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) < 3 {
+			http.Error(w, "warming up", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>`)
+	}))
+	defer srv.Close()
+
+	rv := &RuntimeVerifier{rootTimeout: time.Second}
+	body, c := rv.checkRootPage(context.Background(), &http.Client{}, srv.URL)
+	if !c.Passed {
+		t.Fatalf("expected transient 404 to recover, got: %s", c.Detail)
+	}
+	if got := atomic.LoadInt32(&calls); got < 3 {
+		t.Fatalf("expected retry attempts, got %d", got)
+	}
+	if !strings.Contains(body, `id="root"`) {
+		t.Fatalf("expected recovered HTML body, got %q", body)
+	}
+}
+
 func TestCheckRootPage_BlankBody(t *testing.T) {
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -179,10 +205,13 @@ func TestCheckRootPage_Non200(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rv := &RuntimeVerifier{}
+	rv := &RuntimeVerifier{rootTimeout: time.Millisecond}
 	_, c := rv.checkRootPage(context.Background(), &http.Client{}, srv.URL)
 	if c.Passed {
 		t.Error("expected 404 to fail root page check")
+	}
+	if !strings.Contains(c.Detail, "not found") {
+		t.Errorf("expected 404 body snippet in detail, got %q", c.Detail)
 	}
 }
 
