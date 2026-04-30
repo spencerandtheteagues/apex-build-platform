@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"os/exec"
@@ -2445,12 +2446,12 @@ func TestParseMissingDependenciesByVerificationScope(t *testing.T) {
 
 	errs := []string{
 		`Preview verification dependency check failed: source imports "zod" but package.json does not declare dependency "zod"`,
-		`Preview verification dependency check failed: source imports "@vitejs/plugin-react" but package.json does not declare dependency "@vitejs/plugin-react"`,
+		`Preview verification dependency check failed: source imports "@vitejs/plugin-react" but package.json does not declare dependency "@vitejs/plugin-react"; Preview verification dependency check failed: source imports "react-hook-form" but package.json does not declare dependency "react-hook-form"`,
 		`Backend verification dependency check failed: source imports "bcrypt" but package.json does not declare dependency "bcrypt"`,
 	}
 
 	frontend, backend := parseMissingDependenciesByVerificationScope(errs)
-	if got := strings.Join(frontend, ","); got != "@vitejs/plugin-react,zod" {
+	if got := strings.Join(frontend, ","); got != "@vitejs/plugin-react,react-hook-form,zod" {
 		t.Fatalf("unexpected frontend deps: %q", got)
 	}
 	if got := strings.Join(backend, ","); got != "bcrypt" {
@@ -2534,6 +2535,85 @@ export default function App() {
 		if !strings.Contains(manifest, `"`+pkg+`"`) {
 			t.Fatalf("expected manifest repair to include %s, got %s", pkg, manifest)
 		}
+	}
+}
+
+func TestEnsureGeneratedManifestDependencyClosureRepairsBeforePreviewValidation(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-pre-validation-dependency-closure",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": { "build": "tsc && vite build", "dev": "vite" },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.12.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/App.tsx",
+				Content: `import React from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { LineChart } from "recharts";
+
+export default function App() {
+  const schema = z.object({ name: z.string() });
+  const form = useForm({ resolver: zodResolver(schema) });
+  return <LineChart data={[]} width={100} height={100}>{form.formState.isValid ? "ok" : "ready"}</LineChart>;
+}
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	files := am.collectGeneratedFiles(build)
+	repaired, summary := am.ensureGeneratedManifestDependencyClosure(build, files)
+	if !repaired {
+		t.Fatalf("expected dependency closure repair, got summary %q", summary)
+	}
+
+	files = am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+	manifest := byPath["package.json"]
+	for _, pkg := range []string{"react-hook-form", "zod", "@hookform/resolvers", "@types/lodash"} {
+		if !strings.Contains(manifest, `"`+pkg+`"`) {
+			t.Fatalf("expected dependency closure to include %s, got %s", pkg, manifest)
+		}
+	}
+
+	var parsed previewManifest
+	if err := json.Unmarshal([]byte(manifest), &parsed); err != nil {
+		t.Fatalf("expected repaired manifest to be valid JSON: %v", err)
+	}
+	if issues := validateGeneratedImportDependencies(files, "", parsed); len(issues) > 0 {
+		t.Fatalf("expected repaired manifest to satisfy import dependency check, got %v", issues)
 	}
 }
 

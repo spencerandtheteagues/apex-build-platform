@@ -8266,20 +8266,25 @@ func parseMissingDependenciesByVerificationScope(errors []string) (frontendPkgs 
 	frontSet := map[string]bool{}
 	backSet := map[string]bool{}
 	for _, msg := range errors {
-		matches := reMissing.FindStringSubmatch(strings.TrimSpace(msg))
-		if len(matches) != 2 {
-			continue
-		}
-		pkg := strings.TrimSpace(matches[1])
-		if pkg == "" {
+		matches := reMissing.FindAllStringSubmatch(strings.TrimSpace(msg), -1)
+		if len(matches) == 0 {
 			continue
 		}
 		lower := strings.ToLower(msg)
-		if strings.Contains(lower, "preview verification dependency check failed") {
-			frontSet[pkg] = true
-		}
-		if strings.Contains(lower, "backend verification dependency check failed") {
-			backSet[pkg] = true
+		for _, match := range matches {
+			if len(match) != 2 {
+				continue
+			}
+			pkg := strings.TrimSpace(match[1])
+			if pkg == "" {
+				continue
+			}
+			if strings.Contains(lower, "preview verification dependency check failed") {
+				frontSet[pkg] = true
+			}
+			if strings.Contains(lower, "backend verification dependency check failed") {
+				backSet[pkg] = true
+			}
 		}
 	}
 	for pkg := range frontSet {
@@ -10099,6 +10104,113 @@ func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build,
 	}
 	summary := strings.Join(summaries, "; ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "manifest_repair: "+summary), summary
+}
+
+func generatedManifestDependencyClosureCandidates() []string {
+	return []string{
+		"frontend/package.json",
+		"client/package.json",
+		"web/package.json",
+		"apps/web/package.json",
+		"apps/frontend/package.json",
+		"packages/web/package.json",
+		"packages/frontend/package.json",
+		"backend/package.json",
+		"api/package.json",
+		"server/package.json",
+		"apps/api/package.json",
+		"apps/server/package.json",
+		"packages/backend/package.json",
+		"packages/api/package.json",
+		"package.json",
+	}
+}
+
+func generatedManifestTypeCompanionDependencies(manifest previewManifest) []string {
+	missing := make([]string, 0, 2)
+	add := func(pkg string) {
+		pkg = canonicalGeneratedDependencyName(pkg)
+		if pkg == "" || manifestDeclaresDependency(manifest, pkg) {
+			return
+		}
+		missing = append(missing, pkg)
+	}
+
+	// Recharts v2 declaration files reference lodash types. Without @types/lodash,
+	// generated Vite/TS builds can pass dependency closure but fail at 97% during
+	// preview verification on node_modules/recharts/**/*.d.ts.
+	if manifestDeclaresDependency(manifest, "recharts") {
+		add("@types/lodash")
+	}
+
+	return dedupeStringsPreserveOrder(missing)
+}
+
+func (am *AgentManager) ensureGeneratedManifestDependencyClosure(build *Build, files []GeneratedFile) (bool, string) {
+	if build == nil || len(files) == 0 {
+		return false, ""
+	}
+
+	before, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(before) == 0 || plan == nil {
+		return false, ""
+	}
+
+	changed := false
+	summaries := make([]string, 0, 2)
+	seenManifest := map[string]bool{}
+	for _, manifestPath := range generatedManifestDependencyClosureCandidates() {
+		manifestPath = sanitizeFilePath(manifestPath)
+		if manifestPath == "" || seenManifest[manifestPath] {
+			continue
+		}
+		seenManifest[manifestPath] = true
+
+		content := plan.content(manifestPath)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		var manifest previewManifest
+		if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+			continue
+		}
+
+		missing := missingManifestDependenciesForGeneratedFiles(plan.files(), manifestPath, manifest, nil)
+		missing = append(missing, generatedManifestTypeCompanionDependencies(manifest)...)
+		missing = dedupeStringsPreserveOrder(missing)
+		if len(missing) == 0 {
+			continue
+		}
+
+		updated, added := patchManifestDependenciesJSON(content, missing)
+		if len(added) == 0 {
+			continue
+		}
+		if !plan.patchFile(manifestPath, updated, "json") {
+			continue
+		}
+		changed = true
+		summaries = append(summaries, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(added, ", ")))
+	}
+
+	if !changed {
+		return false, ""
+	}
+
+	bundle := am.bundleFromPatchPlan(build.ID, before, plan, "pre_validation_dependency_closure: "+strings.Join(summaries, "; "))
+	if bundle == nil || !am.applyPatchBundleToBuild(build, bundle) {
+		return false, ""
+	}
+
+	build.mu.Lock()
+	orchestration := ensureBuildOrchestrationStateLocked(build)
+	recordPatchBundles := orchestration != nil && orchestration.Flags.EnablePatchBundles
+	build.mu.Unlock()
+	if recordPatchBundles {
+		appendPatchBundle(build, *bundle)
+	}
+
+	return true, strings.Join(summaries, "; ")
 }
 
 func normalizePreviewSyntaxErrorPath(raw string) string {
@@ -16367,6 +16479,10 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 		if am.applyDeterministicPreValidationNormalization(build) {
 			allFiles = am.collectGeneratedFiles(build)
 		}
+		if repaired, summary := am.ensureGeneratedManifestDependencyClosure(build, allFiles); repaired {
+			allFiles = am.collectGeneratedFiles(build)
+			log.Printf("Build %s: pre-validation dependency closure repaired package manifest(s): %s", build.ID, summary)
+		}
 
 		// Compile validation loop: materialise the workspace, run tsc + vite build,
 		// and repair errors with the AI inline (synchronous, no task queue) up to
@@ -16375,6 +16491,10 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 		// which lets shouldRunPreviewReadinessVerification skip the redundant build.
 		// Never fails the build — falls through gracefully if npm is unavailable.
 		am.runCompileValidationLoop(build, &allFiles, now)
+		if repaired, summary := am.ensureGeneratedManifestDependencyClosure(build, allFiles); repaired {
+			allFiles = am.collectGeneratedFiles(build)
+			log.Printf("Build %s: post-compile dependency closure repaired package manifest(s): %s", build.ID, summary)
+		}
 
 		readinessErrors := am.validateFinalBuildReadiness(build, allFiles)
 		if len(readinessErrors) > 0 {
