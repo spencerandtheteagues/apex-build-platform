@@ -5807,6 +5807,86 @@ export default pool;
 	}
 }
 
+func TestApplyDeterministicTypeDeclarationRepairAnnotatesImplicitAnyArrowParameters(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-implicit-any-arrow-repair",
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": {
+    "build": "tsc && vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{
+							Path: "src/components/AppShell.tsx",
+							Content: `const selectedIds = ["job-1"];
+const createdIds = ["job-2"];
+
+export function AppShell() {
+  const selected = selectedIds.map(id => id.toUpperCase());
+  const created = createdIds.find((createdId) => createdId === selected[0]);
+  return <div>{created}</div>;
+}
+`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
+		"Final output validation failed: Preview verification build failed: src/components/AppShell.tsx(605,42): error TS7006: Parameter 'id' implicitly has an 'any' type.",
+		"src/components/AppShell.tsx(609,25): error TS7006: Parameter 'createdId' implicitly has an 'any' type.",
+	})
+	if bundle == nil {
+		t.Fatalf("expected implicit-any arrow parameter repair to trigger")
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatalf("expected patch bundle to apply")
+	}
+	if !strings.Contains(summary, "typed id callback parameter") || !strings.Contains(summary, "typed createdId callback parameter") {
+		t.Fatalf("expected summary to mention both typed callback parameters, got %q", summary)
+	}
+
+	var appShell string
+	for _, file := range am.collectGeneratedFiles(build) {
+		if file.Path == "src/components/AppShell.tsx" {
+			appShell = file.Content
+			break
+		}
+	}
+	if !strings.Contains(appShell, `selectedIds.map((id: string) => id.toUpperCase())`) {
+		t.Fatalf("expected unparenthesized id arrow callback to be typed, got %q", appShell)
+	}
+	if !strings.Contains(appShell, `createdIds.find((createdId: string) => createdId === selected[0])`) {
+		t.Fatalf("expected parenthesized createdId arrow callback to be typed, got %q", appShell)
+	}
+}
+
 func TestApplyDeterministicTypeDeclarationRepairAddsViteEnvDeclaration(t *testing.T) {
 	t.Parallel()
 

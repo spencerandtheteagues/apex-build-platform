@@ -13420,6 +13420,60 @@ func parseImplicitAnyParameterTargets(errors []string, parameter string) []strin
 	return paths
 }
 
+type implicitAnyParameterRepairTarget struct {
+	Path      string
+	Line      int
+	Column    int
+	Parameter string
+}
+
+func parseImplicitAnyParameterRepairTargets(errors []string) []implicitAnyParameterRepairTarget {
+	if len(errors) == 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\((\d+),(\d+)\): error TS7006: Parameter '([^']+)' implicitly has an 'any' type\.`)
+	seen := map[string]bool{}
+	targets := make([]implicitAnyParameterRepairTarget, 0, 2)
+	for _, msg := range errors {
+		for _, match := range re.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 5 {
+				continue
+			}
+			path := normalizePreviewSyntaxErrorPath(match[1])
+			param := strings.TrimSpace(match[4])
+			if path == "" || param == "" {
+				continue
+			}
+			line, _ := strconv.Atoi(match[2])
+			column, _ := strconv.Atoi(match[3])
+			key := fmt.Sprintf("%s:%d:%d:%s", path, line, column, param)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			targets = append(targets, implicitAnyParameterRepairTarget{
+				Path:      path,
+				Line:      line,
+				Column:    column,
+				Parameter: param,
+			})
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].Path != targets[j].Path {
+			return targets[i].Path < targets[j].Path
+		}
+		if targets[i].Line != targets[j].Line {
+			return targets[i].Line < targets[j].Line
+		}
+		if targets[i].Column != targets[j].Column {
+			return targets[i].Column < targets[j].Column
+		}
+		return targets[i].Parameter < targets[j].Parameter
+	})
+	return targets
+}
+
 func typePackageForModule(module string) string {
 	module = strings.TrimSpace(module)
 	if module == "" {
@@ -13461,6 +13515,122 @@ func annotateGeneratedErrorEventCallbackParameter(path, content string) (string,
 		return content, false
 	}
 	return updated, true
+}
+
+func inferImplicitAnyParameterType(parameter string) string {
+	normalized := strings.ToLower(strings.TrimSpace(parameter))
+	switch {
+	case normalized == "err" || normalized == "error":
+		return "Error"
+	case normalized == "index" || normalized == "idx" || normalized == "i":
+		return "number"
+	case normalized == "event" || normalized == "evt":
+		return "Event"
+	case normalized == "e":
+		return "React.ChangeEvent<HTMLInputElement>"
+	case normalized == "key" || normalized == "slug" || normalized == "status" || normalized == "name" || normalized == "title":
+		return "string"
+	case strings.HasSuffix(normalized, "id") || strings.Contains(normalized, "id"):
+		return "string"
+	default:
+		// Explicit any is intentionally used only as a last-resort repair for
+		// noImplicitAny callback parameters. It preserves runtime behavior and
+		// prevents the verifier from falling into expensive LLM rewrite loops.
+		return "any"
+	}
+}
+
+func annotateImplicitAnyArrowParameterLine(line string, target implicitAnyParameterRepairTarget) (string, bool) {
+	param := strings.TrimSpace(target.Parameter)
+	if param == "" || strings.Contains(param, ":") {
+		return line, false
+	}
+	typ := inferImplicitAnyParameterType(param)
+	updated := line
+	changed := false
+
+	parenthesized := regexp.MustCompile(`\(([^()]*)\)\s*=>`)
+	updated = parenthesized.ReplaceAllStringFunc(updated, func(match string) string {
+		open := strings.Index(match, "(")
+		close := strings.LastIndex(match, ")")
+		if open == -1 || close == -1 || close <= open {
+			return match
+		}
+		paramList := match[open+1 : close]
+		parts := strings.Split(paramList, ",")
+		localChanged := false
+		for i, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != param || strings.Contains(trimmed, ":") || strings.Contains(trimmed, "{") || strings.Contains(trimmed, "[") {
+				continue
+			}
+			prefix := part[:len(part)-len(strings.TrimLeft(part, " \t"))]
+			suffix := part[len(strings.TrimRight(part, " \t")):]
+			parts[i] = prefix + param + ": " + typ + suffix
+			localChanged = true
+		}
+		if !localChanged {
+			return match
+		}
+		changed = true
+		return "(" + strings.Join(parts, ",") + ")" + match[close+1:]
+	})
+
+	if changed {
+		return updated, true
+	}
+
+	unparenthesized := regexp.MustCompile(`\b` + regexp.QuoteMeta(param) + `\s*=>`)
+	updated = unparenthesized.ReplaceAllString(updated, "("+param+": "+typ+") =>")
+	if updated != line {
+		return updated, true
+	}
+
+	return line, false
+}
+
+func annotateImplicitAnyArrowParameter(content string, target implicitAnyParameterRepairTarget) (string, bool) {
+	if strings.TrimSpace(content) == "" || strings.TrimSpace(target.Parameter) == "" {
+		return content, false
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return content, false
+	}
+
+	candidates := make([]int, 0, 5)
+	if target.Line > 0 && target.Line <= len(lines) {
+		start := target.Line - 3
+		if start < 0 {
+			start = 0
+		}
+		end := target.Line + 2
+		if end > len(lines) {
+			end = len(lines)
+		}
+		for i := start; i < end; i++ {
+			candidates = append(candidates, i)
+		}
+	} else {
+		for i := range lines {
+			candidates = append(candidates, i)
+		}
+	}
+
+	changed := false
+	for _, idx := range candidates {
+		updated, lineChanged := annotateImplicitAnyArrowParameterLine(lines[idx], target)
+		if !lineChanged {
+			continue
+		}
+		lines[idx] = updated
+		changed = true
+		break
+	}
+	if !changed {
+		return content, false
+	}
+	return strings.Join(lines, "\n"), true
 }
 
 func requiresViteEnvTypeDeclarationRepair(files []GeneratedFile, errors []string) bool {
@@ -13745,12 +13915,13 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 	}
 	typePkgs := parseMissingTypePackagesFromBuildErrors(readinessErrors)
 	implicitAnyTargets := parseImplicitAnyParameterTargets(readinessErrors, "err")
+	implicitAnyParameterTargets := parseImplicitAnyParameterRepairTargets(readinessErrors)
 	files, plan := am.buildGeneratedFilePatchPlan(build)
 	if len(files) == 0 {
 		return nil, ""
 	}
 	needsViteEnvDeclaration := requiresViteEnvTypeDeclarationRepair(files, readinessErrors)
-	if len(typePkgs) == 0 && !needsViteEnvDeclaration && len(implicitAnyTargets) == 0 {
+	if len(typePkgs) == 0 && !needsViteEnvDeclaration && len(implicitAnyTargets) == 0 && len(implicitAnyParameterTargets) == 0 {
 		return nil, ""
 	}
 
@@ -13800,6 +13971,19 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 		}
 		if plan.patchFile(target, updated, am.detectLanguage(target)) {
 			applied = append(applied, fmt.Sprintf("%s (typed error callback)", target))
+		}
+	}
+	for _, target := range implicitAnyParameterTargets {
+		current := plan.content(target.Path)
+		if strings.TrimSpace(current) == "" {
+			continue
+		}
+		updated, changed := annotateImplicitAnyArrowParameter(current, target)
+		if !changed {
+			continue
+		}
+		if plan.patchFile(target.Path, updated, am.detectLanguage(target.Path)) {
+			applied = append(applied, fmt.Sprintf("%s (typed %s callback parameter)", target.Path, target.Parameter))
 		}
 	}
 
