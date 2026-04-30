@@ -11521,10 +11521,11 @@ type staleImportValidationTarget struct {
 }
 
 type exportMismatchRepairTarget struct {
-	ImporterPath string
-	ExporterPath string
-	Specifier    string
-	ExportName   string
+	ImporterPath      string
+	ExporterPath      string
+	Specifier         string
+	ExportName        string
+	PreferNamedImport bool
 }
 
 func parseStaleImportValidationTargets(errors []string) []staleImportValidationTarget {
@@ -11747,6 +11748,8 @@ func parseExportMismatchRepairTargets(errors []string) []exportMismatchRepairTar
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`(?m)RollupError:\s+["']([^"']+)["'] is not exported by ["']([^"']+)["'], imported by ["']([^"']+)["']`),
 		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS(?:2305|2614): Module ['"]([^'"]+)['"] has no exported member ['"]([^'"]+)['"]`),
+		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2613: Module ['"](.+?)['"] has no default export\.[^\n]*import\s+\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\s+from`),
+		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS1192: Module ['"](.+?)['"] has no default export\.`),
 	}
 
 	seen := map[string]bool{}
@@ -11774,8 +11777,27 @@ func parseExportMismatchRepairTargets(errors []string) []exportMismatchRepairTar
 						Specifier:    strings.TrimSpace(match[2]),
 						ExportName:   strings.TrimSpace(match[3]),
 					}
+				case 2:
+					if len(match) != 4 {
+						continue
+					}
+					target = exportMismatchRepairTarget{
+						ImporterPath:      sanitizeFilePath(strings.TrimSpace(match[1])),
+						ExporterPath:      normalizePreviewSyntaxErrorPath(match[2]),
+						ExportName:        strings.TrimSpace(match[3]),
+						PreferNamedImport: true,
+					}
+				case 3:
+					if len(match) != 3 {
+						continue
+					}
+					target = exportMismatchRepairTarget{
+						ImporterPath:      sanitizeFilePath(strings.TrimSpace(match[1])),
+						ExporterPath:      normalizePreviewSyntaxErrorPath(match[2]),
+						PreferNamedImport: true,
+					}
 				}
-				if target.ImporterPath == "" || target.ExportName == "" {
+				if target.ImporterPath == "" || (!target.PreferNamedImport && target.ExportName == "") {
 					continue
 				}
 				key := strings.ToLower(target.ImporterPath + "::" + target.ExporterPath + "::" + target.Specifier + "::" + target.ExportName)
@@ -11798,6 +11820,30 @@ func parseExportMismatchRepairTargets(errors []string) []exportMismatchRepairTar
 		return targets[i].ImporterPath < targets[j].ImporterPath
 	})
 	return targets
+}
+
+func resolveGeneratedErrorPathCandidate(path string, existing map[string]bool) string {
+	path = strings.TrimSuffix(sanitizeFilePath(path), "/")
+	if path == "" {
+		return ""
+	}
+	candidates := []string{
+		path,
+		path + ".tsx",
+		path + ".ts",
+		path + ".jsx",
+		path + ".js",
+		filepath.ToSlash(filepath.Join(path, "index.tsx")),
+		filepath.ToSlash(filepath.Join(path, "index.ts")),
+		filepath.ToSlash(filepath.Join(path, "index.jsx")),
+		filepath.ToSlash(filepath.Join(path, "index.js")),
+	}
+	for _, candidate := range candidates {
+		if existing[strings.ToLower(candidate)] {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func generatedFileExportsNamedSymbol(content, name string) bool {
@@ -11924,6 +11970,74 @@ func rewriteNamedImportToDefaultImport(importerPath, content, exporterPath, expo
 	return content, false
 }
 
+func rewriteDefaultImportToNamedImport(importerPath, content, exporterPath, exportName, exporterContent string) (string, bool) {
+	importerPath = sanitizeFilePath(importerPath)
+	exporterPath = sanitizeFilePath(exporterPath)
+	exportName = sanitizeGeneratedIdentifier(exportName)
+	if importerPath == "" || exporterPath == "" || strings.TrimSpace(content) == "" || strings.TrimSpace(exporterContent) == "" {
+		return content, false
+	}
+
+	importRe := regexp.MustCompile(`(?m)^(\s*import\s+)(.+?)(\s+from\s+['"]([^'"]+)['"]\s*;?\s*)$`)
+	matches := importRe.FindAllStringSubmatchIndex(content, -1)
+	for _, match := range matches {
+		if len(match) < 10 {
+			continue
+		}
+		clause := content[match[4]:match[5]]
+		specifier := strings.TrimSpace(content[match[8]:match[9]])
+		resolved := resolveExportMismatchTargetPath(importerPath, specifier, map[string]bool{strings.ToLower(exporterPath): true})
+		if !strings.EqualFold(resolved, exporterPath) {
+			continue
+		}
+
+		trimmedClause := strings.TrimSpace(clause)
+		if strings.HasPrefix(trimmedClause, "type ") || strings.HasPrefix(trimmedClause, "{") || strings.HasPrefix(trimmedClause, "*") {
+			continue
+		}
+
+		defaultImport := trimmedClause
+		namedSection := ""
+		if strings.Contains(trimmedClause, "{") {
+			parts := strings.SplitN(trimmedClause, "{", 2)
+			defaultImport = strings.TrimSpace(strings.TrimSuffix(parts[0], ","))
+			namedSection = strings.TrimSpace(strings.TrimSuffix(parts[1], "}"))
+		}
+		defaultImport = sanitizeGeneratedIdentifier(defaultImport)
+		if defaultImport == "" {
+			continue
+		}
+
+		namedExport := exportName
+		if namedExport == "" {
+			namedExport = defaultImport
+		}
+		if !generatedFileExportsNamedSymbol(exporterContent, namedExport) {
+			continue
+		}
+
+		namedParts := make([]string, 0, 2)
+		if namedExport == defaultImport {
+			namedParts = append(namedParts, namedExport)
+		} else {
+			namedParts = append(namedParts, namedExport+" as "+defaultImport)
+		}
+		if namedSection != "" {
+			for _, part := range strings.Split(namedSection, ",") {
+				part = strings.TrimSpace(part)
+				if part != "" {
+					namedParts = append(namedParts, part)
+				}
+			}
+		}
+
+		replacement := content[match[2]:match[3]] + "{ " + strings.Join(namedParts, ", ") + " }" + content[match[6]:match[7]]
+		return content[:match[0]] + replacement + content[match[1]:], true
+	}
+
+	return content, false
+}
+
 func addNamedAliasForDefaultExport(content, exportName string) (string, bool) {
 	exportName = sanitizeGeneratedIdentifier(exportName)
 	if exportName == "" || strings.TrimSpace(content) == "" || generatedFileExportsNamedSymbol(content, exportName) {
@@ -11966,6 +12080,9 @@ func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, rea
 	applied := make([]string, 0, len(targets))
 	for _, target := range targets {
 		exporterPath := sanitizeFilePath(target.ExporterPath)
+		if exporterPath != "" && !existing[strings.ToLower(exporterPath)] {
+			exporterPath = resolveGeneratedErrorPathCandidate(exporterPath, existing)
+		}
 		if exporterPath == "" && target.Specifier != "" {
 			exporterPath = resolveExportMismatchTargetPath(target.ImporterPath, target.Specifier, existing)
 		}
@@ -11974,6 +12091,15 @@ func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, rea
 		}
 
 		importerContent := plan.content(target.ImporterPath)
+		exporterContent := plan.content(exporterPath)
+		if target.PreferNamedImport && strings.TrimSpace(importerContent) != "" && strings.TrimSpace(exporterContent) != "" {
+			if repaired, changed := rewriteDefaultImportToNamedImport(target.ImporterPath, importerContent, exporterPath, target.ExportName, exporterContent); changed {
+				if plan.patchFile(target.ImporterPath, repaired, am.detectLanguage(target.ImporterPath)) {
+					applied = append(applied, fmt.Sprintf("%s imports named export %s from %s", target.ImporterPath, firstNonEmptyString(target.ExportName, "matching default import"), exporterPath))
+					continue
+				}
+			}
+		}
 		if strings.TrimSpace(importerContent) != "" {
 			if repaired, changed := rewriteNamedImportToDefaultImport(target.ImporterPath, importerContent, exporterPath, target.ExportName); changed {
 				if plan.patchFile(target.ImporterPath, repaired, am.detectLanguage(target.ImporterPath)) {
@@ -11983,7 +12109,6 @@ func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, rea
 			}
 		}
 
-		exporterContent := plan.content(exporterPath)
 		if strings.TrimSpace(exporterContent) == "" {
 			continue
 		}

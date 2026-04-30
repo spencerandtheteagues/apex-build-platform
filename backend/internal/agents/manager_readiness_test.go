@@ -4954,6 +4954,76 @@ RollupError: "Button" is not exported by "src/components/Button.tsx", imported b
 	}
 }
 
+func TestApplyDeterministicValidationRepairsFixesMissingDefaultExportWithNamedImport(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-default-import-to-named-export",
+		Tasks: []*Task{
+			{
+				ID:   "frontend-task",
+				Type: TaskGenerateUI,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "src/components/ui/button.tsx",
+							Content: `import React from 'react'
+
+export function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button {...props} />
+}
+`,
+							IsNew: true,
+						},
+						{
+							Path: "src/App.tsx",
+							Content: `import React from 'react'
+import Button from '@/components/ui/button'
+
+export default function App() {
+  return <Button>Save</Button>
+}
+`,
+							IsNew: true,
+						},
+					},
+				},
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification build failed: src/App.tsx(2,8): error TS2613: Module '"/tmp/apex-preview-verify-282435174/src/components/ui/button"' has no default export. Did you mean to use 'import { Button } from "/tmp/apex-preview-verify-282435174/src/components/ui/button"' instead?`},
+		"preview build failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected deterministic default-to-named import repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedImporter string
+	for _, file := range files {
+		if file.Path == "src/App.tsx" {
+			repairedImporter = file.Content
+			break
+		}
+	}
+	if repairedImporter == "" {
+		t.Fatalf("expected repaired importer file, got %+v", files)
+	}
+	if !strings.Contains(repairedImporter, `import { Button } from '@/components/ui/button'`) {
+		t.Fatalf("expected default import to be rewritten to named import, got %q", repairedImporter)
+	}
+}
+
 func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
 	t.Parallel()
 
