@@ -1561,6 +1561,19 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 		}
 	})
 
+	t.Run("strips_bare_react_ambient_declarations_that_shadow_installed_types", func(t *testing.T) {
+		t.Parallel()
+
+		in := "declare module 'react';\ndeclare module 'react/jsx-runtime';\ndeclare module './local-module';\n"
+		got := normalizeGeneratedFileContent("src/types/react.d.ts", in)
+		if strings.Contains(got, "declare module 'react';") || strings.Contains(got, "declare module 'react/jsx-runtime';") {
+			t.Fatalf("expected bare React ambient module declarations to be stripped, got %q", got)
+		}
+		if !strings.Contains(got, "declare module './local-module';") {
+			t.Fatalf("expected local ambient declaration to remain, got %q", got)
+		}
+	})
+
 	t.Run("adds_backend_tsconfig_test_excludes_for_build", func(t *testing.T) {
 		t.Parallel()
 
@@ -1645,6 +1658,28 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 		}
 		if !strings.Contains(got, `"moduleResolution": "Bundler"`) {
 			t.Fatalf("expected downstream tsconfig normalization to still run, got %s", got)
+		}
+	})
+
+	t.Run("removes_frontend_project_references_that_break_single_project_vite_builds", func(t *testing.T) {
+		t.Parallel()
+
+		in := `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "jsx": "react-jsx"
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}`
+		got := normalizeGeneratedFileContent("tsconfig.json", in)
+		if strings.Contains(got, `"references"`) || strings.Contains(got, `tsconfig.node.json`) {
+			t.Fatalf("expected frontend project references to be removed, got %s", got)
+		}
+		if !strings.Contains(got, `"moduleResolution": "Bundler"`) {
+			t.Fatalf("expected frontend moduleResolution to remain bundler-safe, got %s", got)
 		}
 	})
 }

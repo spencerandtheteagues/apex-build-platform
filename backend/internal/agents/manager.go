@@ -19903,6 +19903,7 @@ func normalizeGeneratedFileContent(path, content string) string {
 	content = stripPatchOrMergeMarkersFromContent(content)
 	content = stripTaskProtocolArtifacts(content)
 	content = unwrapGeneratedFilePresentation(path, content)
+	content = stripGeneratedBareAmbientTypeShadows(path, content)
 
 	if strings.TrimSpace(content) == "" || !strings.Contains(content, "''") {
 		content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
@@ -19937,6 +19938,57 @@ func normalizeGeneratedFileContent(path, content string) string {
 	content = strings.ReplaceAll(content, "''", "'")
 	content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
 	return normalizeGeneratedTSConfigBuildExcludes(path, content)
+}
+
+func stripGeneratedBareAmbientTypeShadows(path, content string) string {
+	if strings.TrimSpace(content) == "" {
+		return content
+	}
+
+	normalizedPath := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
+	if !strings.HasSuffix(normalizedPath, ".d.ts") {
+		return content
+	}
+
+	bareAmbientModuleRe := regexp.MustCompile(`^\s*declare\s+module\s+['"]([^'"]+)['"]\s*;\s*$`)
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	changed := false
+	for _, line := range lines {
+		match := bareAmbientModuleRe.FindStringSubmatch(line)
+		if len(match) == 2 && generatedBareAmbientModuleShadowsInstalledTypes(match[1]) {
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if !changed {
+		return content
+	}
+
+	cleaned := strings.TrimSpace(strings.Join(out, "\n"))
+	if cleaned == "" {
+		return "// Removed generated bare ambient module declarations that shadow installed package types.\n"
+	}
+	return cleaned + "\n"
+}
+
+func generatedBareAmbientModuleShadowsInstalledTypes(moduleName string) bool {
+	moduleName = strings.TrimSpace(moduleName)
+	if moduleName == "" {
+		return false
+	}
+
+	switch moduleName {
+	case "react", "react/jsx-runtime", "react/jsx-dev-runtime", "react-dom", "react-dom/client",
+		"react-router-dom", "vite", "@vitejs/plugin-react":
+		return true
+	}
+
+	return strings.HasPrefix(moduleName, "@radix-ui/") ||
+		strings.HasPrefix(moduleName, "lucide-react") ||
+		strings.HasPrefix(moduleName, "framer-motion") ||
+		strings.HasPrefix(moduleName, "react-")
 }
 
 func stripTaskProtocolArtifacts(content string) string {
@@ -20246,7 +20298,9 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 				cfg["compilerOptions"] = compilerOptions
 				changed = true
 			}
-			if strings.EqualFold(trimmedModuleResolution, "NodeNext") || strings.EqualFold(trimmedModuleResolution, "Node16") {
+			if strings.EqualFold(trimmedModuleResolution, "Node") ||
+				strings.EqualFold(trimmedModuleResolution, "NodeNext") ||
+				strings.EqualFold(trimmedModuleResolution, "Node16") {
 				compilerOptions["moduleResolution"] = "Bundler"
 				cfg["compilerOptions"] = compilerOptions
 				changed = true
@@ -20254,6 +20308,10 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 			if strings.EqualFold(trimmedModule, "NodeNext") || strings.EqualFold(trimmedModule, "Node16") {
 				compilerOptions["module"] = "ESNext"
 				cfg["compilerOptions"] = compilerOptions
+				changed = true
+			}
+			if _, ok := cfg["references"]; ok && !strings.Contains(normalizedPath, "/backend/") && !strings.HasPrefix(normalizedPath, "backend/") {
+				delete(cfg, "references")
 				changed = true
 			}
 		}
