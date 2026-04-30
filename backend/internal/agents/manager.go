@@ -10906,28 +10906,57 @@ func parseMissingLocalModuleRepairTargets(errors []string) []missingLocalModuleR
 	}
 
 	re := regexp.MustCompile(`source imports local module "([^"]+)" from "([^"]+)" but generated file "([^"]+)" is missing`)
+	tsCannotFindLocalRe := regexp.MustCompile(`(?m)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx|mjs|cjs))\(\d+,\d+\):\s+error\s+TS2307:\s+Cannot find module ['"]([^'"]+)['"]`)
 	seen := map[string]bool{}
 	targets := make([]missingLocalModuleRepairTarget, 0)
+	addTarget := func(target missingLocalModuleRepairTarget) {
+		target.SourcePath = sanitizeFilePath(target.SourcePath)
+		target.TargetPath = sanitizeFilePath(target.TargetPath)
+		target.Specifier = strings.TrimSpace(target.Specifier)
+		if target.SourcePath == "" || target.TargetPath == "" || target.Specifier == "" {
+			return
+		}
+		key := target.SourcePath + "|" + target.Specifier + "|" + target.TargetPath
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		targets = append(targets, target)
+	}
 	for _, msg := range errors {
 		matches := re.FindAllStringSubmatch(msg, -1)
 		for _, match := range matches {
 			if len(match) != 4 {
 				continue
 			}
-			target := missingLocalModuleRepairTarget{
+			addTarget(missingLocalModuleRepairTarget{
 				Specifier:  strings.TrimSpace(match[1]),
 				SourcePath: sanitizeFilePath(strings.TrimSpace(match[2])),
 				TargetPath: sanitizeFilePath(strings.TrimSpace(match[3])),
-			}
-			if target.SourcePath == "" || target.TargetPath == "" || target.Specifier == "" {
+			})
+		}
+		tsMatches := tsCannotFindLocalRe.FindAllStringSubmatch(msg, -1)
+		for _, match := range tsMatches {
+			if len(match) != 3 {
 				continue
 			}
-			key := target.SourcePath + "|" + target.Specifier + "|" + target.TargetPath
-			if seen[key] {
+			sourcePath := sanitizeFilePath(strings.TrimSpace(match[1]))
+			specifier := strings.TrimSpace(match[2])
+			if sourcePath == "" || specifier == "" {
 				continue
 			}
-			seen[key] = true
-			targets = append(targets, target)
+			if !strings.HasPrefix(specifier, ".") && !strings.HasPrefix(specifier, "@/") && !strings.HasPrefix(specifier, "~/") {
+				continue
+			}
+			candidates := localImportResolutionCandidates(sourcePath, specifier)
+			if len(candidates) == 0 {
+				continue
+			}
+			addTarget(missingLocalModuleRepairTarget{
+				SourcePath: sourcePath,
+				Specifier:  specifier,
+				TargetPath: candidates[0],
+			})
 		}
 	}
 	sort.Slice(targets, func(i, j int) bool {
@@ -11728,13 +11757,88 @@ func (am *AgentManager) clearStaleImportValidationError(build *Build, readinessE
 	return "stale import validation on " + strings.Join(cleared, ", ")
 }
 
+func readinessErrorsContainPostCSSConfigFailure(errors []string) bool {
+	for _, msg := range errors {
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "failed to load postcss config") ||
+			strings.Contains(lower, "postcss config") && (strings.Contains(lower, "unexpected token") || strings.Contains(lower, "module is not defined")) {
+			return true
+		}
+	}
+	return false
+}
+
+func manifestContentUsesESModulePackage(content string) bool {
+	if strings.TrimSpace(content) == "" {
+		return false
+	}
+	var manifest previewManifest
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(manifest.Type), "module")
+}
+
+func configContentUsesESMSyntax(content string) bool {
+	return regexp.MustCompile(`(?m)^\s*import\s+`).MatchString(content) ||
+		regexp.MustCompile(`(?m)^\s*export\s+default\b`).MatchString(content)
+}
+
+func configContentUsesCommonJSSyntax(content string) bool {
+	return regexp.MustCompile(`(?m)^\s*(?:const|let|var)\s+\w+\s*=\s*require\(`).MatchString(content) ||
+		regexp.MustCompile(`(?m)^\s*module\.exports\s*=`).MatchString(content)
+}
+
+func configPathRequiresESMSyntax(path string, packageUsesESM bool) bool {
+	switch strings.ToLower(filepath.Ext(sanitizeFilePath(path))) {
+	case ".mjs", ".ts":
+		return true
+	case ".cjs":
+		return false
+	default:
+		return packageUsesESM
+	}
+}
+
+func configSyntaxConflictsWithModuleMode(path, content string, packageUsesESM bool) bool {
+	if strings.TrimSpace(content) == "" {
+		return false
+	}
+	requiresESM := configPathRequiresESMSyntax(path, packageUsesESM)
+	usesESM := configContentUsesESMSyntax(content)
+	usesCJS := configContentUsesCommonJSSyntax(content)
+	if usesESM && usesCJS {
+		return true
+	}
+	if requiresESM {
+		return usesCJS
+	}
+	return usesESM
+}
+
+func generatedPostCSSConfigSatisfied(files []GeneratedFile, plan *generatedFilePatchPlan, packageUsesESM bool) bool {
+	for _, f := range files {
+		p := filepath.ToSlash(strings.TrimSpace(f.Path))
+		if p != "postcss.config.js" && p != "postcss.config.cjs" && p != "postcss.config.mjs" {
+			continue
+		}
+		content := plan.content(p)
+		return strings.Contains(content, "tailwindcss") &&
+			strings.Contains(content, "autoprefixer") &&
+			!configSyntaxConflictsWithModuleMode(p, content, packageUsesESM)
+	}
+	return false
+}
+
 func (am *AgentManager) clearStaleDependencyValidationError(build *Build, readinessErrors []string) string {
 	if build == nil || len(readinessErrors) == 0 {
 		return ""
 	}
 
 	frontendPkgs, backendPkgs := parseMissingDependenciesByVerificationScope(readinessErrors)
-	if len(frontendPkgs) == 0 && len(backendPkgs) == 0 {
+	frontendPkgs = dedupeStrings(append(frontendPkgs, parseMissingTypePackagesFromBuildErrors(readinessErrors)...))
+	postCSSFailure := readinessErrorsContainPostCSSConfigFailure(readinessErrors)
+	if len(frontendPkgs) == 0 && len(backendPkgs) == 0 && !postCSSFailure {
 		return ""
 	}
 
@@ -11767,6 +11871,8 @@ func (am *AgentManager) clearStaleDependencyValidationError(build *Build, readin
 	}
 
 	cleared := make([]string, 0, 2)
+	frontendPath := ""
+	frontendContent := ""
 	if len(frontendPkgs) > 0 {
 		path, content := manifestContent([]string{
 			"frontend/package.json",
@@ -11781,7 +11887,29 @@ func (am *AgentManager) clearStaleDependencyValidationError(build *Build, readin
 		if !allDeclared(content, frontendPkgs) {
 			return ""
 		}
+		frontendPath, frontendContent = path, content
 		cleared = append(cleared, fmt.Sprintf("frontend %s has %s", path, strings.Join(frontendPkgs, ", ")))
+	}
+	if postCSSFailure {
+		if frontendPath == "" {
+			frontendPath, frontendContent = manifestContent([]string{
+				"frontend/package.json",
+				"client/package.json",
+				"web/package.json",
+				"apps/web/package.json",
+				"apps/frontend/package.json",
+				"packages/web/package.json",
+				"packages/frontend/package.json",
+				"package.json",
+			})
+		}
+		if !allDeclared(frontendContent, []string{"postcss", "tailwindcss", "autoprefixer"}) {
+			return ""
+		}
+		if !generatedPostCSSConfigSatisfied(files, plan, manifestContentUsesESModulePackage(frontendContent)) {
+			return ""
+		}
+		cleared = append(cleared, fmt.Sprintf("frontend %s has compatible PostCSS/Tailwind config", frontendPath))
 	}
 	if len(backendPkgs) > 0 {
 		path, content := manifestContent([]string{
@@ -13878,6 +14006,48 @@ func (am *AgentManager) ensureGeneratedViteEnvDeclaration(plan *generatedFilePat
 	return false, ""
 }
 
+func generatedFrontendPackageUsesESModule(files []GeneratedFile, plan *generatedFilePatchPlan) bool {
+	if plan == nil {
+		return false
+	}
+	manifestPath := findGeneratedManifestPath(files, []string{
+		"frontend/package.json",
+		"client/package.json",
+		"web/package.json",
+		"apps/web/package.json",
+		"apps/frontend/package.json",
+		"packages/web/package.json",
+		"packages/frontend/package.json",
+		"package.json",
+	})
+	if manifestPath == "" {
+		return false
+	}
+	return manifestContentUsesESModulePackage(plan.content(manifestPath))
+}
+
+func generatedFilesFrontendPackageUsesESModule(files []GeneratedFile) bool {
+	manifestPath := findGeneratedManifestPath(files, []string{
+		"frontend/package.json",
+		"client/package.json",
+		"web/package.json",
+		"apps/web/package.json",
+		"apps/frontend/package.json",
+		"packages/web/package.json",
+		"packages/frontend/package.json",
+		"package.json",
+	})
+	if manifestPath == "" {
+		return false
+	}
+	for _, file := range files {
+		if strings.EqualFold(strings.TrimSpace(file.Path), manifestPath) {
+			return manifestContentUsesESModulePackage(file.Content)
+		}
+	}
+	return false
+}
+
 // ensureGeneratedTailwindConfig inspects generated files and repairs the three
 // files that Tailwind CSS v3 requires: tailwind.config.js, postcss.config.js,
 // and src/index.css (the @tailwind directives). Returns the number of files
@@ -13920,15 +14090,18 @@ func ensureGeneratedTailwindConfig(plan *generatedFilePatchPlan, files []Generat
 		}
 	}
 
-	canonical := syntheticFrontendTailwindConfig()
 	if twPath == "" {
 		// Missing entirely — create it.
+		packageUsesESM := generatedFrontendPackageUsesESModule(files, plan)
+		canonical := syntheticFrontendTailwindConfigForPath("tailwind.config.js", packageUsesESM)
 		if plan.createFile("tailwind.config.js", canonical, "javascript") {
 			repaired++
 			parts = append(parts, "created tailwind.config.js")
 		}
 		twPath = "tailwind.config.js"
 	} else {
+		packageUsesESM := generatedFrontendPackageUsesESModule(files, plan)
+		canonical := syntheticFrontendTailwindConfigForPath(twPath, packageUsesESM)
 		existing := plan.content(twPath)
 		// Fix empty content array or missing content field.
 		needsRewrite := false
@@ -13942,6 +14115,9 @@ func ensureGeneratedTailwindConfig(plan *generatedFilePatchPlan, files []Generat
 		if strings.Contains(existing, "@tailwindcss/vite") || strings.Contains(existing, `@import "tailwindcss"`) || strings.Contains(existing, `@import 'tailwindcss'`) {
 			needsRewrite = true
 		}
+		if configSyntaxConflictsWithModuleMode(twPath, existing, packageUsesESM) {
+			needsRewrite = true
+		}
 		if needsRewrite {
 			if plan.patchFile(twPath, canonical, "javascript") {
 				repaired++
@@ -13952,13 +14128,17 @@ func ensureGeneratedTailwindConfig(plan *generatedFilePatchPlan, files []Generat
 
 	// ── 2. postcss.config.js ─────────────────────────────────────────────────
 	hasPostCSS := false
+	packageUsesESM := generatedFrontendPackageUsesESModule(files, plan)
 	for _, f := range files {
 		p := filepath.ToSlash(strings.TrimSpace(f.Path))
 		if p == "postcss.config.js" || p == "postcss.config.cjs" || p == "postcss.config.mjs" {
 			hasPostCSS = true
-			// Check it actually has the tailwindcss plugin.
-			if !strings.Contains(f.Content, "tailwindcss") {
-				if plan.patchFile(p, syntheticFrontendPostCSSConfig(), "javascript") {
+			content := plan.content(p)
+			// Check it actually has the Tailwind plugins and uses syntax Node can load for this package.
+			if !strings.Contains(content, "tailwindcss") ||
+				!strings.Contains(content, "autoprefixer") ||
+				configSyntaxConflictsWithModuleMode(p, content, packageUsesESM) {
+				if plan.patchFile(p, syntheticFrontendPostCSSConfigForPath(p, packageUsesESM), "javascript") {
 					repaired++
 					parts = append(parts, "fixed postcss.config.js plugins")
 				}
@@ -13967,7 +14147,7 @@ func ensureGeneratedTailwindConfig(plan *generatedFilePatchPlan, files []Generat
 		}
 	}
 	if !hasPostCSS {
-		if plan.createFile("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript") {
+		if plan.createFile("postcss.config.js", syntheticFrontendPostCSSConfigForPath("postcss.config.js", packageUsesESM), "javascript") {
 			repaired++
 			parts = append(parts, "created postcss.config.js")
 		}
@@ -16736,10 +16916,61 @@ export default defineConfig({
 
 // syntheticFrontendTailwindConfig returns a canonical Tailwind CSS v3 config file.
 func syntheticFrontendTailwindConfig() string {
-	return `import animate from "tailwindcss-animate";
+	return syntheticFrontendTailwindConfigForPath("tailwind.config.js", false)
+}
+
+func syntheticFrontendTailwindConfigForPath(path string, packageUsesESM bool) string {
+	if configPathRequiresESMSyntax(path, packageUsesESM) {
+		return `import animate from "tailwindcss-animate";
 
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: ["class"],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+    },
+  },
+  plugins: [animate],
+}
+`
+	}
+	return `const animate = require("tailwindcss-animate");
+
+/** @type {import('tailwindcss').Config} */
+module.exports = {
   darkMode: ["class"],
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
@@ -16785,7 +17016,20 @@ export default {
 
 // syntheticFrontendPostCSSConfig returns a canonical PostCSS config for Tailwind v3.
 func syntheticFrontendPostCSSConfig() string {
-	return `export default {
+	return syntheticFrontendPostCSSConfigForPath("postcss.config.js", false)
+}
+
+func syntheticFrontendPostCSSConfigForPath(path string, packageUsesESM bool) string {
+	if configPathRequiresESMSyntax(path, packageUsesESM) {
+		return `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+`
+	}
+	return `module.exports = {
   plugins: {
     tailwindcss: {},
     autoprefixer: {},
@@ -16977,6 +17221,7 @@ func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *T
 	backendEntry := ""
 	backendPort := 3001
 	backendName := ""
+	packageUsesESM := false
 
 	if build != nil {
 		build.mu.RLock()
@@ -16996,6 +17241,7 @@ func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *T
 
 	if output != nil && len(output.Files) > 0 {
 		backendEntry = detectGeneratedBackendEntryForFrontendShell(output.Files)
+		packageUsesESM = generatedFilesFrontendPackageUsesESModule(output.Files)
 	}
 	if backendName != "" {
 		if port := canonicalBackendPort(backendName); port > 0 {
@@ -17013,9 +17259,9 @@ func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *T
 	case "vite.config.ts":
 		return syntheticFrontendViteConfig(backendPort), "typescript", true
 	case "tailwind.config.js":
-		return syntheticFrontendTailwindConfig(), "javascript", true
+		return syntheticFrontendTailwindConfigForPath(path, packageUsesESM), "javascript", true
 	case "postcss.config.js":
-		return syntheticFrontendPostCSSConfig(), "javascript", true
+		return syntheticFrontendPostCSSConfigForPath(path, packageUsesESM), "javascript", true
 	case "src/index.css":
 		return syntheticFrontendIndexCSS(), "css", true
 	case "tsconfig.json":
@@ -17165,8 +17411,6 @@ func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(b
 	upsertPreviewFile("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
 	upsertPreviewFile("src/index.css", syntheticFrontendIndexCSS(), "css")
 	upsertPreviewFile("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
-	upsertPreviewFile("tailwind.config.js", syntheticFrontendTailwindConfig(), "javascript")
-	upsertPreviewFile("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript")
 	upsertPreviewFile("tsconfig.json", syntheticFrontendTSConfig(), "json")
 
 	manifestPath := "package.json"
@@ -17179,6 +17423,9 @@ func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(b
 			applied = append(applied, manifestPath)
 		}
 	}
+	packageUsesESM := manifestContentUsesESModulePackage(plan.content(manifestPath))
+	upsertPreviewFile("tailwind.config.js", syntheticFrontendTailwindConfigForPath("tailwind.config.js", packageUsesESM), "javascript")
+	upsertPreviewFile("postcss.config.js", syntheticFrontendPostCSSConfigForPath("postcss.config.js", packageUsesESM), "javascript")
 	if strings.TrimSpace(plan.content("src/App.tsx")) == "" {
 		if content, language, ok := am.canonicalFrontendScaffoldContent(build, output, "src/App.tsx"); ok && plan.createFile("src/App.tsx", content, language) {
 			applied = append(applied, "src/App.tsx")
@@ -17252,8 +17499,9 @@ func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Buil
 	createIfMissing("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
 	createIfMissing("src/App.tsx", syntheticFrontendAppTSXWithDescription(title, summary, description, backendEntry, backendPort), "typescript")
 	createIfMissing("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
-	createIfMissing("tailwind.config.js", syntheticFrontendTailwindConfig(), "javascript")
-	createIfMissing("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript")
+	packageUsesESM := manifestContentUsesESModulePackage(plan.content(manifestPath))
+	createIfMissing("tailwind.config.js", syntheticFrontendTailwindConfigForPath("tailwind.config.js", packageUsesESM), "javascript")
+	createIfMissing("postcss.config.js", syntheticFrontendPostCSSConfigForPath("postcss.config.js", packageUsesESM), "javascript")
 	createIfMissing("src/index.css", syntheticFrontendIndexCSS(), "css")
 	applyDeterministicShadcnScaffold(createIfMissing)
 	if strings.TrimSpace(plan.content("tsconfig.json")) == "" {
@@ -26490,6 +26738,7 @@ func (am *AgentManager) shouldRequireBackendRuntimeProof(build *Build) bool {
 }
 
 type previewManifest struct {
+	Type            string            `json:"type"`
 	Scripts         map[string]string `json:"scripts"`
 	Dependencies    map[string]string `json:"dependencies"`
 	DevDependencies map[string]string `json:"devDependencies"`

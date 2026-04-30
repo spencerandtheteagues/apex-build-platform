@@ -3281,6 +3281,60 @@ func TestMissingLocalModulePlaceholderSupportsNamedComponentImport(t *testing.T)
 	}
 }
 
+func TestApplyDeterministicValidationRepairsCreatesAliasModuleFromTypeScriptTS2307(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-missing-alias-module-ts2307",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path:    "src/App.tsx",
+				Content: "import AppShell from '@/components/AppShell';\nexport default function App(){ return <AppShell /> }\n",
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`src/App.tsx(3,22): error TS2307: Cannot find module '@/components/AppShell' or its corresponding type declarations.`},
+		"raw TypeScript missing local module",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected raw TypeScript missing local module repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var placeholder string
+	for i := range files {
+		if files[i].Path == "src/components/AppShell.tsx" {
+			placeholder = files[i].Content
+			break
+		}
+	}
+	if strings.TrimSpace(placeholder) == "" {
+		t.Fatalf("expected AppShell placeholder file to be created, got %+v", files)
+	}
+	if !strings.Contains(placeholder, "const AppShell") || !strings.Contains(placeholder, "export default AppShell") {
+		t.Fatalf("expected default AppShell placeholder export, got %q", placeholder)
+	}
+}
+
 func TestClearStaleDependencyValidationAfterManifestRepair(t *testing.T) {
 	t.Parallel()
 
@@ -3325,6 +3379,48 @@ func TestClearStaleDependencyValidationAfterManifestRepair(t *testing.T) {
 	}
 }
 
+func TestClearStaleDependencyValidationAfterTypeDeclarationRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-type-dependency-validation",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": { "build": "tsc && vite build", "dev": "vite" },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}`,
+				IsNew: true,
+			},
+			{Path: "src/App.tsx", Content: `import React from "react"; export default function App(){ return <main />; }`, IsNew: true},
+		},
+	}
+
+	summary := am.clearStaleDependencyValidationError(build, []string{
+		`src/App.tsx(1,19): error TS7016: Could not find a declaration file for module 'react'. '/tmp/node_modules/react/index.js' implicitly has an 'any' type.`,
+		`src/main.tsx(2,22): error TS7016: Could not find a declaration file for module 'react-dom/client'. '/tmp/node_modules/react-dom/client.js' implicitly has an 'any' type.`,
+	})
+	if !strings.Contains(summary, "stale dependency validation") {
+		t.Fatalf("expected stale type dependency validation reset summary, got %q", summary)
+	}
+}
+
 func TestClearStaleLocalModuleValidationAfterPlaceholderRepair(t *testing.T) {
 	t.Parallel()
 
@@ -3350,6 +3446,37 @@ func TestClearStaleLocalModuleValidationAfterPlaceholderRepair(t *testing.T) {
 
 	summary := am.clearStaleLocalModuleValidationError(build, []string{
 		`Preview verification local import check failed: source imports local module "@/components/DashboardPage" from "src/App.tsx" but generated file "src/components/DashboardPage.tsx" is missing`,
+	})
+	if !strings.Contains(summary, "stale local-module validation") {
+		t.Fatalf("expected stale local-module validation reset summary, got %q", summary)
+	}
+}
+
+func TestClearStaleLocalModuleValidationAfterRawTypeScriptTS2307Repair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-local-module-ts2307",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "src/App.tsx",
+				Content: `import AppShell from "@/components/AppShell"; export default function App(){ return <AppShell />; }`,
+				IsNew:   true,
+			},
+			{
+				Path:    "src/components/AppShell.tsx",
+				Content: `export default function AppShell(){ return <div>Shell</div>; }`,
+				IsNew:   true,
+			},
+		},
+	}
+
+	summary := am.clearStaleLocalModuleValidationError(build, []string{
+		`src/App.tsx(3,22): error TS2307: Cannot find module '@/components/AppShell' or its corresponding type declarations.`,
 	})
 	if !strings.Contains(summary, "stale local-module validation") {
 		t.Fatalf("expected stale local-module validation reset summary, got %q", summary)
@@ -6400,6 +6527,142 @@ func TestApplyDeterministicPreValidationNormalizationAddsPostCSSConfigDependenci
 		if !strings.Contains(manifest, needle) {
 			t.Fatalf("expected %s in normalized package.json, got %s", needle, manifest)
 		}
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationRewritesCommonJSTailwindAndPostCSSConfigs(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-prevalidation-commonjs-config",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		TechStack: &TechStack{Frontend: "React"},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "tailwindcss": "^3.4.3",
+    "postcss": "^8.4.38",
+    "autoprefixer": "^10.4.19",
+    "tailwindcss-animate": "^1.0.7"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "tailwind.config.js",
+				Content: `import animate from "tailwindcss-animate";
+module.exports = {
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  plugins: [animate]
+};`,
+				IsNew: true,
+			},
+			{
+				Path: "postcss.config.js",
+				Content: `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {}
+  }
+};`,
+				IsNew: true,
+			},
+			{Path: "src/App.tsx", Content: `export default function App(){ return <div className="text-cyan-300">ok</div>; }`, IsNew: true},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to rewrite incompatible config syntax")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+	if strings.Contains(byPath["tailwind.config.js"], "import animate") || strings.Contains(byPath["tailwind.config.js"], "export default") {
+		t.Fatalf("expected CommonJS tailwind config for package without type=module, got %s", byPath["tailwind.config.js"])
+	}
+	if !strings.Contains(byPath["tailwind.config.js"], `require("tailwindcss-animate")`) || !strings.Contains(byPath["tailwind.config.js"], "module.exports") {
+		t.Fatalf("expected CommonJS tailwind config, got %s", byPath["tailwind.config.js"])
+	}
+	if strings.Contains(byPath["postcss.config.js"], "export default") || !strings.Contains(byPath["postcss.config.js"], "module.exports") {
+		t.Fatalf("expected CommonJS postcss config for package without type=module, got %s", byPath["postcss.config.js"])
+	}
+}
+
+func TestClearStaleDependencyValidationClearsSatisfiedPostCSSConfigFailure(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-postcss-config-validation",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": { "build": "tsc && vite build", "dev": "vite" },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "tailwindcss": "^3.4.3",
+    "postcss": "^8.4.38",
+    "autoprefixer": "^10.4.19"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "postcss.config.js",
+				Content: `module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {}
+  }
+};`,
+				IsNew: true,
+			},
+		},
+	}
+
+	summary := am.clearStaleDependencyValidationError(build, []string{
+		`[Failed to load PostCSS config: Failed to load PostCSS config (searchPath: /tmp/apex-preview): [SyntaxError] Unexpected token 'export']`,
+	})
+	if !strings.Contains(summary, "stale dependency validation") {
+		t.Fatalf("expected stale PostCSS validation reset summary, got %q", summary)
 	}
 }
 
