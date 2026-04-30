@@ -150,13 +150,9 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 		)
 	}
 
-	// ── 3. Allocate port ────────────────────────────────────────────────
-	port, portErr := rv.freePort()
-	if portErr != nil {
-		return rv.rtFail("boot_failed", "could not allocate ephemeral port: "+portErr.Error(), "", start)
-	}
-
-	// ── 4. Start Vite dev server ─────────────────────────────────────────
+	// ── 3. Start Vite dev server ─────────────────────────────────────────
+	// Vite owns port selection. Pre-allocating a "free" port and releasing it
+	// before process start has a TOCTOU race under concurrent verifications.
 	viteBin, viteBinErr := rv.viteBinary(dir)
 	if viteBinErr != nil {
 		return rv.rtFail("boot_failed",
@@ -165,7 +161,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			start,
 		)
 	}
-	viteCmd, viteLogs, viteErr := rv.startVite(bootCtx, dir, viteBin, port)
+	viteCmd, viteLogs, viteErr := rv.startVite(bootCtx, dir, viteBin)
 	if viteErr != nil {
 		return rv.rtFail("boot_failed",
 			fmt.Sprintf("failed to start Vite process: %v", viteErr),
@@ -187,7 +183,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 		}
 	}()
 
-	// ── 5. Wait for port ready ───────────────────────────────────────────
+	// ── 4. Wait for Vite to report its actual URL ─────────────────────────
 	stop := make(chan struct{})
 	defer close(stop)
 	readyTimeout := rv.runtimeServerReadyTimeout(totalTimeout, installTimeout)
@@ -196,7 +192,8 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			readyTimeout = remaining
 		}
 	}
-	if ready, exited, exitErr := waitForTCPPortOrExit(port, readyTimeout, stop, viteExitCh); !ready {
+	baseURL, exited, exitErr := waitForViteURLOrExit(readyTimeout, stop, viteExitCh, viteLogs)
+	if baseURL == "" {
 		serverLogs := truncateLog(viteLogs.String(), 1500)
 		if exited {
 			viteExited = true
@@ -214,16 +211,15 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			)
 		}
 		return rv.rtFailWithLogs("boot_failed",
-			fmt.Sprintf("Vite dev server did not become ready on port %d within %s", port, formatRuntimeTimeout(readyTimeout)),
+			fmt.Sprintf("Vite dev server did not report a local URL within %s", formatRuntimeTimeout(readyTimeout)),
 			"Check vite.config.ts for syntax errors. Ensure all imports resolve. Common cause: missing or misconfigured entry point.",
 			start, serverLogs,
 		)
 	}
 
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 
-	// ── 6. HTTP checks ───────────────────────────────────────────────────
+	// ── 5. HTTP checks ───────────────────────────────────────────────────
 	result := &RuntimeVerificationResult{Passed: true}
 
 	// 6a. Root page
@@ -583,8 +579,8 @@ func (rv *RuntimeVerifier) viteBinary(dir string) (string, error) {
 	return "", fmt.Errorf("local Vite binary was not installed at %s after npm install", local)
 }
 
-func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string, port int) (*exec.Cmd, *bytes.Buffer, error) {
-	args := viteServerArgs(port)
+func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string) (*exec.Cmd, *bytes.Buffer, error) {
+	args := viteServerArgs()
 	cmd := exec.CommandContext(ctx, viteBin, args...)
 	cmd.Dir = dir
 	// Restrict env to avoid leaking secrets
@@ -605,18 +601,8 @@ func (rv *RuntimeVerifier) startVite(ctx context.Context, dir, viteBin string, p
 	return cmd, &logs, nil
 }
 
-func viteServerArgs(port int) []string {
-	return []string{"--port", strconv.Itoa(port), "--host", "127.0.0.1", "--strictPort", "--logLevel", "error"}
-}
-
-func (rv *RuntimeVerifier) freePort() (int, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-	return port, nil
+func viteServerArgs() []string {
+	return []string{"--port", "0", "--host", "127.0.0.1", "--strictPort", "--clearScreen", "false", "--logLevel", "info"}
 }
 
 // waitForTCPPort polls until the given port accepts TCP connections or timeout.
@@ -665,6 +651,38 @@ func waitForTCPPortOrExit(port int, timeout time.Duration, stop <-chan struct{},
 		}
 	}
 	return false, false, nil
+}
+
+var viteLocalURLRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+/?`)
+
+func waitForViteURLOrExit(timeout time.Duration, stop <-chan struct{}, exitCh <-chan error, logs *bytes.Buffer) (baseURL string, exited bool, err error) {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(150 * time.Millisecond)
+	defer ticker.Stop()
+	for time.Now().Before(deadline) {
+		select {
+		case <-stop:
+			return "", false, nil
+		case err := <-exitCh:
+			if url := extractViteLocalURL(logs.String()); url != "" {
+				return url, false, nil
+			}
+			return "", true, err
+		case <-ticker.C:
+			if url := extractViteLocalURL(logs.String()); url != "" {
+				return url, false, nil
+			}
+		}
+	}
+	return "", false, nil
+}
+
+func extractViteLocalURL(logs string) string {
+	match := viteLocalURLRe.FindString(logs)
+	if match == "" {
+		return ""
+	}
+	return strings.TrimRight(match, "/")
 }
 
 // ── HTTP check helpers ────────────────────────────────────────────────────────

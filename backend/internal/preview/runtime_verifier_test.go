@@ -524,13 +524,19 @@ func TestViteBinaryRequiresLocalProjectInstall(t *testing.T) {
 	}
 }
 
-func TestViteServerArgsUseStrictPort(t *testing.T) {
-	args := strings.Join(viteServerArgs(5173), " ")
-	if !strings.Contains(args, "--strictPort") {
-		t.Fatalf("expected Vite startup args to pin the selected port, got %q", args)
+func TestViteServerArgsUseViteOwnedEphemeralPort(t *testing.T) {
+	args := strings.Join(viteServerArgs(), " ")
+	for _, want := range []string{"--port 0", "--strictPort", "--clearScreen false", "--logLevel info"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected Vite startup args to include %q, got %q", want, args)
+		}
 	}
-	if !strings.Contains(args, "--port 5173") {
-		t.Fatalf("expected Vite startup args to include selected port, got %q", args)
+}
+
+func TestExtractViteLocalURL(t *testing.T) {
+	logs := "\n  VITE v4.5.14  ready in 302 ms\n\n  ➜  Local:   http://127.0.0.1:50683/\n"
+	if got := extractViteLocalURL(logs); got != "http://127.0.0.1:50683" {
+		t.Fatalf("expected parsed Vite local URL, got %q", got)
 	}
 }
 
