@@ -5746,6 +5746,16 @@ func TestScaffoldPlaceholderValidationErrorDetectsGeneratedPlaceholderModules(t 
 	if !strings.Contains(msg, "deterministic scaffold placeholder content") {
 		t.Fatalf("expected skeleton shell module to fail readiness, got %q", msg)
 	}
+
+	app := `import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import AppShell from "@/components/AppShell";
+export default function App() {
+  return <BrowserRouter><AppShell><Routes><Route path="/" element={<Navigate to="/dashboard" replace />} />{/* The real UI screens will be routed here in future patches */}</Routes></AppShell></BrowserRouter>;
+}`
+	msg = scaffoldPlaceholderValidationError("src/App.tsx", app)
+	if !strings.Contains(msg, "deterministic scaffold placeholder content") {
+		t.Fatalf("expected future-patch route shell to fail readiness, got %q", msg)
+	}
 }
 
 func TestApplyDeterministicFrontendScaffoldTruncationRepairSkipsNonFrontendBuilds(t *testing.T) {

@@ -267,6 +267,17 @@ async function verifyPreview(url) {
   if (/page not found|sorry,\s*that page does not exist|route not found|\b404\b[\s\S]{0,80}not found|not found[\s\S]{0,80}\b404\b/i.test(bodyText)) {
     throw new Error(`preview rendered an app-level not-found route: ${bodyText.slice(0, 500)}`)
   }
+  const shellOnlyNav = /dashboard/i.test(bodyText) &&
+    /job pipeline/i.test(bodyText) &&
+    /new job/i.test(bodyText) &&
+    /crew management/i.test(bodyText) &&
+    /settings/i.test(bodyText) &&
+    /bootstrapped by apex\.build/i.test(bodyText) &&
+    bodyText.trim().length < 180 &&
+    !/open jobs|pending estimate|launch estimate swarm|recommended final quote/i.test(bodyText)
+  if (shellOnlyNav || /future patches|real ui screens will be routed here|routes will be added later/i.test(bodyText)) {
+    throw new Error(`preview rendered only an app shell instead of working screen content: ${bodyText.slice(0, 500)}`)
+  }
   const screenshotPath = path.join(artifactDir, 'preview.png')
   await page.screenshot({ path: screenshotPath, fullPage: true })
   await browser.close()

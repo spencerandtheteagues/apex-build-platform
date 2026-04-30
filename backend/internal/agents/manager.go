@@ -16059,12 +16059,39 @@ func isGeneratedFrontendSkeletonShellModule(path string, content string) bool {
 	return hasShellNaming && pulseCount >= 1 && (disabledCount >= 3 || loadingCount >= 3 || hasFormShell)
 }
 
+func isGeneratedFrontendFuturePatchShellModule(path string, content string) bool {
+	path = strings.ToLower(strings.TrimSpace(sanitizeFilePath(path)))
+	if path == "" || isTestFile(path) {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ts", ".tsx", ".js", ".jsx":
+	default:
+		return false
+	}
+
+	lower := strings.ToLower(content)
+	if strings.Contains(lower, "future patches") ||
+		strings.Contains(lower, "real ui screens will be routed here") ||
+		strings.Contains(lower, "real ui screens will be added") ||
+		strings.Contains(lower, "routes will be added later") {
+		return true
+	}
+
+	return strings.Contains(lower, "<routes") &&
+		strings.Contains(lower, "<navigate") &&
+		strings.Contains(lower, "appshell") &&
+		!strings.Contains(lower, "open jobs") &&
+		!strings.Contains(lower, "launch estimate swarm") &&
+		!strings.Contains(lower, "pending estimate")
+}
+
 func deterministicScaffoldPlaceholderPaths(files []GeneratedFile) []string {
 	seen := map[string]bool{}
 	paths := make([]string, 0)
 	for _, file := range files {
 		path := sanitizeFilePath(strings.TrimSpace(file.Path))
-		if path == "" || seen[path] || (!isDeterministicGeneratedPlaceholderModule(path, file.Content) && !isGeneratedFrontendSkeletonShellModule(path, file.Content)) {
+		if path == "" || seen[path] || (!isDeterministicGeneratedPlaceholderModule(path, file.Content) && !isGeneratedFrontendSkeletonShellModule(path, file.Content) && !isGeneratedFrontendFuturePatchShellModule(path, file.Content)) {
 			continue
 		}
 		seen[path] = true
@@ -29118,6 +29145,8 @@ func scaffoldPlaceholderValidationError(path string, content string) string {
 	case isDeterministicGeneratedPlaceholderModule(path, content):
 		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
 	case isGeneratedFrontendSkeletonShellModule(path, content):
+		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
+	case isGeneratedFrontendFuturePatchShellModule(path, content):
 		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
 	case strings.Contains(contentLower, "replace this shell with the real experience"),
 		strings.Contains(contentLower, "replace this shell with the product-specific experience"):

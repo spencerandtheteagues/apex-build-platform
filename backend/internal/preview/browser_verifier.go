@@ -436,6 +436,24 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		}
 	}
 
+	if looksLikeShellOnlyPreview(mount.Snippet, mount.VisibleText) {
+		return &BrowserPageLoadResult{
+			Passed:      false,
+			FailureKind: "shell_only_preview",
+			Details:     fmt.Sprintf("app rendered only a navigation shell without requested screen content: %q", mount.Snippet),
+			RepairHints: []string{
+				"Render the requested app's default screen at the preview root, not only a sidebar/app shell.",
+				"Add concrete Dashboard, Pipeline, New Job, Crew Management, and Settings route content before declaring preview success.",
+				"Reject comments such as 'screens will be routed here in future patches' and replace them with functional UI.",
+			},
+			Duration:       time.Since(start),
+			JSErrors:       capturedJS,
+			ConsoleErrors:  capturedConsole,
+			VisibleText:    mount.VisibleText,
+			ScreenshotData: screenshotData,
+		}
+	}
+
 	return &BrowserPageLoadResult{
 		Passed:          true,
 		Duration:        time.Since(start),
@@ -459,6 +477,37 @@ func looksLikeAppLevelNotFound(text string) bool {
 		return true
 	}
 	return strings.Contains(lower, "404") && strings.Contains(lower, "not found")
+}
+
+func looksLikeShellOnlyPreview(text string, visibleText int) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "future patches") ||
+		strings.Contains(lower, "real ui screens will be routed here") ||
+		strings.Contains(lower, "routes will be added later") {
+		return true
+	}
+
+	navHits := 0
+	for _, label := range []string{"dashboard", "job pipeline", "new job", "crew management", "settings"} {
+		if strings.Contains(lower, label) {
+			navHits++
+		}
+	}
+	if navHits < 4 || !strings.Contains(lower, "bootstrapped by apex.build") {
+		return false
+	}
+
+	if visibleText <= 0 {
+		visibleText = len([]rune(lower))
+	}
+	return visibleText < 180 &&
+		!strings.Contains(lower, "open jobs") &&
+		!strings.Contains(lower, "pending estimate") &&
+		!strings.Contains(lower, "launch estimate swarm") &&
+		!strings.Contains(lower, "recommended final quote")
 }
 
 // filterBrowserNoise strips well-known benign browser messages that are not

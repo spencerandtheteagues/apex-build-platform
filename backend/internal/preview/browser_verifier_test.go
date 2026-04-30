@@ -87,6 +87,19 @@ func TestLooksLikeAppLevelNotFound(t *testing.T) {
 	}
 }
 
+func TestLooksLikeShellOnlyPreview(t *testing.T) {
+	t.Parallel()
+
+	shell := "Apex FieldOps AI Dashboard Job Pipeline New Job Crew Management Settings Bootstrapped by Apex.Build"
+	if !looksLikeShellOnlyPreview(shell, len(shell)) {
+		t.Fatal("expected sidebar-only shell to fail browser verification")
+	}
+	realApp := "Apex FieldOps AI Dashboard Job Pipeline New Job Crew Management Settings Open Jobs 7 Pending Estimate Value $48,000 Launch Estimate Swarm"
+	if looksLikeShellOnlyPreview(realApp, len(realApp)) {
+		t.Fatal("expected real dashboard content to pass shell-only heuristic")
+	}
+}
+
 // ── BrowserVerifier.Available / skipped ──────────────────────────────────────
 
 func TestBrowserVerifier_Skipped_WhenChromePathEmpty(t *testing.T) {
