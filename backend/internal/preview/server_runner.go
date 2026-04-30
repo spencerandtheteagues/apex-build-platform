@@ -651,8 +651,13 @@ func (sr *ServerRunner) installDependencies(ctx context.Context, workDir string)
 		if npmPath, lookErr := exec.LookPath("npm"); lookErr == nil {
 			cmdCtx, cancel := commandContext(ctx, 3*time.Minute)
 			defer cancel()
-			cmd := exec.CommandContext(cmdCtx, npmPath, "install", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error")
+			cmd := exec.CommandContext(cmdCtx, npmPath, "install", "--include=dev", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error")
 			cmd.Dir = workDir
+			cmd.Env = append(os.Environ(),
+				"NODE_ENV=development",
+				"NPM_CONFIG_PRODUCTION=false",
+				"npm_config_production=false",
+			)
 			if out, runErr := cmd.CombinedOutput(); runErr != nil {
 				log.Printf("[server_runner] npm install failed in %s: %v\n%s", workDir, runErr, truncateInstallOutput(out))
 			} else {
@@ -750,7 +755,7 @@ func detectNodeServerCommand(packageJSON string) (string, bool) {
 		if strings.Contains(strings.ToLower(strings.TrimSpace(scripts["dev"])), "next") {
 			return "npm run dev", true
 		}
-		return "npx next dev", true
+		return "npm exec next dev", true
 	}
 	if len(scripts) == 0 {
 		return "", false
@@ -773,7 +778,7 @@ func buildServerCommand(command string, entryFile string, framework string, port
 	switch {
 	case command == "npm":
 		if nextRuntime {
-			return "npx", []string{"next", "dev", "--hostname", "0.0.0.0", "--port", strconv.Itoa(port)}, nil
+			return "npm", []string{"exec", "--", "next", "dev", "--hostname", "0.0.0.0", "--port", strconv.Itoa(port)}, nil
 		}
 		return "npm", []string{"run", "start"}, nil
 
@@ -784,8 +789,8 @@ func buildServerCommand(command string, entryFile string, framework string, port
 		}
 		return "npm", args, nil
 
-	case command == "npx next dev":
-		return "npx", []string{"next", "dev", "--hostname", "0.0.0.0", "--port", strconv.Itoa(port)}, nil
+	case command == "npm exec next dev":
+		return "npm", []string{"exec", "--", "next", "dev", "--hostname", "0.0.0.0", "--port", strconv.Itoa(port)}, nil
 
 	case command == "node":
 		return "node", []string{entryFile}, nil
