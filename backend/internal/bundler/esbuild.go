@@ -529,6 +529,9 @@ func (b *ESBuildBundler) BundleFromFiles(ctx context.Context, projectID uint, fi
 		if err := b.readOutputFiles(outputDir, result); err != nil {
 			log.Printf("[bundler] Warning: failed to read some output files: %v", err)
 		}
+		if compiledCSS, ok := b.compileTailwindPreviewCSS(ctx, bundleDir, files, result.OutputCSS); ok {
+			result.OutputCSS = compiledCSS
+		}
 
 		// Compute output hash
 		hasher := make([]byte, 0)
@@ -547,6 +550,177 @@ func (b *ESBuildBundler) BundleFromFiles(ctx context.Context, projectID uint, fi
 		projectID, result.Duration, result.Success, len(result.OutputJS), len(result.OutputCSS))
 
 	return result, nil
+}
+
+func (b *ESBuildBundler) compileTailwindPreviewCSS(ctx context.Context, bundleDir string, files ProjectFiles, bundledCSS []byte) ([]byte, bool) {
+	inputCSS := string(bundledCSS)
+	if strings.TrimSpace(inputCSS) == "" || !containsTailwindDirective(inputCSS) {
+		if css, found := findTailwindSourceCSS(files.Files); found {
+			inputCSS = css
+		}
+	}
+	if !containsTailwindDirective(inputCSS) {
+		return nil, false
+	}
+
+	inputCSS = normalizeTailwindPreviewInput(inputCSS)
+	inputPath := filepath.Join(bundleDir, ".apex-tailwind-input.css")
+	outputPath := filepath.Join(bundleDir, ".apex-output", "__apex_tailwind.css")
+	configPath := filepath.Join(bundleDir, ".apex-tailwind.config.cjs")
+	if err := os.WriteFile(inputPath, []byte(inputCSS), 0644); err != nil {
+		log.Printf("[bundler] Tailwind preview CSS skipped: failed to write input: %v", err)
+		return nil, false
+	}
+	if err := os.WriteFile(configPath, []byte(previewTailwindConfig()), 0644); err != nil {
+		log.Printf("[bundler] Tailwind preview CSS skipped: failed to write config: %v", err)
+		return nil, false
+	}
+
+	args := []string{"-c", configPath, "-i", inputPath, "-o", outputPath}
+	cmdName, cmdArgs, ok := resolveTailwindCommand(args...)
+	if !ok {
+		log.Printf("[bundler] Tailwind preview CSS skipped: tailwindcss CLI is unavailable")
+		return nil, false
+	}
+
+	compileCtx := ctx
+	var cancel context.CancelFunc
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		compileCtx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(compileCtx, cmdName, cmdArgs...)
+	cmd.Dir = bundleDir
+	cmd.Env = append(os.Environ(), "NODE_ENV=development", "FORCE_COLOR=0")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[bundler] Tailwind preview CSS compile failed: %v: %s", err, strings.TrimSpace(string(output)))
+		return nil, false
+	}
+
+	compiled, err := os.ReadFile(outputPath)
+	if err != nil {
+		log.Printf("[bundler] Tailwind preview CSS skipped: failed to read output: %v", err)
+		return nil, false
+	}
+	if len(bytes.TrimSpace(compiled)) == 0 {
+		log.Printf("[bundler] Tailwind preview CSS skipped: compiler produced empty CSS")
+		return nil, false
+	}
+	log.Printf("[bundler] Tailwind preview CSS compiled (%d bytes)", len(compiled))
+	return compiled, true
+}
+
+func resolveTailwindCommand(args ...string) (string, []string, bool) {
+	if override := strings.TrimSpace(os.Getenv("APEX_TAILWIND_CLI")); override != "" {
+		parts := strings.Fields(override)
+		if len(parts) > 0 {
+			return parts[0], append(parts[1:], args...), true
+		}
+	}
+	if path, err := exec.LookPath("tailwindcss"); err == nil {
+		return path, args, true
+	}
+	if path, err := exec.LookPath("npx"); err == nil {
+		npxArgs := append([]string{"--yes", "tailwindcss@3.4.17"}, args...)
+		return path, npxArgs, true
+	}
+	return "", nil, false
+}
+
+func containsTailwindDirective(css string) bool {
+	lower := strings.ToLower(css)
+	return strings.Contains(lower, "@tailwind ") ||
+		strings.Contains(lower, "@import \"tailwindcss\"") ||
+		strings.Contains(lower, "@import 'tailwindcss'")
+}
+
+func findTailwindSourceCSS(files map[string]string) (string, bool) {
+	preferred := []string{
+		"src/index.css",
+		"src/App.css",
+		"src/globals.css",
+		"app/globals.css",
+		"styles/globals.css",
+		"index.css",
+	}
+	for _, path := range preferred {
+		if css, ok := files[path]; ok && containsTailwindDirective(css) {
+			return css, true
+		}
+	}
+	for path, css := range files {
+		if strings.EqualFold(filepath.Ext(path), ".css") && containsTailwindDirective(css) {
+			return css, true
+		}
+	}
+	return "", false
+}
+
+func normalizeTailwindPreviewInput(css string) string {
+	css = strings.ReplaceAll(css, `@import "tailwindcss";`, "@tailwind base;\n@tailwind components;\n@tailwind utilities;")
+	css = strings.ReplaceAll(css, `@import 'tailwindcss';`, "@tailwind base;\n@tailwind components;\n@tailwind utilities;")
+	return css
+}
+
+func previewTailwindConfig() string {
+	return `module.exports = {
+  darkMode: ["class"],
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}"
+  ],
+  theme: {
+    extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))"
+        },
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))"
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))"
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))"
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))"
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))"
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))"
+        }
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)"
+      }
+    }
+  },
+  plugins: []
+}
+`
 }
 
 func (b *ESBuildBundler) prepareFrameworkShims(bundleDir string, config *BundleConfig) error {

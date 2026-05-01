@@ -436,6 +436,100 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 	}
 }
 
+func TestESBuildBundlerCompilesTailwindPreviewCSS(t *testing.T) {
+	cache := NewBundleCache(DefaultCacheConfig())
+	defer cache.Close()
+
+	bundler := NewESBuildBundler(cache)
+	if !bundler.IsAvailable() {
+		t.Skip("esbuild not available, skipping integration test")
+	}
+	if _, _, ok := resolveTailwindCommand("--help"); !ok {
+		t.Skip("tailwindcss CLI not available, skipping integration test")
+	}
+
+	files := ProjectFiles{
+		ProjectID: 22,
+		Files: map[string]string{
+			"package.json": `{
+  "name": "fieldops-tailwind-preview",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.4.49",
+    "autoprefixer": "^10.4.20"
+  }
+}`,
+			"src/index.css": `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 222 47% 7%;
+  --foreground: 210 40% 98%;
+}`,
+			"src/App.tsx": `export default function App() {
+  return <main className="min-h-screen bg-[#0F172A] text-slate-100 p-6"><h1 className="text-3xl font-black">Apex FieldOps AI</h1></main>;
+}`,
+			"src/main.tsx": `import React from "react";
+import ReactDOM from "react-dom/client";
+import "./index.css";
+import App from "./App";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<App />);`,
+		},
+		PackageJSON: &PackageJSON{
+			Name: "fieldops-tailwind-preview",
+			Type: "module",
+			Dependencies: map[string]string{
+				"react":     "^18.3.1",
+				"react-dom": "^18.3.1",
+			},
+			DevDependencies: map[string]string{
+				"tailwindcss":  "^3.4.17",
+				"postcss":      "^8.4.49",
+				"autoprefixer": "^10.4.20",
+			},
+		},
+	}
+
+	config := BundleConfig{
+		EntryPoint: "src/main.tsx",
+		Format:     "iife",
+		Minify:     false,
+		SourceMap:  false,
+		Target:     []string{"es2020"},
+		Framework:  "react",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := bundler.BundleFromFiles(ctx, files.ProjectID, files, config)
+	if err != nil {
+		t.Fatalf("Bundle failed: %v", err)
+	}
+	if !result.Success {
+		for _, e := range result.Errors {
+			t.Logf("Bundle error: %s (file: %s, line: %d)", e.Message, e.File, e.Line)
+		}
+		t.Fatal("expected Tailwind preview bundle to succeed")
+	}
+
+	css := string(result.OutputCSS)
+	if containsStr(css, "@tailwind") {
+		t.Fatalf("expected Tailwind directives to be compiled out, got %q", css)
+	}
+	if !containsStr(css, ".min-h-screen") || !containsStr(css, "background-color") || !containsStr(css, ".text-3xl") {
+		t.Fatalf("expected compiled Tailwind utility CSS, got %q", css)
+	}
+}
+
 func TestESBuildBundlerWrapsNextAppRouterPageForPreview(t *testing.T) {
 	cache := NewBundleCache(DefaultCacheConfig())
 	defer cache.Close()
