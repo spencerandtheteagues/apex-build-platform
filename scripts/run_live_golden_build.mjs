@@ -281,6 +281,57 @@ async function verifyPreview(url) {
   if (shellOnlyNav || /future patches|real ui screens will be routed here|routes will be added later/i.test(bodyText)) {
     throw new Error(`preview rendered only an app shell instead of working screen content: ${bodyText.slice(0, 500)}`)
   }
+  const visualProof = await page.evaluate(() => {
+    const readStyle = (selector) => {
+      const el = document.querySelector(selector)
+      if (!el) return null
+      const style = window.getComputedStyle(el)
+      return {
+        selector,
+        className: String(el.getAttribute('class') || ''),
+        backgroundColor: style.backgroundColor,
+        color: style.color,
+        display: style.display,
+        minHeight: style.minHeight,
+        fontFamily: style.fontFamily,
+      }
+    }
+    const stylesheets = Array.from(document.styleSheets).map((sheet) => {
+      try {
+        const rules = Array.from(sheet.cssRules || [])
+        return {
+          href: sheet.href || 'inline',
+          rules: rules.length,
+          sample: rules.slice(0, 8).map(rule => rule.cssText).join('\n').slice(0, 1200),
+        }
+      } catch (error) {
+        return {
+          href: sheet.href || 'inline',
+          rules: 'blocked',
+          error: String(error?.message || error),
+        }
+      }
+    })
+    const classText = Array.from(document.querySelectorAll('[class]'))
+      .slice(0, 500)
+      .map(el => String(el.getAttribute('class') || ''))
+      .join(' ')
+    const utilityMatches = classText.match(/(?:^|\s)(?:bg-|text-|grid|flex|rounded-|shadow-|p[trblxy]?-\d|m[trblxy]?-\d|gap-|border-|min-h-|w-|h-|from-|to-|ring-|hover:|sm:|md:|lg:|xl:)/g) || []
+    const accessibleRuleCount = stylesheets.reduce((sum, sheet) => (
+      typeof sheet.rules === 'number' ? sum + sheet.rules : sum
+    ), 0)
+    const stylesheetTextSample = stylesheets.map(sheet => sheet.sample || '').join('\n')
+    return {
+      body: readStyle('body'),
+      rootChild: readStyle('#root > *'),
+      main: readStyle('main'),
+      firstSection: readStyle('section'),
+      stylesheets,
+      accessibleRuleCount,
+      utilityClassCount: utilityMatches.length,
+      leakedTailwindDirectives: /@tailwind|@import\s+["']tailwindcss["']/.test(stylesheetTextSample),
+    }
+  })
   const screenshotPath = path.join(artifactDir, 'preview.png')
   await page.screenshot({ path: screenshotPath, fullPage: true })
   await browser.close()
@@ -288,8 +339,14 @@ async function verifyPreview(url) {
     url: absolutePreviewURL(url),
     body_length: bodyText.length,
     console_errors: consoleErrors,
+    visual: visualProof,
     screenshot: screenshotPath,
   })
+  const usesTailwindUtilities = visualProof.utilityClassCount >= 20
+  const hasCompiledUtilityCSS = visualProof.accessibleRuleCount >= 100
+  if (usesTailwindUtilities && (!hasCompiledUtilityCSS || visualProof.leakedTailwindDirectives)) {
+    throw new Error(`preview rendered Tailwind utility markup without compiled CSS: utility_classes=${visualProof.utilityClassCount} css_rules=${visualProof.accessibleRuleCount} leaked_directives=${visualProof.leakedTailwindDirectives}`)
+  }
   if (consoleErrors.length > 0 && process.env.ALLOW_CONSOLE_ERRORS !== '1') {
     throw new Error(`preview console errors: ${consoleErrors.slice(0, 5).join(' | ')}`)
   }
