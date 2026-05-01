@@ -148,8 +148,8 @@ func TestRunPreviewVerificationGateFailsFastWhenPreviewRepairCannotQueue(t *test
 		previewVerifier: &stubPreviewVerifier{
 			result: &PreviewVerificationResult{
 				Passed:      false,
-				FailureKind: "blank_screen",
-				Details:     "Preview rendered a blank screen and no solver is available",
+				FailureKind: "backend_missing",
+				Details:     "Backend runtime missing and no solver is available",
 			},
 		},
 	}
@@ -208,9 +208,9 @@ func TestRunPreviewVerificationGateMarksRecoveryOnlyAfterPreviewRepairQueues(t *
 		previewVerifier: &stubPreviewVerifier{
 			result: &PreviewVerificationResult{
 				Passed:      false,
-				FailureKind: "blank_screen",
-				Details:     "Preview rendered a blank screen",
-				RepairHints: []string{"Render the dashboard at the root route."},
+				FailureKind: "interaction_dead",
+				Details:     "Preview loaded but exposes no interactive controls",
+				RepairHints: []string{"Add visible buttons, links, menus, or toggles on first load."},
 			},
 		},
 	}
@@ -257,6 +257,89 @@ func TestRunPreviewVerificationGateMarksRecoveryOnlyAfterPreviewRepairQueues(t *
 		}
 	default:
 		t.Fatal("expected repair task to be enqueued for execution")
+	}
+}
+
+func TestRunPreviewVerificationGateUsesDeterministicShellFallbackBeforeSolverForBlankScreen(t *testing.T) {
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		agents:      map[string]*Agent{},
+		builds:      map[string]*Build{},
+		subscribers: map[string][]chan *WSMessage{},
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{
+				Passed:      false,
+				FailureKind: "blank_screen",
+				Details:     "Preview rendered a blank screen after mounting the root.",
+				RepairHints: []string{"Install a working React app shell at the root route."},
+			},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:          "preview-blank-shell-fallback",
+		Description: "Build a complete contractor field operations SaaS dashboard",
+		Status:      BuildReviewing,
+		Progress:    99,
+		UpdatedAt:   now,
+		TechStack:   &TechStack{Frontend: "React", Styling: "Tailwind"},
+		Agents:      map[string]*Agent{},
+		Tasks: []*Task{
+			{
+				ID:     "frontend",
+				Type:   TaskGenerateUI,
+				Status: TaskInProgress,
+				Output: &TaskOutput{Files: []GeneratedFile{
+					{Path: "package.json", Content: `{"scripts":{"dev":"vite","build":"vite build"},"dependencies":{"@vitejs/plugin-react":"latest","vite":"latest","typescript":"latest","react":"latest","react-dom":"latest"}}`},
+					{Path: "index.html", Content: `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`},
+					{Path: "src/main.tsx", Content: `import React from "react"; import { createRoot } from "react-dom/client"; import App from "./App"; createRoot(document.getElementById("root")!).render(<App />);`},
+					{Path: "src/App.tsx", Content: `export default function App(){ return null; }`},
+				}},
+			},
+		},
+	}
+	build.SnapshotState.Orchestration = &BuildOrchestrationState{
+		Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+	}
+	manager.builds[build.ID] = build
+
+	status := BuildCompleted
+	buildError := ""
+	if !manager.runPreviewVerificationGate(build, manager.collectGeneratedFiles(build), &status, &buildError, now) {
+		t.Fatal("expected preview gate to apply deterministic shell fallback and pause finalization")
+	}
+	if build.Status != BuildTesting {
+		t.Fatalf("expected build status testing after deterministic fallback, got %s", build.Status)
+	}
+	if build.Progress != 95 {
+		t.Fatalf("expected build progress 95 after deterministic fallback, got %d", build.Progress)
+	}
+	if build.PreviewVerificationAttempts != 1 {
+		t.Fatalf("expected preview attempts=1 after deterministic fallback, got %d", build.PreviewVerificationAttempts)
+	}
+	if len(build.Tasks) != 1 {
+		t.Fatalf("expected deterministic fallback not to queue solver tasks, got %+v", build.Tasks)
+	}
+
+	filesByPath := map[string]string{}
+	for _, file := range manager.collectGeneratedFiles(build) {
+		filesByPath[file.Path] = file.Content
+	}
+	app := filesByPath["src/App.tsx"]
+	if strings.Contains(app, "return null") || !strings.Contains(app, "APEX recovered preview") || !strings.Contains(strings.ToLower(app), "contractor") {
+		t.Fatalf("expected blank App.tsx to be replaced by contractor preview shell, got %q", app)
+	}
+	if strings.TrimSpace(filesByPath["src/index.css"]) == "" || strings.TrimSpace(filesByPath["vite.config.ts"]) == "" {
+		t.Fatalf("expected fallback to install canonical preview scaffold files, got paths: %+v", filesByPath)
+	}
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected preview fallback patch bundle, got %+v", state)
+	}
+	bundle := state.PatchBundles[len(state.PatchBundles)-1]
+	if !strings.Contains(bundle.Justification, "preview_fallback_repair") {
+		t.Fatalf("expected preview fallback patch justification, got %+v", bundle)
 	}
 }
 

@@ -325,11 +325,99 @@ func (am *AgentManager) applyPreviewDeterministicRepair(
 
 	switch result.FailureKind {
 	case "corrupt_content":
-		return am.applyPreviewFenceStripRepair(build, allFiles, result, now)
+		if am.applyPreviewFenceStripRepair(build, allFiles, result, now) {
+			return true
+		}
+		return am.applyPreviewShellFallbackRepair(build, result, now)
 	case "js_runtime_error":
-		return am.applyPreviewRouterContextRepair(build, result, now)
+		if am.applyPreviewRouterContextRepair(build, result, now) {
+			return true
+		}
+		if previewFailureLooksLikeShellFallbackCandidate(result) {
+			return am.applyPreviewShellFallbackRepair(build, result, now)
+		}
+	case "blank_screen", "missing_entrypoint", "invalid_html", "invalid_package_json":
+		return am.applyPreviewShellFallbackRepair(build, result, now)
 	}
 	return false
+}
+
+func previewFailureLooksLikeShellFallbackCandidate(result *PreviewVerificationResult) bool {
+	if result == nil {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(result.FailureKind))
+	switch kind {
+	case "blank_screen", "missing_entrypoint", "invalid_html", "invalid_package_json", "corrupt_content":
+		return true
+	case "js_runtime_error":
+		haystack := strings.ToLower(strings.TrimSpace(result.Details + "\n" + strings.Join(result.RepairHints, "\n") + "\n" + strings.Join(result.CanaryErrors, "\n")))
+		for _, needle := range []string{
+			"blank screen",
+			"white screen",
+			"empty root",
+			"root stopped rendering",
+			"failed to fetch dynamically imported module",
+			"does not provide an export named",
+			"uncaught syntaxerror",
+			"cannot read properties of null",
+			"document.getelementbyid",
+		} {
+			if strings.Contains(haystack, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) applyPreviewShellFallbackRepair(
+	build *Build,
+	result *PreviewVerificationResult,
+	now time.Time,
+) bool {
+	if build == nil || result == nil || !previewFailureLooksLikeShellFallbackCandidate(result) {
+		return false
+	}
+
+	errorSummary := strings.TrimSpace(fmt.Sprintf("Preview verification failed (%s): %s", result.FailureKind, result.Details))
+	readinessErrors := []string{errorSummary}
+	readinessErrors = append(readinessErrors, result.RepairHints...)
+	readinessErrors = append(readinessErrors, result.CanaryErrors...)
+
+	bundle, summary := am.applyDeterministicPreviewFallbackRepair(build, readinessErrors)
+	if bundle == nil || !am.applyPatchBundleToBuild(build, bundle) {
+		return false
+	}
+	if previewPatchBundleRecordingEnabled(build) {
+		appendPatchBundle(build, *bundle)
+	}
+
+	build.mu.Lock()
+	build.PreviewVerificationAttempts++
+	build.Status = BuildTesting
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	build.Progress = 95
+	build.Error = fmt.Sprintf("Preview verification: installed a validated preview shell after %s. Re-checking. (%s)", result.FailureKind, result.Details)
+	build.mu.Unlock()
+
+	log.Printf("Build %s: preview shell fallback repair applied for %s: %s", build.ID, result.FailureKind, summary)
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":          "preview_verification",
+			"status":         string(BuildTesting),
+			"repair_type":    "preview_shell_fallback",
+			"failure_kind":   result.FailureKind,
+			"repair_summary": summary,
+			"message":        "Preview verification installed a validated React/Vite shell after the generated frontend failed to render. Re-checking preview readiness.",
+		},
+	})
+	am.checkBuildCompletion(build)
+	return true
 }
 
 // applyPreviewFenceStripRepair removes unmatched markdown code fences from
