@@ -12463,12 +12463,19 @@ func parseGeneratedImportNamedSourceNames(sourceContent string, specifier string
 		return nil
 	}
 
-	pattern := regexp.MustCompile(`(?ms)^\s*import\s+(.+?)\s+from\s+['"]` + regexp.QuoteMeta(specifier) + `['"]`)
-	match := pattern.FindStringSubmatch(sourceContent)
-	if len(match) != 2 {
+	clause := ""
+	importPattern := regexp.MustCompile(`(?ms)^\s*import\s+(?:type\s+)?(.+?)\s+from\s+['"]([^'"]+)['"]`)
+	for _, statement := range generatedImportStatements(sourceContent) {
+		match := importPattern.FindStringSubmatch(statement)
+		if len(match) != 3 || strings.TrimSpace(match[2]) != specifier {
+			continue
+		}
+		clause = strings.TrimSpace(match[1])
+		break
+	}
+	if clause == "" {
 		return nil
 	}
-	clause := strings.TrimSpace(match[1])
 	if strings.HasPrefix(clause, "type ") {
 		return nil
 	}
@@ -12494,6 +12501,44 @@ func parseGeneratedImportNamedSourceNames(sourceContent string, specifier string
 		}
 	}
 	return dedupeStringsPreserveOrder(names)
+}
+
+func generatedImportStatements(sourceContent string) []string {
+	sourceContent = strings.ReplaceAll(sourceContent, "\r\n", "\n")
+	lines := strings.Split(sourceContent, "\n")
+	statements := make([]string, 0)
+	fromPattern := regexp.MustCompile(`(?m)\s+from\s+['"][^'"]+['"]`)
+
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(trimmed, "import ") || strings.HasPrefix(trimmed, "import(") {
+			continue
+		}
+
+		var b strings.Builder
+		for j := i; j < len(lines); j++ {
+			if j > i {
+				nextTrimmed := strings.TrimSpace(lines[j])
+				if strings.HasPrefix(nextTrimmed, "import ") || strings.HasPrefix(nextTrimmed, "export ") {
+					break
+				}
+				b.WriteString("\n")
+			}
+			b.WriteString(lines[j])
+
+			statement := b.String()
+			if strings.Contains(lines[j], ";") || fromPattern.MatchString(statement) || j-i >= 40 {
+				break
+			}
+		}
+
+		statement := strings.TrimSpace(b.String())
+		if statement != "" {
+			statements = append(statements, statement)
+		}
+	}
+
+	return statements
 }
 
 func localImportResolutionCandidatesWithAliasPrefix(importerPath, spec string) []string {
@@ -12604,6 +12649,10 @@ func collectShadcnUIExportRequirements(files []GeneratedFile) map[string]*shadcn
 			if module == "" {
 				continue
 			}
+			names = allowedShadcnUIExportNames(module, names)
+			if len(names) == 0 {
+				continue
+			}
 			req := requirements[targetPath]
 			if req == nil {
 				req = &shadcnUIExportRequirement{
@@ -12642,45 +12691,139 @@ func shadcnPascalName(slug string) string {
 
 func shadcnKnownExports(module string) []string {
 	switch module {
+	case "accordion":
+		return []string{"Accordion", "AccordionItem", "AccordionTrigger", "AccordionContent"}
+	case "alert":
+		return []string{"Alert", "AlertTitle", "AlertDescription"}
+	case "alert-dialog":
+		return []string{"AlertDialog", "AlertDialogPortal", "AlertDialogOverlay", "AlertDialogTrigger", "AlertDialogContent", "AlertDialogHeader", "AlertDialogFooter", "AlertDialogTitle", "AlertDialogDescription", "AlertDialogAction", "AlertDialogCancel"}
+	case "aspect-ratio":
+		return []string{"AspectRatio"}
+	case "avatar":
+		return []string{"Avatar", "AvatarImage", "AvatarFallback"}
 	case "badge":
 		return []string{"Badge", "badgeVariants"}
 	case "button":
 		return []string{"Button", "buttonVariants"}
+	case "calendar":
+		return []string{"Calendar"}
 	case "card":
 		return []string{"Card", "CardHeader", "CardFooter", "CardTitle", "CardDescription", "CardContent"}
-	case "input":
-		return []string{"Input"}
-	case "label":
-		return []string{"Label"}
-	case "textarea":
-		return []string{"Textarea"}
-	case "select":
-		return []string{"Select", "SelectGroup", "SelectValue", "SelectTrigger", "SelectContent", "SelectLabel", "SelectItem", "SelectSeparator"}
-	case "dialog":
-		return []string{"Dialog", "DialogTrigger", "DialogPortal", "DialogOverlay", "DialogContent", "DialogHeader", "DialogFooter", "DialogTitle", "DialogDescription", "DialogClose"}
-	case "tabs":
-		return []string{"Tabs", "TabsList", "TabsTrigger", "TabsContent"}
-	case "table":
-		return []string{"Table", "TableHeader", "TableBody", "TableFooter", "TableHead", "TableRow", "TableCell", "TableCaption"}
-	case "avatar":
-		return []string{"Avatar", "AvatarImage", "AvatarFallback"}
-	case "separator":
-		return []string{"Separator"}
+	case "carousel":
+		return []string{"Carousel", "CarouselContent", "CarouselItem", "CarouselPrevious", "CarouselNext"}
+	case "chart":
+		return []string{"ChartContainer", "ChartTooltip", "ChartTooltipContent", "ChartLegend", "ChartLegendContent", "ChartStyle"}
 	case "checkbox":
 		return []string{"Checkbox"}
-	case "switch":
-		return []string{"Switch"}
+	case "collapsible":
+		return []string{"Collapsible", "CollapsibleTrigger", "CollapsibleContent"}
+	case "command":
+		return []string{"Command", "CommandDialog", "CommandInput", "CommandList", "CommandEmpty", "CommandGroup", "CommandItem", "CommandShortcut", "CommandSeparator"}
+	case "context-menu":
+		return []string{"ContextMenu", "ContextMenuTrigger", "ContextMenuContent", "ContextMenuItem", "ContextMenuCheckboxItem", "ContextMenuRadioItem", "ContextMenuLabel", "ContextMenuSeparator", "ContextMenuShortcut", "ContextMenuGroup", "ContextMenuPortal", "ContextMenuSub", "ContextMenuSubContent", "ContextMenuSubTrigger", "ContextMenuRadioGroup"}
+	case "dialog":
+		return []string{"Dialog", "DialogTrigger", "DialogPortal", "DialogOverlay", "DialogContent", "DialogHeader", "DialogFooter", "DialogTitle", "DialogDescription", "DialogClose"}
+	case "drawer":
+		return []string{"Drawer", "DrawerPortal", "DrawerOverlay", "DrawerTrigger", "DrawerClose", "DrawerContent", "DrawerHeader", "DrawerFooter", "DrawerTitle", "DrawerDescription"}
+	case "dropdown-menu":
+		return []string{"DropdownMenu", "DropdownMenuTrigger", "DropdownMenuContent", "DropdownMenuItem", "DropdownMenuCheckboxItem", "DropdownMenuRadioItem", "DropdownMenuLabel", "DropdownMenuSeparator", "DropdownMenuShortcut", "DropdownMenuGroup", "DropdownMenuPortal", "DropdownMenuSub", "DropdownMenuSubContent", "DropdownMenuSubTrigger", "DropdownMenuRadioGroup"}
+	case "form":
+		return []string{"Form", "FormItem", "FormLabel", "FormControl", "FormDescription", "FormMessage", "FormField", "useFormField"}
+	case "hover-card":
+		return []string{"HoverCard", "HoverCardTrigger", "HoverCardContent"}
+	case "input":
+		return []string{"Input"}
+	case "input-otp":
+		return []string{"InputOTP", "InputOTPGroup", "InputOTPSlot", "InputOTPSeparator"}
+	case "label":
+		return []string{"Label"}
+	case "menubar":
+		return []string{"Menubar", "MenubarMenu", "MenubarTrigger", "MenubarContent", "MenubarItem", "MenubarSeparator", "MenubarLabel", "MenubarCheckboxItem", "MenubarRadioGroup", "MenubarRadioItem", "MenubarPortal", "MenubarSubContent", "MenubarSubTrigger", "MenubarGroup", "MenubarSub", "MenubarShortcut"}
+	case "navigation-menu":
+		return []string{"NavigationMenu", "NavigationMenuList", "NavigationMenuItem", "NavigationMenuContent", "NavigationMenuTrigger", "NavigationMenuLink", "NavigationMenuIndicator", "NavigationMenuViewport", "navigationMenuTriggerStyle"}
+	case "pagination":
+		return []string{"Pagination", "PaginationContent", "PaginationEllipsis", "PaginationItem", "PaginationLink", "PaginationNext", "PaginationPrevious"}
+	case "popover":
+		return []string{"Popover", "PopoverTrigger", "PopoverContent", "PopoverAnchor"}
 	case "progress":
 		return []string{"Progress"}
+	case "radio-group":
+		return []string{"RadioGroup", "RadioGroupItem"}
+	case "resizable":
+		return []string{"ResizablePanelGroup", "ResizablePanel", "ResizableHandle"}
+	case "scroll-area":
+		return []string{"ScrollArea", "ScrollBar"}
+	case "select":
+		return []string{"Select", "SelectGroup", "SelectValue", "SelectTrigger", "SelectContent", "SelectLabel", "SelectItem", "SelectSeparator", "SelectScrollUpButton", "SelectScrollDownButton"}
+	case "separator":
+		return []string{"Separator"}
 	case "sheet":
 		return []string{"Sheet", "SheetTrigger", "SheetClose", "SheetContent", "SheetHeader", "SheetFooter", "SheetTitle", "SheetDescription"}
+	case "skeleton":
+		return []string{"Skeleton"}
+	case "slider":
+		return []string{"Slider"}
+	case "sonner":
+		return []string{"Toaster", "toast"}
+	case "switch":
+		return []string{"Switch"}
+	case "table":
+		return []string{"Table", "TableHeader", "TableBody", "TableFooter", "TableHead", "TableRow", "TableCell", "TableCaption"}
+	case "tabs":
+		return []string{"Tabs", "TabsList", "TabsTrigger", "TabsContent"}
+	case "textarea":
+		return []string{"Textarea"}
+	case "toast":
+		return []string{"Toast", "ToastProvider", "ToastViewport", "ToastTitle", "ToastDescription", "ToastClose", "ToastAction", "toast"}
+	case "toaster":
+		return []string{"Toaster"}
+	case "toggle":
+		return []string{"Toggle", "toggleVariants"}
+	case "toggle-group":
+		return []string{"ToggleGroup", "ToggleGroupItem"}
+	case "tooltip":
+		return []string{"Tooltip", "TooltipTrigger", "TooltipContent", "TooltipProvider"}
+	case "use-toast":
+		return []string{"useToast", "toast"}
 	default:
 		return []string{shadcnPascalName(module)}
 	}
 }
 
+func allowedShadcnUIExportNames(module string, requested []string) []string {
+	module = strings.ToLower(strings.TrimSpace(module))
+	if module == "" {
+		return nil
+	}
+	known := shadcnKnownExports(module)
+	allowed := make(map[string]bool, len(known)+2)
+	for _, name := range known {
+		if sanitized := sanitizeGeneratedIdentifier(name); sanitized != "" {
+			allowed[sanitized] = true
+		}
+	}
+
+	pascal := shadcnPascalName(module)
+	if pascal != "" {
+		allowed[pascal] = true
+		allowed[strings.ToLower(pascal[:1])+pascal[1:]+"Variants"] = true
+	}
+
+	filtered := make([]string, 0, len(requested))
+	for _, name := range requested {
+		name = sanitizeGeneratedIdentifier(name)
+		if name == "" {
+			continue
+		}
+		if allowed[name] || (pascal != "" && strings.HasPrefix(name, pascal)) {
+			filtered = append(filtered, name)
+		}
+	}
+	return dedupeStringsPreserveOrder(filtered)
+}
+
 func shadcnUIFallbackModuleContent(module string, importedNames []string) string {
-	names := dedupeStringsPreserveOrder(append(shadcnKnownExports(module), importedNames...))
+	names := dedupeStringsPreserveOrder(append(shadcnKnownExports(module), allowedShadcnUIExportNames(module, importedNames)...))
 	mainName := shadcnPascalName(module)
 	for _, name := range names {
 		if isLikelyReactComponentName(name) {

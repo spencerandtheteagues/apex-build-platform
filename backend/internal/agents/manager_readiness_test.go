@@ -7019,6 +7019,62 @@ export default function App() {
 	}
 }
 
+func TestCollectShadcnUIExportRequirementsDoesNotBleedPackageImports(t *testing.T) {
+	t.Parallel()
+
+	files := []GeneratedFile{
+		{
+			Path: "src/App.tsx",
+			Content: `import { ArrowRight, Bot, BriefcaseBusiness, Building2, CheckCircle2 } from "lucide-react"
+import { Toaster, toast } from "sonner"
+import { useEffect, useMemo, useState } from "react"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
+import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core"
+import { CSS } from "@dnd-kit/utilities"
+import {
+  Button
+} from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent } from "@/components/ui/card"
+
+export default function App() {
+  return <Card><CardContent><Button><Badge>Ready</Badge></Button></CardContent></Card>;
+}`,
+			IsNew: true,
+		},
+		{Path: "src/components/ui/button.tsx", Content: `export default function Button(){ return <button />; }`, IsNew: true},
+		{Path: "src/components/ui/badge.tsx", Content: `export default function Badge(){ return <span />; }`, IsNew: true},
+		{Path: "src/components/ui/card.tsx", Content: `export default function Card(){ return <div />; }`, IsNew: true},
+	}
+
+	requirements := collectShadcnUIExportRequirements(files)
+	assertNames := func(path string, want []string) {
+		t.Helper()
+		req := requirements[path]
+		if req == nil {
+			t.Fatalf("expected shadcn export requirements for %s", path)
+		}
+		got := make([]string, 0, len(req.Names))
+		for name := range req.Names {
+			got = append(got, name)
+		}
+		slices.Sort(got)
+		slices.Sort(want)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("unexpected names for %s: got %v want %v", path, got, want)
+		}
+		for _, invalid := range []string{"ArrowRight", "Bot", "BriefcaseBusiness", "Toaster", "toast", "useEffect", "useLocation", "DndContext", "PointerSensor", "CSS"} {
+			if req.Names[invalid] {
+				t.Fatalf("unexpected package import %s leaked into %s requirements: %#v", invalid, path, req.Names)
+			}
+		}
+	}
+
+	assertNames("src/components/ui/button.tsx", []string{"Button"})
+	assertNames("src/components/ui/badge.tsx", []string{"Badge"})
+	assertNames("src/components/ui/card.tsx", []string{"Card", "CardContent"})
+}
+
 func TestApplyDeterministicPreValidationNormalizationAddsBackendTSConfigAndTooling(t *testing.T) {
 	t.Parallel()
 
