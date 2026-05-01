@@ -141,6 +141,8 @@ export function usePreviewRuntime({
           onServerStatusHint(response.data.server)
         }
         setPreviewUrl(response.data.preview.url)
+        setIframeError(null)
+        setError(null)
         setConnected(true)
         return
       }
@@ -192,30 +194,33 @@ export function usePreviewRuntime({
             project_id: number
             sandbox: boolean
             require_backend: boolean
-            start_backend?: boolean
+            start_backend: boolean
             backend_entry_file?: string
             backend_command?: string
           } = {
             project_id: projectId,
             sandbox: requestedSandbox,
             require_backend: false,
+            start_backend: Boolean(serverDetection?.has_backend),
             backend_entry_file: serverDetection?.entry_file,
             backend_command: serverDetection?.command,
-          }
-          if (serverDetection !== null) {
-            fullStackRequest.start_backend = Boolean(serverDetection.has_backend)
           }
           data = await apiService.startFullStackPreview(fullStackRequest)
         } catch (fullStackErr: any) {
           const statusCode = fullStackErr?.response?.status
-          if (statusCode !== 404 && statusCode !== 405) {
+          const terminalStartFailure = statusCode === 401 || statusCode === 403 || statusCode === 429
+          if (terminalStartFailure) {
             throw fullStackErr
           }
-          const response = await apiService.client.post('/preview/start', {
-            project_id: projectId,
-            sandbox: requestedSandbox,
-          })
-          data = response.data
+          try {
+            const response = await apiService.client.post('/preview/start', {
+              project_id: projectId,
+              sandbox: requestedSandbox,
+            })
+            data = response.data
+          } catch {
+            throw fullStackErr
+          }
         }
 
         if (activeProjectIdRef.current !== requestProjectId) return
@@ -235,11 +240,10 @@ export function usePreviewRuntime({
           onServerStatusHint(null)
         }
 
-        // A degraded optional backend is not a failed preview. Keep the iframe
-        // visible and let the status cards/server panel explain the API state.
-        if (!data.degraded) {
-          setError(null)
-        }
+        // A degraded optional backend is not a failed preview. If the frontend
+        // preview is active, keep the iframe visible and let the status cards
+        // explain backend/runtime degradation instead of pinning an old error.
+        setError(null)
         setRefreshKey(prev => prev + 1)
         setLoading(false)
         return

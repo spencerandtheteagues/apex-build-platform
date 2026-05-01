@@ -239,9 +239,13 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 		return
 	}
 
-	startBackend := true
-	if req.StartBackend != nil {
+	startBackend := false
+	if req.RequireBackend {
+		startBackend = true
+	} else if req.StartBackend != nil {
 		startBackend = *req.StartBackend
+	} else if strings.TrimSpace(req.BackendEntry) != "" || strings.TrimSpace(req.BackendCommand) != "" {
+		startBackend = true
 	}
 	if (startBackend || req.RequireBackend) && !requirePaidBackendPlan(c, h.db, userID, "backend preview") {
 		return

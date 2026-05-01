@@ -299,6 +299,54 @@ func TestPreviewHandlerFullStackOptionalBackendTimeoutStillReturnsFrontendPrevie
 	require.Contains(t, recorder.Body.String(), `/api/v1/preview/proxy/`+strconv.FormatUint(uint64(projectID), 10)+`/`)
 }
 
+func TestPreviewHandlerFullStackOmitsBackendByDefaultForFrontendOnlyApps(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+
+	files := []models.File{
+		{
+			ProjectID: projectID,
+			Path:      "package.json",
+			Name:      "package.json",
+			Type:      "file",
+			Content: `{
+				"scripts": {"build": "vite build", "dev": "vite"},
+				"dependencies": {"@vitejs/plugin-react": "^latest", "vite": "^latest", "react": "^latest", "react-dom": "^latest"}
+			}`,
+		},
+		{
+			ProjectID: projectID,
+			Path:      "index.html",
+			Name:      "index.html",
+			Type:      "file",
+			Content:   `<!doctype html><html><body><div id="root">Apex FieldOps AI</div></body></html>`,
+		},
+	}
+	require.NoError(t, handler.db.Create(&files).Error)
+
+	body, err := json.Marshal(map[string]any{
+		"project_id":  projectID,
+		"framework":   "react",
+		"entry_point": "index.html",
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/preview/fullstack/start", bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Request.Host = "apex-build.dev"
+	context.Set("user_id", uint(1))
+
+	handler.StartFullStackPreview(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.Contains(t, recorder.Body.String(), `"backend_requested":false`)
+	require.Contains(t, recorder.Body.String(), `"backend_skipped":true`)
+	require.NotContains(t, recorder.Body.String(), `"backend_error"`)
+	require.Contains(t, recorder.Body.String(), `/api/v1/preview/proxy/`+strconv.FormatUint(uint64(projectID), 10)+`/`)
+}
+
 func TestPreviewHandlerStartServerNotBlockedBySecureModeFallback(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, true)
 

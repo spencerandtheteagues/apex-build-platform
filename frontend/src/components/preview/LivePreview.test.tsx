@@ -73,7 +73,7 @@ describe('LivePreview', () => {
       }
     })
 
-    // Fallback path (only called if fullstack returns 404/405)
+    // Fallback path (called when fullstack cannot start a frontend-only preview)
     mockPost.mockImplementation(async (url: string, body?: any) => {
       if (url === '/preview/start') {
         return {
@@ -375,6 +375,90 @@ describe('LivePreview', () => {
         sandbox: false,
       }))
     })
+  })
+
+  it('does not request backend startup before backend detection is available', async () => {
+    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+    const view = render(<LivePreview projectId={818} className="h-96" />)
+
+    fireEvent.click(within(view.container).getAllByRole('button', { name: /start preview/i })[0])
+
+    await waitFor(() => {
+      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({
+        project_id: 818,
+        start_backend: false,
+        require_backend: false,
+      }))
+    })
+  })
+
+  it('falls back to frontend-only preview when fullstack startup fails', async () => {
+    const mockPost = apiService.client.post as any
+    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+
+    mockStartFullStack.mockRejectedValueOnce({
+      response: {
+        status: 500,
+        data: { error: 'backend runtime failed before frontend preview was attached' },
+      },
+    })
+
+    const view = render(<LivePreview projectId={819} autoStart className="h-96" />)
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', {
+        project_id: 819,
+        sandbox: false,
+      })
+    })
+    expect(await within(view.container).findByTitle('Live Preview')).toBeTruthy()
+    expect(within(view.container).queryByText(/backend runtime failed/i)).toBeNull()
+  })
+
+  it('clears a prior failed-start error when a degraded preview starts successfully', async () => {
+    const mockPost = apiService.client.post as any
+    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+
+    mockStartFullStack
+      .mockRejectedValueOnce({
+        response: {
+          status: 500,
+          data: { error: 'Failed to start preview' },
+        },
+      })
+      .mockResolvedValueOnce({
+        sandbox: false,
+        degraded: true,
+        diagnostics: {
+          backend_started: false,
+          backend_error: 'no backend server detected in project',
+        },
+        preview: {
+          project_id: 820,
+          active: true,
+          port: 3000,
+          url: 'http://localhost:3000/project-820',
+          started_at: new Date().toISOString(),
+          last_access: new Date().toISOString(),
+          connected_clients: 1,
+        },
+      })
+    mockPost.mockRejectedValueOnce({
+      response: {
+        status: 500,
+        data: { error: 'Failed to start preview' },
+      },
+    })
+
+    const view = render(<LivePreview projectId={820} className="h-96" />)
+
+    fireEvent.click(within(view.container).getAllByRole('button', { name: /start preview/i })[0])
+    expect(await within(view.container).findByText(/Failed to start preview/i)).toBeTruthy()
+
+    fireEvent.click(within(view.container).getAllByRole('button', { name: /start preview/i })[0])
+
+    expect(await within(view.container).findByTitle('Live Preview')).toBeTruthy()
+    expect(within(view.container).queryByText(/Failed to start preview/i)).toBeNull()
   })
 
   it('keeps the iframe visible when optional backend startup degrades', async () => {
