@@ -189,38 +189,46 @@ export function usePreviewRuntime({
       try {
         const requestedSandbox = useSandbox && dockerAvailable && !sandboxDegraded
         let data: any
-        try {
-          const fullStackRequest: {
-            project_id: number
-            sandbox: boolean
-            require_backend: boolean
-            start_backend: boolean
-            backend_entry_file?: string
-            backend_command?: string
-          } = {
-            project_id: projectId,
-            sandbox: requestedSandbox,
-            require_backend: false,
-            start_backend: Boolean(serverDetection?.has_backend),
-            backend_entry_file: serverDetection?.entry_file,
-            backend_command: serverDetection?.command,
-          }
-          data = await apiService.startFullStackPreview(fullStackRequest)
-        } catch (fullStackErr: any) {
-          const statusCode = fullStackErr?.response?.status
-          const terminalStartFailure = statusCode === 401 || statusCode === 403 || statusCode === 429
-          if (terminalStartFailure) {
-            throw fullStackErr
-          }
+        if (serverDetection?.has_backend === true) {
           try {
-            const response = await apiService.client.post('/preview/start', {
+            const fullStackRequest: {
+              project_id: number
+              sandbox: boolean
+              require_backend: boolean
+              start_backend: boolean
+              backend_entry_file?: string
+              backend_command?: string
+            } = {
               project_id: projectId,
               sandbox: requestedSandbox,
-            })
-            data = response.data
-          } catch {
-            throw fullStackErr
+              require_backend: false,
+              start_backend: true,
+              backend_entry_file: serverDetection.entry_file,
+              backend_command: serverDetection.command,
+            }
+            data = await apiService.startFullStackPreview(fullStackRequest)
+          } catch (fullStackErr: any) {
+            const statusCode = fullStackErr?.response?.status
+            const terminalStartFailure = statusCode === 401 || statusCode === 403 || statusCode === 429
+            if (terminalStartFailure) {
+              throw fullStackErr
+            }
+            try {
+              const response = await apiService.client.post('/preview/start', {
+                project_id: projectId,
+                sandbox: requestedSandbox,
+              })
+              data = response.data
+            } catch {
+              throw fullStackErr
+            }
           }
+        } else {
+          const response = await apiService.client.post('/preview/start', {
+            project_id: projectId,
+            sandbox: requestedSandbox,
+          })
+          data = response.data
         }
 
         if (activeProjectIdRef.current !== requestProjectId) return

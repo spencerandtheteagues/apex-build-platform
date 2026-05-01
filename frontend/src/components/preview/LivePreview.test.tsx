@@ -57,7 +57,7 @@ describe('LivePreview', () => {
       throw new Error(`Unexpected GET ${url}`)
     })
 
-    // startFullStackPreview is the primary start path now
+    // Full-stack preview is reserved for detected backend projects.
     mockStartFullStack.mockImplementation(async (data: any) => {
       return {
         sandbox: false,
@@ -101,27 +101,26 @@ describe('LivePreview', () => {
   })
 
   it('auto-starts again after projectId changes', async () => {
-    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+    const mockPost = apiService.client.post as any
     const { rerender } = render(<LivePreview projectId={101} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({ project_id: 101 }))
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 101 }))
     })
 
     rerender(<LivePreview projectId={202} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({ project_id: 202 }))
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 202 }))
     })
   })
 
   it('restarts an active preview runtime from the workspace controls', async () => {
     const mockPost = apiService.client.post as any
-    const mockStartFullStack = (apiService as any).startFullStackPreview as any
     const view = render(<LivePreview projectId={606} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({ project_id: 606 }))
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 606 }))
     })
 
     fireEvent.click(within(view.container).getByRole('button', { name: /restart/i }))
@@ -131,13 +130,13 @@ describe('LivePreview', () => {
         project_id: 606,
         sandbox: false,
       })
-      expect(mockStartFullStack).toHaveBeenCalledTimes(2)
+      expect(mockPost.mock.calls.filter(([url]: [string]) => url === '/preview/start')).toHaveLength(2)
     })
   })
 
   it('keeps active preview visible when a status poll fails transiently', async () => {
     const mockGet = apiService.client.get as any
-    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+    const mockPost = apiService.client.post as any
     const intervalCallbacks: Array<() => void | Promise<void>> = []
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockImplementation((((fn: TimerHandler) => {
       intervalCallbacks.push(fn as () => void)
@@ -175,18 +174,22 @@ describe('LivePreview', () => {
       if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
       throw new Error(`Unexpected GET ${url}`)
     })
-    mockStartFullStack.mockImplementation(async (data: any) => {
+    mockPost.mockImplementation(async (url: string, data: any) => {
+      if (url === '/preview/stop' || url === '/preview/refresh') return { data: {} }
+      if (url !== '/preview/start') throw new Error(`Unexpected POST ${url}`)
       previewRunning = true
       return {
-        sandbox: false,
-        preview: {
-          project_id: data.project_id,
-          active: true,
-          port: 3000,
-          url: `http://localhost:3000/project-${data.project_id}`,
-          started_at: new Date().toISOString(),
-          last_access: new Date().toISOString(),
-          connected_clients: 1,
+        data: {
+          sandbox: false,
+          preview: {
+            project_id: data.project_id,
+            active: true,
+            port: 3000,
+            url: `http://localhost:3000/project-${data.project_id}`,
+            started_at: new Date().toISOString(),
+            last_access: new Date().toISOString(),
+            connected_clients: 1,
+          },
         },
       }
     })
@@ -194,7 +197,7 @@ describe('LivePreview', () => {
     const view = render(<LivePreview projectId={303} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({ project_id: 303 }))
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 303 }))
     })
     await waitFor(() => {
       expect(within(view.container).getAllByTitle('Live Preview').length).toBeGreaterThan(0)
@@ -219,7 +222,7 @@ describe('LivePreview', () => {
 
   it('polls the active preview sandbox mode even after toggling sandbox setting', async () => {
     const mockGet = apiService.client.get as any
-    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+    const mockPost = apiService.client.post as any
     const intervalCallbacks: Array<() => void | Promise<void>> = []
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockImplementation((((fn: TimerHandler) => {
       intervalCallbacks.push(fn as () => void)
@@ -254,18 +257,22 @@ describe('LivePreview', () => {
       if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
       throw new Error(`Unexpected GET ${url}`)
     })
-    mockStartFullStack.mockImplementation(async (data: any) => {
+    mockPost.mockImplementation(async (url: string, data: any) => {
+      if (url === '/preview/stop' || url === '/preview/refresh') return { data: {} }
+      if (url !== '/preview/start') throw new Error(`Unexpected POST ${url}`)
       previewRunning = true
       return {
-        sandbox: false,
-        preview: {
-          project_id: data.project_id,
-          active: true,
-          port: 3000,
-          url: `http://localhost:3000/project-${data.project_id}`,
-          started_at: new Date().toISOString(),
-          last_access: new Date().toISOString(),
-          connected_clients: 1,
+        data: {
+          sandbox: false,
+          preview: {
+            project_id: data.project_id,
+            active: true,
+            port: 3000,
+            url: `http://localhost:3000/project-${data.project_id}`,
+            started_at: new Date().toISOString(),
+            last_access: new Date().toISOString(),
+            connected_clients: 1,
+          },
         },
       }
     })
@@ -273,7 +280,7 @@ describe('LivePreview', () => {
     const view = render(<LivePreview projectId={404} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({ project_id: 404 }))
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 404 }))
     })
     await waitFor(() => {
       expect(within(view.container).getAllByTitle('Live Preview').length).toBeGreaterThan(0)
@@ -345,7 +352,7 @@ describe('LivePreview', () => {
 
   it('uses process fallback when production sandbox is required but Docker is degraded', async () => {
     const mockGet = apiService.client.get as any
-    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+    const mockPost = apiService.client.post as any
 
     mockGet.mockImplementation(async (url: string) => {
       if (url === '/preview/docker/status') {
@@ -370,31 +377,45 @@ describe('LivePreview', () => {
     render(<LivePreview projectId={808} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({
         project_id: 808,
         sandbox: false,
       }))
     })
   })
 
-  it('does not request backend startup before backend detection is available', async () => {
+  it('uses frontend-only startup before backend detection is available', async () => {
+    const mockPost = apiService.client.post as any
     const mockStartFullStack = (apiService as any).startFullStackPreview as any
     const view = render(<LivePreview projectId={818} className="h-96" />)
 
     fireEvent.click(within(view.container).getAllByRole('button', { name: /start preview/i })[0])
 
     await waitFor(() => {
-      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({
         project_id: 818,
-        start_backend: false,
-        require_backend: false,
+        sandbox: false,
       }))
     })
+    expect(mockStartFullStack).not.toHaveBeenCalled()
   })
 
   it('falls back to frontend-only preview when fullstack startup fails', async () => {
     const mockPost = apiService.client.post as any
+    const mockGet = apiService.client.get as any
     const mockStartFullStack = (apiService as any).startFullStackPreview as any
+
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/preview/docker/status') return { data: { available: false } }
+      if (url === '/preview/bundler/status') return { data: { available: true } }
+      if (url.startsWith('/preview/status/')) return { data: { preview: { active: false } } }
+      if (url.startsWith('/preview/server/detect/')) {
+        return { data: { has_backend: true, framework: 'express', server_type: 'node', command: 'npm', entry_file: 'server.js' } }
+      }
+      if (url.startsWith('/preview/server/status/')) return { data: { server: { running: false, ready: false } } }
+      if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
 
     mockStartFullStack.mockRejectedValueOnce({
       response: {
@@ -417,9 +438,8 @@ describe('LivePreview', () => {
 
   it('clears a prior failed-start error when a degraded preview starts successfully', async () => {
     const mockPost = apiService.client.post as any
-    const mockStartFullStack = (apiService as any).startFullStackPreview as any
 
-    mockStartFullStack
+    mockPost
       .mockRejectedValueOnce({
         response: {
           status: 500,
@@ -427,28 +447,24 @@ describe('LivePreview', () => {
         },
       })
       .mockResolvedValueOnce({
-        sandbox: false,
-        degraded: true,
-        diagnostics: {
-          backend_started: false,
-          backend_error: 'no backend server detected in project',
-        },
-        preview: {
-          project_id: 820,
-          active: true,
-          port: 3000,
-          url: 'http://localhost:3000/project-820',
-          started_at: new Date().toISOString(),
-          last_access: new Date().toISOString(),
-          connected_clients: 1,
+        data: {
+          sandbox: false,
+          degraded: true,
+          diagnostics: {
+            backend_started: false,
+            backend_error: 'no backend server detected in project',
+          },
+          preview: {
+            project_id: 820,
+            active: true,
+            port: 3000,
+            url: 'http://localhost:3000/project-820',
+            started_at: new Date().toISOString(),
+            last_access: new Date().toISOString(),
+            connected_clients: 1,
+          },
         },
       })
-    mockPost.mockRejectedValueOnce({
-      response: {
-        status: 500,
-        data: { error: 'Failed to start preview' },
-      },
-    })
 
     const view = render(<LivePreview projectId={820} className="h-96" />)
 
@@ -519,7 +535,7 @@ describe('LivePreview', () => {
   })
 
   it('renders the preview iframe with same-origin sandbox support', async () => {
-    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+    const mockPost = apiService.client.post as any
     const mockGet = apiService.client.get as any
     let previewRunning = false
 
@@ -548,18 +564,22 @@ describe('LivePreview', () => {
       if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
       throw new Error(`Unexpected GET ${url}`)
     })
-    mockStartFullStack.mockImplementation(async (data: any) => {
+    mockPost.mockImplementation(async (url: string, data: any) => {
+      if (url === '/preview/stop' || url === '/preview/refresh') return { data: {} }
+      if (url !== '/preview/start') throw new Error(`Unexpected POST ${url}`)
       previewRunning = true
       return {
-        sandbox: false,
-        preview: {
-          project_id: data.project_id,
-          active: true,
-          port: 3000,
-          url: `http://localhost:3000/project-${data.project_id}`,
-          started_at: new Date().toISOString(),
-          last_access: new Date().toISOString(),
-          connected_clients: 1,
+        data: {
+          sandbox: false,
+          preview: {
+            project_id: data.project_id,
+            active: true,
+            port: 3000,
+            url: `http://localhost:3000/project-${data.project_id}`,
+            started_at: new Date().toISOString(),
+            last_access: new Date().toISOString(),
+            connected_clients: 1,
+          },
         },
       }
     })
@@ -567,7 +587,7 @@ describe('LivePreview', () => {
     const view = render(<LivePreview projectId={707} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({ project_id: 707 }))
+      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 707 }))
     })
 
     const iframe = await within(view.container).findByTitle('Live Preview')
