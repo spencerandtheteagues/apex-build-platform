@@ -23,7 +23,19 @@ vi.mock('./NetworkPanel', () => ({
 }))
 
 import apiService from '@/services/api'
+import { formatPreviewStartError } from '@/hooks/usePreviewRuntime'
 import LivePreview from './LivePreview'
+
+describe('formatPreviewStartError', () => {
+  it('includes sandbox diagnostics instead of hiding the preview startup cause', () => {
+    expect(formatPreviewStartError({
+      error: 'Failed to start preview',
+      diagnostics: {
+        sandbox_error: 'container preview build failed: missing package.json',
+      },
+    })).toBe('Failed to start preview: container preview build failed: missing package.json')
+  })
+})
 
 describe('LivePreview', () => {
   beforeEach(() => {

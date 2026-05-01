@@ -165,16 +165,16 @@ export function deriveBrowserLocalPreviewRoute({
       reason: 'Project bundler support is unavailable, so keep using platform preview startup.',
     }
   }
-  if (capability.state === 'ready') {
-    if (!browserLocalRuntimeEnabled || !browserLocalRuntimeAvailable) {
-      return {
-        state: 'browser_local_eligible',
-        label: browserLocalPreviewRouteLabels.browser_local_eligible,
-        reason: !browserLocalRuntimeEnabled
-          ? 'Frontend-only project is eligible for browser-local preview evaluation, but the runtime adapter is not enabled.'
-          : 'Frontend-only project is eligible for browser-local preview evaluation, but no browser-local runtime adapter is bundled.',
-      }
+  if (!browserLocalRuntimeEnabled || !browserLocalRuntimeAvailable) {
+    return {
+      state: 'platform_runtime',
+      label: browserLocalPreviewRouteLabels.platform_runtime,
+      reason: !browserLocalRuntimeEnabled
+        ? 'Browser-local preview is disabled; using the platform preview runtime.'
+        : 'Browser-local preview adapter is unavailable; using the platform preview runtime.',
     }
+  }
+  if (capability.state === 'ready') {
     return {
       state: 'browser_local_active',
       label: browserLocalPreviewRouteLabels.browser_local_active,

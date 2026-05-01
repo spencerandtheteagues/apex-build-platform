@@ -129,17 +129,17 @@ describe('deriveBrowserLocalPreviewRoute', () => {
     ).toBe('platform_runtime')
   })
 
-  it('marks frontend-only projects as browser-local eligible when prerequisites are ready but runtime is disabled', () => {
+  it('keeps frontend-only projects on platform runtime when browser-local runtime is disabled', () => {
     expect(
       deriveBrowserLocalPreviewRoute({
         serverDetection: { has_backend: false },
         bundlerAvailable: true,
         capability: readyCapability,
       }).state,
-    ).toBe('browser_local_eligible')
+    ).toBe('platform_runtime')
   })
 
-  it('keeps frontend-only projects eligible when the runtime flag is enabled but no adapter is bundled', () => {
+  it('keeps frontend-only projects on platform runtime when no browser-local adapter is bundled', () => {
     const route = deriveBrowserLocalPreviewRoute({
       serverDetection: { has_backend: false },
       bundlerAvailable: true,
@@ -147,8 +147,8 @@ describe('deriveBrowserLocalPreviewRoute', () => {
       browserLocalRuntimeEnabled: true,
     })
 
-    expect(route.state).toBe('browser_local_eligible')
-    expect(route.reason).toContain('no browser-local runtime adapter is bundled')
+    expect(route.state).toBe('platform_runtime')
+    expect(route.reason).toContain('adapter is unavailable')
   })
 
   it('marks frontend-only projects as browser-local active only when the runtime is enabled and available', () => {
@@ -164,11 +164,13 @@ describe('deriveBrowserLocalPreviewRoute', () => {
     expect(route.reason).toContain('enabled browser-local runtime')
   })
 
-  it('blocks frontend-only browser-local routing when isolation is missing', () => {
+  it('blocks frontend-only browser-local routing when an enabled adapter is missing isolation', () => {
     const route = deriveBrowserLocalPreviewRoute({
       serverDetection: { has_backend: false },
       bundlerAvailable: true,
       capability: blockedCapability,
+      browserLocalRuntimeEnabled: true,
+      browserLocalRuntimeAvailable: true,
     })
 
     expect(route.state).toBe('browser_local_blocked')

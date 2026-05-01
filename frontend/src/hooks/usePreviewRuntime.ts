@@ -2,6 +2,24 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import apiService from '@/services/api'
 import type { PreviewStatus, ServerDetection, ServerStatus } from '@/components/preview/types'
 
+export function formatPreviewStartError(responseData: any): string {
+  const diagnostics = responseData?.diagnostics || {}
+  const details = [
+    responseData?.details,
+    diagnostics.sandbox_error,
+    diagnostics.runtime_error,
+    diagnostics.preview_error,
+    diagnostics.backend_error,
+    responseData?.message,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(' | ')
+
+  const message = responseData?.error || responseData?.message || 'Failed to start preview'
+  return details ? `${message}: ${details}` : message
+}
+
 interface UsePreviewRuntimeOptions {
   projectId: number
   autoStart: boolean
@@ -234,12 +252,7 @@ export function usePreviewRuntime({
           continue
         }
 
-        const responseData = err.response?.data
-        const details = [responseData?.details, responseData?.diagnostics?.backend_error]
-          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-          .join(' | ')
-        const message = responseData?.error || 'Failed to start preview'
-        setError(details ? `${message}: ${details}` : message)
+        setError(formatPreviewStartError(err.response?.data))
         break
       }
     }

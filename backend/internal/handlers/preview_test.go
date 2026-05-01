@@ -8,11 +8,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"apex-build/internal/preview"
 	"apex-build/pkg/models"
@@ -55,6 +57,20 @@ func newPreviewHandlerTestFixture(t *testing.T, requireSandbox bool) (*PreviewHa
 	}
 
 	return handler, project.ID
+}
+
+func setPreviewFactoryDockerAvailable(t *testing.T, factory *preview.PreviewServerFactory, available bool) {
+	t.Helper()
+	field := reflect.ValueOf(factory).Elem().FieldByName("dockerAvailable")
+	require.True(t, field.IsValid())
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().SetBool(available)
+}
+
+func setPreviewFactoryContainerServer(t *testing.T, factory *preview.PreviewServerFactory, server *preview.ContainerPreviewServer) {
+	t.Helper()
+	field := reflect.ValueOf(factory).Elem().FieldByName("containerServer")
+	require.True(t, field.IsValid())
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(server))
 }
 
 type fakePreviewRuntime struct {
@@ -135,6 +151,41 @@ func TestPreviewHandlerStartPreviewFallsBackWhenSandboxRequiredButDockerUnavaila
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
 	require.Contains(t, recorder.Body.String(), `"sandbox":false`)
+}
+
+func TestPreviewHandlerStartPreviewFallsBackWhenSandboxContainerStartFails(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, true)
+	factory, err := preview.NewPreviewServerFactory(handler.db, &preview.FactoryConfig{EnableContainerPreviews: false})
+	require.NoError(t, err)
+	setPreviewFactoryDockerAvailable(t, factory, true)
+	setPreviewFactoryContainerServer(t, factory, &preview.ContainerPreviewServer{})
+	handler.factory = factory
+	handler.server = factory.GetProcessServer()
+
+	body, err := json.Marshal(map[string]any{
+		"project_id":  projectID,
+		"entry_point": "index.html",
+		"framework":   "react",
+		"sandbox":     true,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/preview/start", bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Request.Host = "apex-build.dev"
+	context.Set("user_id", uint(1))
+
+	handler.StartPreview(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.Contains(t, recorder.Body.String(), `"degraded":true`)
+	require.Contains(t, recorder.Body.String(), `"frontend_fallback":true`)
+	require.Contains(t, recorder.Body.String(), `"sandbox":false`)
+	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
+	require.Contains(t, recorder.Body.String(), "Docker is not available")
 }
 
 func TestPreviewHandlerFullStackNextFallsBackToFrontendPreviewWhenRuntimeFails(t *testing.T) {
@@ -317,6 +368,35 @@ func TestPreviewHandlerGetDockerStatusTreatsE2BRuntimeAsBackendPreviewAvailable(
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"backend_preview_available":true`)
 	require.Contains(t, recorder.Body.String(), `"backend_preview_runtime":"e2b"`)
+}
+
+func TestPreviewHandlerGetStatusFindsProcessFallbackWhenSandboxPreferred(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, true)
+	factory, err := preview.NewPreviewServerFactory(handler.db, &preview.FactoryConfig{EnableContainerPreviews: false})
+	require.NoError(t, err)
+	setPreviewFactoryDockerAvailable(t, factory, true)
+	handler.factory = factory
+	handler.server = factory.GetProcessServer()
+
+	_, err = handler.server.StartPreview(context.Background(), &preview.PreviewConfig{
+		ProjectID:  projectID,
+		EntryPoint: "index.html",
+		Framework:  "react",
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "projectId", Value: strconv.FormatUint(uint64(projectID), 10)}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/preview/status/"+strconv.FormatUint(uint64(projectID), 10)+"?sandbox=1", nil)
+	context.Set("user_id", uint(1))
+
+	handler.GetPreviewStatus(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"active":true`)
+	require.Contains(t, recorder.Body.String(), `"sandbox":false`)
+	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
 }
 
 func TestPreviewHandlerFactoryStatusPrefersActiveFrameworkRuntime(t *testing.T) {

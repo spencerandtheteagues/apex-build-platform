@@ -215,7 +215,11 @@ export default function LivePreview({
       {runtime.sandboxDegraded && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-200 text-xs">
           <AlertCircle className="w-3.5 h-3.5 text-amber-300" />
-          <span>Platform Docker is unavailable. Preview is using process fallback mode.</span>
+          <span>
+            {runtime.dockerAvailable
+              ? 'Sandbox preview did not start cleanly. Preview is using process fallback mode.'
+              : 'Platform Docker is unavailable. Preview is using process fallback mode.'}
+          </span>
         </div>
       )}
 

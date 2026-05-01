@@ -176,25 +176,13 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 	}
 	req.Sandbox = useSandbox
 
-	var status *preview.PreviewStatus
-	var err error
-
-	// Use factory if available for sandbox support
-	if h.factory != nil {
-		status, err = h.factory.StartPreview(c.Request.Context(), config, req.Sandbox)
-	} else {
-		if req.Sandbox {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sandbox preview is required but not configured"})
-			return
-		}
-		status, err = h.server.StartPreview(c.Request.Context(), config)
-	}
-
+	status, actualSandbox, fallbackDegraded, fallbackReason, err := h.startFrontendPreviewWithFallback(c.Request.Context(), config, req.Sandbox)
 	if err != nil {
 		metrics.RecordPreviewStart("frontend", "error", req.Sandbox)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	req.Sandbox = actualSandbox
 
 	// Override URL to use proxy so it's accessible from the browser
 	status.URL = h.buildProxyURL(c, req.ProjectID)
@@ -205,7 +193,15 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 		"preview":          status,
 		"message":          "Preview started successfully",
 		"sandbox":          req.Sandbox,
-		"sandbox_degraded": h.sandboxFallbackActive() && !req.Sandbox,
+		"sandbox_degraded": (h.sandboxFallbackActive() && !req.Sandbox) || fallbackDegraded,
+	}
+	if fallbackDegraded {
+		response["degraded"] = true
+		response["diagnostics"] = gin.H{
+			"frontend_fallback": true,
+			"sandbox_error":     fallbackReason,
+		}
+		response["message"] = "Sandbox preview fell back to process preview"
 	}
 
 	// Include Docker availability info
@@ -213,7 +209,11 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 		response["docker_available"] = h.factory.IsDockerAvailable()
 	}
 
-	metrics.RecordPreviewStart("frontend", "success", req.Sandbox)
+	previewStartResult := "success"
+	if fallbackDegraded {
+		previewStartResult = "degraded"
+	}
+	metrics.RecordPreviewStart("frontend", previewStartResult, req.Sandbox)
 	c.JSON(http.StatusOK, response)
 }
 
@@ -338,16 +338,10 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 	req.Sandbox = useSandbox
 
 	var previewStatus *preview.PreviewStatus
+	var degraded bool
+	var sandboxFallbackReason string
 	var err error
-	if h.factory != nil {
-		previewStatus, err = h.factory.StartPreview(c.Request.Context(), previewConfig, req.Sandbox)
-	} else {
-		if req.Sandbox {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sandbox preview is required but not configured"})
-			return
-		}
-		previewStatus, err = h.server.StartPreview(c.Request.Context(), previewConfig)
-	}
+	previewStatus, req.Sandbox, degraded, sandboxFallbackReason, err = h.startFrontendPreviewWithFallback(c.Request.Context(), previewConfig, req.Sandbox)
 	if err != nil {
 		metrics.RecordPreviewStart("fullstack", "error", req.Sandbox)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -364,7 +358,10 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 		"preview_started":   true,
 		"backend_requested": startBackend,
 	}
-	degraded := false
+	if sandboxFallbackReason != "" {
+		diagnostics["frontend_fallback"] = true
+		diagnostics["sandbox_error"] = sandboxFallbackReason
+	}
 
 	if startBackend {
 		if !h.backendPreviewAvailable() {
@@ -451,7 +448,7 @@ response:
 		"diagnostics":      diagnostics,
 		"message":          "Full-stack preview started",
 		"sandbox":          req.Sandbox,
-		"sandbox_degraded": h.sandboxFallbackActive() && !req.Sandbox,
+		"sandbox_degraded": (h.sandboxFallbackActive() && !req.Sandbox) || sandboxFallbackReason != "",
 	}
 	if h.factory != nil {
 		resp["docker_available"] = h.factory.IsDockerAvailable()
@@ -561,6 +558,7 @@ func (h *PreviewHandler) GetPreviewStatus(c *gin.Context) {
 	}
 
 	status, activeSandbox := h.getPreviewStatus(uint(projectID), useSandbox)
+	sandboxDegraded := h.previewStatusSandboxDegraded(uint(projectID), status, activeSandbox)
 
 	// Override URL to proxy
 	if status != nil && status.Active {
@@ -577,7 +575,7 @@ func (h *PreviewHandler) GetPreviewStatus(c *gin.Context) {
 		"success":          true,
 		"preview":          status,
 		"sandbox":          activeSandbox,
-		"sandbox_degraded": h.sandboxFallbackActive() && !activeSandbox,
+		"sandbox_degraded": sandboxDegraded,
 		"server":           serverStatus,
 	})
 }
@@ -610,7 +608,7 @@ func (h *PreviewHandler) RefreshPreview(c *gin.Context) {
 		return
 	}
 
-	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(req.Sandbox)
+	useSandbox, sandboxErr := h.resolvePreviewOperationSandbox(req.ProjectID, req.Sandbox)
 	if sandboxErr != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": sandboxErr.Error()})
 		return
@@ -1556,6 +1554,28 @@ func (h *PreviewHandler) resolveRequestedPreviewSandbox(requested bool) (bool, e
 	return false, nil
 }
 
+func (h *PreviewHandler) resolvePreviewOperationSandbox(projectID uint, requested bool) (bool, error) {
+	if !requested && h.requireSandbox && h.factory != nil && h.factory.IsDockerAvailable() {
+		if status, activeSandbox := h.getPreviewStatus(projectID, false); status != nil && status.Active && !activeSandbox {
+			return false, nil
+		}
+	}
+	return h.resolveRequestedPreviewSandbox(requested)
+}
+
+func (h *PreviewHandler) previewStatusSandboxDegraded(projectID uint, status *preview.PreviewStatus, activeSandbox bool) bool {
+	if status == nil || !status.Active || activeSandbox {
+		return false
+	}
+	if h.isFrameworkRuntimePreviewActive(projectID) {
+		return false
+	}
+	if h.sandboxFallbackActive() {
+		return true
+	}
+	return h.requireSandbox && h.factory != nil && h.factory.IsDockerAvailable()
+}
+
 func (h *PreviewHandler) backendPreviewAvailable() bool {
 	if h.serverRunner == nil {
 		return false
@@ -1698,22 +1718,47 @@ func (h *PreviewHandler) startFrontendPreviewFallback(c *gin.Context, projectID 
 		EnvVars:    envVars,
 	}
 
-	var status *preview.PreviewStatus
-	var err error
-	if h.factory != nil {
-		status, err = h.factory.StartPreview(c.Request.Context(), config, useSandbox)
-	} else {
-		if useSandbox {
-			return nil, useSandbox, fmt.Errorf("sandbox preview is required but not configured")
-		}
-		status, err = h.server.StartPreview(c.Request.Context(), config)
-	}
+	status, actualSandbox, _, _, err := h.startFrontendPreviewWithFallback(c.Request.Context(), config, useSandbox)
 	if err != nil {
-		return nil, useSandbox, err
+		return nil, actualSandbox, err
 	}
 	status.URL = h.buildProxyURL(c, projectID)
 	h.setPreviewAccessCookie(c, projectID)
-	return status, useSandbox, nil
+	return status, actualSandbox, nil
+}
+
+func (h *PreviewHandler) startFrontendPreviewWithFallback(ctx context.Context, config *preview.PreviewConfig, requestedSandbox bool) (*preview.PreviewStatus, bool, bool, string, error) {
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(requestedSandbox)
+	if sandboxErr != nil {
+		return nil, useSandbox, false, "", sandboxErr
+	}
+
+	if h.factory != nil {
+		status, err := h.factory.StartPreview(ctx, config, useSandbox)
+		if err == nil {
+			return status, useSandbox, false, "", nil
+		}
+		if useSandbox && h.server != nil {
+			fallbackStatus, fallbackErr := h.server.StartPreview(ctx, config)
+			if fallbackErr == nil {
+				return fallbackStatus, false, true, err.Error(), nil
+			}
+			return nil, useSandbox, false, err.Error(), fmt.Errorf("sandbox preview failed: %v; process fallback also failed: %w", err, fallbackErr)
+		}
+		return nil, useSandbox, false, "", err
+	}
+
+	if useSandbox {
+		return nil, useSandbox, false, "", fmt.Errorf("sandbox preview is required but not configured")
+	}
+	if h.server == nil {
+		return nil, false, false, "", fmt.Errorf("process preview server is not configured")
+	}
+	status, err := h.server.StartPreview(ctx, config)
+	if err != nil {
+		return nil, false, false, "", err
+	}
+	return status, false, false, "", nil
 }
 
 func (h *PreviewHandler) runtimePreviewStatus(projectID uint) *preview.PreviewStatus {
@@ -1759,9 +1804,9 @@ func (h *PreviewHandler) getPreviewStatus(projectID uint, preferredSandbox bool)
 		if primary != nil && primary.Active {
 			return primary, preferredSandbox
 		}
-		if h.requireSandbox && preferredSandbox && !h.sandboxFallbackActive() {
-			return primary, preferredSandbox
-		}
+		// A sandbox start can fall back to the process preview path when the
+		// container build fails. Always check the alternate runtime before
+		// reporting "not running" so the UI can recover the degraded preview.
 		fallback := h.factory.GetPreviewStatus(projectID, !preferredSandbox)
 		if fallback != nil && fallback.Active {
 			return fallback, !preferredSandbox
