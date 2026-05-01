@@ -16,7 +16,10 @@ const pollSeconds = Number(process.env.POLL_SECONDS || 15)
 const maxPolls = Number(process.env.MAX_POLLS || 240)
 const artifactDir = process.env.ARTIFACT_DIR || path.join('/tmp', `apex-golden-${Date.now()}`)
 const loginEmail = process.env.LOGIN_EMAIL || ''
-const loginUsername = process.env.LOGIN_USERNAME || 'spencer'
+// Prefer explicit email-only login when LOGIN_EMAIL is supplied. Sending both a
+// stale default username and the intended email causes the production handler to
+// authenticate the wrong identifier.
+const loginUsername = process.env.LOGIN_USERNAME ?? (loginEmail ? '' : 'spencer')
 const loginPassword = process.env.LOGIN_PASSWORD || ''
 
 if (!prompt.trim()) {
