@@ -2234,6 +2234,52 @@ func TestMaxAutomatedRecoveryAttemptsByPowerMode(t *testing.T) {
 	}
 }
 
+func TestMaxAutomatedFixLoopsCapsSolverAndPreviewRecoveryByDefault(t *testing.T) {
+	t.Setenv("BUILD_MAX_SOLVER_RECOVERY_LOOPS", "")
+	t.Setenv("BUILD_MAX_PREVIEW_FIX_LOOPS", "")
+
+	am := &AgentManager{}
+	build := &Build{ID: "solver-loop-defaults", Status: BuildReviewing}
+
+	if got := am.maxAutomatedFixLoops(build, "solve_build_failure"); got != 1 {
+		t.Fatalf("solve_build_failure default loop cap = %d, want 1", got)
+	}
+	if got := am.maxAutomatedFixLoops(build, "fix_preview_verification"); got != 1 {
+		t.Fatalf("fix_preview_verification default loop cap = %d, want 1", got)
+	}
+}
+
+func TestLaunchFinalValidationSolverRecoveryHonorsSolverLoopCapBeforeMutating(t *testing.T) {
+	t.Setenv("BUILD_MAX_SOLVER_RECOVERY_LOOPS", "")
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "solver-loop-cap-build",
+		Status:    BuildReviewing,
+		PowerMode: PowerMax,
+		Tasks: []*Task{
+			{
+				ID:     "prior-solver",
+				Type:   TaskFix,
+				Status: TaskCompleted,
+				Input: map[string]any{
+					"action": "solve_build_failure",
+				},
+			},
+		},
+	}
+
+	if am.launchFinalValidationSolverRecovery(build, nil, []string{"missing required file"}, "missing required file", time.Now().UTC()) {
+		t.Fatal("expected solver recovery to be blocked by the default loop cap")
+	}
+	if build.ReadinessRecoveryAttempts != 0 {
+		t.Fatalf("expected readiness attempts to remain unchanged when cap blocks recovery, got %d", build.ReadinessRecoveryAttempts)
+	}
+	if build.Status != BuildReviewing {
+		t.Fatalf("expected build status unchanged, got %s", build.Status)
+	}
+}
+
 func TestRepeatedReadinessErrorClassRequiresThreeAttempts(t *testing.T) {
 	t.Parallel()
 

@@ -46,6 +46,39 @@ func TestEnqueueRecoveryTask_DoesNotLeavePendingTaskWithoutSolver(t *testing.T) 
 	}
 }
 
+func TestEnqueueRecoveryTaskSkipsTerminalBuild(t *testing.T) {
+	t.Parallel()
+
+	manager := newTestIterationManager(nil)
+	build := &Build{
+		ID:          "terminal-recovery-build",
+		Status:      BuildFailed,
+		Description: "Do not recover a terminal build",
+		MaxRetries:  2,
+		Agents:      map[string]*Agent{},
+	}
+	failedTask := &Task{
+		ID:     "failed-review",
+		Type:   TaskReview,
+		Status: TaskFailed,
+		Input: map[string]any{
+			"action": "post_fix_review",
+		},
+	}
+	build.Tasks = []*Task{failedTask}
+	manager.builds[build.ID] = build
+
+	if manager.enqueueRecoveryTask(build.ID, failedTask, errors.New("review failed")) {
+		t.Fatal("expected terminal build recovery enqueue to be rejected")
+	}
+	if len(build.Tasks) != 1 {
+		t.Fatalf("expected no recovery task to be added, got %d tasks", len(build.Tasks))
+	}
+	if failedTask.Status != TaskFailed {
+		t.Fatalf("expected failed task to remain failed, got %s", failedTask.Status)
+	}
+}
+
 func TestEnqueueRecoveryTask_RollsBackWhenAssignmentFails(t *testing.T) {
 	t.Parallel()
 
@@ -302,6 +335,42 @@ func TestSchedulePostFixValidation_AssignmentFailureFailsValidationTasks(t *test
 	}
 	if !strings.Contains(task.Error, "could not be assigned") {
 		t.Fatalf("expected assignment error on %s, got %q", task.ID, task.Error)
+	}
+}
+
+func TestSchedulePostFixValidationSkipsTerminalBuild(t *testing.T) {
+	t.Parallel()
+
+	manager := newTestIterationManager(nil)
+	build := &Build{
+		ID:          "post-fix-terminal-build",
+		Status:      BuildFailed,
+		Description: "Do not schedule validation after terminal failure",
+		MaxRetries:  2,
+		Agents: map[string]*Agent{
+			"tester-1": {
+				ID:      "tester-1",
+				BuildID: "post-fix-terminal-build",
+				Role:    RoleTesting,
+				Status:  StatusIdle,
+			},
+		},
+	}
+	sourceTask := &Task{
+		ID:     "fix-task",
+		Type:   TaskFix,
+		Status: TaskCompleted,
+		Input: map[string]any{
+			"action": "solve_build_failure",
+		},
+	}
+	build.Tasks = []*Task{sourceTask}
+	manager.builds[build.ID] = build
+
+	manager.schedulePostFixValidation(build, sourceTask)
+
+	if len(build.Tasks) != 1 {
+		t.Fatalf("expected no post-fix validation task after terminal failure, got %d tasks", len(build.Tasks))
 	}
 }
 

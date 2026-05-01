@@ -179,11 +179,15 @@ func TestGenerateTaskOutputWithProviderUsesRoutingWaterfallWhenEnabled(t *testin
 	}
 	build.mu.RLock()
 	defer build.mu.RUnlock()
-	if len(build.ActivityTimeline) != 1 {
-		t.Fatalf("expected provider route telemetry entry, got %d", len(build.ActivityTimeline))
+	foundRouteTelemetry := false
+	for _, entry := range build.ActivityTimeline {
+		if entry.EventType == string(WSGlassProviderRouteSelected) && entry.TaskID == task.ID && entry.Provider == string(ai.ProviderGPT4) {
+			foundRouteTelemetry = true
+			break
+		}
 	}
-	if entry := build.ActivityTimeline[0]; entry.EventType != string(WSGlassProviderRouteSelected) || entry.TaskID != task.ID || entry.Provider != string(ai.ProviderGPT4) {
-		t.Fatalf("unexpected provider route telemetry entry: %+v", entry)
+	if !foundRouteTelemetry {
+		t.Fatalf("expected provider route telemetry entry in %+v", build.ActivityTimeline)
 	}
 }
 
@@ -276,8 +280,8 @@ func TestGenerateTaskOutputWithProviderHonorsManualProviderModelOverride(t *test
 	if candidate == nil || candidate.Output == nil {
 		t.Fatalf("expected candidate output")
 	}
-	if router.lastOpts.ModelOverride != "gpt-4.1" {
-		t.Fatalf("expected manual provider model override to win, got %+v", router.lastOpts)
+	if router.lastOpts.ModelOverride != "gpt-5.4" {
+		t.Fatalf("expected max power to upgrade lower-tier manual override, got %+v", router.lastOpts)
 	}
 	if candidate.WaterfallReason != "provider_model_override" {
 		t.Fatalf("expected manual override reason, got %+v", candidate)

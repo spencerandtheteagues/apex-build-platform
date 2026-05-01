@@ -87,6 +87,17 @@ func planRoutingWaterfall(build *Build, task *Task, provider ai.AIProvider) Rout
 	}
 }
 
+func buildScopedSupportPowerMode(build *Build) PowerMode {
+	if build != nil && build.PowerMode == PowerMax {
+		return PowerMax
+	}
+	return PowerFast
+}
+
+func buildScopedSupportModelForProvider(provider ai.AIProvider, mode PowerMode, usesPlatformKeys bool) string {
+	return normalizeExecutionModelForProvider(provider, "", mode, usesPlatformKeys)
+}
+
 func modeRank(mode PowerMode) int {
 	switch mode {
 	case PowerFast:

@@ -734,6 +734,9 @@ const constrainProviderModelForPowerMode = (
   model: string,
   mode: 'fast' | 'balanced' | 'max'
 ) => {
+  if (mode === 'max' && provider !== 'ollama' && model !== POWER_MODE_MODEL_CATALOG.max[provider].id) {
+    return POWER_MODE_MODEL_CATALOG.max[provider].id
+  }
   if (mode === 'balanced' && model === POWER_MODE_MODEL_CATALOG.max[provider].id) {
     return POWER_MODE_MODEL_CATALOG.balanced[provider].id
   }

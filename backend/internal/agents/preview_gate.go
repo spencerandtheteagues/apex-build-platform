@@ -279,6 +279,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 		build.CompletedAt = &now
 		build.UpdatedAt = now
 		build.mu.Unlock()
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
 		return false
 	}
 
@@ -305,6 +306,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 	build.CompletedAt = &now
 	build.UpdatedAt = now
 	build.mu.Unlock()
+	am.cancelAutomatedRecoveryTasksForLoopCap(build)
 	return false
 }
 
@@ -584,11 +586,21 @@ func (am *AgentManager) launchPreviewRepairTask(
 	result *PreviewVerificationResult,
 	now time.Time,
 ) bool {
+	build.mu.RLock()
+	terminal := isTerminalBuildStatus(build.Status)
+	build.mu.RUnlock()
+	if terminal {
+		return false
+	}
 	if !am.canCreateAutomatedFixTask(build, "fix_preview_verification") {
 		return false
 	}
 
 	build.mu.Lock()
+	if isTerminalBuildStatus(build.Status) {
+		build.mu.Unlock()
+		return false
+	}
 	build.PreviewVerificationAttempts++
 	build.Status = BuildReviewing
 	build.CompletedAt = nil

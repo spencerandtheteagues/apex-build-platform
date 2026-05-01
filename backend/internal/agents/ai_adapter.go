@@ -186,10 +186,14 @@ func constrainModelForPowerMode(provider ai.AIProvider, model string, mode Power
 	if trimmed == "" {
 		return trimmed
 	}
-	if mode != PowerBalanced {
+	if mode == PowerMax {
+		flagships := flagshipModelsByProvider[provider]
+		if len(flagships) > 0 && !flagships[strings.ToLower(trimmed)] {
+			return selectModelForPowerMode(provider, PowerMax)
+		}
 		return trimmed
 	}
-	if flagshipModelsByProvider[provider][strings.ToLower(trimmed)] {
+	if mode == PowerBalanced && flagshipModelsByProvider[provider][strings.ToLower(trimmed)] {
 		return selectModelForPowerMode(provider, PowerBalanced)
 	}
 	return trimmed

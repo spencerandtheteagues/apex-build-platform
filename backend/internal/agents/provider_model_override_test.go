@@ -33,10 +33,10 @@ func TestSetProviderModelOverrideUpdatesProviderAgents(t *testing.T) {
 	if err := manager.SetProviderModelOverride(build.ID, ai.ProviderGrok, "grok-3"); err != nil {
 		t.Fatalf("SetProviderModelOverride returned error: %v", err)
 	}
-	if got := build.ProviderModelOverrides["grok"]; got != "grok-3" {
+	if got := build.ProviderModelOverrides["grok"]; got != "grok-4.20-0309-reasoning" {
 		t.Fatalf("expected persisted grok override, got %q", got)
 	}
-	if agent.Model != "grok-3" {
+	if agent.Model != "grok-4.20-0309-reasoning" {
 		t.Fatalf("expected live grok agent to update model, got %q", agent.Model)
 	}
 

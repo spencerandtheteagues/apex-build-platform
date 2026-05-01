@@ -452,11 +452,13 @@ type taskRoutingRouter struct {
 	generationByProvider map[ai.AIProvider]string
 	lastProvider         ai.AIProvider
 	lastPrompt           string
+	lastOpt              GenerateOptions
 }
 
-func (r *taskRoutingRouter) Generate(_ context.Context, provider ai.AIProvider, prompt string, _ GenerateOptions) (*ai.AIResponse, error) {
+func (r *taskRoutingRouter) Generate(_ context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (*ai.AIResponse, error) {
 	r.lastProvider = provider
 	r.lastPrompt = prompt
+	r.lastOpt = opts
 	switch {
 	case strings.Contains(prompt, "Choose the better build candidate"):
 		return &ai.AIResponse{Content: r.judgeContent}, nil
@@ -531,6 +533,62 @@ func TestJudgeTaskCandidatesReturnsWinnerAndJudgeProvider(t *testing.T) {
 	}
 }
 
+func TestJudgeTaskCandidatesUsesMaxPowerModelForMaxBuild(t *testing.T) {
+	router := &taskRoutingRouter{
+		stubAIRouter: stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderGPT4},
+			hasConfiguredProvider: true,
+		},
+		judgeContent: `{"winner_index":0,"rationale":"candidate 0 is cleaner"}`,
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		ctx:      context.Background(),
+	}
+
+	build := &Build{
+		ID:           "build-dual-candidate-max-judge",
+		UserID:       21,
+		ProviderMode: "platform",
+		PowerMode:    PowerMax,
+	}
+	task := &Task{
+		ID:          "task-dual-candidate-max-judge",
+		Type:        TaskGenerateUI,
+		Description: "Generate frontend shell",
+	}
+	candidates := []*taskGenerationCandidate{
+		{
+			Provider:           ai.ProviderClaude,
+			Model:              "claude-a",
+			DeterministicScore: 95,
+			VerifyPassed:       true,
+			Output:             &TaskOutput{Files: []GeneratedFile{{Path: "src/App.tsx", Content: "export default function App(){return <div>a</div>}", Language: "typescript"}}},
+		},
+		{
+			Provider:           ai.ProviderGrok,
+			Model:              "grok-b",
+			DeterministicScore: 94,
+			VerifyPassed:       true,
+			Output:             &TaskOutput{Files: []GeneratedFile{{Path: "src/App.tsx", Content: "export default function App(){return <main>b</main>}", Language: "typescript"}}},
+		},
+	}
+
+	winner, judgeProvider, _ := am.judgeTaskCandidates(build, task, candidates)
+	if winner != 0 {
+		t.Fatalf("expected judge winner index 0, got %d", winner)
+	}
+	if judgeProvider != ai.ProviderGPT4 {
+		t.Fatalf("expected adversarial critique provider gpt4, got %s", judgeProvider)
+	}
+	if router.lastOpt.PowerMode != PowerMax {
+		t.Fatalf("expected max build judge to use max power mode, got %s", router.lastOpt.PowerMode)
+	}
+	if router.lastOpt.ModelOverride != selectModelForPowerMode(ai.ProviderGPT4, PowerMax) {
+		t.Fatalf("expected max build judge to use gpt max model, got %q", router.lastOpt.ModelOverride)
+	}
+}
+
 func TestProviderAssistedTaskVerificationReturnsSurfaceScopedReport(t *testing.T) {
 	router := &taskRoutingRouter{
 		stubAIRouter: stubAIRouter{
@@ -596,6 +654,56 @@ func TestProviderAssistedTaskVerificationReturnsSurfaceScopedReport(t *testing.T
 	}
 	if !containsTruthTag(report.TruthTags, TruthScaffolded) {
 		t.Fatalf("expected truth tags from work order contract slice, got %+v", report.TruthTags)
+	}
+}
+
+func TestProviderAssistedTaskVerificationUsesMaxPowerModelForMaxBuild(t *testing.T) {
+	router := &taskRoutingRouter{
+		stubAIRouter: stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderGPT4, ai.ProviderGrok},
+			hasConfiguredProvider: true,
+		},
+		verifyContent: `{"summary":"candidate is clean","warnings":[],"blockers":[],"confidence":0.9}`,
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		ctx:      context.Background(),
+	}
+
+	build := &Build{
+		ID:           "build-task-verifier-max",
+		UserID:       55,
+		ProviderMode: "platform",
+		PowerMode:    PowerMax,
+	}
+	task := &Task{
+		ID:          "task-task-verifier-max",
+		Type:        TaskGenerateAPI,
+		Description: "Create backend route",
+	}
+	candidate := &taskGenerationCandidate{
+		Provider:     ai.ProviderGPT4,
+		Model:        selectModelForPowerMode(ai.ProviderGPT4, PowerMax),
+		VerifyPassed: true,
+		Output: &TaskOutput{
+			Files: []GeneratedFile{
+				{Path: "app/api/health/route.ts", Content: "export function GET(){ return Response.json({ ok: true }) }", Language: "typescript"},
+			},
+		},
+	}
+
+	report := am.providerAssistedTaskVerification(build, task, candidate)
+	if report == nil {
+		t.Fatal("expected task verification report")
+	}
+	if report.Provider != ai.ProviderGrok {
+		t.Fatalf("expected alternate critique provider grok, got %+v", report.Provider)
+	}
+	if router.lastOpt.PowerMode != PowerMax {
+		t.Fatalf("expected max build verifier to use max power mode, got %s", router.lastOpt.PowerMode)
+	}
+	if router.lastOpt.ModelOverride != selectModelForPowerMode(ai.ProviderGrok, PowerMax) {
+		t.Fatalf("expected max build verifier to use grok max model, got %q", router.lastOpt.ModelOverride)
 	}
 }
 

@@ -34,6 +34,31 @@ func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
 	}
 }
 
+func TestCVRepairPowerModePreservesMaxBuildTier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode PowerMode
+		want PowerMode
+	}{
+		{name: "max stays max", mode: PowerMax, want: PowerMax},
+		{name: "balanced stays balanced", mode: PowerBalanced, want: PowerBalanced},
+		{name: "fast stays fast", mode: PowerFast, want: PowerFast},
+		{name: "empty defaults fast", mode: "", want: PowerFast},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := cvRepairPowerMode(tt.mode); got != tt.want {
+				t.Fatalf("cvRepairPowerMode(%q) = %q, want %q", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCVPackageManifestSanityIssues(t *testing.T) {
 	t.Parallel()
 

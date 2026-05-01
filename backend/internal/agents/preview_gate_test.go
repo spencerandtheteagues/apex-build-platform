@@ -139,6 +139,62 @@ func TestRunPreviewVerificationGateTerminalFailureDropsProgressBelowCompletion(t
 	}
 }
 
+func TestRunPreviewVerificationGateTerminalFailureCancelsPreviewRecoveryTasks(t *testing.T) {
+	agent := &Agent{
+		ID:     "solver-1",
+		Role:   RoleSolver,
+		Status: StatusWorking,
+	}
+	recoveryTask := &Task{
+		ID:         "preview-repair",
+		Type:       TaskFix,
+		Status:     TaskInProgress,
+		AssignedTo: agent.ID,
+		Input: map[string]any{
+			"action": "fix_preview_verification",
+		},
+	}
+	agent.CurrentTask = recoveryTask
+
+	manager := &AgentManager{
+		ctx: context.Background(),
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{
+				Passed:      false,
+				FailureKind: "js_runtime_error",
+				Details:     "preview still throws after repair",
+			},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:                          "preview-terminal-cancel-recovery",
+		Status:                      BuildCompleted,
+		Progress:                    100,
+		PreviewVerificationAttempts: 1,
+		Agents: map[string]*Agent{
+			agent.ID: agent,
+		},
+		Tasks: []*Task{recoveryTask},
+	}
+	status := BuildCompleted
+	buildError := ""
+
+	if manager.runPreviewVerificationGate(build, nil, &status, &buildError, now) {
+		t.Fatal("expected terminal preview failure to return false")
+	}
+	if recoveryTask.Status != TaskCancelled {
+		t.Fatalf("expected pending preview recovery to be cancelled, got %s", recoveryTask.Status)
+	}
+	if agent.CurrentTask != nil {
+		t.Fatalf("expected cancelled preview recovery to be released from agent, got %+v", agent.CurrentTask)
+	}
+	if agent.Status != StatusIdle {
+		t.Fatalf("expected agent to return to idle, got %s", agent.Status)
+	}
+}
+
 func TestRunBuildFinalizationDoesNotMarkCompletedBeforePreviewPasses(t *testing.T) {
 	now := time.Now().UTC()
 	build := &Build{

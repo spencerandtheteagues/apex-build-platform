@@ -732,12 +732,16 @@ func (am *AgentManager) SetProviderModelOverride(buildID string, provider ai.AIP
 	}
 
 	now := time.Now().UTC()
-	normalizedModel := normalizeProviderModelOverride(provider, model)
+	requestedModel := normalizeProviderModelOverride(provider, model)
 
 	build.mu.Lock()
 	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
 		build.mu.Unlock()
 		return fmt.Errorf("build %s already in terminal state: %s", buildID, build.Status)
+	}
+	normalizedModel := requestedModel
+	if normalizedModel != "" {
+		normalizedModel = constrainModelForPowerMode(provider, normalizedModel, build.PowerMode)
 	}
 	if build.ProviderModelOverrides == nil {
 		build.ProviderModelOverrides = make(map[string]string)

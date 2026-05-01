@@ -266,6 +266,7 @@ Return JSON only:
 
 	ctx, cancel := context.WithTimeout(am.ctx, 45*time.Second)
 	defer cancel()
+	critiquePowerMode := buildScopedSupportPowerMode(build)
 	resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		BuildID:         build.ID,
@@ -273,7 +274,8 @@ Return JSON only:
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict build verifier. Return concise JSON only.",
 		RoleHint:        string(RoleReviewer),
-		PowerMode:       PowerFast,
+		ModelOverride:   buildScopedSupportModelForProvider(provider, critiquePowerMode, am.buildUsesPlatformKeys(build)),
+		PowerMode:       critiquePowerMode,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
 	if err != nil || resp == nil {
@@ -420,6 +422,7 @@ Return JSON only:
 
 	ctx, cancel := context.WithTimeout(am.ctx, 45*time.Second)
 	defer cancel()
+	judgePowerMode := buildScopedSupportPowerMode(build)
 	resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		BuildID:         build.ID,
@@ -427,7 +430,8 @@ Return JSON only:
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict build judge. Return concise JSON only.",
 		RoleHint:        string(RoleReviewer),
-		PowerMode:       PowerFast,
+		ModelOverride:   buildScopedSupportModelForProvider(provider, judgePowerMode, am.buildUsesPlatformKeys(build)),
+		PowerMode:       judgePowerMode,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
 	if err != nil || resp == nil {

@@ -3088,6 +3088,10 @@ func isAutomatedFixWriterAction(action string) bool {
 	}
 }
 
+func isTerminalBuildStatus(status BuildStatus) bool {
+	return status == BuildCompleted || status == BuildFailed || status == BuildCancelled
+}
+
 func (am *AgentManager) hasActiveAutomatedFixWriterTask(build *Build) bool {
 	if build == nil {
 		return false
@@ -6970,11 +6974,16 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	if failedTask == nil || err == nil {
 		return false
 	}
+	failedTaskInput := cloneTaskInputForSnapshot(failedTask)
+	recoveryAction := "solve_build_failure"
+	if action := strings.TrimSpace(taskInputStringValue(failedTaskInput, "action")); action == "fix_preview_verification" {
+		recoveryAction = action
+	}
+
 	// Track recovery depth to allow one 2nd-level recovery but prevent infinite loops.
 	currentRecoveryDepth := 0
 	if failedTask.Type == TaskFix {
-		failedTaskInput := cloneTaskInputForSnapshot(failedTask)
-		if action, ok := failedTaskInput["action"].(string); ok && action == "solve_build_failure" {
+		if action := strings.TrimSpace(taskInputStringValue(failedTaskInput, "action")); action == "solve_build_failure" || action == "fix_preview_verification" {
 			// Use taskInputInt to safely read the depth regardless of whether the
 			// value was stored as int (in-process) or float64 (after JSON round-trip
 			// through cloneTaskInput / snapshot restore).
@@ -6990,7 +6999,16 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	if getErr != nil {
 		return false
 	}
-	if !am.canCreateAutomatedFixTask(build, "solve_build_failure") {
+
+	build.mu.RLock()
+	terminal := isTerminalBuildStatus(build.Status)
+	build.mu.RUnlock()
+	if terminal {
+		log.Printf("Build %s: skipping recovery solver task for failed task %s because build is terminal", buildID, failedTask.ID)
+		return false
+	}
+
+	if !am.canCreateAutomatedFixTask(build, recoveryAction) {
 		log.Printf("Build %s: skipping recovery solver task for failed task %s (loop cap or active recovery task already present)",
 			buildID, failedTask.ID)
 		return false
@@ -7030,7 +7048,7 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	failedTaskPartialOutput := summarizeFailedTaskOutputForRecovery(failedTask.Output, 16000)
 	failedTaskVerificationReport := summarizeFailedTaskVerificationReportForRecovery(failedTask.Output, 5000)
 	recoveryInput := map[string]any{
-		"action":                   "solve_build_failure",
+		"action":                   recoveryAction,
 		"failed_task_id":           failedTaskID,
 		"failed_task_type":         failedTaskType,
 		"failed_task_description":  failedTaskDescription,
@@ -7058,6 +7076,11 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	}
 
 	build.mu.Lock()
+	if isTerminalBuildStatus(build.Status) {
+		build.mu.Unlock()
+		log.Printf("Build %s: skipping recovery solver task for failed task %s because build became terminal", buildID, failedTask.ID)
+		return false
+	}
 	if flag, ok := cloneTaskInputForSnapshot(failedTask)["recovery_queued"].(bool); ok && flag {
 		build.mu.Unlock()
 		return false
@@ -7145,6 +7168,10 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 
 	var testAgent, reviewAgent *Agent
 	build.mu.RLock()
+	if isTerminalBuildStatus(build.Status) {
+		build.mu.RUnlock()
+		return
+	}
 	for _, agent := range build.Agents {
 		switch agent.Role {
 		case RoleTesting:
@@ -7199,6 +7226,10 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 	}
 
 	build.mu.Lock()
+	if isTerminalBuildStatus(build.Status) {
+		build.mu.Unlock()
+		return
+	}
 	build.Tasks = append(build.Tasks, newTasks...)
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
@@ -7243,6 +7274,10 @@ func (am *AgentManager) schedulePostFixReviewAfterRegression(build *Build, sourc
 
 	var reviewAgent *Agent
 	build.mu.RLock()
+	if isTerminalBuildStatus(build.Status) {
+		build.mu.RUnlock()
+		return
+	}
 	for _, agent := range build.Agents {
 		if agent.Role == RoleReviewer {
 			reviewAgent = agent
@@ -7271,6 +7306,10 @@ func (am *AgentManager) schedulePostFixReviewAfterRegression(build *Build, sourc
 	}
 
 	build.mu.Lock()
+	if isTerminalBuildStatus(build.Status) {
+		build.mu.Unlock()
+		return
+	}
 	build.Tasks = append(build.Tasks, task)
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
@@ -7626,6 +7665,13 @@ func (am *AgentManager) canCreateAutomatedFixTask(build *Build, action string) b
 		return true
 	}
 
+	build.mu.RLock()
+	terminal := isTerminalBuildStatus(build.Status)
+	build.mu.RUnlock()
+	if terminal {
+		return false
+	}
+
 	if isAutomatedFixWriterAction(action) && am.hasActiveAutomatedFixWriterTask(build) {
 		return false
 	}
@@ -7693,6 +7739,12 @@ func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
 		envKey = "BUILD_MAX_TEST_FIX_LOOPS"
 	} else if action == "fix_integration_contract" {
 		envKey = "BUILD_MAX_INTEGRATION_FIX_LOOPS"
+	} else if action == "solve_build_failure" {
+		defaultLimit = 1
+		envKey = "BUILD_MAX_SOLVER_RECOVERY_LOOPS"
+	} else if action == "fix_preview_verification" {
+		defaultLimit = 1
+		envKey = "BUILD_MAX_PREVIEW_FIX_LOOPS"
 	}
 
 	limit := envInt(envKey, defaultLimit)
@@ -18217,7 +18269,7 @@ func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 
 	isRecoveryAction := func(action string) bool {
 		switch strings.TrimSpace(action) {
-		case "fix_review_issues", "fix_tests", "fix_integration_contract", "regression_test", "post_fix_review", "solve_build_failure":
+		case "fix_review_issues", "fix_tests", "fix_integration_contract", "regression_test", "post_fix_review", "solve_build_failure", "fix_preview_verification":
 			return true
 		default:
 			return false
@@ -18925,8 +18977,13 @@ func (am *AgentManager) launchFinalValidationSolverRecovery(
 	errorSummary string,
 	now time.Time,
 ) bool {
+	if !am.canCreateAutomatedFixTask(build, "solve_build_failure") {
+		pLog(build.ID).ReadinessRecoveryDone(build.ReadinessRecoveryAttempts, false)
+		return false
+	}
+
 	build.mu.Lock()
-	if build.ReadinessRecoveryAttempts >= maxAutomatedRecoveryAttempts(build.PowerMode) {
+	if isTerminalBuildStatus(build.Status) || build.ReadinessRecoveryAttempts >= maxAutomatedRecoveryAttempts(build.PowerMode) {
 		build.mu.Unlock()
 		pLog(build.ID).ReadinessRecoveryDone(build.ReadinessRecoveryAttempts, false)
 		return false
@@ -19112,6 +19169,7 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 			status = build.Status
 			progress = build.Progress
 			build.mu.Unlock()
+			am.cancelAutomatedRecoveryTasksForLoopCap(build)
 		} else {
 			build.mu.Lock()
 			if build.Status != BuildFailed && build.Status != BuildCancelled {
@@ -30269,6 +30327,7 @@ func (am *AgentManager) runFailureConsensus(
 		build.mu.Unlock()
 		am.persistBuildSnapshot(build, nil)
 
+		consensusPowerMode := buildScopedSupportPowerMode(build)
 		resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 			UserID:          build.UserID,
 			BuildID:         build.ID,
@@ -30276,7 +30335,8 @@ func (am *AgentManager) runFailureConsensus(
 			Temperature:     0.2,
 			SystemPrompt:    "You are an incident commander. Vote for the safest path to complete the build.",
 			RoleHint:        string(RoleReviewer),
-			PowerMode:       PowerFast,
+			ModelOverride:   buildScopedSupportModelForProvider(provider, consensusPowerMode, am.buildUsesPlatformKeys(build)),
+			PowerMode:       consensusPowerMode,
 			UsePlatformKeys: am.buildUsesPlatformKeys(build),
 		})
 		cancel()
@@ -30414,7 +30474,7 @@ func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, erro
 		taskInput := cloneTaskInputForSnapshot(task)
 		isRecoveryTask := task.Type == TaskFix &&
 			taskInput != nil &&
-			taskInput["action"] == "solve_build_failure"
+			(taskInput["action"] == "solve_build_failure" || taskInput["action"] == "fix_preview_verification")
 		if !isRecoveryTask {
 			switch task.Type {
 			case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix:
@@ -30897,6 +30957,7 @@ func (am *AgentManager) executeChunkedFileRepair(
 			}
 		}
 
+		repairPowerMode := buildScopedSupportPowerMode(build)
 		resp, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 			UserID:      build.UserID,
 			BuildID:     build.ID,
@@ -30905,7 +30966,8 @@ func (am *AgentManager) executeChunkedFileRepair(
 			SystemPrompt: "You are a precise code editor. Apply the given instruction to the " +
 				"code chunk and return ONLY the modified chunk. No explanation. No code fences.",
 			RoleHint:        string(RoleSolver),
-			PowerMode:       PowerFast, // cost-efficient; chunk repairs don't need frontier reasoning
+			ModelOverride:   buildScopedSupportModelForProvider(agent.Provider, repairPowerMode, am.buildUsesPlatformKeys(build)),
+			PowerMode:       repairPowerMode,
 			UsePlatformKeys: am.buildUsesPlatformKeys(build),
 		})
 		if err != nil {

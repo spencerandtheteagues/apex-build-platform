@@ -153,6 +153,37 @@ func TestCreateBuildNormalizesUnavailableOpenAIProviderModelOverride(t *testing.
 	}
 }
 
+func TestCreateBuildUpgradesLowerTierOverridesInMax(t *testing.T) {
+	manager := &AgentManager{
+		builds: make(map[string]*Build),
+	}
+
+	build, err := manager.CreateBuild(1, "owner", &BuildRequest{
+		Description: "Build a production-ready operations dashboard",
+		PowerMode:   PowerMax,
+		ProviderModelOverrides: map[string]string{
+			"gpt4":   "gpt-4o-mini",
+			"claude": "claude-sonnet-4-6",
+			"gemini": "gemini-2.5-pro",
+			"grok":   "grok-3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBuild returned error: %v", err)
+	}
+	want := map[string]string{
+		"gpt4":   "gpt-5.4",
+		"claude": "claude-opus-4-7",
+		"gemini": "gemini-3.1-pro",
+		"grok":   "grok-4.20-0309-reasoning",
+	}
+	for provider, wantModel := range want {
+		if got := build.ProviderModelOverrides[provider]; got != wantModel {
+			t.Fatalf("max stored override %s = %q, want %q; overrides=%+v", provider, got, wantModel, build.ProviderModelOverrides)
+		}
+	}
+}
+
 func TestCreateBuildDowngradesFlagshipOverridesInBalanced(t *testing.T) {
 	manager := &AgentManager{
 		builds: make(map[string]*Build),

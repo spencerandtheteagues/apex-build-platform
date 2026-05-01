@@ -87,15 +87,13 @@ func cvRepairTokens(mode PowerMode) int {
 }
 
 // cvRepairPowerMode returns the power mode to use for compile repair calls.
-// We use the build's mode capped at Balanced to keep repair fast while still
-// using a capable model — frontier models aren't needed for syntax repair.
+// Max builds must stay on max-tier models for all build-scoped AI calls; lower
+// modes keep their cheaper repair behavior.
 func cvRepairPowerMode(buildMode PowerMode) PowerMode {
-	switch buildMode {
-	case PowerMax:
-		return PowerBalanced
-	default:
-		return buildMode
+	if buildMode == "" {
+		return PowerFast
 	}
+	return buildMode
 }
 
 const compileRepairSystemPrompt = `You are a TypeScript/React build repair expert.
