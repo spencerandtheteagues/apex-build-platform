@@ -20,8 +20,15 @@ func skipIfNoDocker(t *testing.T) {
 		t.Skip("Docker-backed sandbox integration tests are skipped under -race")
 	}
 
-	cmd := exec.Command("docker", "info")
-	if err := cmd.Run(); err != nil {
+	config := DefaultContainerSandboxConfig()
+	remoteHost := strings.HasPrefix(strings.ToLower(strings.TrimSpace(config.DockerHost)), "ssh://")
+	if remoteHost && strings.EqualFold(strings.TrimSpace(os.Getenv("APEX_RUN_REMOTE_DOCKER_TESTS")), "true") {
+		t.Log("running Docker sandbox test against configured remote Docker host")
+	} else if remoteHost {
+		t.Skip("remote Docker sandbox integration tests require APEX_RUN_REMOTE_DOCKER_TESTS=true")
+	}
+	sandbox := &ContainerSandbox{config: config}
+	if !sandbox.checkDockerAvailable() {
 		t.Skip("Docker not available, skipping container sandbox tests")
 	}
 }
@@ -685,6 +692,42 @@ func TestContainerSandboxStats(t *testing.T) {
 
 	if stats.FailedExecs < 1 {
 		t.Errorf("Expected at least 1 failed execution, got %d", stats.FailedExecs)
+	}
+}
+
+func TestPipeCommandsReturnsOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	producer := exec.CommandContext(ctx, "sh", "-c", "while :; do printf 'workspace-data'; sleep 1; done")
+	consumer := exec.CommandContext(ctx, "sh", "-c", "sleep 30")
+
+	start := time.Now()
+	err := pipeCommands(ctx, producer, consumer, "pack workspace", "stage workspace")
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("pipeCommands returned too slowly after cancellation: %s", elapsed)
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("expected context deadline error, got %v", err)
+	}
+}
+
+func TestRunCommandWithSoftDeadlineReturnsBeforeHungCommand(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "sleep 30")
+
+	start := time.Now()
+	_, err := runCommandWithSoftDeadline(cmd, 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected soft deadline error")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("soft deadline returned too slowly: %s", elapsed)
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("expected context deadline error, got %v", err)
 	}
 }
 

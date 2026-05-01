@@ -18,7 +18,34 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
+)
+
+const (
+	dockerMetadataTimeout = 5 * time.Second
+	dockerBuildTimeout    = 2 * time.Minute
+	dockerProbeCacheTTL   = 30 * time.Second
+)
+
+type dockerBoolCacheEntry struct {
+	value     bool
+	checkedAt time.Time
+}
+
+type dockerContextCacheEntry struct {
+	name      string
+	host      string
+	checkedAt time.Time
+}
+
+var (
+	dockerAvailabilityCacheMu sync.Mutex
+	dockerAvailabilityCache   = map[string]dockerBoolCacheEntry{}
+	dockerImageInspectCacheMu sync.Mutex
+	dockerImageInspectCache   = map[string]dockerBoolCacheEntry{}
+	dockerContextCacheMu      sync.Mutex
+	dockerContextCache        = map[string]dockerContextCacheEntry{}
 )
 
 // ContainerSandbox provides Docker-based isolated code execution
@@ -325,8 +352,23 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 
 // checkDockerAvailable verifies Docker daemon is accessible
 func (s *ContainerSandbox) checkDockerAvailable() bool {
+	key := s.dockerProbeCacheKey()
+	now := time.Now()
+	dockerAvailabilityCacheMu.Lock()
+	if cached, ok := dockerAvailabilityCache[key]; ok && now.Sub(cached.checkedAt) < dockerProbeCacheTTL {
+		dockerAvailabilityCacheMu.Unlock()
+		return cached.value
+	}
+	dockerAvailabilityCacheMu.Unlock()
+
 	cmd := s.dockerCommand("info")
-	return cmd.Run() == nil
+	_, err := runCommandWithSoftDeadline(cmd, dockerMetadataTimeout)
+	available := err == nil
+
+	dockerAvailabilityCacheMu.Lock()
+	dockerAvailabilityCache[key] = dockerBoolCacheEntry{value: available, checkedAt: now}
+	dockerAvailabilityCacheMu.Unlock()
+	return available
 }
 
 func executionEnvValue(env []string, key string) string {
@@ -363,30 +405,58 @@ func (s *ContainerSandbox) dockerEnv() []string {
 }
 
 func inspectDockerContext(contextName string) (string, string) {
+	key := strings.Join([]string{
+		strings.TrimSpace(contextName),
+		strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")),
+		strings.TrimSpace(os.Getenv("DOCKER_HOST")),
+	}, "\x00")
+	now := time.Now()
+	dockerContextCacheMu.Lock()
+	if cached, ok := dockerContextCache[key]; ok && now.Sub(cached.checkedAt) < dockerProbeCacheTTL {
+		dockerContextCacheMu.Unlock()
+		return cached.name, cached.host
+	}
+	dockerContextCacheMu.Unlock()
+
 	args := []string{"context", "inspect", "--format", "{{.Name}}\t{{.Endpoints.docker.Host}}"}
 	if strings.TrimSpace(contextName) != "" {
 		args = append(args, contextName)
 	}
-	output, err := osexec.Command("docker", args...).Output()
+	cmd := osexec.Command("docker", args...)
+	configureCommandForHardCancel(cmd)
+	output, err := runCommandWithSoftDeadline(cmd, dockerMetadataTimeout)
 	if err != nil {
+		dockerContextCacheMu.Lock()
+		dockerContextCache[key] = dockerContextCacheEntry{checkedAt: now}
+		dockerContextCacheMu.Unlock()
 		return "", ""
 	}
 	parts := strings.SplitN(strings.TrimSpace(string(output)), "\t", 2)
 	if len(parts) != 2 {
+		dockerContextCacheMu.Lock()
+		dockerContextCache[key] = dockerContextCacheEntry{checkedAt: now}
+		dockerContextCacheMu.Unlock()
 		return "", ""
 	}
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	name := strings.TrimSpace(parts[0])
+	host := strings.TrimSpace(parts[1])
+	dockerContextCacheMu.Lock()
+	dockerContextCache[key] = dockerContextCacheEntry{name: name, host: host, checkedAt: now}
+	dockerContextCacheMu.Unlock()
+	return name, host
 }
 
 func (s *ContainerSandbox) dockerCommand(args ...string) *osexec.Cmd {
 	cmd := osexec.Command("docker", args...)
 	cmd.Env = s.dockerEnv()
+	configureCommandForHardCancel(cmd)
 	return cmd
 }
 
 func (s *ContainerSandbox) dockerCommandContext(ctx context.Context, args ...string) *osexec.Cmd {
 	cmd := osexec.CommandContext(ctx, "docker", args...)
 	cmd.Env = s.dockerEnv()
+	configureCommandForHardCancel(cmd)
 	return cmd
 }
 
@@ -396,6 +466,22 @@ func (s *ContainerSandbox) usesRemoteDocker() bool {
 		host = strings.TrimSpace(os.Getenv("DOCKER_HOST"))
 	}
 	return strings.HasPrefix(strings.ToLower(host), "ssh://")
+}
+
+func (s *ContainerSandbox) dockerProbeCacheKey() string {
+	if s == nil || s.config == nil {
+		return strings.Join([]string{
+			strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")),
+			strings.TrimSpace(os.Getenv("DOCKER_HOST")),
+		}, "\x00")
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(s.config.DockerHost),
+		strings.TrimSpace(s.config.DockerContext),
+		strings.TrimSpace(s.config.DockerSocket),
+		strings.TrimSpace(os.Getenv("DOCKER_HOST")),
+		strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")),
+	}, "\x00")
 }
 
 // writeSeccompProfile creates a restrictive seccomp profile
@@ -547,8 +633,22 @@ func (s *ContainerSandbox) warmImages() {
 
 func (s *ContainerSandbox) inspectImage(language string) bool {
 	imageName := fmt.Sprintf("%s-%s:latest", s.config.ImagePrefix, language)
-	cmd := osexec.Command("docker", "image", "inspect", imageName)
-	return cmd.Run() == nil
+	key := s.dockerProbeCacheKey() + "\x00" + imageName
+	now := time.Now()
+	dockerImageInspectCacheMu.Lock()
+	if cached, ok := dockerImageInspectCache[key]; ok && now.Sub(cached.checkedAt) < dockerProbeCacheTTL {
+		dockerImageInspectCacheMu.Unlock()
+		return cached.value
+	}
+	dockerImageInspectCacheMu.Unlock()
+
+	cmd := s.dockerCommand("image", "inspect", imageName)
+	_, err := runCommandWithSoftDeadline(cmd, dockerMetadataTimeout)
+	ready := err == nil
+	dockerImageInspectCacheMu.Lock()
+	dockerImageInspectCache[key] = dockerBoolCacheEntry{value: ready, checkedAt: now}
+	dockerImageInspectCacheMu.Unlock()
+	return ready
 }
 
 func (s *ContainerSandbox) imageReady(language string) bool {
@@ -674,9 +774,10 @@ func (s *ContainerSandbox) buildImage(language, dockerfile string) error {
 		return err
 	}
 
-	// Build image
-	cmd := s.dockerCommand("build", "-t", imageName, "-f", dockerfilePath, tmpDir)
-	output, err := cmd.CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), dockerBuildTimeout)
+	defer cancel()
+	cmd := s.dockerCommandContext(ctx, "build", "-t", imageName, "-f", dockerfilePath, tmpDir)
+	output, err := runCommandWithSoftDeadline(cmd, dockerBuildTimeout)
 	if err != nil {
 		return fmt.Errorf("docker build failed: %s", string(output))
 	}
@@ -1154,7 +1255,7 @@ func (s *ContainerSandbox) copyWorkspaceToRemoteVolume(ctx context.Context, imag
 		imageName,
 		"sh", "-lc", "tar -C /work -xf - && chown -R sandbox:sandbox /work",
 	)
-	return pipeCommands(tarCmd, dockerCmd, "pack workspace", "stage workspace")
+	return pipeCommands(ctx, tarCmd, dockerCmd, "pack workspace", "stage workspace")
 }
 
 func (s *ContainerSandbox) copyWorkspaceFromRemoteVolume(ctx context.Context, imageName, volumeName, targetDir string) error {
@@ -1167,13 +1268,16 @@ func (s *ContainerSandbox) copyWorkspaceFromRemoteVolume(ctx context.Context, im
 		"sh", "-lc", "tar -C /work -cf - .",
 	)
 	tarCmd := osexec.CommandContext(ctx, "tar", "-C", targetDir, "-xf", "-")
-	return pipeCommands(dockerCmd, tarCmd, "export workspace", "unpack workspace")
+	return pipeCommands(ctx, dockerCmd, tarCmd, "export workspace", "unpack workspace")
 }
 
-func pipeCommands(producer, consumer *osexec.Cmd, producerLabel, consumerLabel string) error {
+func pipeCommands(ctx context.Context, producer, consumer *osexec.Cmd, producerLabel, consumerLabel string) error {
 	reader, writer := io.Pipe()
 	var producerErr bytes.Buffer
 	var consumerErr bytes.Buffer
+
+	configureCommandForHardCancel(producer)
+	configureCommandForHardCancel(consumer)
 
 	producer.Stdout = writer
 	producer.Stderr = &producerErr
@@ -1193,16 +1297,59 @@ func pipeCommands(producer, consumer *osexec.Cmd, producerLabel, consumerLabel s
 		return fmt.Errorf("%s failed to start: %w", producerLabel, err)
 	}
 
-	producerWaitErr := producer.Wait()
-	if producerWaitErr != nil {
-		_ = writer.CloseWithError(producerWaitErr)
-	} else {
-		_ = writer.Close()
+	producerDone := make(chan error, 1)
+	consumerDone := make(chan error, 1)
+	go func() {
+		err := producer.Wait()
+		if err != nil {
+			_ = writer.CloseWithError(err)
+		} else {
+			_ = writer.Close()
+		}
+		producerDone <- err
+	}()
+	go func() {
+		err := consumer.Wait()
+		_ = reader.CloseWithError(io.ErrClosedPipe)
+		consumerDone <- err
+	}()
+
+	var producerWaitErr error
+	var consumerWaitErr error
+	var canceledErr error
+	producerFinished := false
+	consumerFinished := false
+
+	for !producerFinished || !consumerFinished {
+		select {
+		case producerWaitErr = <-producerDone:
+			producerFinished = true
+		case consumerWaitErr = <-consumerDone:
+			consumerFinished = true
+		case <-ctx.Done():
+			canceledErr = ctx.Err()
+			_ = writer.CloseWithError(ctx.Err())
+			_ = reader.CloseWithError(ctx.Err())
+			killCommandProcessGroup(producer)
+			killCommandProcessGroup(consumer)
+			cancelTimer := time.NewTimer(3 * time.Second)
+			defer cancelTimer.Stop()
+			for !producerFinished || !consumerFinished {
+				select {
+				case producerWaitErr = <-producerDone:
+					producerFinished = true
+				case consumerWaitErr = <-consumerDone:
+					consumerFinished = true
+				case <-cancelTimer.C:
+					return fmt.Errorf("%s/%s canceled but subprocesses did not exit: %w: %s %s", producerLabel, consumerLabel, ctx.Err(), strings.TrimSpace(producerErr.String()), strings.TrimSpace(consumerErr.String()))
+				}
+			}
+		}
 	}
 
-	consumerWaitErr := consumer.Wait()
-	_ = reader.Close()
-
+	if canceledErr != nil {
+		return fmt.Errorf("%s/%s canceled: %w: %s %s", producerLabel, consumerLabel, canceledErr, strings.TrimSpace(producerErr.String()), strings.TrimSpace(consumerErr.String()))
+	}
 	if producerWaitErr != nil {
 		return fmt.Errorf("%s failed: %w: %s", producerLabel, producerWaitErr, strings.TrimSpace(producerErr.String()))
 	}
@@ -1210,6 +1357,68 @@ func pipeCommands(producer, consumer *osexec.Cmd, producerLabel, consumerLabel s
 		return fmt.Errorf("%s failed: %w: %s", consumerLabel, consumerWaitErr, strings.TrimSpace(consumerErr.String()))
 	}
 	return nil
+}
+
+func configureCommandForHardCancel(cmd *osexec.Cmd) {
+	if cmd == nil || runtime.GOOS == "windows" {
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+	if cmd.Cancel != nil {
+		cmd.Cancel = func() error {
+			killCommandProcessGroup(cmd)
+			return nil
+		}
+	}
+	cmd.WaitDelay = 2 * time.Second
+}
+
+func killCommandProcessGroup(cmd *osexec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	if runtime.GOOS != "windows" {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	_ = cmd.Process.Kill()
+}
+
+func runCommandWithSoftDeadline(cmd *osexec.Cmd, timeout time.Duration) ([]byte, error) {
+	if cmd == nil {
+		return nil, fmt.Errorf("command is nil")
+	}
+	configureCommandForHardCancel(cmd)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return stdout.Bytes(), err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case err := <-done:
+		if err != nil && stderr.Len() > 0 {
+			return stdout.Bytes(), fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		}
+		return stdout.Bytes(), err
+	case <-timer.C:
+		killCommandProcessGroup(cmd)
+		return nil, fmt.Errorf("command timed out after %s: %w", timeout, context.DeadlineExceeded)
+	}
 }
 
 func (s *ContainerSandbox) removeRemoteWorkspaceVolume(volumeName string) {
@@ -1412,7 +1621,10 @@ func (s *ContainerSandbox) forceKillContainer(containerID string) {
 	stopCmd.Run()
 
 	// Then force remove
-	rmCmd := s.dockerCommand("rm", "-f", containerID)
+	rmCtx, rmCancel := context.WithTimeout(context.Background(), dockerMetadataTimeout)
+	defer rmCancel()
+	rmCmd := s.dockerCommandContext(rmCtx, "rm", "-f", containerID)
+	configureCommandForHardCancel(rmCmd)
 	rmCmd.Run()
 }
 
@@ -1461,7 +1673,10 @@ func (s *ContainerSandbox) cleanupLoop() {
 
 // cleanupOrphanedContainers removes any orphaned sandbox containers
 func (s *ContainerSandbox) cleanupOrphanedContainers() {
-	cmd := s.dockerCommand("ps", "-a", "--filter", "name=apex-sandbox-", "--format", "{{.Names}}\t{{.Status}}")
+	ctx, cancel := context.WithTimeout(context.Background(), dockerMetadataTimeout)
+	defer cancel()
+	cmd := s.dockerCommandContext(ctx, "ps", "-a", "--filter", "name=apex-sandbox-", "--format", "{{.Names}}\t{{.Status}}")
+	configureCommandForHardCancel(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return
@@ -1483,7 +1698,11 @@ func (s *ContainerSandbox) cleanupOrphanedContainers() {
 
 		// Remove exited or created containers
 		if strings.Contains(status, "Exited") || strings.Contains(status, "Created") {
-			s.dockerCommand("rm", "-f", containerName).Run()
+			rmCtx, rmCancel := context.WithTimeout(context.Background(), dockerMetadataTimeout)
+			rmCmd := s.dockerCommandContext(rmCtx, "rm", "-f", containerName)
+			configureCommandForHardCancel(rmCmd)
+			_ = rmCmd.Run()
+			rmCancel()
 		}
 	}
 }

@@ -595,7 +595,7 @@ func CheckDockerStatus() DockerStatus {
 
 	// Check docker version
 	cmd := exec.Command(dockerPath, "version", "--format", "{{.Server.Version}}")
-	output, err := cmd.Output()
+	output, err := runCommandWithSoftDeadline(cmd, dockerMetadataTimeout)
 	if err != nil {
 		status.Error = fmt.Sprintf("Docker daemon not accessible: %v", err)
 		return status
@@ -606,7 +606,7 @@ func CheckDockerStatus() DockerStatus {
 
 	// Get API version
 	cmd = exec.Command(dockerPath, "version", "--format", "{{.Server.APIVersion}}")
-	output, err = cmd.Output()
+	output, err = runCommandWithSoftDeadline(cmd, dockerMetadataTimeout)
 	if err == nil {
 		status.APIVersion = string(output)
 	}

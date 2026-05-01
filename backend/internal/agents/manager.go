@@ -17659,11 +17659,17 @@ func syntheticFrontendTSConfig() string {
 `
 }
 
+func syntheticFrontendViteEnvDTS() string {
+	return `/// <reference types="vite/client" />
+`
+}
+
 func isCanonicalFrontendScaffoldPath(path string) bool {
 	switch sanitizeFilePath(strings.TrimSpace(path)) {
 	case "index.html",
 		"src/main.tsx",
 		"src/App.tsx",
+		"src/vite-env.d.ts",
 		"vite.config.ts",
 		"tailwind.config.js",
 		"postcss.config.js",
@@ -17793,6 +17799,8 @@ func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *T
 		return syntheticFrontendMainTSX(), "typescript", true
 	case "src/App.tsx":
 		return syntheticFrontendAppTSXWithDescription(buildTitle, buildSummary, buildDescription, backendEntry, backendPort), "typescript", true
+	case "src/vite-env.d.ts":
+		return syntheticFrontendViteEnvDTS(), "typescript", true
 	case "vite.config.ts":
 		return syntheticFrontendViteConfig(backendPort), "typescript", true
 	case "tailwind.config.js":
@@ -18070,6 +18078,148 @@ func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Buil
 	}
 	summaryText := strings.Join(summaryParts, "; ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "missing_frontend_shell_repair: "+summaryText), summaryText
+}
+
+func previewFallbackRemovableFrontendSourcePath(path string) bool {
+	path = sanitizeFilePath(strings.TrimSpace(path))
+	if path == "" || isCanonicalFrontendScaffoldPath(path) || pathLooksLikeGeneratedBackendCode(path) {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".ts", ".tsx", ".js", ".jsx", ".css":
+	default:
+		return false
+	}
+
+	lower := strings.ToLower(path)
+	if strings.HasPrefix(lower, "src/") {
+		return true
+	}
+	for _, prefix := range []string{
+		"app/",
+		"pages/",
+		"components/",
+		"client/src/",
+		"frontend/src/",
+		"web/src/",
+		"apps/web/src/",
+		"apps/frontend/src/",
+		"packages/web/src/",
+		"packages/frontend/src/",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) applyDeterministicPreviewFallbackRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 || !buildRequestsFrontendSurface(build) {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if plan == nil {
+		return nil, ""
+	}
+
+	build.mu.RLock()
+	description := build.Description
+	backendName := ""
+	if build.TechStack != nil {
+		backendName = build.TechStack.Backend
+	}
+	build.mu.RUnlock()
+	if backendName == "" && build.Plan != nil {
+		backendName = build.Plan.TechStack.Backend
+	}
+
+	backendEntry := detectGeneratedBackendEntryForFrontendShell(files)
+	backendPort := canonicalBackendPort(backendName)
+	if backendPort == 0 {
+		backendPort = 3001
+	}
+
+	applied := make([]string, 0, 16)
+	upsertPreviewFile := func(path string, content string, language string) {
+		if strings.TrimSpace(content) == "" {
+			return
+		}
+		if strings.TrimSpace(plan.content(path)) == "" {
+			if plan.createFile(path, content, language) {
+				applied = append(applied, path)
+			}
+			return
+		}
+		if plan.patchFile(path, content, language) {
+			applied = append(applied, path)
+		}
+	}
+
+	manifestPath := "package.json"
+	updatedManifest, manifestChanges, ok := patchManifestForSyntheticFrontendShell(plan.content(manifestPath), backendEntry)
+	if !ok {
+		updatedManifest, manifestChanges, ok = patchManifestForSyntheticFrontendShell("{}", backendEntry)
+	}
+	if ok {
+		upsertPreviewFile(manifestPath, updatedManifest, "json")
+	}
+
+	title := synthesizedFrontendShellAppName(description)
+	summary := synthesizedFrontendShellSummary(description)
+	packageUsesESM := manifestContentUsesESModulePackage(plan.content(manifestPath))
+	upsertPreviewFile("index.html", syntheticFrontendIndexHTML(title), "html")
+	upsertPreviewFile("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
+	upsertPreviewFile("src/App.tsx", syntheticFrontendAppTSXWithDescription(title, summary, description, backendEntry, backendPort), "typescript")
+	upsertPreviewFile("src/index.css", syntheticFrontendIndexCSS(), "css")
+	upsertPreviewFile("src/vite-env.d.ts", syntheticFrontendViteEnvDTS(), "typescript")
+	upsertPreviewFile("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
+	upsertPreviewFile("tsconfig.json", syntheticFrontendTSConfig(), "json")
+	upsertPreviewFile("tailwind.config.js", syntheticFrontendTailwindConfigForPath("tailwind.config.js", packageUsesESM), "javascript")
+	upsertPreviewFile("postcss.config.js", syntheticFrontendPostCSSConfigForPath("postcss.config.js", packageUsesESM), "javascript")
+	for _, path := range shadcnScaffoldPaths() {
+		content, language, ok := shadcnScaffoldContent(path)
+		if !ok {
+			continue
+		}
+		upsertPreviewFile(path, content, language)
+	}
+
+	removed := make([]string, 0)
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if !previewFallbackRemovableFrontendSourcePath(path) {
+			continue
+		}
+		if plan.deleteFile(path) {
+			removed = append(removed, path)
+			applied = append(applied, "removed "+path)
+		}
+	}
+
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	applied = dedupeStringsPreserveOrder(applied)
+	sort.Strings(applied)
+	summaryParts := []string{
+		"replaced unrepaired frontend output with validated React/Vite preview baseline",
+		strings.Join(applied, ", "),
+	}
+	if backendEntry != "" {
+		summaryParts = append(summaryParts, "preserved backend runtime at "+backendEntry)
+	}
+	if len(manifestChanges) > 0 {
+		summaryParts = append(summaryParts, "package.json: "+strings.Join(manifestChanges, ", "))
+	}
+	if len(removed) > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("isolated %d broken frontend source file(s)", len(removed)))
+	}
+	summaryText := strings.Join(summaryParts, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "preview_fallback_repair: "+summaryText), summaryText
 }
 
 type expressIntegrationRepairRequirements struct {
@@ -19173,7 +19323,30 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 
 	candidate := am.selectBestDeterministicValidationRepair(build, readinessErrors, repairs)
 	if candidate == nil || candidate.bundle == nil {
-		return false
+		fallbackBundle, fallbackSummary := am.applyDeterministicPreviewFallbackRepair(build, readinessErrors)
+		if fallbackBundle == nil {
+			return false
+		}
+		if !am.applyPatchBundleToBuild(build, fallbackBundle) {
+			return false
+		}
+		if recordPatchBundles {
+			appendPatchBundle(build, *fallbackBundle)
+		}
+
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
+		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (applied deterministic preview fallback: %s)", errorSummary, fallbackSummary))
+		am.broadcastValidationRepair(
+			build.ID,
+			now,
+			progress,
+			readinessErrors,
+			"Applied deterministic preview fallback after targeted repairs could not classify the frontend failure. Re-running final validation before solver recovery.",
+			"preview_fallback_repair",
+			fallbackSummary,
+		)
+		am.checkBuildCompletion(build)
+		return true
 	}
 	if !am.applyPatchBundleToBuild(build, candidate.bundle) {
 		return false
@@ -19357,7 +19530,13 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 		build.FinalizationInProgress = false
 		build.mu.Unlock()
 		if rerunAfterFinalization {
-			am.checkBuildCompletion(build)
+			go func() {
+				// Do not recurse on the finalization stack. A deterministic repair
+				// may need another readiness pass, but that pass must start from a
+				// fresh goroutine after FinalizationInProgress is released.
+				time.Sleep(10 * time.Millisecond)
+				am.checkBuildCompletion(build)
+			}()
 		}
 	}()
 

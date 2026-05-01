@@ -5953,6 +5953,222 @@ func TestApplyDeterministicScaffoldPlaceholderReplacementRepairBuildsFieldOpsShe
 	}
 }
 
+func TestDeterministicPreviewFallbackRepairReplacesUnclassifiedBrokenFrontend(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:          "build-preview-fallback",
+		Status:      BuildReviewing,
+		Mode:        ModeFull,
+		Description: "Build a complete production-ready Apex FieldOps AI app for contractors with job pipeline, estimate builder, crew management, and Estimate Swarm.",
+		Tasks: []*Task{
+			{ID: "task-block-finalization", Type: TaskTest, Status: TaskInProgress},
+		},
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Plan: &BuildPlan{
+			AppType: "fullstack",
+			TechStack: TechStack{
+				Frontend: "React",
+				Backend:  "Express",
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: BuildOrchestrationFlags{
+					EnablePatchBundles: true,
+				},
+			},
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "package.json",
+				Language: "json",
+				Content:  `{"name":"broken-app","private":true,"scripts":{"build":"vite build"},"dependencies":{"react":"^18.2.0"}}`,
+			},
+			{
+				Path:     "README.md",
+				Language: "markdown",
+				Content:  "Run npm install and npm run build.\n",
+			},
+			{
+				Path:     ".env.example",
+				Language: "dotenv",
+				Content:  "VITE_API_URL=http://localhost:3001\n",
+			},
+			{
+				Path:     "index.html",
+				Language: "html",
+				Content:  `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`,
+			},
+			{
+				Path:     "src/main.tsx",
+				Language: "typescript",
+				Content:  `import App from "./App"; import "./index.css"; console.log(App);`,
+			},
+			{
+				Path:     "src/App.tsx",
+				Language: "typescript",
+				Content:  `import Broken from "./Broken"; export default function App(){ return <Broken /> }`,
+			},
+			{
+				Path:     "src/Broken.tsx",
+				Language: "typescript",
+				Content:  `export default function Broken(){ return <section>{ }</section> }`,
+			},
+			{
+				Path:     "src/components/ui/button.tsx",
+				Language: "typescript",
+				Content:  `export const Button = ;`,
+			},
+			{
+				Path:     "src/server.ts",
+				Language: "typescript",
+				Content:  `import express from "express"; const app = express(); app.get("/health", (_req, res) => res.json({ok:true})); app.listen(process.env.PORT || 3001);`,
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{"Preview verification build failed: generated source graph failed before first paint"},
+		"preview build failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected deterministic preview fallback repair to apply")
+	}
+
+	byPath := map[string]string{}
+	for _, file := range am.collectGeneratedFiles(build) {
+		byPath[file.Path] = file.Content
+	}
+	if _, ok := byPath["src/Broken.tsx"]; ok {
+		t.Fatalf("expected broken frontend source to be isolated from fallback build, got %q", byPath["src/Broken.tsx"])
+	}
+	if _, ok := byPath["src/server.ts"]; !ok {
+		t.Fatal("expected backend runtime source to be preserved")
+	}
+	if strings.Contains(byPath["src/App.tsx"], "./Broken") {
+		t.Fatalf("expected fallback App.tsx to stop importing broken source, got %q", byPath["src/App.tsx"])
+	}
+	for _, expected := range []string{"Launch Estimate Swarm", "Job Pipeline", "Crew Management"} {
+		if !strings.Contains(byPath["src/App.tsx"], expected) {
+			t.Fatalf("expected fallback app to preserve FieldOps-specific affordance %q, got %q", expected, byPath["src/App.tsx"])
+		}
+	}
+	if !strings.Contains(byPath["src/components/ui/button.tsx"], "class-variance-authority") {
+		t.Fatalf("expected corrupt shadcn button file to be replaced, got %q", byPath["src/components/ui/button.tsx"])
+	}
+
+	var manifest previewManifest
+	if err := json.Unmarshal([]byte(byPath["package.json"]), &manifest); err != nil {
+		t.Fatalf("expected valid package.json after fallback, got %q: %v", byPath["package.json"], err)
+	}
+	for _, pkg := range []string{"react", "react-dom", "vite", "@vitejs/plugin-react"} {
+		if !manifestDeclaresDependency(manifest, pkg) {
+			t.Fatalf("expected package.json to declare %s, got %+v", pkg, manifest)
+		}
+	}
+	var tsconfig struct {
+		Include []string `json:"include"`
+	}
+	if err := json.Unmarshal([]byte(byPath["tsconfig.json"]), &tsconfig); err != nil {
+		t.Fatalf("expected valid tsconfig.json after fallback, got %q: %v", byPath["tsconfig.json"], err)
+	}
+	if !reflect.DeepEqual(tsconfig.Include, []string{"src/main.tsx", "src/App.tsx", "vite.config.ts"}) {
+		t.Fatalf("expected fallback tsconfig to restrict compile surface, got %+v", tsconfig.Include)
+	}
+	if state := build.SnapshotState.Orchestration; state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected fallback repair to record a patch bundle, got %+v", state)
+	}
+}
+
+func TestFinalizationRerunAfterDeterministicRepairDoesNotRecurse(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:          "build-finalization-rerun",
+		Status:      BuildReviewing,
+		Mode:        ModeFull,
+		Description: "Build a polished React SaaS dashboard with analytics and settings.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "frontend",
+			TechStack: TechStack{
+				Frontend: "React",
+			},
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "package.json",
+				Language: "json",
+				Content:  `{"name":"preview","private":true,"scripts":{"build":"vite build","dev":"vite"},"dependencies":{"react":"^18.2.0","react-dom":"^18.2.0"},"devDependencies":{"vite":"^5.0.0","typescript":"^5.0.0","@vitejs/plugin-react":"^4.2.1"}}`,
+			},
+			{
+				Path:     "README.md",
+				Language: "markdown",
+				Content:  "Run npm install and npm run build.\n",
+			},
+			{
+				Path:     "index.html",
+				Language: "html",
+				Content:  `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`,
+			},
+			{
+				Path:     "src/main.tsx",
+				Language: "typescript",
+				Content:  `import App from "./App"; console.log(App);`,
+			},
+			{
+				Path:     "src/App.tsx",
+				Language: "typescript",
+				Content:  `export default function App(){ return <main>The deterministic scaffold is live. Replace this shell with the real experience.</main> }`,
+			},
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		am.runBuildFinalization(build, buildCompletionSnapshot{
+			allComplete:            true,
+			currentStatus:          BuildReviewing,
+			phasedPipelineComplete: true,
+			completedAtWasNil:      true,
+			buildMode:              string(ModeFull),
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected finalization to return after scheduling repaired readiness rerun")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		build.mu.RLock()
+		status := build.Status
+		progress := build.Progress
+		build.mu.RUnlock()
+		if status == BuildCompleted && progress == 100 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	t.Fatalf("expected async finalization rerun to complete build, got status=%s progress=%d error=%q", build.Status, build.Progress, build.Error)
+}
+
 func TestScaffoldPlaceholderValidationErrorDetectsGeneratedPlaceholderModules(t *testing.T) {
 	t.Parallel()
 

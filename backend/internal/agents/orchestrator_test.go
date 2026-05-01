@@ -63,9 +63,19 @@ func TestCompleteOrchestrationUsesManagerReadinessGateAndNormalization(t *testin
 
 	orchestrator.completeOrchestration(build, state)
 
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		build.mu.RLock()
+		done := build.Status == BuildCompleted && build.CompletedAt != nil
+		build.mu.RUnlock()
+		if done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
 	build.mu.RLock()
 	defer build.mu.RUnlock()
-
 	if !build.PhasedPipelineComplete {
 		t.Fatalf("expected completeOrchestration to mark phased pipeline complete")
 	}
