@@ -824,12 +824,7 @@ func (s *ContainerPreviewServer) cleanupContainerSessionResources(session *Conta
 
 // buildDockerImage builds a Docker image from the project files
 func (s *ContainerPreviewServer) buildDockerImage(ctx context.Context, contextDir, imageName string) error {
-	cmd := s.dockerCommandContext(ctx, "build",
-		"-t", imageName,
-		"-f", filepath.Join(contextDir, "Dockerfile"),
-		"--no-cache",
-		contextDir,
-	)
+	cmd := s.dockerCommandContext(ctx, s.dockerBuildArgs(contextDir, imageName)...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -837,6 +832,15 @@ func (s *ContainerPreviewServer) buildDockerImage(ctx context.Context, contextDi
 	}
 
 	return nil
+}
+
+func (s *ContainerPreviewServer) dockerBuildArgs(contextDir, imageName string) []string {
+	return []string{
+		"build",
+		"-t", imageName,
+		"-f", filepath.Join(contextDir, "Dockerfile"),
+		contextDir,
+	}
 }
 
 // runContainer starts a Docker container with security constraints

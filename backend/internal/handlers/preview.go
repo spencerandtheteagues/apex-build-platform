@@ -1665,7 +1665,7 @@ func previewOptionalBackendStartTimeout() time.Duration {
 }
 
 func previewFrontendStartTimeout() time.Duration {
-	return previewDurationFromEnv("APEX_PREVIEW_FRONTEND_START_TIMEOUT_MS", 20*time.Second)
+	return previewDurationFromEnv("APEX_PREVIEW_FRONTEND_START_TIMEOUT_MS", 75*time.Second)
 }
 
 func previewDurationFromEnv(key string, fallback time.Duration) time.Duration {

@@ -188,6 +188,13 @@ func TestPreviewHandlerStartPreviewFallsBackWhenSandboxContainerStartFails(t *te
 	require.Contains(t, recorder.Body.String(), "Docker is not available")
 }
 
+func TestPreviewFrontendStartTimeoutAllowsContainerBuildWindow(t *testing.T) {
+	t.Setenv("APEX_PREVIEW_FRONTEND_START_TIMEOUT_MS", "")
+
+	require.GreaterOrEqual(t, previewFrontendStartTimeout(), 75*time.Second)
+	require.LessOrEqual(t, previewFrontendStartTimeout(), 90*time.Second)
+}
+
 func TestPreviewHandlerFullStackNextFallsBackToFrontendPreviewWhenRuntimeFails(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, false)
 	handler.serverRunner = preview.NewServerRunnerWithRuntime(handler.db, &failingPreviewRuntime{})

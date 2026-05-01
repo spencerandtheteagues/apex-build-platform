@@ -57,6 +57,7 @@ import {
 } from '@/types'
 
 const DEFAULT_PRODUCTION_API_BASE_URL = 'https://api.apex-build.dev/api/v1'
+export const PREVIEW_START_TIMEOUT_MS = 90_000
 
 // Get API URL from environment or use default
 const getApiUrl = (): string => {
@@ -859,7 +860,9 @@ export class ApiService {
     backend_command?: string
     backend_env_vars?: Record<string, string>
   }): Promise<any> {
-    const response = await this.client.post('/preview/fullstack/start', data)
+    const response = await this.client.post('/preview/fullstack/start', data, {
+      timeout: PREVIEW_START_TIMEOUT_MS,
+    })
     return response.data
   }
 

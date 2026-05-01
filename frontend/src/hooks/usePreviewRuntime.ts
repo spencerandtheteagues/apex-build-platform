@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import apiService from '@/services/api'
+import apiService, { PREVIEW_START_TIMEOUT_MS } from '@/services/api'
 import type { PreviewStatus, ServerDetection, ServerStatus } from '@/components/preview/types'
 
 export function formatPreviewStartError(responseData: any): string {
@@ -246,6 +246,8 @@ export function usePreviewRuntime({
               const response = await apiService.client.post('/preview/start', {
                 project_id: projectId,
                 sandbox: requestedSandbox,
+              }, {
+                timeout: PREVIEW_START_TIMEOUT_MS,
               })
               data = response.data
             } catch {
@@ -256,6 +258,8 @@ export function usePreviewRuntime({
           const response = await apiService.client.post('/preview/start', {
             project_id: projectId,
             sandbox: requestedSandbox,
+          }, {
+            timeout: PREVIEW_START_TIMEOUT_MS,
           })
           data = response.data
         }

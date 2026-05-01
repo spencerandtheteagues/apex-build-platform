@@ -77,6 +77,18 @@ func TestNodeDockerfileInstallsDevDependenciesForPreviewBuilds(t *testing.T) {
 	}
 }
 
+func TestContainerPreviewBuildUsesDockerLayerCache(t *testing.T) {
+	t.Parallel()
+
+	server := &ContainerPreviewServer{}
+	args := server.dockerBuildArgs("/tmp/apex-preview", "apex-preview-1:latest")
+	joined := strings.Join(args, " ")
+
+	if strings.Contains(joined, "--no-cache") {
+		t.Fatalf("preview container builds should use Docker layer cache, got args: %v", args)
+	}
+}
+
 func TestPreviewContainerNamesAreDeterministic(t *testing.T) {
 	t.Parallel()
 

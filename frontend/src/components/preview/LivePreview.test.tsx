@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/api', () => ({
+  PREVIEW_START_TIMEOUT_MS: 90000,
   default: {
     client: {
       get: vi.fn(),
@@ -22,9 +23,17 @@ vi.mock('./NetworkPanel', () => ({
   default: () => null,
 }))
 
-import apiService from '@/services/api'
+import apiService, { PREVIEW_START_TIMEOUT_MS } from '@/services/api'
 import { formatPreviewStartError, stablePreviewEmbedUrl } from '@/hooks/usePreviewRuntime'
 import LivePreview from './LivePreview'
+
+const expectPreviewStartCalledWith = (mockPost: any, body: Record<string, unknown>) => {
+  expect(mockPost).toHaveBeenCalledWith(
+    '/preview/start',
+    expect.objectContaining(body),
+    expect.objectContaining({ timeout: PREVIEW_START_TIMEOUT_MS }),
+  )
+}
 
 describe('formatPreviewStartError', () => {
   it('includes sandbox diagnostics instead of hiding the preview startup cause', () => {
@@ -116,13 +125,13 @@ describe('LivePreview', () => {
     const { rerender } = render(<LivePreview projectId={101} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 101 }))
+      expectPreviewStartCalledWith(mockPost, { project_id: 101 })
     })
 
     rerender(<LivePreview projectId={202} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 202 }))
+      expectPreviewStartCalledWith(mockPost, { project_id: 202 })
     })
   })
 
@@ -131,7 +140,7 @@ describe('LivePreview', () => {
     const view = render(<LivePreview projectId={606} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 606 }))
+      expectPreviewStartCalledWith(mockPost, { project_id: 606 })
     })
 
     const restartButton = await within(view.container).findByRole('button', { name: /restart/i })
@@ -209,7 +218,7 @@ describe('LivePreview', () => {
     const view = render(<LivePreview projectId={303} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 303 }))
+      expectPreviewStartCalledWith(mockPost, { project_id: 303 })
     })
     await waitFor(() => {
       expect(within(view.container).getAllByTitle('Live Preview').length).toBeGreaterThan(0)
@@ -292,7 +301,7 @@ describe('LivePreview', () => {
     const view = render(<LivePreview projectId={404} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 404 }))
+      expectPreviewStartCalledWith(mockPost, { project_id: 404 })
     })
     await waitFor(() => {
       expect(within(view.container).getAllByTitle('Live Preview').length).toBeGreaterThan(0)
@@ -389,10 +398,10 @@ describe('LivePreview', () => {
     render(<LivePreview projectId={808} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({
+      expectPreviewStartCalledWith(mockPost, {
         project_id: 808,
         sandbox: false,
-      }))
+      })
     })
   })
 
@@ -404,10 +413,10 @@ describe('LivePreview', () => {
     fireEvent.click(within(view.container).getAllByRole('button', { name: /start preview/i })[0])
 
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({
+      expectPreviewStartCalledWith(mockPost, {
         project_id: 818,
         sandbox: false,
-      }))
+      })
     })
     expect(mockStartFullStack).not.toHaveBeenCalled()
   })
@@ -442,7 +451,7 @@ describe('LivePreview', () => {
       expect(mockPost).toHaveBeenCalledWith('/preview/start', {
         project_id: 819,
         sandbox: false,
-      })
+      }, expect.objectContaining({ timeout: PREVIEW_START_TIMEOUT_MS }))
     })
     expect(await within(view.container).findByTitle('Live Preview')).toBeTruthy()
     expect(within(view.container).queryByText(/backend runtime failed/i)).toBeNull()
@@ -724,7 +733,7 @@ describe('LivePreview', () => {
     const view = render(<LivePreview projectId={707} autoStart className="h-96" />)
 
     await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 707 }))
+      expectPreviewStartCalledWith(mockPost, { project_id: 707 })
     })
 
     const iframe = await within(view.container).findByTitle('Live Preview')
