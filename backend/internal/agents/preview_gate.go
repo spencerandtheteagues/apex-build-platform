@@ -586,6 +586,9 @@ func (am *AgentManager) launchPreviewRepairTask(
 	result *PreviewVerificationResult,
 	now time.Time,
 ) bool {
+	if build == nil || result == nil {
+		return false
+	}
 	build.mu.RLock()
 	terminal := isTerminalBuildStatus(build.Status)
 	build.mu.RUnlock()
@@ -595,20 +598,6 @@ func (am *AgentManager) launchPreviewRepairTask(
 	if !am.canCreateAutomatedFixTask(build, "fix_preview_verification") {
 		return false
 	}
-
-	build.mu.Lock()
-	if isTerminalBuildStatus(build.Status) {
-		build.mu.Unlock()
-		return false
-	}
-	build.PreviewVerificationAttempts++
-	build.Status = BuildReviewing
-	build.CompletedAt = nil
-	build.UpdatedAt = now
-	build.Progress = 95
-	build.Error = fmt.Sprintf("Preview verification failed: %s", result.Details)
-	progress := build.Progress
-	build.mu.Unlock()
 
 	hints := result.RepairHints
 	if len(result.CanaryErrors) > 0 {
@@ -626,6 +615,25 @@ func (am *AgentManager) launchPreviewRepairTask(
 		Input:       buildPreviewRepairTaskInput(build, result, hints),
 	}
 
+	if !am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("preview verification failed (%s): %s", result.FailureKind, result.Details)) {
+		log.Printf("Build %s: preview repair task for %s could not be queued", build.ID, result.FailureKind)
+		return false
+	}
+
+	build.mu.Lock()
+	if isTerminalBuildStatus(build.Status) {
+		build.mu.Unlock()
+		return false
+	}
+	build.PreviewVerificationAttempts++
+	build.Status = BuildReviewing
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	build.Progress = 95
+	build.Error = fmt.Sprintf("Preview verification failed: %s", result.Details)
+	progress := build.Progress
+	build.mu.Unlock()
+
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
 		BuildID:   build.ID,
@@ -642,7 +650,6 @@ func (am *AgentManager) launchPreviewRepairTask(
 		},
 	})
 
-	am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("preview verification failed (%s): %s", result.FailureKind, result.Details))
 	log.Printf("Build %s: launched preview repair task for %s", build.ID, result.FailureKind)
 
 	_ = allFiles // available for future context selection

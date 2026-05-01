@@ -2280,6 +2280,42 @@ func TestLaunchFinalValidationSolverRecoveryHonorsSolverLoopCapBeforeMutating(t 
 	}
 }
 
+func TestLaunchFinalValidationSolverRecoveryDoesNotMutateWhenRecoveryCannotQueue(t *testing.T) {
+	t.Setenv("BUILD_MAX_SOLVER_RECOVERY_LOOPS", "")
+
+	am := &AgentManager{
+		ctx:         context.Background(),
+		agents:      map[string]*Agent{},
+		builds:      map[string]*Build{},
+		subscribers: map[string][]chan *WSMessage{},
+	}
+	build := &Build{
+		ID:        "solver-no-agent-build",
+		Status:    BuildReviewing,
+		Progress:  99,
+		PowerMode: PowerBalanced,
+		Agents:    map[string]*Agent{},
+		Tasks:     []*Task{},
+	}
+	am.builds[build.ID] = build
+
+	if am.launchFinalValidationSolverRecovery(build, nil, []string{"missing required file"}, "missing required file", time.Now().UTC()) {
+		t.Fatal("expected solver recovery to fail when no solver or fallback agent can be queued")
+	}
+	if build.ReadinessRecoveryAttempts != 0 {
+		t.Fatalf("expected readiness attempts to remain unchanged when recovery cannot queue, got %d", build.ReadinessRecoveryAttempts)
+	}
+	if build.Status != BuildReviewing {
+		t.Fatalf("expected build status unchanged, got %s", build.Status)
+	}
+	if build.Progress != 99 {
+		t.Fatalf("expected progress unchanged, got %d", build.Progress)
+	}
+	if len(build.Tasks) != 0 {
+		t.Fatalf("expected no unassigned recovery task to remain, got %+v", build.Tasks)
+	}
+}
+
 func TestRepeatedReadinessErrorClassRequiresThreeAttempts(t *testing.T) {
 	t.Parallel()
 

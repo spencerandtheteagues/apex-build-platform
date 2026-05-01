@@ -19120,18 +19120,46 @@ func (am *AgentManager) launchFinalValidationSolverRecovery(
 	errorSummary string,
 	now time.Time,
 ) bool {
+	if build == nil {
+		return false
+	}
 	if !am.canCreateAutomatedFixTask(build, "solve_build_failure") {
 		pLog(build.ID).ReadinessRecoveryDone(build.ReadinessRecoveryAttempts, false)
 		return false
 	}
 
-	build.mu.Lock()
+	build.mu.RLock()
 	if isTerminalBuildStatus(build.Status) || build.ReadinessRecoveryAttempts >= maxAutomatedRecoveryAttempts(build.PowerMode) {
-		build.mu.Unlock()
+		build.mu.RUnlock()
+		pLog(build.ID).ReadinessRecoveryDone(build.ReadinessRecoveryAttempts, false)
+		return false
+	}
+	build.mu.RUnlock()
+
+	failedTask := &Task{
+		ID:          "final_output_validation",
+		Type:        TaskReview,
+		Description: "Final output validation",
+		Status:      TaskFailed,
+		Input: map[string]any{
+			"validation_errors": readinessErrors,
+		},
+	}
+	if hints := am.finalValidationRepairHints(readinessErrors, allFiles, build.UserID); len(hints) > 0 {
+		setTaskInputValue(failedTask, "repair_hints", hints)
+	}
+
+	if !am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary)) {
 		pLog(build.ID).ReadinessRecoveryDone(build.ReadinessRecoveryAttempts, false)
 		return false
 	}
 
+	build.mu.Lock()
+	if isTerminalBuildStatus(build.Status) {
+		build.mu.Unlock()
+		pLog(build.ID).ReadinessRecoveryDone(build.ReadinessRecoveryAttempts, false)
+		return false
+	}
 	build.ReadinessRecoveryAttempts++
 	pLog(build.ID).ReadinessRecoveryStart(build.ReadinessRecoveryAttempts, errorSummary)
 	build.Status = BuildReviewing
@@ -19157,21 +19185,7 @@ func (am *AgentManager) launchFinalValidationSolverRecovery(
 			"validation_errors":     readinessErrors,
 		},
 	})
-
-	failedTask := &Task{
-		ID:          "final_output_validation",
-		Type:        TaskReview,
-		Description: "Final output validation",
-		Status:      TaskFailed,
-		Input: map[string]any{
-			"validation_errors": readinessErrors,
-		},
-	}
-	if hints := am.finalValidationRepairHints(readinessErrors, allFiles, build.UserID); len(hints) > 0 {
-		setTaskInputValue(failedTask, "repair_hints", hints)
-	}
-
-	return am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary))
+	return true
 }
 
 // checkBuildCompletion determines if the build is finished

@@ -139,6 +139,127 @@ func TestRunPreviewVerificationGateTerminalFailureDropsProgressBelowCompletion(t
 	}
 }
 
+func TestRunPreviewVerificationGateFailsFastWhenPreviewRepairCannotQueue(t *testing.T) {
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		agents:      map[string]*Agent{},
+		builds:      map[string]*Build{},
+		subscribers: map[string][]chan *WSMessage{},
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{
+				Passed:      false,
+				FailureKind: "blank_screen",
+				Details:     "Preview rendered a blank screen and no solver is available",
+			},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:        "preview-repair-no-solver",
+		Status:    BuildReviewing,
+		Progress:  99,
+		UpdatedAt: now,
+		Agents:    map[string]*Agent{},
+		Tasks:     []*Task{},
+	}
+	manager.builds[build.ID] = build
+
+	status := BuildCompleted
+	buildError := ""
+	if manager.runPreviewVerificationGate(build, nil, &status, &buildError, now) {
+		t.Fatal("expected preview gate to fail fast when repair cannot be queued")
+	}
+	if status != BuildFailed {
+		t.Fatalf("expected status build failed, got %s", status)
+	}
+	if build.Status != BuildFailed {
+		t.Fatalf("expected build status failed, got %s", build.Status)
+	}
+	if build.Progress != 99 {
+		t.Fatalf("expected failed preview to remain at 99 rather than fake 95 recovery, got %d", build.Progress)
+	}
+	if build.PreviewVerificationAttempts != 0 {
+		t.Fatalf("expected no preview attempt to be counted when repair did not queue, got %d", build.PreviewVerificationAttempts)
+	}
+	if strings.TrimSpace(buildError) == "" || !strings.Contains(buildError, "Preview verification failed") {
+		t.Fatalf("expected preview failure error, got %q", buildError)
+	}
+	if len(build.Tasks) != 0 {
+		t.Fatalf("expected no unassigned recovery task to remain, got %+v", build.Tasks)
+	}
+}
+
+func TestRunPreviewVerificationGateMarksRecoveryOnlyAfterPreviewRepairQueues(t *testing.T) {
+	taskQueue := make(chan *Task, 1)
+	solver := &Agent{
+		ID:       "solver-preview-repair",
+		Role:     RoleSolver,
+		Status:   StatusIdle,
+		BuildID:  "preview-repair-queues",
+		Provider: "gpt4",
+	}
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		agents:      map[string]*Agent{solver.ID: solver},
+		builds:      map[string]*Build{},
+		subscribers: map[string][]chan *WSMessage{},
+		taskQueue:   taskQueue,
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{
+				Passed:      false,
+				FailureKind: "blank_screen",
+				Details:     "Preview rendered a blank screen",
+				RepairHints: []string{"Render the dashboard at the root route."},
+			},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:        solver.BuildID,
+		Status:    BuildReviewing,
+		Progress:  99,
+		UpdatedAt: now,
+		Agents:    map[string]*Agent{solver.ID: solver},
+		Tasks:     []*Task{},
+	}
+	manager.builds[build.ID] = build
+
+	status := BuildCompleted
+	buildError := ""
+	if !manager.runPreviewVerificationGate(build, nil, &status, &buildError, now) {
+		t.Fatal("expected preview gate to pause finalization after queuing repair")
+	}
+	if build.Status != BuildReviewing {
+		t.Fatalf("expected build status reviewing, got %s", build.Status)
+	}
+	if build.Progress != 95 {
+		t.Fatalf("expected build progress 95 after actual repair queue, got %d", build.Progress)
+	}
+	if build.PreviewVerificationAttempts != 1 {
+		t.Fatalf("expected preview attempts=1 after actual repair queue, got %d", build.PreviewVerificationAttempts)
+	}
+	if len(build.Tasks) != 1 {
+		t.Fatalf("expected one queued repair task, got %+v", build.Tasks)
+	}
+	repairTask := build.Tasks[0]
+	if repairTask.Type != TaskFix || repairTask.Status != TaskInProgress {
+		t.Fatalf("expected in-progress fix task, got %+v", repairTask)
+	}
+	if action := taskInputStringValue(repairTask.Input, "action"); action != "fix_preview_verification" {
+		t.Fatalf("expected preview repair action, got %q", action)
+	}
+	select {
+	case queued := <-taskQueue:
+		if queued.ID != repairTask.ID {
+			t.Fatalf("expected queued task %s, got %s", repairTask.ID, queued.ID)
+		}
+	default:
+		t.Fatal("expected repair task to be enqueued for execution")
+	}
+}
+
 func TestRunPreviewVerificationGateTerminalFailureCancelsPreviewRecoveryTasks(t *testing.T) {
 	agent := &Agent{
 		ID:     "solver-1",
