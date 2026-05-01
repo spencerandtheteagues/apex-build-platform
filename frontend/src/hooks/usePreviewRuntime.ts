@@ -99,35 +99,56 @@ export function usePreviewRuntime({
     statusActiveRef.current = status?.active
   }, [status?.active])
 
-  useEffect(() => {
-    const checkCapabilities = async () => {
-      try {
-        const response = await apiService.client.get('/preview/docker/status')
-        const previewDockerAvailable = response.data.available === true
-        const previewSandboxRequired = response.data.sandbox_required === true
-        const previewSandboxDegraded = response.data.sandbox_degraded === true
-        setDockerAvailable(previewDockerAvailable)
-        setSandboxRequired(previewSandboxRequired)
-        setSandboxDegraded(previewSandboxDegraded)
-        setBackendPreviewAvailable(response.data.backend_preview_available !== false)
-        setBackendPreviewReason(response.data.backend_preview_reason || '')
-        if (previewSandboxRequired) {
-          setUseSandbox(previewDockerAvailable && !previewSandboxDegraded)
-        }
-      } catch {
-        setDockerAvailable(false)
-      }
+  const setPreferredUseSandbox = useCallback((value: boolean) => {
+    useSandboxRef.current = value
+    setUseSandbox(value)
+  }, [])
 
-      try {
-        const response = await apiService.client.get('/preview/bundler/status')
-        setBundlerAvailable(response.data.available === true)
-      } catch {
-        setBundlerAvailable(false)
+  const loadPreviewCapabilities = useCallback(async () => {
+    const capabilities = {
+      dockerAvailable: false,
+      sandboxRequired: false,
+      sandboxCapabilityDegraded: false,
+      bundlerAvailable: false,
+    }
+
+    try {
+      const response = await apiService.client.get('/preview/docker/status')
+      capabilities.dockerAvailable = response.data.available === true
+      capabilities.sandboxRequired = response.data.sandbox_required === true
+      capabilities.sandboxCapabilityDegraded = response.data.sandbox_degraded === true
+
+      setDockerAvailable(capabilities.dockerAvailable)
+      setSandboxRequired(capabilities.sandboxRequired)
+      if (!statusActiveRef.current) {
+        setSandboxDegraded(capabilities.sandboxCapabilityDegraded)
+      }
+      setBackendPreviewAvailable(response.data.backend_preview_available !== false)
+      setBackendPreviewReason(response.data.backend_preview_reason || '')
+      if (capabilities.sandboxRequired) {
+        setPreferredUseSandbox(capabilities.dockerAvailable && !capabilities.sandboxCapabilityDegraded)
+      }
+    } catch {
+      setDockerAvailable(false)
+      if (!statusActiveRef.current) {
+        setSandboxDegraded(true)
       }
     }
 
-    void checkCapabilities()
-  }, [])
+    try {
+      const response = await apiService.client.get('/preview/bundler/status')
+      capabilities.bundlerAvailable = response.data.available === true
+      setBundlerAvailable(capabilities.bundlerAvailable)
+    } catch {
+      setBundlerAvailable(false)
+    }
+
+    return capabilities
+  }, [setPreferredUseSandbox])
+
+  useEffect(() => {
+    void loadPreviewCapabilities()
+  }, [loadPreviewCapabilities])
 
   useEffect(() => {
     setStatus(null)
@@ -216,7 +237,11 @@ export function usePreviewRuntime({
     const maxRetries = 3
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       try {
-        const requestedSandbox = useSandbox && dockerAvailable && !sandboxDegraded
+        const capabilities = await loadPreviewCapabilities()
+        const preferredSandbox = capabilities.sandboxRequired
+          ? capabilities.dockerAvailable && !capabilities.sandboxCapabilityDegraded
+          : useSandboxRef.current
+        const requestedSandbox = preferredSandbox && capabilities.dockerAvailable && !capabilities.sandboxCapabilityDegraded
         let data: any
         if (serverDetection?.has_backend === true) {
           try {
@@ -274,7 +299,6 @@ export function usePreviewRuntime({
         setConnected(true)
         statusActiveRef.current = true
         setActiveSandbox(actualSandbox)
-        setUseSandbox(actualSandbox)
         setSandboxDegraded(data.sandbox_degraded === true)
         if (data.server !== undefined) {
           onServerStatusHint(data.server)
@@ -317,7 +341,7 @@ export function usePreviewRuntime({
     if (activeProjectIdRef.current === requestProjectId) {
       setLoading(false)
     }
-  }, [clearDevTools, dockerAvailable, onServerStatusHint, projectId, sandboxDegraded, serverDetection, setError, useSandbox])
+  }, [clearDevTools, fetchStatus, loadPreviewCapabilities, onServerStatusHint, projectId, serverDetection, setError])
 
   useEffect(() => {
     const activeForCurrentProject = status?.active && status.project_id === projectId
@@ -395,7 +419,7 @@ export function usePreviewRuntime({
     connected,
     refreshKey,
     useSandbox,
-    setUseSandbox,
+    setUseSandbox: setPreferredUseSandbox,
     activeSandbox,
     dockerAvailable,
     sandboxRequired,

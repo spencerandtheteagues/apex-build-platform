@@ -155,6 +155,90 @@ describe('LivePreview', () => {
     })
   })
 
+  it('retries Docker sandbox on restart after an active process fallback when Docker is healthy', async () => {
+    const mockGet = apiService.client.get as any
+    const mockPost = apiService.client.post as any
+
+    let previewRunning = true
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/preview/docker/status') {
+        return {
+          data: {
+            available: true,
+            sandbox_required: true,
+            sandbox_degraded: false,
+            backend_preview_available: true,
+          },
+        }
+      }
+      if (url === '/preview/bundler/status') return { data: { available: true } }
+      if (url.startsWith('/preview/status/')) {
+        return {
+          data: {
+            sandbox: false,
+            sandbox_degraded: previewRunning,
+            preview: previewRunning
+              ? {
+                project_id: 607,
+                active: true,
+                port: 9000,
+                url: 'http://localhost:9000/project-607',
+                started_at: new Date().toISOString(),
+                last_access: new Date().toISOString(),
+                connected_clients: 1,
+              }
+              : { active: false },
+          },
+        }
+      }
+      if (url.startsWith('/preview/server/detect/')) return { data: { has_backend: false } }
+      if (url.startsWith('/preview/server/status/')) return { data: { server: null } }
+      if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+
+    mockPost.mockImplementation(async (url: string, data: any) => {
+      if (url === '/preview/stop') {
+        previewRunning = false
+        return { data: {} }
+      }
+      if (url === '/preview/refresh') return { data: {} }
+      if (url !== '/preview/start') throw new Error(`Unexpected POST ${url}`)
+      previewRunning = true
+      return {
+        data: {
+          sandbox: data.sandbox,
+          sandbox_degraded: false,
+          preview: {
+            project_id: data.project_id,
+            active: true,
+            port: data.sandbox ? 5173 : 9000,
+            url: `http://localhost:${data.sandbox ? 5173 : 9000}/project-${data.project_id}`,
+            started_at: new Date().toISOString(),
+            last_access: new Date().toISOString(),
+            connected_clients: 1,
+          },
+        },
+      }
+    })
+
+    const view = render(<LivePreview projectId={607} className="h-96" />)
+
+    const restartButton = await within(view.container).findByRole('button', { name: /restart/i })
+    fireEvent.click(restartButton)
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith('/preview/stop', {
+        project_id: 607,
+        sandbox: false,
+      })
+      expectPreviewStartCalledWith(mockPost, {
+        project_id: 607,
+        sandbox: true,
+      })
+    })
+  })
+
   it('keeps active preview visible when a status poll fails transiently', async () => {
     const mockGet = apiService.client.get as any
     const mockPost = apiService.client.post as any
