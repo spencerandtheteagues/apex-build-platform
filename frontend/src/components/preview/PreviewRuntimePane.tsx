@@ -40,7 +40,7 @@ export default function PreviewRuntimePane({
 
   return (
     <div className="relative h-full flex items-center justify-center bg-gray-950 overflow-auto p-4">
-      {error && (
+      {error && !status?.active && (
         <div className="flex flex-col items-center justify-center text-red-400">
           <AlertCircle className="w-12 h-12 mb-3" />
           <p className="text-sm">{error}</p>

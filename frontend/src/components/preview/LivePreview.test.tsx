@@ -477,6 +477,56 @@ describe('LivePreview', () => {
     expect(within(view.container).queryByText(/Failed to start preview/i)).toBeNull()
   })
 
+  it('recovers the iframe when startup errors after the preview became active', async () => {
+    const mockGet = apiService.client.get as any
+    const mockPost = apiService.client.post as any
+    let previewActive = false
+
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/preview/docker/status') return { data: { available: false } }
+      if (url === '/preview/bundler/status') return { data: { available: true } }
+      if (url.startsWith('/preview/status/')) {
+        return {
+          data: {
+            preview: previewActive
+              ? {
+                project_id: 821,
+                active: true,
+                port: 3000,
+                url: 'http://localhost:3000/project-821',
+                started_at: new Date().toISOString(),
+                last_access: new Date().toISOString(),
+                connected_clients: 1,
+              }
+              : { active: false },
+          },
+        }
+      }
+      if (url.startsWith('/preview/server/detect/')) return { data: { has_backend: false } }
+      if (url.startsWith('/preview/server/status/')) return { data: { server: null } }
+      if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    mockPost.mockImplementation(async (url: string) => {
+      if (url === '/preview/stop' || url === '/preview/refresh') return { data: {} }
+      if (url !== '/preview/start') throw new Error(`Unexpected POST ${url}`)
+      previewActive = true
+      throw {
+        response: {
+          status: 500,
+          data: { error: 'Failed to start preview' },
+        },
+      }
+    })
+
+    const view = render(<LivePreview projectId={821} className="h-96" />)
+
+    fireEvent.click(within(view.container).getAllByRole('button', { name: /start preview/i })[0])
+
+    expect(await within(view.container).findByTitle('Live Preview')).toBeTruthy()
+    expect(within(view.container).queryByText(/Failed to start preview/i)).toBeNull()
+  })
+
   it('keeps the iframe visible when optional backend startup degrades', async () => {
     const mockGet = apiService.client.get as any
     const mockStartFullStack = (apiService as any).startFullStackPreview as any

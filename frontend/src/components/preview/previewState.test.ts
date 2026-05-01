@@ -56,11 +56,21 @@ describe('derivePreviewRuntimeState', () => {
     ).toBe('degraded')
   })
 
-  it('classifies visible runtime errors as failed', () => {
+  it('keeps active previews visible when a stale startup error remains', () => {
     expect(
       derivePreviewRuntimeState({
         loading: false,
         status: activePreview,
+        error: 'Preview failed',
+      }),
+    ).toBe('degraded')
+  })
+
+  it('classifies startup errors before an active preview as failed', () => {
+    expect(
+      derivePreviewRuntimeState({
+        loading: false,
+        status: null,
         error: 'Preview failed',
       }),
     ).toBe('failed')

@@ -116,6 +116,7 @@ export function usePreviewRuntime({
     setActiveSandbox(false)
     onServerStatusHint(null)
     clearDevTools()
+    statusActiveRef.current = false
     lastAutoStartedProjectRef.current = null
   }, [clearDevTools, onServerStatusHint, projectId, setError])
 
@@ -144,7 +145,8 @@ export function usePreviewRuntime({
         setIframeError(null)
         setError(null)
         setConnected(true)
-        return
+        statusActiveRef.current = true
+        return true
       }
 
       if (response.data.server !== undefined) {
@@ -157,6 +159,8 @@ export function usePreviewRuntime({
       setIframeLoading(false)
       setIframeError(null)
       setConnected(false)
+      statusActiveRef.current = false
+      return false
     } catch (err: any) {
       if (activeProjectIdRef.current !== requestProjectId) return
 
@@ -169,6 +173,7 @@ export function usePreviewRuntime({
         setIframeError(null)
       }
       setConnected(false)
+      return false
     }
   }, [onServerStatusHint, projectId])
 
@@ -239,6 +244,7 @@ export function usePreviewRuntime({
         setIframeLoading(true)
         setIframeError(null)
         setConnected(true)
+        statusActiveRef.current = true
         setActiveSandbox(actualSandbox)
         setUseSandbox(actualSandbox)
         setSandboxDegraded(data.sandbox_degraded === true)
@@ -262,6 +268,17 @@ export function usePreviewRuntime({
         if (statusCode === 429 && attempt < maxRetries) {
           await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 2000))
           continue
+        }
+
+        try {
+          const recovered = await fetchStatus()
+          if (recovered) {
+            setError(null)
+            setIframeError(null)
+            break
+          }
+        } catch {
+          // Keep the original startup failure visible when status recovery is unavailable.
         }
 
         setError(formatPreviewStartError(err.response?.data))
@@ -302,6 +319,7 @@ export function usePreviewRuntime({
       setIframeError(null)
       setConnected(false)
       setActiveSandbox(false)
+      statusActiveRef.current = false
       onServerStatusHint(null)
       return true
     } catch (err: any) {

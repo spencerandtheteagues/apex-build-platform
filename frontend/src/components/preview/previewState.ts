@@ -81,11 +81,12 @@ export function derivePreviewRuntimeState({
   serverStatus,
   backendPreviewAvailable = true,
 }: PreviewRuntimeStateInput): PreviewRuntimeState {
-  if (error || iframeError) return 'failed'
   if (loading && !status?.active) return 'starting'
+  if (!status?.active && (error || iframeError)) return 'failed'
   if (!status?.active) return 'stopped'
   if (serverDetection?.has_backend && backendPreviewAvailable && !serverStatus?.running) return 'backend_down'
   if (connected === false) return 'degraded'
+  if (error || iframeError) return 'degraded'
   if (sandboxDegraded) return 'degraded'
   return 'running'
 }
