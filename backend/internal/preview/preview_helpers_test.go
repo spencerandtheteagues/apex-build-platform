@@ -179,6 +179,22 @@ func TestGenerateBundleHTMLUsesBundleConfigTitle(t *testing.T) {
 	}
 }
 
+func TestInjectHotReloadScriptReconnectsWithoutReloadingOnSocketClose(t *testing.T) {
+	ps := &PreviewServer{}
+
+	html := ps.injectHotReloadScript("<!doctype html><body><div id=\"root\"></div></body>", &PreviewConfig{ProjectID: 42})
+
+	if !strings.Contains(html, "Preview websocket disconnected; reconnecting without reloading the app") {
+		t.Fatalf("expected reconnect message in injected script, got %q", html)
+	}
+	if strings.Contains(html, "setTimeout(() => window.location.reload(), 1000)") {
+		t.Fatalf("websocket close must not force iframe reloads, got %q", html)
+	}
+	if strings.Count(html, "window.location.reload()") != 2 {
+		t.Fatalf("expected reloads only for explicit reload/hot-reload messages, got %d in %q", strings.Count(html, "window.location.reload()"), html)
+	}
+}
+
 func TestPreviewWebSocketOriginAllowsLocalAPIProxyHost(t *testing.T) {
 	ps := NewPreviewServer(nil)
 	req := httptest.NewRequest(http.MethodGet, "/__apex_ws", nil)

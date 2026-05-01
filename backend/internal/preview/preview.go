@@ -1033,40 +1033,72 @@ func (ps *PreviewServer) injectHotReloadScript(html string, config *PreviewConfi
   const proxyMatch = window.location.pathname.match(/^\/api\/v1\/preview\/proxy\/\d+/);
   const proxyBase = proxyMatch ? proxyMatch[0] : '';
   const wsPath = (proxyBase ? proxyBase : '') + '/__apex_ws' + (window.location.search || '');
-  const ws = new WebSocket(wsProtocol + window.location.host + wsPath);
+  const wsUrl = wsProtocol + window.location.host + wsPath;
+  let wsReconnectAttempts = 0;
+  let wsReconnectTimer = null;
 
-  ws.onmessage = function(event) {
-    const data = JSON.parse(event.data);
-
-    if (data.type === 'reload') {
-      console.log('[APEX] Reloading...');
-      window.location.reload();
-    } else if (data.type === 'hot-reload') {
-      if (data.reload === 'css') {
-        // Hot reload CSS
-        const links = document.querySelectorAll('link[rel="stylesheet"]');
-        links.forEach(link => {
-          const href = link.getAttribute('href');
-          if (href && href.includes(data.file)) {
-            link.href = href.split('?')[0] + '?t=' + Date.now();
-          }
-        });
-        console.log('[APEX] CSS hot reloaded:', data.file);
-      } else {
-        console.log('[APEX] Full reload required for:', data.file);
-        window.location.reload();
-      }
+  function connectPreviewWebSocket() {
+    let ws;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (error) {
+      schedulePreviewReconnect(error);
+      return;
     }
-  };
 
-  ws.onclose = function() {
-    console.log('[APEX] Connection closed, attempting reconnect...');
-    setTimeout(() => window.location.reload(), 1000);
-  };
+    ws.onopen = function() {
+      wsReconnectAttempts = 0;
+      console.log('[APEX] Preview websocket connected');
+    };
 
-  ws.onerror = function(error) {
-    console.error('[APEX] WebSocket error:', error);
-  };
+    ws.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'reload') {
+        console.log('[APEX] Reloading...');
+        window.location.reload();
+      } else if (data.type === 'hot-reload') {
+        if (data.reload === 'css') {
+          // Hot reload CSS
+          const links = document.querySelectorAll('link[rel="stylesheet"]');
+          links.forEach(link => {
+            const href = link.getAttribute('href');
+            if (href && href.includes(data.file)) {
+              link.href = href.split('?')[0] + '?t=' + Date.now();
+            }
+          });
+          console.log('[APEX] CSS hot reloaded:', data.file);
+        } else {
+          console.log('[APEX] Full reload required for:', data.file);
+          window.location.reload();
+        }
+      }
+    };
+
+    ws.onclose = function() {
+      schedulePreviewReconnect();
+    };
+
+    ws.onerror = function(error) {
+      console.warn('[APEX] WebSocket error:', error);
+    };
+  }
+
+  function schedulePreviewReconnect(error) {
+    if (wsReconnectTimer) return;
+    wsReconnectAttempts += 1;
+    const delay = Math.min(1000 * wsReconnectAttempts, 5000);
+    if (error) {
+      console.warn('[APEX] Preview websocket connect failed:', error);
+    }
+    console.warn('[APEX] Preview websocket disconnected; reconnecting without reloading the app.');
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectTimer = null;
+      connectPreviewWebSocket();
+    }, delay);
+  }
+
+  connectPreviewWebSocket();
 
   console.log('[APEX] Preview connected with DevTools');
 })();

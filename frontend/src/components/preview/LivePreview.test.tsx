@@ -134,7 +134,8 @@ describe('LivePreview', () => {
       expect(mockPost).toHaveBeenCalledWith('/preview/start', expect.objectContaining({ project_id: 606 }))
     })
 
-    fireEvent.click(within(view.container).getByRole('button', { name: /restart/i }))
+    const restartButton = await within(view.container).findByRole('button', { name: /restart/i })
+    fireEvent.click(restartButton)
 
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith('/preview/stop', {
