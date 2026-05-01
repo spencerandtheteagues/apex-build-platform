@@ -23,7 +23,7 @@ vi.mock('./NetworkPanel', () => ({
 }))
 
 import apiService from '@/services/api'
-import { formatPreviewStartError } from '@/hooks/usePreviewRuntime'
+import { formatPreviewStartError, stablePreviewEmbedUrl } from '@/hooks/usePreviewRuntime'
 import LivePreview from './LivePreview'
 
 describe('formatPreviewStartError', () => {
@@ -34,6 +34,17 @@ describe('formatPreviewStartError', () => {
         sandbox_error: 'container preview build failed: missing package.json',
       },
     })).toBe('Failed to start preview: container preview build failed: missing package.json')
+  })
+})
+
+describe('stablePreviewEmbedUrl', () => {
+  it('removes volatile preview tokens from proxied iframe URLs', () => {
+    expect(stablePreviewEmbedUrl('https://api.apex-build.dev/api/v1/preview/proxy/71/?preview_token=one')).toBe(
+      'https://api.apex-build.dev/api/v1/preview/proxy/71/',
+    )
+    expect(stablePreviewEmbedUrl('https://api.apex-build.dev/api/v1/preview/proxy/71/?foo=bar&preview_token=one')).toBe(
+      'https://api.apex-build.dev/api/v1/preview/proxy/71/?foo=bar',
+    )
   })
 })
 
@@ -525,6 +536,81 @@ describe('LivePreview', () => {
 
     expect(await within(view.container).findByTitle('Live Preview')).toBeTruthy()
     expect(within(view.container).queryByText(/Failed to start preview/i)).toBeNull()
+  })
+
+  it('does not reload the iframe when status polling rotates preview tokens', async () => {
+    const mockGet = apiService.client.get as any
+    const mockPost = apiService.client.post as any
+    const intervalCallbacks: Array<() => void | Promise<void>> = []
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockImplementation((((fn: TimerHandler) => {
+      intervalCallbacks.push(fn as () => void)
+      return 1 as unknown as ReturnType<typeof setInterval>
+    }) as unknown) as typeof setInterval)
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {})
+
+    let previewRunning = false
+    let statusPoll = 0
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/preview/docker/status') return { data: { available: false } }
+      if (url === '/preview/bundler/status') return { data: { available: true } }
+      if (url.startsWith('/preview/status/')) {
+        statusPoll += 1
+        return {
+          data: {
+            preview: previewRunning
+              ? {
+                project_id: 822,
+                active: true,
+                port: 3000,
+                url: `https://api.apex-build.dev/api/v1/preview/proxy/822/?preview_token=status-${statusPoll}`,
+                started_at: new Date().toISOString(),
+                last_access: new Date().toISOString(),
+                connected_clients: 1,
+              }
+              : { active: false },
+          },
+        }
+      }
+      if (url.startsWith('/preview/server/detect/')) return { data: { has_backend: false } }
+      if (url.startsWith('/preview/server/status/')) return { data: { server: null } }
+      if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    mockPost.mockImplementation(async (url: string, data: any) => {
+      if (url === '/preview/stop' || url === '/preview/refresh') return { data: {} }
+      if (url !== '/preview/start') throw new Error(`Unexpected POST ${url}`)
+      previewRunning = true
+      return {
+        data: {
+          sandbox: false,
+          preview: {
+            project_id: data.project_id,
+            active: true,
+            port: 3000,
+            url: `https://api.apex-build.dev/api/v1/preview/proxy/${data.project_id}/?preview_token=start-token`,
+            started_at: new Date().toISOString(),
+            last_access: new Date().toISOString(),
+            connected_clients: 1,
+          },
+        },
+      }
+    })
+
+    const view = render(<LivePreview projectId={822} autoStart className="h-96" />)
+
+    const iframe = await within(view.container).findByTitle('Live Preview')
+    const firstSrc = iframe.getAttribute('src')
+    expect(firstSrc).toBe('https://api.apex-build.dev/api/v1/preview/proxy/822/')
+
+    await act(async () => {
+      await Promise.all(intervalCallbacks.map(cb => Promise.resolve(cb())))
+    })
+
+    expect(iframe.getAttribute('src')).toBe(firstSrc)
+    expect(iframe.getAttribute('src')).not.toContain('preview_token')
+
+    setIntervalSpy.mockRestore()
+    clearIntervalSpy.mockRestore()
   })
 
   it('keeps the iframe visible when optional backend startup degrades', async () => {

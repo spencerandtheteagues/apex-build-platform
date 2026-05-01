@@ -20,6 +20,30 @@ export function formatPreviewStartError(responseData: any): string {
   return details ? `${message}: ${details}` : message
 }
 
+export function stablePreviewEmbedUrl(rawUrl: string): string {
+  if (!rawUrl) return ''
+
+  try {
+    const url = new URL(rawUrl, window.location.origin)
+    if (url.pathname.includes('/api/v1/preview/proxy/')) {
+      // Preview status can rotate scoped auth tokens on every poll. The API
+      // also sets the HttpOnly preview cookie, so keeping the query token in
+      // iframe src only creates a false URL change and reloads the app.
+      url.searchParams.delete('preview_token')
+      url.searchParams.delete('token')
+      return url.toString()
+    }
+  } catch {
+    // Fall through to the conservative string cleanup below.
+  }
+
+  return rawUrl
+    .replace(/([?&])preview_token=[^&]*/g, '$1')
+    .replace(/([?&])token=[^&]*/g, '$1')
+    .replace(/[?&]$/, '')
+    .replace(/\?&/, '?')
+}
+
 interface UsePreviewRuntimeOptions {
   projectId: number
   autoStart: boolean
@@ -141,7 +165,7 @@ export function usePreviewRuntime({
         if (response.data.server !== undefined) {
           onServerStatusHint(response.data.server)
         }
-        setPreviewUrl(response.data.preview.url)
+        setPreviewUrl(stablePreviewEmbedUrl(response.data.preview.url))
         setIframeError(null)
         setError(null)
         setConnected(true)
@@ -240,7 +264,7 @@ export function usePreviewRuntime({
 
         const actualSandbox = typeof data.sandbox === 'boolean' ? data.sandbox : requestedSandbox
         setStatus(data.preview)
-        setPreviewUrl(data.proxy_url || data.preview?.url || data.url || '')
+        setPreviewUrl(stablePreviewEmbedUrl(data.proxy_url || data.preview?.url || data.url || ''))
         setIframeLoading(true)
         setIframeError(null)
         setConnected(true)
