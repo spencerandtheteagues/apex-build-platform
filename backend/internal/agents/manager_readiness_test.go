@@ -3436,6 +3436,71 @@ func TestMissingLocalModulePlaceholderSupportsNamedComponentImport(t *testing.T)
 	if !strings.Contains(placeholder, "export default AppShell") {
 		t.Fatalf("expected default export to remain available, got %q", placeholder)
 	}
+	if msg := scaffoldPlaceholderValidationError("src/components/AppShell.tsx", placeholder); msg != "" {
+		t.Fatalf("missing local module repair must not create final-blocking scaffold placeholder content, got %q in %q", msg, placeholder)
+	}
+}
+
+func TestMissingLocalModuleRepairPrefersExistingGeneratedComponentAlias(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-missing-local-module-alias-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path:    "src/components/AppShell.tsx",
+				Content: "import Dashboard from './dashboard/Dashboard';\nexport default function AppShell(){ return <Dashboard /> }\n",
+				IsNew:   true,
+			},
+			{
+				Path:    "src/components/Dashboard.tsx",
+				Content: "export default function Dashboard(){ return <main>Real dashboard</main> }\n",
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification local import check failed: source imports local module "./dashboard/Dashboard" from "src/components/AppShell.tsx" but generated file "src/components/dashboard/Dashboard.tsx" is missing`},
+		"missing local module with nearby component",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected missing local module repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var shim string
+	for i := range files {
+		if files[i].Path == "src/components/dashboard/Dashboard.tsx" {
+			shim = files[i].Content
+			break
+		}
+	}
+	if strings.TrimSpace(shim) == "" {
+		t.Fatalf("expected Dashboard shim file to be created, got %+v", files)
+	}
+	if !strings.Contains(shim, "export { default } from '../Dashboard'") {
+		t.Fatalf("expected shim to re-export existing Dashboard component, got %q", shim)
+	}
+	if msg := scaffoldPlaceholderValidationError("src/components/dashboard/Dashboard.tsx", shim); msg != "" {
+		t.Fatalf("alias shim must not trip scaffold placeholder validation, got %q in %q", msg, shim)
+	}
 }
 
 func TestApplyDeterministicValidationRepairsCreatesAliasModuleFromTypeScriptTS2307(t *testing.T) {

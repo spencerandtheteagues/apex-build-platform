@@ -11138,12 +11138,139 @@ func placeholderComponentIdentifier(targetPath string, binding generatedImportBi
 	base := strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
 	base = sanitizeGeneratedIdentifier(base)
 	if base == "" {
-		return "GeneratedPlaceholder"
+		return "GeneratedModule"
 	}
 	if !isLikelyReactComponentName(base) {
-		return "GeneratedPlaceholder"
+		return "GeneratedModule"
 	}
 	return base
+}
+
+func generatedLocalModuleComparableName(path string) string {
+	base := strings.TrimSuffix(filepath.Base(sanitizeFilePath(path)), filepath.Ext(path))
+	base = strings.ToLower(base)
+	var b strings.Builder
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	name := b.String()
+	for _, suffix := range []string{"component", "screen", "page", "view", "panel"} {
+		if strings.HasSuffix(name, suffix) && len(name) > len(suffix) {
+			return strings.TrimSuffix(name, suffix)
+		}
+	}
+	return name
+}
+
+func generatedRelativeImportSpecifier(fromPath, toPath string) string {
+	fromPath = sanitizeFilePath(fromPath)
+	toPath = sanitizeFilePath(toPath)
+	if fromPath == "" || toPath == "" {
+		return ""
+	}
+	fromDir := filepath.Dir(fromPath)
+	toNoExt := strings.TrimSuffix(toPath, filepath.Ext(toPath))
+	rel, err := filepath.Rel(filepath.FromSlash(fromDir), filepath.FromSlash(toNoExt))
+	if err != nil {
+		return ""
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "" || rel == "." {
+		return ""
+	}
+	if !strings.HasPrefix(rel, ".") {
+		rel = "./" + rel
+	}
+	return rel
+}
+
+func generatedMissingLocalModuleReExportContent(targetPath, aliasPath string, binding generatedImportBinding) string {
+	spec := generatedRelativeImportSpecifier(targetPath, aliasPath)
+	if spec == "" {
+		return ""
+	}
+	if strings.ToLower(filepath.Ext(targetPath)) == ".cjs" {
+		return fmt.Sprintf("module.exports = require('%s');\n", spec)
+	}
+
+	var b strings.Builder
+	if strings.TrimSpace(binding.DefaultImport) != "" {
+		b.WriteString(fmt.Sprintf("export { default } from '%s';\n", spec))
+	}
+	if len(binding.NamedImports) > 0 {
+		b.WriteString(fmt.Sprintf("export * from '%s';\n", spec))
+	} else if strings.TrimSpace(binding.DefaultImport) == "" {
+		b.WriteString(fmt.Sprintf("export * from '%s';\n", spec))
+	}
+	return b.String()
+}
+
+func findGeneratedMissingLocalModuleAlias(plan *generatedFilePatchPlan, target missingLocalModuleRepairTarget) string {
+	if plan == nil {
+		return ""
+	}
+	targetPath := sanitizeFilePath(target.TargetPath)
+	sourcePath := sanitizeFilePath(target.SourcePath)
+	targetName := generatedLocalModuleComparableName(targetPath)
+	if targetPath == "" || targetName == "" {
+		return ""
+	}
+	targetBase := strings.ToLower(strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath)))
+	targetDir := filepath.Dir(targetPath)
+
+	type candidate struct {
+		path  string
+		score int
+	}
+	candidates := make([]candidate, 0)
+	for _, path := range plan.orderedPaths {
+		path = sanitizeFilePath(path)
+		if path == "" || path == targetPath || path == sourcePath || strings.TrimSpace(plan.content(path)) == "" {
+			continue
+		}
+		if strings.HasPrefix(targetPath, "src/") && !strings.HasPrefix(path, "src/") {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs":
+		default:
+			continue
+		}
+		if isTestFile(path) {
+			continue
+		}
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+		comparable := generatedLocalModuleComparableName(path)
+		score := 100
+		switch {
+		case base == targetBase:
+			score = 0
+		case comparable == targetName:
+			score = 10
+		default:
+			continue
+		}
+		if filepath.Dir(path) != targetDir {
+			score += 2
+		}
+		if !strings.HasPrefix(path, "src/components/") {
+			score += 4
+		}
+		score += len(strings.Split(path, "/"))
+		candidates = append(candidates, candidate{path: path, score: score})
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].score == candidates[j].score {
+			return candidates[i].path < candidates[j].path
+		}
+		return candidates[i].score < candidates[j].score
+	})
+	return candidates[0].path
 }
 
 func missingLocalModulePlaceholderContent(targetPath string, binding generatedImportBinding) string {
@@ -11164,7 +11291,6 @@ func missingLocalModulePlaceholderContent(targetPath string, binding generatedIm
 
 	if componentLike {
 		componentName := placeholderComponentIdentifier(targetPath, binding)
-		label := strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
 		namedImports := make([]string, 0, len(binding.NamedImports))
 		componentIsNamedExport := false
 		for _, name := range binding.NamedImports {
@@ -11180,16 +11306,12 @@ func missingLocalModulePlaceholderContent(targetPath string, binding generatedIm
 
 		var b strings.Builder
 		b.WriteString("import React from 'react';\n\n")
-		b.WriteString("type PlaceholderProps = Record<string, unknown>;\n\n")
+		b.WriteString("type ShimProps = Record<string, unknown>;\n\n")
 		if componentIsNamedExport {
-			b.WriteString(fmt.Sprintf("export const %s: React.FC<PlaceholderProps> = () => (\n", componentName))
+			b.WriteString(fmt.Sprintf("export const %s: React.FC<ShimProps> = () => null;\n\n", componentName))
 		} else {
-			b.WriteString(fmt.Sprintf("const %s: React.FC<PlaceholderProps> = () => (\n", componentName))
+			b.WriteString(fmt.Sprintf("const %s: React.FC<ShimProps> = () => null;\n\n", componentName))
 		}
-		b.WriteString("  <div className='rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 p-4 text-sm text-slate-300'>\n")
-		b.WriteString(fmt.Sprintf("    %s placeholder\n", label))
-		b.WriteString("  </div>\n")
-		b.WriteString(");\n\n")
 		for _, name := range namedImports {
 			if name == componentName {
 				continue
@@ -11277,7 +11399,13 @@ func (am *AgentManager) applyDeterministicMissingLocalModuleRepair(build *Build,
 			continue
 		}
 		binding := parseGeneratedImportBinding(sourceContent, target.Specifier)
-		content := missingLocalModulePlaceholderContent(target.TargetPath, binding)
+		content := ""
+		if aliasPath := findGeneratedMissingLocalModuleAlias(plan, target); aliasPath != "" {
+			content = generatedMissingLocalModuleReExportContent(target.TargetPath, aliasPath, binding)
+		}
+		if strings.TrimSpace(content) == "" {
+			content = missingLocalModulePlaceholderContent(target.TargetPath, binding)
+		}
 		language := am.detectLanguage(target.TargetPath)
 		if !plan.createFile(target.TargetPath, content, language) {
 			continue
@@ -11293,7 +11421,7 @@ func (am *AgentManager) applyDeterministicMissingLocalModuleRepair(build *Build,
 		return nil, ""
 	}
 
-	summary := "generated placeholder module(s): " + strings.Join(applied, ", ")
+	summary := "generated local module shim(s): " + strings.Join(applied, ", ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "missing_local_module_repair: "+summary), summary
 }
 
