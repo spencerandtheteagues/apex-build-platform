@@ -343,6 +343,89 @@ func TestRunPreviewVerificationGateUsesDeterministicShellFallbackBeforeSolverFor
 	}
 }
 
+func TestRunPreviewVerificationGateCompletesAfterVerifiedFallbackStillReportsShellFailure(t *testing.T) {
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		agents:      map[string]*Agent{},
+		builds:      map[string]*Build{},
+		subscribers: map[string][]chan *WSMessage{},
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{
+				Passed:      false,
+				FailureKind: "blank_screen",
+				Details:     "Preview still reported a blank screen after fallback.",
+			},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:                          "preview-fallback-second-pass",
+		Description:                 "Build a reliable React SaaS app",
+		Status:                      BuildTesting,
+		Progress:                    99,
+		UpdatedAt:                   now,
+		TechStack:                   &TechStack{Frontend: "React", Styling: "Tailwind"},
+		PreviewVerificationAttempts: 1,
+		Agents:                      map[string]*Agent{},
+		Tasks: []*Task{
+			{
+				ID:     "frontend",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{Files: []GeneratedFile{
+					{Path: "package.json", Content: `{"private":true,"scripts":{"dev":"vite","build":"vite build","preview":"vite preview"},"dependencies":{"@vitejs/plugin-react":"latest","vite":"latest","typescript":"latest","react":"latest","react-dom":"latest"}}`},
+					{Path: "index.html", Content: `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`},
+					{Path: "src/main.tsx", Content: `import React from "react"; import { createRoot } from "react-dom/client"; import App from "./App"; createRoot(document.getElementById("root")!).render(<App />);`},
+					{Path: "src/App.tsx", Content: `export default function App(){ return <main>APEX recovered preview</main>; }`},
+					{Path: "src/index.css", Content: `@tailwind base; @tailwind components; @tailwind utilities;`},
+					{Path: "vite.config.ts", Content: `import { defineConfig } from "vite"; import react from "@vitejs/plugin-react"; export default defineConfig({ plugins: [react()] });`},
+				}},
+			},
+		},
+	}
+	build.SnapshotState.Orchestration = &BuildOrchestrationState{
+		PatchBundles: []PatchBundle{
+			{
+				ID:            "preview-fallback",
+				BuildID:       build.ID,
+				Justification: "preview_fallback_repair: replaced unrepaired frontend output with validated React/Vite preview baseline",
+				CreatedAt:     now,
+			},
+		},
+	}
+	manager.builds[build.ID] = build
+
+	status := BuildCompleted
+	buildError := "previous preview error"
+	if manager.runPreviewVerificationGate(build, manager.collectGeneratedFiles(build), &status, &buildError, now) {
+		t.Fatal("expected fallback-verified second pass to continue finalization, not queue another repair")
+	}
+	if status != BuildCompleted {
+		t.Fatalf("expected status to remain completed for finalization, got %s", status)
+	}
+	if build.Status == BuildFailed {
+		t.Fatalf("expected build not to be failed after verified deterministic fallback")
+	}
+	if buildError != "" {
+		t.Fatalf("expected build error to be cleared after verified deterministic fallback, got %q", buildError)
+	}
+	reports := build.SnapshotState.Orchestration.VerificationReports
+	if len(reports) < 2 {
+		t.Fatalf("expected failed report followed by fallback pass report, got %+v", reports)
+	}
+	latest := reports[len(reports)-1]
+	if latest.Status != VerificationPassed {
+		t.Fatalf("expected latest preview report to pass with advisory, got %+v", latest)
+	}
+	if len(latest.Warnings) != 1 || !strings.Contains(latest.Warnings[0], "preview_fallback") {
+		t.Fatalf("expected fallback advisory warning, got %+v", latest.Warnings)
+	}
+	if build.SnapshotState.FailureTaxonomy != nil && build.SnapshotState.FailureTaxonomy.CurrentClass != "" {
+		t.Fatalf("expected fallback pass report to clear current failure taxonomy, got %+v", build.SnapshotState.FailureTaxonomy)
+	}
+}
+
 func TestRunPreviewVerificationGateTerminalFailureCancelsPreviewRecoveryTasks(t *testing.T) {
 	agent := &Agent{
 		ID:     "solver-1",
