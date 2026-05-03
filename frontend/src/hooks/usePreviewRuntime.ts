@@ -220,7 +220,7 @@ export function usePreviewRuntime({
       setConnected(false)
       return false
     }
-  }, [onServerStatusHint, projectId])
+  }, [onServerStatusHint, projectId, setError])
 
   useEffect(() => {
     void fetchStatus()

@@ -11,7 +11,7 @@ export interface ProjectTemplate {
   stack?: string[]
 }
 
-export const PROJECT_TEMPLATES: ProjectTemplate[] = [
+const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
     id: 'saas-dashboard',
     label: 'SaaS Dashboard',

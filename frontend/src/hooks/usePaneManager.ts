@@ -2,7 +2,6 @@
 // Manages multiple editor panes with file tabs
 
 import { useState, useCallback, useMemo } from 'react'
-import { v4 as uuidv4 } from 'uuid'
 import { File } from '@/types'
 
 export interface PaneFile {
@@ -52,8 +51,16 @@ export interface UsePaneManagerReturn {
 
 const MAX_PANES = 4
 
+const createPaneId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `pane-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 const createPane = (): EditorPane => ({
-  id: uuidv4(),
+  id: createPaneId(),
   files: [],
   activeFileId: null
 })

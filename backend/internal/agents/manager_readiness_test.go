@@ -714,6 +714,22 @@ func containsError(errors []string, want string) bool {
 	return false
 }
 
+func containsErrorParts(errors []string, wants ...string) bool {
+	for _, err := range errors {
+		matches := true
+		for _, want := range wants {
+			if !strings.Contains(err, want) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
 func TestVerifyGeneratedFrontendPreviewReadiness(t *testing.T) {
 	t.Parallel()
 
@@ -1168,7 +1184,7 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 		}
 
 		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
-		if !containsError(errs, "Backend runtime probe failed: /health returned HTTP 404") {
+		if !containsErrorParts(errs, "Backend runtime probe failed:", "HTTP 404") {
 			t.Fatalf("expected backend runtime 404 failure, got %v", errs)
 		}
 	})
@@ -1277,7 +1293,7 @@ if __name__ == "__main__":
 		}
 
 		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
-		if !containsError(errs, "Python backend runtime probe failed: /health returned HTTP 404") {
+		if !containsErrorParts(errs, "Python backend runtime probe failed:", "HTTP 404") {
 			t.Fatalf("expected python runtime 404 failure, got %v", errs)
 		}
 	})

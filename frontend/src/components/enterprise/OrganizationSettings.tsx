@@ -60,6 +60,7 @@ export const OrganizationSettings = () => {
   const [showCert, setShowCert] = useState(false)
 
   const { user } = useStore()
+  const selectedOrgId = selectedOrg?.id
 
   const showToast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
     if (type === 'success') {
@@ -100,11 +101,11 @@ export const OrganizationSettings = () => {
 
   // Load org details when selected
   useEffect(() => {
-    if (!selectedOrg) return
+    if (!selectedOrgId) return
     const loadOrg = async () => {
       setLoading(true)
       try {
-        const res = await apiService.getOrganization(selectedOrg.id)
+        const res = await apiService.getOrganization(selectedOrgId)
         if (res.success && res.organization) {
           setSelectedOrg(res.organization)
           // Pre-fill SSO config if org already has it
@@ -126,7 +127,7 @@ export const OrganizationSettings = () => {
       }
     }
     loadOrg()
-  }, [selectedOrg?.id])
+  }, [selectedOrgId])
 
   // Load tab-specific data
   useEffect(() => {
