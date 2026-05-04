@@ -5849,8 +5849,9 @@ func TestApplyDeterministicFrontendScaffoldTruncationRepair(t *testing.T) {
 	if !strings.Contains(output.Files[0].Content, `export { Input };`) {
 		t.Fatalf("expected canonical input scaffold content, got %q", output.Files[0].Content)
 	}
-	if !strings.Contains(output.Files[1].Content, `APEX recovered preview`) {
-		t.Fatalf("expected canonical App shell content, got %q", output.Files[1].Content)
+	lowerApp := strings.ToLower(output.Files[1].Content)
+	if strings.Contains(lowerApp, "apex recovered preview") || !strings.Contains(lowerApp, "add live item") {
+		t.Fatalf("expected prompt-adaptive App shell content, got %q", output.Files[1].Content)
 	}
 	if len(output.TruncatedFiles) != 0 {
 		t.Fatalf("expected repaired scaffold files to be removed from truncated files, got %+v", output.TruncatedFiles)

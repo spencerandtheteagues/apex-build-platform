@@ -17329,6 +17329,224 @@ function AgentPanel({ name, lines, step }: { name: string; lines: string[]; step
 `
 }
 
+type adaptivePreviewModule struct {
+	Name   string `json:"name"`
+	Detail string `json:"detail"`
+	Tone   string `json:"tone"`
+}
+
+type adaptivePreviewMetric struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+	Trend string `json:"trend"`
+}
+
+type adaptivePreviewRecord struct {
+	Name   string `json:"name"`
+	Owner  string `json:"owner"`
+	Status string `json:"status"`
+	Value  string `json:"value"`
+}
+
+func adaptivePreviewJSON(v any) string {
+	data, err := json.Marshal(v)
+	if err != nil || len(data) == 0 {
+		return "[]"
+	}
+	return string(data)
+}
+
+func adaptivePreviewProfile(description string) (string, []adaptivePreviewMetric, []adaptivePreviewModule, []adaptivePreviewRecord) {
+	normalized := strings.ToLower(description)
+	switch {
+	case strings.Contains(normalized, "inventory") || strings.Contains(normalized, "warehouse") || strings.Contains(normalized, "stock"):
+		return "Inventory Control",
+			[]adaptivePreviewMetric{{"Stock health", "94%", "+8% this week"}, {"Open POs", "18", "6 arriving today"}, {"At-risk SKUs", "7", "3 critical"}, {"Cycle count accuracy", "98.2%", "+1.4 pts"}},
+			[]adaptivePreviewModule{{"Inventory Ledger", "Track SKU levels, reorder points, valuation, and status in one operating view.", "cyan"}, {"Receiving Dock", "Prioritize inbound shipments, damaged goods, and put-away work.", "emerald"}, {"Purchase Orders", "Monitor vendor commitments, ETAs, approvals, and landed cost.", "amber"}, {"Stock Alerts", "Surface low-stock, dead-stock, and margin exposure before they become outages.", "rose"}},
+			[]adaptivePreviewRecord{{"Pallet racking sensors", "North Dock", "Receiving", "$18,420"}, {"HVAC compressor stock", "Vendor PO-1048", "Low stock", "$42,900"}, {"Safety gloves L/XL", "Cycle Count Team", "Verified", "$6,380"}, {"Forklift battery kits", "Maintenance Bay", "Reorder", "$12,250"}}
+	case strings.Contains(normalized, "crm") || strings.Contains(normalized, "sales") || strings.Contains(normalized, "pipeline"):
+		return "Revenue Pipeline",
+			[]adaptivePreviewMetric{{"Qualified pipeline", "$482K", "+21% MoM"}, {"Close rate", "31%", "+4 pts"}, {"Follow-ups due", "26", "11 high value"}, {"Forecast confidence", "87%", "stable"}},
+			[]adaptivePreviewModule{{"Lead Inbox", "Capture inbound leads, source, score, and recommended next action.", "cyan"}, {"Pipeline Forecast", "Track stages, probability, timing, and weighted value.", "emerald"}, {"Deal Desk", "Coordinate pricing approvals, objections, and proposal assets.", "amber"}, {"Follow-up Queue", "Prioritize stalled opportunities and automate rep reminders.", "rose"}},
+			[]adaptivePreviewRecord{{"Northstar Manufacturing", "Avery Cole", "Proposal sent", "$86,000"}, {"Luma Health", "Mina Ortiz", "Discovery", "$42,500"}, {"Fieldstone Group", "Noah Reyes", "Legal review", "$118,000"}, {"BrightPath Labs", "Jordan Lee", "Renewal", "$63,400"}}
+	case strings.Contains(normalized, "booking") || strings.Contains(normalized, "scheduler") || strings.Contains(normalized, "salon") || strings.Contains(normalized, "appointment"):
+		return "Booking Operations",
+			[]adaptivePreviewMetric{{"Appointments today", "42", "94% filled"}, {"Utilization", "88%", "+6 pts"}, {"No-show risk", "5", "2 urgent"}, {"Revenue booked", "$12.8K", "+14%"}},
+			[]adaptivePreviewModule{{"Live Calendar", "Coordinate staff, rooms, buffers, and customer preferences.", "cyan"}, {"Client Intake", "Collect service notes, allergies, deposits, and reminders.", "emerald"}, {"Capacity Planner", "Balance demand across providers and prevent double-booking.", "amber"}, {"Retention Queue", "Trigger rebooking offers and follow-up campaigns.", "rose"}},
+			[]adaptivePreviewRecord{{"Balayage consultation", "Amelia Hart", "Confirmed", "$240"}, {"Deep tissue massage", "Kai Morgan", "Checked in", "$165"}, {"Bridal trial", "Nora Singh", "Deposit paid", "$520"}, {"Color correction", "Leo Park", "Needs follow-up", "$380"}}
+	case strings.Contains(normalized, "marketplace") || strings.Contains(normalized, "directory") || strings.Contains(normalized, "provider"):
+		return "Marketplace Command",
+			[]adaptivePreviewMetric{{"Active providers", "318", "+24 this month"}, {"Bookings", "1,284", "+17%"}, {"Review score", "4.8", "top tier"}, {"Pending reviews", "16", "5 urgent"}},
+			[]adaptivePreviewModule{{"Discovery", "Search, filter, and compare providers with trust signals.", "cyan"}, {"Provider Ops", "Review onboarding, compliance, availability, and service areas.", "emerald"}, {"Booking Flow", "Convert demand into reservations, deposits, and confirmations.", "amber"}, {"Admin Review", "Resolve disputes, flagged listings, and quality issues.", "rose"}},
+			[]adaptivePreviewRecord{{"Elite Concrete Co.", "Dallas Metro", "Verified", "$18K MRR"}, {"Precision HVAC Pros", "Austin", "Featured", "$11K MRR"}, {"Rapid Clean Team", "Houston", "Review queue", "$7.2K MRR"}, {"Bright Roofing", "San Antonio", "Onboarding", "$9.6K MRR"}}
+	case strings.Contains(normalized, "client portal") || strings.Contains(normalized, "agency") || strings.Contains(normalized, "portal"):
+		return "Client Portal",
+			[]adaptivePreviewMetric{{"Active clients", "34", "+5"}, {"Approvals waiting", "12", "4 urgent"}, {"Messages", "86", "92% SLA"}, {"Project health", "91%", "+3 pts"}},
+			[]adaptivePreviewModule{{"Client Home", "Show milestones, approvals, files, invoices, and next steps.", "cyan"}, {"Approval Center", "Collect sign-off on scopes, designs, and change requests.", "emerald"}, {"File Vault", "Organize deliverables, versions, and shared assets.", "amber"}, {"Message Hub", "Keep client communication threaded and accountable.", "rose"}},
+			[]adaptivePreviewRecord{{"Atlas Rebrand", "Mia Chen", "Approval due", "$24,000"}, {"Finch Website", "Drew Lane", "In review", "$18,500"}, {"Evergreen Ads", "Sam Patel", "Live", "$9,800"}, {"Northwind Strategy", "Ava Stone", "Kickoff", "$31,200"}}
+	case strings.Contains(normalized, "project management") || strings.Contains(normalized, "collaboration") || strings.Contains(normalized, "task"):
+		return "Project Workspace",
+			[]adaptivePreviewMetric{{"Active projects", "19", "+3"}, {"Tasks due", "47", "12 blocked"}, {"Team load", "82%", "balanced"}, {"Delivery confidence", "89%", "+7 pts"}},
+			[]adaptivePreviewModule{{"Roadmap", "Plan milestones, owners, dependencies, and release windows.", "cyan"}, {"Task Board", "Move work across backlog, active, blocked, and shipped states.", "emerald"}, {"Team Pulse", "Spot capacity risk, blockers, and decision latency.", "amber"}, {"Docs + Decisions", "Capture briefs, specs, approvals, and launch notes.", "rose"}},
+			[]adaptivePreviewRecord{{"Mobile onboarding", "Product", "In progress", "84 pts"}, {"Billing refactor", "Engineering", "Blocked", "34 pts"}, {"Q3 launch plan", "Marketing", "On track", "62 pts"}, {"Customer import", "Success", "Review", "21 pts"}}
+	case strings.Contains(normalized, "social") || strings.Contains(normalized, "community") || strings.Contains(normalized, "messaging") || strings.Contains(normalized, "content"):
+		return "Community Hub",
+			[]adaptivePreviewMetric{{"Active members", "12.4K", "+9%"}, {"Posts today", "386", "+31"}, {"Moderation queue", "14", "3 high risk"}, {"Message response", "4m", "-18%"}},
+			[]adaptivePreviewModule{{"Content Feed", "Publish, rank, and moderate community posts with engagement context.", "cyan"}, {"Member Graph", "Track cohorts, roles, reputation, and retention.", "emerald"}, {"Messaging", "Manage direct messages, groups, and notification health.", "amber"}, {"Trust Queue", "Review flags, reports, spam, and safety escalations.", "rose"}},
+			[]adaptivePreviewRecord{{"Founder AMA thread", "Community Team", "Trending", "8.4K views"}, {"Partner launch", "Growth", "Scheduled", "2.1K waitlist"}, {"Spam cluster", "Trust", "Review", "42 reports"}, {"Power user cohort", "Success", "Healthy", "96% retention"}}
+	case strings.Contains(normalized, "landing") || strings.Contains(normalized, "waitlist") || strings.Contains(normalized, "funnel"):
+		return "Launch Funnel",
+			[]adaptivePreviewMetric{{"Waitlist", "8,420", "+18%"}, {"Conversion", "14.6%", "+2.3 pts"}, {"Qualified leads", "1,184", "+206"}, {"Launch readiness", "92%", "green"}},
+			[]adaptivePreviewModule{{"Hero + Offer", "Position the product with clear value, proof, and call-to-action.", "cyan"}, {"Waitlist Capture", "Collect intent, segments, source, and qualification signals.", "emerald"}, {"Proof System", "Show testimonials, metrics, product shots, and trust badges.", "amber"}, {"Experiment Board", "Track variants, funnel drop-off, and launch learnings.", "rose"}},
+			[]adaptivePreviewRecord{{"Founder audience", "LinkedIn", "Converting", "18.2%"}, {"Product Hunt prep", "Launch", "Scheduled", "3,200 leads"}, {"Paid search beta", "Growth", "Testing", "11.4%"}, {"Partner webinar", "Sales", "Booked", "640 signups"}}
+	default:
+		if strings.Contains(normalized, "contractor") || strings.Contains(normalized, "field service") || strings.Contains(normalized, "operations") {
+			return "Operations Control",
+				[]adaptivePreviewMetric{{"Active work", "27", "+6"}, {"Revenue in motion", "$284K", "+19%"}, {"SLA health", "96%", "stable"}, {"Risk flags", "5", "2 urgent"}},
+				[]adaptivePreviewModule{{"Command Center", "Track work, customers, owners, priority, and operational health.", "cyan"}, {"Pipeline Board", "Move requests through intake, review, active work, and completion.", "emerald"}, {"Resource Planner", "Balance capacity, assignments, due dates, and escalation risk.", "amber"}, {"Customer Updates", "Prepare status notes, next actions, and approval requests.", "rose"}},
+				[]adaptivePreviewRecord{{"Priority customer rollout", "Ops Lead", "Active", "$58,000"}, {"Service queue cleanup", "Dispatch", "At risk", "$14,200"}, {"Quarterly renewal", "Success", "Ready", "$92,000"}, {"Implementation sprint", "Delivery", "In review", "$31,500"}}
+		}
+		return "Product Console",
+			[]adaptivePreviewMetric{{"Active users", "2,840", "+12%"}, {"Revenue tracked", "$186K", "+16%"}, {"Open actions", "38", "9 urgent"}, {"System health", "97%", "green"}},
+			[]adaptivePreviewModule{{"Dashboard", "Summarize KPIs, recent activity, priority work, and operational status.", "cyan"}, {"Workflow Board", "Move records across stages with clear owners and due dates.", "emerald"}, {"Customer View", "Show profile details, history, notes, and next best action.", "amber"}, {"Settings", "Configure teams, routing, defaults, integrations, and permissions.", "rose"}},
+			[]adaptivePreviewRecord{{"Enterprise onboarding", "Maya Rivera", "In progress", "$42,000"}, {"Self-serve launch", "Growth Team", "Ready", "$18,700"}, {"Data import", "Platform", "Review", "$9,200"}, {"Retention playbook", "Success", "At risk", "$27,500"}}
+	}
+}
+
+func syntheticAdaptiveFrontendAppTSX(title string, summary string, description string, backendEntry string, backendPort int) string {
+	profile, metrics, modules, records := adaptivePreviewProfile(description + " " + title + " " + summary)
+	appTitle := strings.TrimSpace(title)
+	if appTitle == "" {
+		appTitle = profile
+	}
+	appSummary := strings.TrimSpace(summary)
+	if appSummary == "" {
+		appSummary = "A prompt-specific product workspace with dashboard metrics, workflow stages, records, and action controls."
+	}
+	backendLabel := "Frontend-first preview"
+	if backendEntry != "" {
+		backendLabel = "Backend handoff: " + backendEntry
+	}
+	return fmt.Sprintf(`import { useMemo, useState } from "react";
+
+const appTitle = %q;
+const appSummary = %q;
+const profile = %q;
+const backendLabel = %q;
+const apiBase = %q;
+const metrics = %s;
+const modules = %s;
+const initialRecords = %s;
+
+type RecordItem = {
+  name: string;
+  owner: string;
+  status: string;
+  value: string;
+};
+
+export default function App() {
+  const [activeModule, setActiveModule] = useState(modules[0]?.name ?? "Dashboard");
+  const [records, setRecords] = useState<RecordItem[]>(initialRecords);
+  const [note, setNote] = useState("");
+  const active = useMemo(() => modules.find((item) => item.name === activeModule) ?? modules[0], [activeModule]);
+
+  function addRecord() {
+    const trimmed = note.trim();
+    if (!trimmed) {
+      return;
+    }
+    setRecords((current) => [{ name: trimmed, owner: "Live user", status: "New", value: "$0" }, ...current].slice(0, 6));
+    setNote("");
+  }
+
+  return (
+    <main className="min-h-screen overflow-hidden bg-[#07111f] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_18%%_10%%,rgba(34,211,238,0.24),transparent_28%%),radial-gradient(circle_at_88%%_18%%,rgba(59,130,246,0.2),transparent_24%%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(2,6,23,1))]" />
+      <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-5 py-6 md:px-8">
+        <header className="rounded-[2rem] border border-cyan-300/20 bg-slate-950/70 p-6 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-bold uppercase tracking-[0.4em] text-cyan-200">{profile}</p>
+              <h1 className="mt-3 text-4xl font-black tracking-tight text-white md:text-6xl">{appTitle}</h1>
+              <p className="mt-4 max-w-2xl text-base leading-8 text-slate-300 md:text-lg">{appSummary}</p>
+            </div>
+            <div className="rounded-3xl border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm text-cyan-100">
+              <p className="font-black">Live preview workspace</p>
+              <p className="mt-1 text-cyan-100/80">{backendLabel}</p>
+              <p className="mt-2 rounded-full bg-slate-950/60 px-3 py-1 text-xs">{apiBase}</p>
+            </div>
+          </div>
+        </header>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {metrics.map((metric) => (
+            <article key={metric.label} className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-5 shadow-xl shadow-black/20">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{metric.label}</p>
+              <div className="mt-4 flex items-end justify-between gap-4">
+                <strong className="text-3xl font-black text-white">{metric.value}</strong>
+                <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-xs font-bold text-emerald-100">{metric.trend}</span>
+              </div>
+            </article>
+          ))}
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-[0.75fr_1.25fr]">
+          <aside className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/70 p-4 shadow-xl shadow-black/20">
+            <p className="px-2 text-xs font-bold uppercase tracking-[0.3em] text-slate-500">Workspace</p>
+            <div className="mt-4 space-y-3">
+              {modules.map((item) => (
+                <button key={item.name} type="button" onClick={() => setActiveModule(item.name)} className={"w-full rounded-2xl border p-4 text-left transition " + (activeModule === item.name ? "border-cyan-300/60 bg-cyan-300/15 shadow-lg shadow-cyan-500/10" : "border-slate-700/60 bg-slate-950/50 hover:border-cyan-300/30")}>
+                  <span className="block font-black text-white">{item.name}</span>
+                  <span className="mt-1 block text-sm leading-6 text-slate-400">{item.detail}</span>
+                </button>
+              ))}
+            </div>
+          </aside>
+
+          <div className="space-y-6">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/70 p-6 shadow-xl shadow-black/20">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">Active module</p>
+                  <h2 className="mt-2 text-3xl font-black text-white">{active?.name}</h2>
+                  <p className="mt-3 max-w-2xl leading-7 text-slate-300">{active?.detail}</p>
+                </div>
+                <button type="button" onClick={addRecord} className="rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950 shadow-xl shadow-cyan-500/20 transition hover:bg-cyan-200">Add live item</button>
+              </div>
+              <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-700/70 bg-slate-950/55 p-4 sm:flex-row">
+                <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Create a new demo record..." className="min-h-11 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-4 text-white outline-none transition focus:border-cyan-300" />
+                <button type="button" onClick={addRecord} className="rounded-xl border border-cyan-300/50 px-4 py-2 font-bold text-cyan-100 transition hover:bg-cyan-300/10">Save</button>
+              </div>
+            </article>
+
+            <article className="overflow-hidden rounded-[2rem] border border-cyan-300/10 bg-slate-900/70 shadow-xl shadow-black/20">
+              <div className="grid border-b border-slate-700/70 bg-slate-950/65 px-5 py-3 text-xs font-bold uppercase tracking-[0.22em] text-slate-500 md:grid-cols-[1.4fr_0.8fr_0.8fr_0.6fr]">
+                <span>Name</span>
+                <span>Owner</span>
+                <span>Status</span>
+                <span>Value</span>
+              </div>
+              <div className="divide-y divide-slate-800">
+                {records.map((record) => (
+                  <div key={record.name + record.owner} className="grid gap-2 px-5 py-4 text-sm md:grid-cols-[1.4fr_0.8fr_0.8fr_0.6fr]">
+                    <strong className="text-white">{record.name}</strong>
+                    <span className="text-slate-300">{record.owner}</span>
+                    <span className="w-fit rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs font-bold text-cyan-100">{record.status}</span>
+                    <span className="font-bold text-emerald-200">{record.value}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+`, appTitle, appSummary, profile, backendLabel, fmt.Sprintf("http://localhost:%d", backendPort), adaptivePreviewJSON(metrics), adaptivePreviewJSON(modules), adaptivePreviewJSON(records))
+}
+
 func syntheticFrontendAppTSX(title string, summary string, backendEntry string, backendPort int) string {
 	return syntheticFrontendAppTSXWithDescription(title, summary, title+" "+summary, backendEntry, backendPort)
 }
@@ -17337,89 +17555,7 @@ func syntheticFrontendAppTSXWithDescription(title string, summary string, descri
 	if promptLooksLikeFieldOpsApp(description) || promptLooksLikeFieldOpsApp(title+" "+summary) {
 		return syntheticFieldOpsAppTSX()
 	}
-	backendNote := "Backend runtime files were generated separately and can be launched alongside this preview."
-	if backendEntry != "" {
-		backendNote = fmt.Sprintf("Backend runtime detected at %s. Start it separately to enable live API calls in local development.", backendEntry)
-	}
-	return fmt.Sprintf(`import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-
-const previewPillars = [
-  { label: "Frontend Shell", value: "Recovered", hint: "Vite + React preview entry recreated automatically" },
-  { label: "Backend Runtime", value: %q, hint: %q },
-  { label: "Suggested API Base", value: %q, hint: "Set VITE_API_URL if your backend runs elsewhere" },
-];
-
-export default function App() {
-  return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-10 md:px-10">
-        <section className="relative overflow-hidden rounded-[28px] border border-border/70 bg-card/90 p-8 shadow-2xl shadow-black/20">
-          <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-r from-primary/15 via-transparent to-secondary/15" />
-          <div className="relative flex flex-wrap items-center gap-3">
-            <Badge variant="secondary" className="bg-primary/15 text-primary hover:bg-primary/15">
-              APEX recovered preview
-            </Badge>
-            <Badge variant="outline" className="border-primary/40 text-muted-foreground">
-              Frontend-first recovery
-            </Badge>
-          </div>
-          <div className="relative mt-6 max-w-3xl space-y-4">
-            <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">%s</h1>
-            <p className="text-base leading-8 text-muted-foreground md:text-lg">%s</p>
-          </div>
-          <div className="relative mt-8 flex flex-col gap-4 rounded-2xl border border-border/60 bg-background/70 p-4 sm:flex-row sm:items-center">
-            <Input value=%q readOnly aria-label="Suggested backend API URL" className="h-11 bg-background/80" />
-            <div className="flex gap-3">
-              <Button className="min-w-[150px]">Open live preview</Button>
-              <Button variant="outline" className="min-w-[170px]">Continue backend work</Button>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-3">
-          {previewPillars.map((item) => (
-            <Card key={item.label} className="border-border/60 bg-card/80 backdrop-blur">
-              <CardHeader className="space-y-3">
-                <Badge variant="outline" className="w-fit border-primary/30 text-primary">
-                  {item.label}
-                </Badge>
-                <CardTitle className="text-2xl">{item.value}</CardTitle>
-                <CardDescription className="text-sm leading-6 text-muted-foreground">{item.hint}</CardDescription>
-              </CardHeader>
-            </Card>
-          ))}
-        </section>
-
-        <Card className="border-border/60 bg-card/75">
-          <CardHeader>
-            <CardTitle>What happened</CardTitle>
-            <CardDescription>
-              The generated project produced a backend runtime without a frontend entrypoint, so APEX synthesized a stable preview shell instead of failing the build terminally.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
-            <div className="space-y-3 text-sm leading-7 text-muted-foreground">
-              <p>React + Vite entry files, Tailwind configuration, and a shadcn-compatible design system baseline were restored deterministically.</p>
-              <p>Existing backend code was preserved untouched, so preview can boot now while runtime work continues through the normal validation path.</p>
-            </div>
-            <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
-              <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">Recovered baseline</p>
-              <ul className="mt-3 space-y-3 text-sm text-foreground">
-                <li>Previewable React entry shell</li>
-                <li>Tailwind + shadcn UI primitives</li>
-                <li>Backend runtime preserved for later continuation</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </main>
-  );
-}
-`, backendEntry, backendNote, fmt.Sprintf("http://localhost:%d", backendPort), title, summary, fmt.Sprintf("http://localhost:%d", backendPort))
+	return syntheticAdaptiveFrontendAppTSX(title, summary, description, backendEntry, backendPort)
 }
 
 func syntheticFrontendViteConfig(backendPort int) string {

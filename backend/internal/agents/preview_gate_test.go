@@ -390,8 +390,12 @@ func TestRunPreviewVerificationGateUsesDeterministicShellFallbackBeforeSolverFor
 		filesByPath[file.Path] = file.Content
 	}
 	app := filesByPath["src/App.tsx"]
-	if strings.Contains(app, "return null") || !strings.Contains(app, "APEX recovered preview") || !strings.Contains(strings.ToLower(app), "contractor") {
-		t.Fatalf("expected blank App.tsx to be replaced by contractor preview shell, got %q", app)
+	lowerApp := strings.ToLower(app)
+	if strings.Contains(app, "return null") ||
+		strings.Contains(lowerApp, "apex recovered preview") ||
+		!strings.Contains(lowerApp, "contractor") ||
+		!strings.Contains(lowerApp, "add live item") {
+		t.Fatalf("expected blank App.tsx to be replaced by prompt-adaptive contractor app shell, got %q", app)
 	}
 	if strings.TrimSpace(filesByPath["src/index.css"]) == "" || strings.TrimSpace(filesByPath["vite.config.ts"]) == "" {
 		t.Fatalf("expected fallback to install canonical preview scaffold files, got paths: %+v", filesByPath)
