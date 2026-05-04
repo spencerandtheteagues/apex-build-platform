@@ -1,6 +1,8 @@
 package preview
 
 import (
+	"errors"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -86,6 +88,74 @@ func TestContainerPreviewBuildUsesDockerLayerCache(t *testing.T) {
 
 	if strings.Contains(joined, "--no-cache") {
 		t.Fatalf("preview container builds should use Docker layer cache, got args: %v", args)
+	}
+}
+
+func TestAssignContainerPortSkipsLocallyOccupiedBasePort(t *testing.T) {
+	occupied, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatalf("reserve occupied port: %v", err)
+	}
+	defer occupied.Close()
+	basePort := occupied.Addr().(*net.TCPAddr).Port
+
+	projectID := uint(601)
+	server := &ContainerPreviewServer{
+		PreviewServer: &PreviewServer{
+			portMap: map[uint]int{},
+		},
+		config: &ContainerPreviewConfig{BasePort: basePort},
+	}
+
+	port, err := server.assignContainerPort(projectID)
+	if err != nil {
+		t.Fatalf("assign container port: %v", err)
+	}
+	if port == basePort {
+		t.Fatalf("container preview reused occupied port %d", basePort)
+	}
+	if got := server.portMap[projectID]; got != port {
+		t.Fatalf("portMap[%d] = %d, want %d", projectID, got, port)
+	}
+}
+
+func TestAssignContainerPortAvoidsBlockedRetryPort(t *testing.T) {
+	t.Parallel()
+
+	projectID := uint(602)
+	server := &ContainerPreviewServer{
+		PreviewServer: &PreviewServer{
+			portMap: map[uint]int{projectID: 10000},
+		},
+		config: &ContainerPreviewConfig{BasePort: 10000, ConnectHost: "177.7.36.223"},
+	}
+
+	port, err := server.assignContainerPortAvoiding(projectID, map[int]bool{10000: true})
+	if err != nil {
+		t.Fatalf("assign retry container port: %v", err)
+	}
+	if port != 10001 {
+		t.Fatalf("retry port = %d, want 10001", port)
+	}
+	if got := server.portMap[projectID]; got != 10001 {
+		t.Fatalf("portMap[%d] = %d, want 10001", projectID, got)
+	}
+}
+
+func TestDockerPortAllocationOutputClassifiesRetryableBindFailures(t *testing.T) {
+	t.Parallel()
+
+	retryable := []string{
+		"docker run failed: exit status 125\nOutput: Bind for 0.0.0.0:10000 failed: port is already allocated",
+		"Error response from daemon: Ports are not available: exposing port TCP 0.0.0.0:10000: listen tcp 0.0.0.0:10000: bind: address already in use",
+	}
+	for _, message := range retryable {
+		if !dockerPortAllocationOutput(errors.New(message)) {
+			t.Fatalf("expected retryable port allocation error: %q", message)
+		}
+	}
+	if dockerPortAllocationOutput(errors.New("docker run failed: permission denied while trying to connect to the Docker daemon socket")) {
+		t.Fatal("permission errors must not be treated as retryable port allocation")
 	}
 }
 

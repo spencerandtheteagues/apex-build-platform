@@ -26,6 +26,12 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	maxContainerPortSearchSpan  = 2000
+	maxContainerRunPortAttempts = 25
+	defaultContainerPreviewPort = 10000
+)
+
 // ContainerPreviewServer provides Docker-based preview isolation
 type ContainerPreviewServer struct {
 	*PreviewServer
@@ -172,7 +178,7 @@ func DefaultContainerPreviewConfig() *ContainerPreviewConfig {
 		DockerContext:     dockerContext,
 		ConnectHost:       connectHost,
 		ImagePrefix:       "apex-preview",
-		BasePort:          10000,
+		BasePort:          defaultContainerPreviewPort,
 		MaxContainers:     50,
 		MaxContainerAge:   30 * time.Minute,
 		CleanupInterval:   5 * time.Minute,
@@ -488,8 +494,13 @@ func (s *ContainerPreviewServer) StartContainerPreview(ctx context.Context, conf
 		return nil, fmt.Errorf("failed to write Dockerfile: %w", err)
 	}
 
-	// Assign port
-	port := s.assignContainerPort(config.ProjectID)
+	// Reserve a host port early so concurrent preview starts in this process do
+	// not race each other while Docker builds the image.
+	port, err := s.assignContainerPort(config.ProjectID)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		return nil, fmt.Errorf("failed to reserve preview port: %w", err)
+	}
 
 	// Build container name and image name
 	containerName := s.previewContainerName(config.ProjectID)
@@ -510,9 +521,10 @@ func (s *ContainerPreviewServer) StartContainerPreview(ctx context.Context, conf
 	}
 	atomic.AddInt64(&s.stats.TotalBuildTime, time.Since(startBuild).Milliseconds())
 
-	// Run container
+	// Run container. Docker is the source of truth for remote daemon port
+	// conflicts, so retry port-allocation failures instead of failing preview.
 	internalPort := s.getInternalPort(framework)
-	containerID, err := s.runContainer(ctx, imageName, containerName, port, internalPort, containerConfig)
+	containerID, err := s.runContainerWithPortRetries(ctx, config.ProjectID, imageName, containerName, port, internalPort, containerConfig)
 	if err != nil {
 		os.RemoveAll(tempDir)
 		s.releaseContainerPort(config.ProjectID)
@@ -520,6 +532,14 @@ func (s *ContainerPreviewServer) StartContainerPreview(ctx context.Context, conf
 		// Clean up image
 		s.dockerCommand("rmi", "-f", imageName).Run()
 		return nil, fmt.Errorf("failed to start container: %w", err)
+	}
+	port = s.currentContainerPort(config.ProjectID)
+	if port <= 0 {
+		_ = s.dockerCommand("rm", "-f", containerID).Run()
+		_ = s.dockerCommand("rmi", "-f", imageName).Run()
+		_ = os.RemoveAll(tempDir)
+		atomic.AddInt64(&s.stats.FailedContainers, 1)
+		return nil, fmt.Errorf("failed to resolve preview port after container start")
 	}
 
 	// Create session
@@ -841,6 +861,47 @@ func (s *ContainerPreviewServer) dockerBuildArgs(contextDir, imageName string) [
 		"-f", filepath.Join(contextDir, "Dockerfile"),
 		contextDir,
 	}
+}
+
+func (s *ContainerPreviewServer) runContainerWithPortRetries(ctx context.Context, projectID uint, imageName, containerName string, initialPort, internalPort int, config *ContainerConfig) (string, error) {
+	blockedPorts := make(map[int]bool)
+	port := initialPort
+	var lastErr error
+
+	for attempt := 0; attempt < maxContainerRunPortAttempts; attempt++ {
+		if port <= 0 || blockedPorts[port] {
+			var err error
+			port, err = s.assignContainerPortAvoiding(projectID, blockedPorts)
+			if err != nil {
+				if lastErr != nil {
+					return "", fmt.Errorf("%w; last docker run error: %v", err, lastErr)
+				}
+				return "", err
+			}
+		}
+
+		containerID, err := s.runContainer(ctx, imageName, containerName, port, internalPort, config)
+		if err == nil {
+			return containerID, nil
+		}
+		lastErr = err
+
+		// A failed `docker run` can still leave a named container behind on some
+		// daemon versions. Remove it before retrying the same deterministic name.
+		_ = s.removeContainer(ctx, containerName)
+
+		if !dockerPortAllocationOutput(err) {
+			return "", err
+		}
+		blockedPorts[port] = true
+		s.releaseContainerPort(projectID)
+		port = 0
+	}
+
+	if lastErr == nil {
+		return "", fmt.Errorf("preview port allocation exhausted")
+	}
+	return "", fmt.Errorf("preview port allocation exhausted after %d attempts: %w", maxContainerRunPortAttempts, lastErr)
 }
 
 // runContainer starts a Docker container with security constraints
@@ -1180,29 +1241,96 @@ func (s *ContainerPreviewServer) getInternalPort(framework string) int {
 	}
 }
 
-// assignContainerPort assigns a unique port for a container
-func (s *ContainerPreviewServer) assignContainerPort(projectID uint) int {
+// assignContainerPort assigns a unique port for a container.
+func (s *ContainerPreviewServer) assignContainerPort(projectID uint) (int, error) {
+	return s.assignContainerPortAvoiding(projectID, nil)
+}
+
+func (s *ContainerPreviewServer) assignContainerPortAvoiding(projectID uint, blockedPorts map[int]bool) (int, error) {
 	s.portMu.Lock()
 	defer s.portMu.Unlock()
 
 	// Check if already assigned
 	if port, exists := s.portMap[projectID]; exists {
-		return port
+		if blockedPorts == nil || !blockedPorts[port] {
+			if s.containerHostPortAvailable(port) {
+				return port, nil
+			}
+		}
+		delete(s.portMap, projectID)
 	}
 
 	// Find next available port starting from container base port
-	port := s.config.BasePort
+	basePort := defaultContainerPreviewPort
+	if s.config != nil && s.config.BasePort > 0 {
+		basePort = s.config.BasePort
+	}
 	usedPorts := make(map[int]bool)
 	for _, p := range s.portMap {
 		usedPorts[p] = true
 	}
 
-	for usedPorts[port] {
-		port++
+	for port := basePort; port <= basePort+maxContainerPortSearchSpan; port++ {
+		if usedPorts[port] || blockedPorts[port] {
+			continue
+		}
+		if !s.containerHostPortAvailable(port) {
+			continue
+		}
+		s.portMap[projectID] = port
+		return port, nil
 	}
 
-	s.portMap[projectID] = port
-	return port
+	return 0, fmt.Errorf("failed to reserve container preview port near %d", basePort)
+}
+
+func (s *ContainerPreviewServer) currentContainerPort(projectID uint) int {
+	s.portMu.Lock()
+	defer s.portMu.Unlock()
+	return s.portMap[projectID]
+}
+
+func (s *ContainerPreviewServer) containerHostPortAvailable(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	if !s.shouldProbeLocalContainerPorts() {
+		return true
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
+}
+
+func (s *ContainerPreviewServer) shouldProbeLocalContainerPorts() bool {
+	host := ""
+	if s != nil && s.config != nil {
+		host = strings.TrimSpace(s.config.ConnectHost)
+	}
+	if parsed, err := url.Parse(host); err == nil && parsed.Scheme != "" {
+		host = parsed.Hostname()
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+		return true
+	}
+	return false
+}
+
+func dockerPortAllocationOutput(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "port is already allocated") ||
+		strings.Contains(lower, "ports are not available") ||
+		strings.Contains(lower, "address already in use") ||
+		strings.Contains(lower, "bind for 0.0.0.0") ||
+		strings.Contains(lower, "bind for [::]") ||
+		strings.Contains(lower, "listen tcp")
 }
 
 // releaseContainerPort releases the port assigned to a container
