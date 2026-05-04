@@ -15,6 +15,8 @@ const projectName = process.env.PROJECT_NAME || `golden-${powerMode}-${Date.now(
 const pollSeconds = Number(process.env.POLL_SECONDS || 15)
 const maxPolls = Number(process.env.MAX_POLLS || 240)
 const artifactDir = process.env.ARTIFACT_DIR || path.join('/tmp', `apex-golden-${Date.now()}`)
+const previewStabilitySeconds = Number(process.env.PREVIEW_STABILITY_SECONDS || 10)
+const previewStabilityPollMS = Math.max(250, Number(process.env.PREVIEW_STABILITY_POLL_MS || 1000))
 const loginEmail = process.env.LOGIN_EMAIL || ''
 // Prefer explicit email-only login when LOGIN_EMAIL is supplied. Sending both a
 // stale default username and the intended email causes the production handler to
@@ -255,8 +257,19 @@ async function verifyPreview(url) {
   })
   const page = await context.newPage()
   const consoleErrors = []
+  const pageErrors = []
+  let stabilityStarted = false
+  let mainFrameNavigationsAfterStableStart = 0
   page.on('console', msg => {
     if (msg.type() === 'error') consoleErrors.push(msg.text())
+  })
+  page.on('pageerror', error => {
+    pageErrors.push(String(error?.message || error))
+  })
+  page.on('framenavigated', frame => {
+    if (stabilityStarted && frame === page.mainFrame()) {
+      mainFrameNavigationsAfterStableStart += 1
+    }
   })
   const response = await page.goto(absolutePreviewURL(url), { waitUntil: 'networkidle', timeout: 60000 })
   if (!response || !response.ok()) {
@@ -281,6 +294,55 @@ async function verifyPreview(url) {
   if (shellOnlyNav || /future patches|real ui screens will be routed here|routes will be added later/i.test(bodyText)) {
     throw new Error(`preview rendered only an app shell instead of working screen content: ${bodyText.slice(0, 500)}`)
   }
+
+  async function samplePreviewHealth(label) {
+    const sample = await page.evaluate((sampleLabel) => {
+      const bodyText = String(document.body?.innerText || '')
+      const root = document.querySelector('#root')
+      const rootRect = root?.getBoundingClientRect()
+      return {
+        label: sampleLabel,
+        readyState: document.readyState,
+        url: location.href,
+        bodyTextLength: bodyText.trim().length,
+        bodyHTMLLength: String(document.body?.innerHTML || '').length,
+        rootChildCount: root?.children?.length ?? null,
+        rootTextLength: String(root?.textContent || '').trim().length,
+        rootHeight: rootRect?.height || 0,
+        failureText: /failed to start preview|application error|vite error|runtime error|page not found|route not found/i.test(bodyText),
+      }
+    }, label)
+    if (!['interactive', 'complete'].includes(sample.readyState)) {
+      throw new Error(`preview unstable during ${label}: document readyState=${sample.readyState}`)
+    }
+    if (sample.failureText) {
+      throw new Error(`preview rendered failure text during ${label}`)
+    }
+    if (sample.bodyTextLength < 80 || sample.bodyHTMLLength < 200 || sample.rootChildCount === 0 || sample.rootHeight < 40) {
+      throw new Error(`preview blank or under-rendered during ${label}: ${JSON.stringify(sample)}`)
+    }
+    return sample
+  }
+
+  const stabilitySamples = []
+  if (previewStabilitySeconds > 0) {
+    stabilityStarted = true
+    const deadline = Date.now() + previewStabilitySeconds * 1000
+    let sampleIndex = 0
+    while (Date.now() < deadline) {
+      stabilitySamples.push(await samplePreviewHealth(`stability-${sampleIndex}`))
+      if (mainFrameNavigationsAfterStableStart > 0) {
+        throw new Error(`preview reloaded or navigated during stability window: ${mainFrameNavigationsAfterStableStart} navigation(s)`)
+      }
+      if (pageErrors.length > 0) {
+        throw new Error(`preview page errors during stability window: ${pageErrors.slice(0, 5).join(' | ')}`)
+      }
+      await page.waitForTimeout(previewStabilityPollMS)
+      sampleIndex += 1
+    }
+    stabilitySamples.push(await samplePreviewHealth('stability-final'))
+  }
+
   const visualProof = await page.evaluate(() => {
     const readStyle = (selector) => {
       const el = document.querySelector(selector)
@@ -339,6 +401,13 @@ async function verifyPreview(url) {
     url: absolutePreviewURL(url),
     body_length: bodyText.length,
     console_errors: consoleErrors,
+    page_errors: pageErrors,
+    stability: {
+      seconds: previewStabilitySeconds,
+      poll_ms: previewStabilityPollMS,
+      main_frame_navigations_after_stable_start: mainFrameNavigationsAfterStableStart,
+      samples: stabilitySamples,
+    },
     visual: visualProof,
     screenshot: screenshotPath,
   })
@@ -349,6 +418,9 @@ async function verifyPreview(url) {
   }
   if (consoleErrors.length > 0 && process.env.ALLOW_CONSOLE_ERRORS !== '1') {
     throw new Error(`preview console errors: ${consoleErrors.slice(0, 5).join(' | ')}`)
+  }
+  if (pageErrors.length > 0) {
+    throw new Error(`preview page errors: ${pageErrors.slice(0, 5).join(' | ')}`)
   }
   console.log(`PREVIEW_SCREENSHOT=${screenshotPath}`)
 }

@@ -120,3 +120,68 @@ jobs:
           MAX_POLLS: ${{ matrix.max_polls }}
           PROJECT_NAME: canary-${{ matrix.name }}
         run: ./scripts/run_platform_build_smoke.sh
+
+  golden-fieldops-live-canary:
+    name: Golden FieldOps Live Canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check canary credentials
+        id: canary-creds
+        env:
+          APEX_CANARY_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
+          APEX_CANARY_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+        run: |
+          if [[ -n "$APEX_CANARY_EMAIL" && -n "$APEX_CANARY_PASSWORD" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping golden live canary because APEX_CANARY_EMAIL/APEX_CANARY_PASSWORD are not configured."
+          fi
+
+      - name: Set up Node
+        if: steps.canary-creds.outputs.available == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install E2E deps
+        if: steps.canary-creds.outputs.available == 'true'
+        working-directory: tests/e2e
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        if: steps.canary-creds.outputs.available == 'true'
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run balanced and max golden canary
+        if: steps.canary-creds.outputs.available == 'true'
+        env:
+          BASE_URL: https://api.apex-build.dev/api/v1
+          PROMPT_FILE: prompts/golden/apex-fieldops-ai.md
+          POWER_MODES: balanced max
+          MODE: full
+          POLL_SECONDS: 15
+          MAX_POLLS: 260
+          PREVIEW_STABILITY_SECONDS: 15
+          PREVIEW_STABILITY_POLL_MS: 1000
+          PROJECT_NAME_PREFIX: golden-fieldops-live-canary
+          ARTIFACT_ROOT: golden-canary-artifacts
+          LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
+          LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
+          LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+        run: ./scripts/run_live_golden_canary_matrix.sh
+
+      - name: Upload golden canary artifacts
+        if: always() && steps.canary-creds.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-fieldops-live-canary-artifacts
+          path: golden-canary-artifacts
+          retention-days: 14
