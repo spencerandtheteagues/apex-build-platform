@@ -17,6 +17,7 @@ const maxPolls = Number(process.env.MAX_POLLS || 240)
 const artifactDir = process.env.ARTIFACT_DIR || path.join('/tmp', `apex-golden-${Date.now()}`)
 const previewStabilitySeconds = Number(process.env.PREVIEW_STABILITY_SECONDS || 10)
 const previewStabilityPollMS = Math.max(250, Number(process.env.PREVIEW_STABILITY_POLL_MS || 1000))
+const startupRetrySeconds = Math.max(0, Number(process.env.STARTUP_RETRY_SECONDS || 180))
 const autoRegister = process.env.AUTO_REGISTER === '1'
 let loginEmail = process.env.LOGIN_EMAIL || ''
 // Prefer explicit email-only login when LOGIN_EMAIL is supplied. Sending both a
@@ -65,9 +66,27 @@ function apiURL(route) {
   return `${apiBase}${route.startsWith('/') ? route : `/${route}`}`
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function isStartupError(error) {
+  const response = error?.response || {}
+  const startup = response.startup || {}
+  return error?.status === 503 && (
+    response.error === 'server starting' ||
+    response.phase === 'starting' ||
+    response.ready === false ||
+    startup.ready === false ||
+    startup.phase === 'starting'
+  )
+}
+
 async function request(route, options = {}) {
   const { skipReauth = false, ...fetchOptions } = options
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const startedAt = Date.now()
+  let authRetried = false
+  for (;;) {
     try {
       return await requestOnce(route, fetchOptions)
     } catch (error) {
@@ -78,12 +97,18 @@ async function request(route, options = {}) {
         err.code = 'EMAIL_VERIFICATION_REQUIRED'
         throw err
       }
-      if (!skipReauth && error.status === 401 && attempt === 0) {
+      if (!skipReauth && error.status === 401 && !authRetried) {
+        authRetried = true
         console.log(`[${new Date().toISOString()}] auth expired during ${route}; refreshing session and retrying`)
         cookies.clear()
         csrfToken = ''
         bearerToken = ''
         await login()
+        continue
+      }
+      if (isStartupError(error) && Date.now() - startedAt < startupRetrySeconds * 1000) {
+        console.log(`[${new Date().toISOString()}] API is restarting during ${route}; retrying after startup gate`)
+        await sleep(5000)
         continue
       }
       throw error
