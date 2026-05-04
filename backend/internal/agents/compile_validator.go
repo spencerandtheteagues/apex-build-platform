@@ -68,6 +68,7 @@ const (
 	cvTscTimeout       = 40 * time.Second
 	cvBuildTimeout     = 90 * time.Second
 	cvInstallTimeout   = 2 * time.Minute
+	cvMinBudget        = 2 * time.Minute
 	cvMaxErrorsPerFile = 3 // cap errors per file in the repair prompt
 	cvMaxFilesInPrompt = 5 // cap distinct files in the repair prompt
 	cvContextLines     = 8 // source lines to show around each error location
@@ -125,6 +126,32 @@ func maxCompileAttempts(mode PowerMode) int {
 	default: // PowerFast and unknown
 		return 2 // Fast still gets one repair pass; a single missed import should not fail first-pass.
 	}
+}
+
+// compileValidationBudget caps the synchronous compile/repair loop so a build
+// cannot sit at the final quality gate indefinitely. The loop is best-effort;
+// if the budget expires, downstream structural and preview validation still run.
+func compileValidationBudget(mode PowerMode) time.Duration {
+	defaultSeconds := 480 // fast/default: 8 minutes
+	envKey := "APEX_COMPILE_VALIDATION_BUDGET_FAST_SECONDS"
+	switch mode {
+	case PowerMax:
+		defaultSeconds = 720 // max: 12 minutes
+		envKey = "APEX_COMPILE_VALIDATION_BUDGET_MAX_SECONDS"
+	case PowerBalanced:
+		defaultSeconds = 600 // balanced: 10 minutes
+		envKey = "APEX_COMPILE_VALIDATION_BUDGET_BALANCED_SECONDS"
+	}
+
+	seconds := envInt(envKey, defaultSeconds)
+	if override := envInt("APEX_COMPILE_VALIDATION_BUDGET_SECONDS", 0); override > 0 {
+		seconds = override
+	}
+	budget := time.Duration(seconds) * time.Second
+	if budget < cvMinBudget {
+		return cvMinBudget
+	}
+	return budget
 }
 
 var cvPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
@@ -211,18 +238,12 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		return result
 	}
 
-	// Broadcast that we're entering compile validation.
-	am.broadcast(build.ID, &WSMessage{
-		Type:      WSBuildProgress,
-		BuildID:   build.ID,
-		Timestamp: now,
-		Data: map[string]any{
-			"phase":    "compile_validation",
-			"status":   string(BuildReviewing),
-			"progress": 92,
-			"message":  "Compile-validating generated code…",
-		},
-	})
+	startedAt := now
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	budget := compileValidationBudget(build.PowerMode)
+	am.cvBroadcastStage(build, 92, "prepare", fmt.Sprintf("Compile-validating generated code with a %s budget.", budget.Round(time.Second)))
 
 	// Create persistent workspace — node_modules will be reused across repair attempts.
 	tmpDir, err := os.MkdirTemp("", "apex-compile-validate-*")
@@ -239,9 +260,14 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		log.Printf("[compile_validator] build %s: %s", build.ID, result.SkipReason)
 		return result
 	}
-	ctx := am.ctx
-	if ctx == nil {
-		ctx = context.Background()
+	parentCtx := am.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, budget)
+	defer cancel()
+	if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+		return result
 	}
 	if manifestIssues := cvPackageManifestSanityIssues(*allFiles); len(manifestIssues) > 0 {
 		result.Attempts = 1
@@ -254,8 +280,12 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		log.Printf("[compile_validator] build %s: package.json sanity failed before npm install: %v", build.ID, manifestIssues)
 		pLog(build.ID).CompileRepairStart("manifest_inline", 0, len(*allFiles))
 		result.RepairAttempts++
+		am.cvBroadcastStage(build, 93, "manifest_repair", "Repairing package manifest before dependency install.")
 		repaired := am.cvRunInlineRepair(ctx, build, manifestIssues, allFiles, tmpDir)
 		pLog(build.ID).CompileRepairDone("manifest_inline", 0, repaired, len(manifestIssues))
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
 		if !repaired {
 			cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
 			am.cvBroadcastResult(build, false, manifestIssues)
@@ -274,8 +304,15 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 	// are repaired immediately instead of burning a later readiness recovery pass.
 	installPassed := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
+		am.cvBroadcastStage(build, 93, "npm_install", fmt.Sprintf("Installing dependencies for compile validation (attempt %d/%d).", attempt+1, maxAttempts))
 		installOut, installErr := cvRunCommand(ctx, tmpDir, cvInstallTimeout,
 			"npm", "install", "--legacy-peer-deps", "--prefer-offline", "--no-audit", "--no-fund")
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
 		if installErr == nil {
 			installPassed = true
 			break
@@ -298,8 +335,12 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		log.Printf("[compile_validator] build %s attempt %d: npm install failed: %s", build.ID, attempt+1, summary)
 		pLog(build.ID).CompileRepairStart("install_inline", attempt, len(*allFiles))
 		result.RepairAttempts++
+		am.cvBroadcastStage(build, 94, "install_repair", fmt.Sprintf("Repairing dependency manifest failure (attempt %d/%d).", attempt+1, maxAttempts))
 		repaired := am.cvRunInlineRepair(ctx, build, installErrors, allFiles, tmpDir)
 		pLog(build.ID).CompileRepairDone("install_inline", attempt, repaired, len(installErrors))
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
 		if !repaired {
 			cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
 			am.cvBroadcastResult(build, false, installErrors)
@@ -313,8 +354,15 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		// The last repair attempt may have fixed the manifest without getting a
 		// verification pass (the loop gives maxAttempts repairs but only
 		// maxAttempts-1 post-repair installs). Run one final install to confirm.
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
+		am.cvBroadcastStage(build, 94, "npm_install_final", "Confirming repaired dependency manifest.")
 		finalOut, finalErr := cvRunCommand(ctx, tmpDir, cvInstallTimeout,
 			"npm", "install", "--legacy-peer-deps", "--prefer-offline", "--no-audit", "--no-fund")
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
 		if finalErr == nil {
 			installPassed = true
 		} else {
@@ -344,6 +392,9 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
 		result.Attempts = attempt + 1
 
 		// Broadcast per-attempt progress.
@@ -351,20 +402,14 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		if attempt > 0 {
 			attemptMsg = fmt.Sprintf("Re-compiling after repair (attempt %d/%d)…", attempt+1, maxAttempts)
 		}
-		am.broadcast(build.ID, &WSMessage{
-			Type:      WSBuildProgress,
-			BuildID:   build.ID,
-			Timestamp: time.Now(),
-			Data: map[string]any{
-				"phase":    "compile_validation",
-				"status":   string(BuildReviewing),
-				"progress": 92 + attempt,
-				"message":  attemptMsg,
-			},
-		})
+		am.cvBroadcastStage(build, 95, "compile_attempt", attemptMsg)
 
 		// ── TypeScript type check ─────────────────────────────────────────────
+		am.cvBroadcastStage(build, 95, "tsc", "Running TypeScript compile check.")
 		tscErrors := cvRunTscCheck(ctx, tmpDir)
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
 		{
 			msgs := make([]string, len(tscErrors))
 			for i, e := range tscErrors {
@@ -376,8 +421,12 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 			log.Printf("[compile_validator] build %s attempt %d: tsc found %d error(s)", build.ID, attempt+1, len(tscErrors))
 			pLog(build.ID).CompileRepairStart("tsc_inline", attempt, len(*allFiles))
 			result.RepairAttempts++
+			am.cvBroadcastStage(build, 96, "tsc_repair", fmt.Sprintf("Repairing TypeScript errors (attempt %d/%d).", attempt+1, maxAttempts))
 			repaired := am.cvRunInlineRepair(ctx, build, tscErrors, allFiles, tmpDir)
 			pLog(build.ID).CompileRepairDone("tsc_inline", attempt, repaired, len(tscErrors))
+			if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+				return result
+			}
 			if repaired {
 				// Rematerialise updated source files (not node_modules) and continue.
 				if err := cvRematerializeSourceFiles(*allFiles, tmpDir); err != nil {
@@ -404,7 +453,11 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 			return result
 		}
 
+		am.cvBroadcastStage(build, 96, "vite_build", "Running production bundle check.")
 		viteErrors := cvRunViteBuild(ctx, tmpDir)
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
 		{
 			msgs := make([]string, len(viteErrors))
 			for i, e := range viteErrors {
@@ -424,8 +477,12 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		log.Printf("[compile_validator] build %s attempt %d: vite build found %d error(s)", build.ID, attempt+1, len(viteErrors))
 		pLog(build.ID).CompileRepairStart("vite_inline", attempt, len(*allFiles))
 		result.RepairAttempts++
+		am.cvBroadcastStage(build, 97, "vite_repair", fmt.Sprintf("Repairing production bundle errors (attempt %d/%d).", attempt+1, maxAttempts))
 		repaired := am.cvRunInlineRepair(ctx, build, viteErrors, allFiles, tmpDir)
 		pLog(build.ID).CompileRepairDone("vite_inline", attempt, repaired, len(viteErrors))
+		if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
+			return result
+		}
 		if repaired {
 			if err := cvRematerializeSourceFiles(*allFiles, tmpDir); err != nil {
 				log.Printf("[compile_validator] build %s: rematerialise failed: %v", build.ID, err)
@@ -442,6 +499,27 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 	cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
 	am.cvBroadcastResult(build, false, result.FinalErrors)
 	return result
+}
+
+func cvStopForContext(ctx context.Context, result *compileLoopResult, build *Build, startedAt time.Time, budget time.Duration, am *AgentManager) bool {
+	if ctx == nil || ctx.Err() == nil || result == nil {
+		return false
+	}
+	elapsed := time.Since(startedAt).Round(time.Second)
+	switch ctx.Err() {
+	case context.DeadlineExceeded:
+		result.SkipReason = fmt.Sprintf("compile validation budget exhausted after %s (budget %s)", elapsed, budget.Round(time.Second))
+	default:
+		result.SkipReason = fmt.Sprintf("compile validation cancelled after %s: %v", elapsed, ctx.Err())
+	}
+	cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
+	if am != nil {
+		am.cvBroadcastStage(build, 97, "budget_exhausted", result.SkipReason+"; continuing to final readiness validation.")
+	}
+	if build != nil {
+		log.Printf("[compile_validator] build %s: %s", build.ID, result.SkipReason)
+	}
+	return true
 }
 
 func cvSetValidationCounters(build *Build, passed bool, attempts, repairs int) {
@@ -1563,7 +1641,52 @@ func cvHasFrontendBuildableFiles(files []GeneratedFile) bool {
 
 // ─── Progress Broadcasting ────────────────────────────────────────────────────
 
+func (am *AgentManager) cvBroadcastStage(build *Build, progress int, stage, message string) {
+	if am == nil || build == nil {
+		return
+	}
+	if progress < 92 {
+		progress = 92
+	}
+	if progress > 97 {
+		progress = 97
+	}
+	now := time.Now()
+
+	build.mu.Lock()
+	if !isTerminalBuildStatus(build.Status) {
+		build.Status = BuildReviewing
+		build.Progress = progress
+		build.UpdatedAt = now
+		build.SnapshotState.CurrentPhase = "compile_validation"
+		required := true
+		build.SnapshotState.QualityGateRequired = &required
+		build.SnapshotState.QualityGateStatus = "running"
+		build.SnapshotState.QualityGateStage = "compile_validation"
+	}
+	build.mu.Unlock()
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":                    "compile_validation",
+			"status":                   string(BuildReviewing),
+			"progress":                 progress,
+			"message":                  message,
+			"quality_gate_required":    true,
+			"quality_gate_active":      true,
+			"quality_gate_stage":       "compile_validation",
+			"compile_validation_stage": strings.TrimSpace(stage),
+		},
+	})
+}
+
 func (am *AgentManager) cvBroadcastResult(build *Build, passed bool, errors []ParsedBuildError) {
+	if am == nil || build == nil {
+		return
+	}
 	msg := "Compile validation passed — generated code builds cleanly."
 	if !passed {
 		if len(errors) > 0 {
@@ -1573,17 +1696,32 @@ func (am *AgentManager) cvBroadcastResult(build *Build, passed bool, errors []Pa
 		}
 		cvRecordCompileFailureFingerprint(build, errors)
 	}
+	progress := 97
+	now := time.Now()
+	build.mu.Lock()
+	if !isTerminalBuildStatus(build.Status) {
+		build.Status = BuildReviewing
+		build.Progress = progress
+		build.UpdatedAt = now
+		build.SnapshotState.CurrentPhase = "compile_validation"
+		required := true
+		build.SnapshotState.QualityGateRequired = &required
+		build.SnapshotState.QualityGateStatus = "running"
+		build.SnapshotState.QualityGateStage = "compile_validation"
+	}
+	build.mu.Unlock()
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
 		BuildID:   build.ID,
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Data: map[string]any{
 			"phase":                     "compile_validation",
 			"status":                    string(BuildReviewing),
-			"progress":                  95,
+			"progress":                  progress,
 			"message":                   msg,
 			"compile_validation_passed": passed,
 			"compile_validation_errors": len(errors),
+			"compile_validation_stage":  "result",
 		},
 	})
 }

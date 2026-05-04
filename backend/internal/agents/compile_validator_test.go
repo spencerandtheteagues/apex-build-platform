@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,62 @@ func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
 				t.Fatalf("maxCompileAttempts(%q) = %d, want %d", tt.mode, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCompileValidationBudgetByPowerMode(t *testing.T) {
+	t.Setenv("APEX_COMPILE_VALIDATION_BUDGET_SECONDS", "")
+	t.Setenv("APEX_COMPILE_VALIDATION_BUDGET_FAST_SECONDS", "")
+	t.Setenv("APEX_COMPILE_VALIDATION_BUDGET_BALANCED_SECONDS", "")
+	t.Setenv("APEX_COMPILE_VALIDATION_BUDGET_MAX_SECONDS", "")
+
+	tests := []struct {
+		name string
+		mode PowerMode
+		want time.Duration
+	}{
+		{name: "fast", mode: PowerFast, want: 8 * time.Minute},
+		{name: "balanced", mode: PowerBalanced, want: 10 * time.Minute},
+		{name: "max", mode: PowerMax, want: 12 * time.Minute},
+		{name: "unknown defaults to fast budget", mode: PowerMode("unknown"), want: 8 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compileValidationBudget(tt.mode); got != tt.want {
+				t.Fatalf("compileValidationBudget(%q) = %s, want %s", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompileValidationBudgetHonorsOverrideAndFloor(t *testing.T) {
+	t.Setenv("APEX_COMPILE_VALIDATION_BUDGET_SECONDS", "")
+	t.Setenv("APEX_COMPILE_VALIDATION_BUDGET_FAST_SECONDS", "30")
+	if got := compileValidationBudget(PowerFast); got != cvMinBudget {
+		t.Fatalf("expected budget floor %s, got %s", cvMinBudget, got)
+	}
+
+	t.Setenv("APEX_COMPILE_VALIDATION_BUDGET_SECONDS", "180")
+	if got := compileValidationBudget(PowerMax); got != 3*time.Minute {
+		t.Fatalf("expected global override to win, got %s", got)
+	}
+}
+
+func TestCVRunCommandHonorsParentDeadline(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	_, err := cvRunCommand(ctx, t.TempDir(), time.Minute, "sh", "-c", "sleep 1")
+	if err == nil {
+		t.Fatal("expected parent context deadline to stop command")
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("expected command to stop near parent deadline, elapsed %s", elapsed)
 	}
 }
 
