@@ -446,8 +446,8 @@ func TestGetBuildStatusFallsBackToSnapshotWhenLiveReadStalls(t *testing.T) {
 		if body["live"] != false {
 			t.Fatalf("expected stalled live read to fall back to snapshot, got live=%v", body["live"])
 		}
-		if body["progress"] != float64(99) {
-			t.Fatalf("expected snapshot progress 99, got %v", body["progress"])
+		if body["progress"] != float64(79) {
+			t.Fatalf("expected active snapshot backend_services progress to be capped at 79, got %v", body["progress"])
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("expected build status fallback to return promptly when live state read blocks")
@@ -1207,6 +1207,53 @@ func TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
 	}
 	if got := int(body["progress"].(float64)); got != 19 {
 		t.Fatalf("expected architecture progress to be capped at 19, got %d", got)
+	}
+}
+
+func TestGetBuildStatusNormalizesActiveSnapshotProgressAndRepairError(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "snapshot-progress-repair",
+		UserID:      1,
+		Description: "Active snapshot should not overstate progress while repaired validation reruns",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerMax),
+		Progress:    99,
+		Error:       "Final output validation failed: missing_deliverable: .env.example (applied deliverable repair: generated .env.example)",
+		FilesJSON:   "[]",
+		StateJSON:   `{"current_phase":"parallel_core","quality_gate_required":true,"quality_gate_status":"running","quality_gate_stage":"validation"}`,
+		CreatedAt:   now.Add(-2 * time.Minute),
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/snapshot-progress-repair/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got := int(body["progress"].(float64)); got != 79 {
+		t.Fatalf("expected active snapshot parallel_core progress to be capped at 79, got %d", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(body["error"])); got != "" {
+		t.Fatalf("expected transient repaired validation error to be hidden from active status, got %q", got)
 	}
 }
 

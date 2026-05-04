@@ -763,8 +763,9 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		return
 	}
 
+	snapshotState := parseBuildSnapshotState(snapshot.StateJSON)
 	snapshotStatus := string(presentedSnapshotStatus(snapshot))
-	snapshotProgress := presentedSnapshotProgress(snapshot, BuildStatus(snapshotStatus))
+	snapshotProgress := presentedSnapshotProgress(snapshot, BuildStatus(snapshotStatus), snapshotState)
 	agents := parseBuildAgents(snapshot.AgentsJSON)
 	tasks := parseBuildTasks(snapshot.TasksJSON)
 	checkpoints := parseBuildCheckpoints(snapshot.CheckpointsJSON)
@@ -782,13 +783,13 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		"created_at":             snapshot.CreatedAt,
 		"updated_at":             snapshot.UpdatedAt,
 		"completed_at":           snapshot.CompletedAt,
-		"error":                  snapshot.Error,
+		"error":                  presentedBuildError(BuildStatus(snapshotStatus), snapshot.Error),
 		"files_count":            snapshot.FilesCount,
 		"interaction":            parseBuildInteraction(snapshot.InteractionJSON),
 		"live":                   false,
 		"restored_from_snapshot": true,
 	}
-	for key, value := range buildSnapshotStateResponseFields(parseBuildSnapshotState(snapshot.StateJSON), snapshotStatus, userPlan) {
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, snapshotStatus, userPlan) {
 		response[key] = value
 	}
 	c.JSON(http.StatusOK, response)
@@ -892,7 +893,7 @@ func presentedSnapshotStatus(snapshot *models.CompletedBuild) BuildStatus {
 	return normalizeRestoredBuildStatus(snapshot)
 }
 
-func presentedSnapshotProgress(snapshot *models.CompletedBuild, status BuildStatus) int {
+func presentedSnapshotProgress(snapshot *models.CompletedBuild, status BuildStatus, state ...BuildSnapshotState) int {
 	if snapshot == nil {
 		if status == BuildCompleted {
 			return 100
@@ -902,6 +903,12 @@ func presentedSnapshotProgress(snapshot *models.CompletedBuild, status BuildStat
 	progress := snapshot.Progress
 	if status == BuildCompleted && progress < 100 {
 		progress = 100
+	}
+	if isActiveBuildStatus(string(status)) && len(state) > 0 {
+		_, phaseMax, ok := buildPhaseProgressWindow(state[0].CurrentPhase, status)
+		if ok && progress > phaseMax {
+			progress = phaseMax
+		}
 	}
 	return progress
 }
@@ -924,6 +931,28 @@ func presentedLiveBuildProgress(progress int, state BuildSnapshotState, status B
 		return phaseMax
 	}
 	return progress
+}
+
+func presentedBuildError(status BuildStatus, raw string) string {
+	err := strings.TrimSpace(raw)
+	if err == "" {
+		return ""
+	}
+	if !isActiveBuildStatus(string(status)) {
+		return err
+	}
+	lower := strings.ToLower(err)
+	transientRepairMarkers := []string{
+		"(applied ",
+		"(cleared stale ",
+		"re-running final validation",
+	}
+	for _, marker := range transientRepairMarkers {
+		if strings.Contains(lower, marker) {
+			return ""
+		}
+	}
+	return err
 }
 
 func normalizeBuildMessageProgress(msg *WSMessage, state BuildSnapshotState, status BuildStatus) {
@@ -1147,7 +1176,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 	activityTimeline := parseBuildActivityTimeline(snapshot.ActivityJSON)
 	snapshotState := parseBuildSnapshotState(snapshot.StateJSON)
 	snapshotStatus := string(presentedSnapshotStatus(snapshot))
-	snapshotProgress := presentedSnapshotProgress(snapshot, BuildStatus(snapshotStatus))
+	snapshotProgress := presentedSnapshotProgress(snapshot, BuildStatus(snapshotStatus), snapshotState)
 
 	response := gin.H{
 		"id":                     snapshot.BuildID,
@@ -1165,7 +1194,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		"created_at":             snapshot.CreatedAt,
 		"updated_at":             snapshot.UpdatedAt,
 		"completed_at":           snapshot.CompletedAt,
-		"error":                  snapshot.Error,
+		"error":                  presentedBuildError(BuildStatus(snapshotStatus), snapshot.Error),
 		"files":                  files,
 		"messages":               interaction.Messages,
 		"interaction":            interaction,
@@ -1286,7 +1315,7 @@ func (h *BuildHandler) readLiveBuildStatusPayload(build *Build, userPlan string,
 		build.mu.RLock()
 		defer build.mu.RUnlock()
 
-		errorMessage := build.Error
+		errorMessage := presentedBuildError(build.Status, build.Error)
 		if strings.TrimSpace(errorMessage) == "" && build.Status == BuildFailed {
 			errorMessage = latestFailedTaskErrorLocked(build)
 		}
@@ -1356,7 +1385,7 @@ func (h *BuildHandler) readLiveBuildDetailsPayload(build *Build, userPlan string
 			"created_at":               build.CreatedAt,
 			"updated_at":               build.UpdatedAt,
 			"completed_at":             build.CompletedAt,
-			"error":                    build.Error,
+			"error":                    presentedBuildError(build.Status, build.Error),
 			"files":                    h.manager.collectGeneratedFiles(build),
 			"messages":                 interaction.Messages,
 			"interaction":              interaction,
@@ -2389,6 +2418,7 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 			json.Unmarshal([]byte(b.TechStack), &techStack)
 		}
 		displayStatus := presentedSnapshotStatus(&b)
+		snapshotState := parseBuildSnapshotState(b.StateJSON)
 		s := BuildSummary{
 			ID:          b.ID,
 			BuildID:     b.BuildID,
@@ -2401,7 +2431,7 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 			TechStack:   techStack,
 			FilesCount:  b.FilesCount,
 			TotalCost:   b.TotalCost,
-			Progress:    presentedSnapshotProgress(&b, displayStatus),
+			Progress:    presentedSnapshotProgress(&b, displayStatus, snapshotState),
 			DurationMs:  b.DurationMs,
 			CreatedAt:   b.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			Live:        false,
@@ -2484,7 +2514,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		live = true
 	}
 	displayStatus := presentedSnapshotStatus(&build)
-	displayProgress := presentedSnapshotProgress(&build, displayStatus)
+	displayProgress := presentedSnapshotProgress(&build, displayStatus, snapshotState)
 
 	response := gin.H{
 		"id":                build.ID,
@@ -2507,7 +2537,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		"total_cost":        build.TotalCost,
 		"progress":          displayProgress,
 		"duration_ms":       build.DurationMs,
-		"error":             build.Error,
+		"error":             presentedBuildError(displayStatus, build.Error),
 		"created_at":        build.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		"completed_at":      build.CompletedAt,
 		"live":              live,
