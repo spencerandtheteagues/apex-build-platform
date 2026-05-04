@@ -15,6 +15,9 @@ ARTIFACT_ROOT="${ARTIFACT_ROOT:-/tmp/apex-live-prompt-matrix-$(date -u +%Y%m%dT%
 LOGIN_EMAIL="${LOGIN_EMAIL:-}"
 LOGIN_USERNAME="${LOGIN_USERNAME:-}"
 LOGIN_PASSWORD="${LOGIN_PASSWORD:-}"
+LOGIN_FULL_NAME="${LOGIN_FULL_NAME:-APEX Matrix Canary}"
+AUTO_REGISTER="${AUTO_REGISTER:-0}"
+STOP_ON_AUTH_PREREQ="${STOP_ON_AUTH_PREREQ:-1}"
 DRY_RUN="${DRY_RUN:-0}"
 
 discover_prompts() {
@@ -61,7 +64,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-if [[ -z "$LOGIN_PASSWORD" ]]; then
+if [[ -z "$LOGIN_PASSWORD" && "$AUTO_REGISTER" != "1" ]]; then
   echo "PROMPT_MATRIX_CREDENTIALS_MISSING: LOGIN_PASSWORD is required" >&2
   exit 1
 fi
@@ -157,6 +160,8 @@ for prompt_file in "${prompt_files[@]}"; do
     LOGIN_EMAIL="$LOGIN_EMAIL" \
     LOGIN_USERNAME="$LOGIN_USERNAME" \
     LOGIN_PASSWORD="$LOGIN_PASSWORD" \
+    LOGIN_FULL_NAME="$LOGIN_FULL_NAME" \
+    AUTO_REGISTER="$AUTO_REGISTER" \
     node scripts/run_live_golden_build.mjs "$prompt_file" 2>&1 | tee "$run_artifacts/harness.log"
     exit_code="${PIPESTATUS[0]}"
     set -e
@@ -164,6 +169,10 @@ for prompt_file in "${prompt_files[@]}"; do
     summarize_run "$prompt_slug" "$prompt_file" "$power_mode" "$run_artifacts" "$exit_code" >> "$summary_jsonl"
     if [[ "$exit_code" -ne 0 ]]; then
       overall_status=1
+      if [[ "$STOP_ON_AUTH_PREREQ" == "1" ]] && grep -Eq 'EMAIL_VERIFICATION_REQUIRED|email_not_verified|AUTH_RATE_LIMIT_EXCEEDED|Too many authentication attempts' "$run_artifacts/harness.log"; then
+        echo "PROMPT_MATRIX_AUTH_PREREQUISITE_FAILED: verified canary credentials are required before continuing the live matrix." >&2
+        break 2
+      fi
     fi
   done
 done

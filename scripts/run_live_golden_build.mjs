@@ -17,12 +17,20 @@ const maxPolls = Number(process.env.MAX_POLLS || 240)
 const artifactDir = process.env.ARTIFACT_DIR || path.join('/tmp', `apex-golden-${Date.now()}`)
 const previewStabilitySeconds = Number(process.env.PREVIEW_STABILITY_SECONDS || 10)
 const previewStabilityPollMS = Math.max(250, Number(process.env.PREVIEW_STABILITY_POLL_MS || 1000))
-const loginEmail = process.env.LOGIN_EMAIL || ''
+const autoRegister = process.env.AUTO_REGISTER === '1'
+let loginEmail = process.env.LOGIN_EMAIL || ''
 // Prefer explicit email-only login when LOGIN_EMAIL is supplied. Sending both a
 // stale default username and the intended email causes the production handler to
 // authenticate the wrong identifier.
-const loginUsername = process.env.LOGIN_USERNAME ?? (loginEmail ? '' : 'spencer')
-const loginPassword = process.env.LOGIN_PASSWORD || ''
+let loginUsername = process.env.LOGIN_USERNAME ?? (loginEmail ? '' : 'spencer')
+let loginPassword = process.env.LOGIN_PASSWORD || ''
+
+if (autoRegister && !loginPassword.trim()) {
+  const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`
+  loginUsername = process.env.LOGIN_USERNAME || `matrix${suffix}`
+  loginEmail = process.env.LOGIN_EMAIL || `${loginUsername}@example.com`
+  loginPassword = `Passw0rd!${suffix}`
+}
 
 if (!prompt.trim()) {
   throw new Error('PROMPT or prompt file path is required')
@@ -36,6 +44,7 @@ fs.mkdirSync(artifactDir, { recursive: true })
 const cookies = new Map()
 let csrfToken = ''
 let bearerToken = ''
+let autoRegisterAttempted = false
 
 function recordCookies(headers) {
   const raw = typeof headers.getSetCookie === 'function'
@@ -62,6 +71,13 @@ async function request(route, options = {}) {
     try {
       return await requestOnce(route, fetchOptions)
     } catch (error) {
+      if (error.status === 403 && error.response?.error_code === 'email_not_verified') {
+        const err = new Error('authenticated live canary requires a verified account; disposable auto-register accounts cannot start builds while email verification is enforced')
+        err.status = error.status
+        err.response = error.response
+        err.code = 'EMAIL_VERIFICATION_REQUIRED'
+        throw err
+      }
       if (!skipReauth && error.status === 401 && attempt === 0) {
         console.log(`[${new Date().toISOString()}] auth expired during ${route}; refreshing session and retrying`)
         cookies.clear()
@@ -132,6 +148,35 @@ async function login() {
   })
   bearerToken = data?.access_token || data?.token || data?.data?.access_token || data?.tokens?.access_token || ''
   await fetchCSRF()
+}
+
+async function registerAndLogin() {
+  if (autoRegisterAttempted) {
+    throw new Error('AUTO_REGISTER attempted more than once in one harness process')
+  }
+  autoRegisterAttempted = true
+  await fetchCSRF()
+  const data = await request('/auth/register', {
+    method: 'POST',
+    skipReauth: true,
+    body: {
+      username: loginUsername,
+      email: loginEmail,
+      password: loginPassword,
+      full_name: process.env.LOGIN_FULL_NAME || 'APEX Matrix Canary',
+      accept_legal_terms: true,
+    },
+  })
+  bearerToken = data?.access_token || data?.token || data?.data?.access_token || data?.data?.tokens?.access_token || data?.tokens?.access_token || ''
+  writeArtifact('auth-user.json', {
+    auto_registered: true,
+    username: loginUsername,
+    email: loginEmail,
+  })
+  await fetchCSRF()
+  if (!bearerToken && cookies.size === 0) {
+    await login()
+  }
 }
 
 function writeArtifact(name, data) {
@@ -430,7 +475,11 @@ try {
   console.log(`BASE_URL=${apiBase}`)
   console.log(`MODE=${mode}`)
   console.log(`POWER_MODE=${powerMode}`)
-  await login()
+  if (autoRegister) {
+    await registerAndLogin()
+  } else {
+    await login()
+  }
   const buildID = await startBuild()
   const detail = await pollBuild(buildID)
   await startPreview(detail.project_id)

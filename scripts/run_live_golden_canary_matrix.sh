@@ -14,6 +14,9 @@ ARTIFACT_ROOT="${ARTIFACT_ROOT:-/tmp/apex-live-golden-canary-$(date -u +%Y%m%dT%
 LOGIN_EMAIL="${LOGIN_EMAIL:-}"
 LOGIN_USERNAME="${LOGIN_USERNAME:-}"
 LOGIN_PASSWORD="${LOGIN_PASSWORD:-}"
+LOGIN_FULL_NAME="${LOGIN_FULL_NAME:-APEX Canary}"
+AUTO_REGISTER="${AUTO_REGISTER:-0}"
+STOP_ON_AUTH_PREREQ="${STOP_ON_AUTH_PREREQ:-1}"
 DRY_RUN="${DRY_RUN:-0}"
 
 if [[ ! -f "$PROMPT_FILE" ]]; then
@@ -30,7 +33,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-if [[ -z "$LOGIN_PASSWORD" ]]; then
+if [[ -z "$LOGIN_PASSWORD" && "$AUTO_REGISTER" != "1" ]]; then
   echo "GOLDEN_CANARY_CREDENTIALS_MISSING: LOGIN_PASSWORD is required" >&2
   exit 1
 fi
@@ -122,6 +125,8 @@ for power_mode in $POWER_MODES; do
   LOGIN_EMAIL="$LOGIN_EMAIL" \
   LOGIN_USERNAME="$LOGIN_USERNAME" \
   LOGIN_PASSWORD="$LOGIN_PASSWORD" \
+  LOGIN_FULL_NAME="$LOGIN_FULL_NAME" \
+  AUTO_REGISTER="$AUTO_REGISTER" \
   node scripts/run_live_golden_build.mjs "$PROMPT_FILE" 2>&1 | tee "$mode_artifacts/harness.log"
   exit_code="${PIPESTATUS[0]}"
   set -e
@@ -129,6 +134,10 @@ for power_mode in $POWER_MODES; do
   summarize_mode "$power_mode" "$mode_artifacts" "$exit_code" >> "$summary_jsonl"
   if [[ "$exit_code" -ne 0 ]]; then
     overall_status=1
+    if [[ "$STOP_ON_AUTH_PREREQ" == "1" ]] && grep -Eq 'EMAIL_VERIFICATION_REQUIRED|email_not_verified|AUTH_RATE_LIMIT_EXCEEDED|Too many authentication attempts' "$mode_artifacts/harness.log"; then
+      echo "GOLDEN_CANARY_AUTH_PREREQUISITE_FAILED: verified canary credentials are required before continuing the live canary." >&2
+      break
+    fi
   fi
 done
 
