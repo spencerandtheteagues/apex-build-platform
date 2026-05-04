@@ -98,6 +98,13 @@ async function request(route, options = {}) {
         throw err
       }
       if (!skipReauth && error.status === 401 && !authRetried) {
+        if (autoRegister && autoRegisterAttempted) {
+          const err = new Error(`AUTO_REGISTER session expired during ${route}; disposable unverified canary accounts cannot re-login after production restarts`)
+          err.status = error.status
+          err.response = error.response
+          err.code = 'AUTO_REGISTER_SESSION_EXPIRED'
+          throw err
+        }
         authRetried = true
         console.log(`[${new Date().toISOString()}] auth expired during ${route}; refreshing session and retrying`)
         cookies.clear()
@@ -249,7 +256,18 @@ async function pollBuild(buildID) {
   let lastProgress = -1
   let sameProgressTicks = 0
   for (let i = 0; i < maxPolls; i += 1) {
-    const status = await request(`/build/${buildID}/status`).catch(error => ({ error: error.message, response: error.response }))
+    let status
+    try {
+      status = await request(`/build/${buildID}/status`)
+    } catch (error) {
+      writeArtifact(`build-status-error-${i + 1}.json`, {
+        message: error.message,
+        status: error.status,
+        code: error.code,
+        response: error.response,
+      })
+      throw error
+    }
     const summary = summarizeBuild(status)
     if (summary.progress === lastProgress) sameProgressTicks += 1
     else sameProgressTicks = 0

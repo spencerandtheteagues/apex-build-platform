@@ -506,6 +506,7 @@ type Build struct {
 	CompileValidationPassed     bool                  `json:"compile_validation_passed,omitempty"`
 	CompileValidationAttempts   int                   `json:"compile_validation_attempts,omitempty"`
 	CompileValidationRepairs    int                   `json:"compile_validation_repairs,omitempty"`
+	CompileValidationStartedAt  *time.Time            `json:"-"`
 	PhasedPipelineComplete      bool                  `json:"phased_pipeline_complete,omitempty"`
 	DiffMode                    bool                  `json:"diff_mode,omitempty"`        // When true, changes require user review before applying
 	RoleAssignments             map[string]string     `json:"role_assignments,omitempty"` // User-specified provider per role category

@@ -154,6 +154,32 @@ func compileValidationBudget(mode PowerMode) time.Duration {
 	return budget
 }
 
+func cvCompileValidationBudgetWindow(build *Build, now time.Time, budget time.Duration) (time.Time, time.Duration) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if budget <= 0 {
+		budget = cvMinBudget
+	}
+	if build == nil {
+		return now, budget
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	if build.CompileValidationStartedAt == nil || build.CompileValidationStartedAt.IsZero() {
+		startedAt := now
+		build.CompileValidationStartedAt = &startedAt
+	}
+	startedAt := *build.CompileValidationStartedAt
+	elapsed := now.Sub(startedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	return startedAt, budget - elapsed
+}
+
 var cvPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
 
 func cvPackageManifestSanityIssues(files []GeneratedFile) []ParsedBuildError {
@@ -243,7 +269,15 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		startedAt = time.Now()
 	}
 	budget := compileValidationBudget(build.PowerMode)
-	am.cvBroadcastStage(build, 92, "prepare", fmt.Sprintf("Compile-validating generated code with a %s budget.", budget.Round(time.Second)))
+	startedAt, remainingBudget := cvCompileValidationBudgetWindow(build, startedAt, budget)
+	if remainingBudget <= 0 {
+		result.SkipReason = fmt.Sprintf("compile validation total budget exhausted after %s (budget %s)", time.Since(startedAt).Round(time.Second), budget.Round(time.Second))
+		cvSetValidationCounters(build, false, result.Attempts, result.RepairAttempts)
+		am.cvBroadcastStage(build, 97, "budget_exhausted", result.SkipReason+"; continuing to final readiness validation.")
+		log.Printf("[compile_validator] build %s: %s", build.ID, result.SkipReason)
+		return result
+	}
+	am.cvBroadcastStage(build, 92, "prepare", fmt.Sprintf("Compile-validating generated code with %s remaining of the %s total budget.", remainingBudget.Round(time.Second), budget.Round(time.Second)))
 
 	// Create persistent workspace — node_modules will be reused across repair attempts.
 	tmpDir, err := os.MkdirTemp("", "apex-compile-validate-*")
@@ -264,7 +298,7 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parentCtx, budget)
+	ctx, cancel := context.WithTimeout(parentCtx, remainingBudget)
 	defer cancel()
 	if cvStopForContext(ctx, &result, build, startedAt, budget, am) {
 		return result

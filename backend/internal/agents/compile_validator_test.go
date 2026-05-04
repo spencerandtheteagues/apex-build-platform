@@ -75,6 +75,35 @@ func TestCompileValidationBudgetHonorsOverrideAndFloor(t *testing.T) {
 	}
 }
 
+func TestCVCompileValidationBudgetWindowPersistsAcrossReruns(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{ID: "compile-budget-window"}
+	started := time.Date(2026, 5, 4, 4, 0, 0, 0, time.UTC)
+	budget := 8 * time.Minute
+
+	gotStarted, remaining := cvCompileValidationBudgetWindow(build, started, budget)
+	if !gotStarted.Equal(started) {
+		t.Fatalf("expected first window to start at %s, got %s", started, gotStarted)
+	}
+	if remaining != budget {
+		t.Fatalf("expected full budget on first window, got %s", remaining)
+	}
+
+	gotStarted, remaining = cvCompileValidationBudgetWindow(build, started.Add(3*time.Minute), budget)
+	if !gotStarted.Equal(started) {
+		t.Fatalf("expected rerun to preserve first start %s, got %s", started, gotStarted)
+	}
+	if remaining != 5*time.Minute {
+		t.Fatalf("expected remaining budget across rerun to be 5m, got %s", remaining)
+	}
+
+	_, remaining = cvCompileValidationBudgetWindow(build, started.Add(9*time.Minute), budget)
+	if remaining > 0 {
+		t.Fatalf("expected exhausted budget after total elapsed exceeds cap, got %s", remaining)
+	}
+}
+
 func TestCVRunCommandHonorsParentDeadline(t *testing.T) {
 	t.Parallel()
 
