@@ -2,11 +2,13 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/pkg/models"
 )
 
 func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
@@ -101,6 +103,53 @@ func TestCVCompileValidationBudgetWindowPersistsAcrossReruns(t *testing.T) {
 	_, remaining = cvCompileValidationBudgetWindow(build, started.Add(9*time.Minute), budget)
 	if remaining > 0 {
 		t.Fatalf("expected exhausted budget after total elapsed exceeds cap, got %s", remaining)
+	}
+}
+
+func TestCompileValidationStartedAtPersistsThroughSnapshotRestore(t *testing.T) {
+	t.Parallel()
+
+	started := time.Date(2026, 5, 4, 4, 0, 0, 0, time.UTC)
+	build := &Build{
+		ID:                         "compile-budget-snapshot",
+		UserID:                     42,
+		Status:                     BuildReviewing,
+		Mode:                       ModeFast,
+		PowerMode:                  PowerFast,
+		CompileValidationStartedAt: &started,
+	}
+	state := snapshotStateForPersistenceLocked(build)
+	if state.RestoreContext == nil || state.RestoreContext.CompileValidationStartedAt == nil {
+		t.Fatal("expected compile validation start timestamp in restore context")
+	}
+	if !state.RestoreContext.CompileValidationStartedAt.Equal(started) {
+		t.Fatalf("expected persisted start %s, got %s", started, *state.RestoreContext.CompileValidationStartedAt)
+	}
+
+	stateJSON, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal snapshot state: %v", err)
+	}
+	am := NewAgentManager(&stubAIRouter{
+		providers:             []ai.AIProvider{ai.ProviderGPT4},
+		hasConfiguredProvider: true,
+	})
+	restored, _, err := am.restoreBuildSessionFromSnapshotWithOptions(&models.CompletedBuild{
+		BuildID:   build.ID,
+		UserID:    build.UserID,
+		Status:    string(BuildReviewing),
+		Mode:      string(ModeFast),
+		PowerMode: string(PowerFast),
+		StateJSON: string(stateJSON),
+		Progress:  97,
+		CreatedAt: started.Add(-time.Minute),
+		UpdatedAt: started,
+	}, restoreBuildSessionOptions{resumeExecution: false})
+	if err != nil {
+		t.Fatalf("restore build from snapshot: %v", err)
+	}
+	if restored.CompileValidationStartedAt == nil || !restored.CompileValidationStartedAt.Equal(started) {
+		t.Fatalf("expected restored compile validation start %s, got %+v", started, restored.CompileValidationStartedAt)
 	}
 }
 

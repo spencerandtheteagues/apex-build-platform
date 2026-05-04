@@ -465,6 +465,7 @@ type BuildRestoreContext struct {
 	CompileValidationPassed     bool              `json:"compile_validation_passed,omitempty"`
 	CompileValidationAttempts   int               `json:"compile_validation_attempts,omitempty"`
 	CompileValidationRepairs    int               `json:"compile_validation_repairs,omitempty"`
+	CompileValidationStartedAt  *time.Time        `json:"compile_validation_started_at,omitempty"`
 	MaxAgents                   int               `json:"max_agents,omitempty"`
 	MaxRetries                  int               `json:"max_retries,omitempty"`
 	MaxRequests                 int               `json:"max_requests,omitempty"`

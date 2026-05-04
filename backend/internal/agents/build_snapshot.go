@@ -82,6 +82,7 @@ func snapshotStateForPersistenceLocked(build *Build) BuildSnapshotState {
 		CompileValidationPassed:     build.CompileValidationPassed,
 		CompileValidationAttempts:   build.CompileValidationAttempts,
 		CompileValidationRepairs:    build.CompileValidationRepairs,
+		CompileValidationStartedAt:  cloneTimePtr(build.CompileValidationStartedAt),
 		MaxAgents:                   build.MaxAgents,
 		MaxRetries:                  build.MaxRetries,
 		MaxRequests:                 build.MaxRequests,
@@ -94,6 +95,14 @@ func snapshotStateForPersistenceLocked(build *Build) BuildSnapshotState {
 		Plan:                        cloneBuildPlan(build.Plan),
 	}
 	return state
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := value.UTC()
+	return &cloned
 }
 
 func copyBuildOrchestrationStateLocked(build *Build) *BuildOrchestrationState {

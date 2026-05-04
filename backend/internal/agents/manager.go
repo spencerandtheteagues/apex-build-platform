@@ -22602,6 +22602,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 	compileValidationPassed := false
 	compileValidationAttempts := 0
 	compileValidationRepairs := 0
+	var compileValidationStartedAt *time.Time
 	roleAssignments := map[string]string(nil)
 	providerModelOverrides := map[string]string(nil)
 	phasedPipelineComplete := false
@@ -22619,6 +22620,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		compileValidationPassed = restoreContext.CompileValidationPassed
 		compileValidationAttempts = restoreContext.CompileValidationAttempts
 		compileValidationRepairs = restoreContext.CompileValidationRepairs
+		compileValidationStartedAt = cloneTimePtr(restoreContext.CompileValidationStartedAt)
 		if restoreContext.MaxAgents > 0 {
 			maxAgents = restoreContext.MaxAgents
 		}
@@ -22673,6 +22675,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		CompileValidationPassed:     compileValidationPassed,
 		CompileValidationAttempts:   compileValidationAttempts,
 		CompileValidationRepairs:    compileValidationRepairs,
+		CompileValidationStartedAt:  compileValidationStartedAt,
 		PhasedPipelineComplete:      phasedPipelineComplete,
 		DiffMode:                    diffMode,
 		RoleAssignments:             roleAssignments,
