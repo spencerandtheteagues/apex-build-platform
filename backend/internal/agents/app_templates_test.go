@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -98,6 +100,41 @@ func TestDetectAppTemplateSelectsAllProductionBlueprints(t *testing.T) {
 			tmpl := DetectAppTemplate(tc.description)
 			if tmpl == nil || tmpl.ID != tc.wantID {
 				t.Fatalf("expected %s template, got %+v", tc.wantID, tmpl)
+			}
+		})
+	}
+}
+
+func TestCanaryPromptFixturesMapToProductionBlueprints(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		file   string
+		wantID string
+	}{
+		{"01-ai-saas-document-intelligence.md", "ai-saas"},
+		{"02-saas-dashboard-ops-command-center.md", "saas-dashboard"},
+		{"03-crm-sales-pipeline.md", "crm"},
+		{"04-client-portal-agency.md", "client-portal"},
+		{"05-marketplace-contractor-directory.md", "marketplace"},
+		{"06-booking-salon-scheduler.md", "booking"},
+		{"07-inventory-warehouse-control.md", "inventory"},
+		{"08-project-management-collaboration.md", "project-management"},
+		{"09-social-community-content-messaging.md", "community"},
+		{"10-landing-page-waitlist-funnel.md", "landing-page"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.file, func(t *testing.T) {
+			t.Parallel()
+			content, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "canary", tc.file))
+			if err != nil {
+				t.Fatalf("read canary prompt fixture: %v", err)
+			}
+			tmpl := DetectAppTemplate(string(content))
+			if tmpl == nil || tmpl.ID != tc.wantID {
+				t.Fatalf("expected canary prompt %s to select template %q, got %+v", tc.file, tc.wantID, tmpl)
 			}
 		})
 	}

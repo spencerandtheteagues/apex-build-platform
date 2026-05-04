@@ -4,6 +4,17 @@ on:
   schedule:
     - cron: '0 11 * * *'
   workflow_dispatch:
+    inputs:
+      run_prompt_matrix:
+        description: Run the 10-prompt paid live reliability matrix
+        required: false
+        default: false
+        type: boolean
+      prompt_matrix_power_modes:
+        description: Space-separated power modes for the prompt matrix
+        required: false
+        default: balanced
+        type: string
 
 concurrency:
   group: production-canary
@@ -184,4 +195,70 @@ jobs:
         with:
           name: golden-fieldops-live-canary-artifacts
           path: golden-canary-artifacts
+          retention-days: 14
+
+  prompt-reliability-live-matrix:
+    name: Prompt Reliability Live Matrix
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_prompt_matrix == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check canary credentials
+        id: canary-creds
+        env:
+          APEX_CANARY_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
+          APEX_CANARY_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+        run: |
+          if [[ -n "$APEX_CANARY_EMAIL" && -n "$APEX_CANARY_PASSWORD" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping prompt reliability matrix because APEX_CANARY_EMAIL/APEX_CANARY_PASSWORD are not configured."
+          fi
+
+      - name: Set up Node
+        if: steps.canary-creds.outputs.available == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install E2E deps
+        if: steps.canary-creds.outputs.available == 'true'
+        working-directory: tests/e2e
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        if: steps.canary-creds.outputs.available == 'true'
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run live prompt reliability matrix
+        if: steps.canary-creds.outputs.available == 'true'
+        env:
+          BASE_URL: https://api.apex-build.dev/api/v1
+          PROMPT_DIR: prompts/canary
+          POWER_MODES: ${{ inputs.prompt_matrix_power_modes }}
+          MODE: full
+          POLL_SECONDS: 15
+          MAX_POLLS: 220
+          PREVIEW_STABILITY_SECONDS: 12
+          PREVIEW_STABILITY_POLL_MS: 1000
+          PROJECT_NAME_PREFIX: prompt-reliability-live-matrix
+          ARTIFACT_ROOT: prompt-matrix-artifacts
+          LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
+          LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
+          LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+        run: ./scripts/run_live_prompt_matrix.sh
+
+      - name: Upload prompt matrix artifacts
+        if: always() && steps.canary-creds.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-reliability-live-matrix-artifacts
+          path: prompt-matrix-artifacts
           retention-days: 14
