@@ -84,7 +84,6 @@ jobs:
 
   platform-build-canary-matrix:
     name: Platform Build Canary (${{ matrix.name }})
-    if: ${{ !matrix.requires_paid || (secrets.APEX_CANARY_EMAIL != '' && secrets.APEX_CANARY_PASSWORD != '') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -116,7 +115,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check paid canary credentials
+        id: paid-creds
+        env:
+          APEX_CANARY_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
+          APEX_CANARY_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+        run: |
+          if [[ -n "$APEX_CANARY_EMAIL" && -n "$APEX_CANARY_PASSWORD" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            if [[ "${{ matrix.requires_paid }}" == "true" ]]; then
+              echo "Skipping paid platform canary because APEX_CANARY_EMAIL/APEX_CANARY_PASSWORD are not configured."
+            fi
+          fi
+
       - name: Run platform build canary
+        if: ${{ !matrix.requires_paid || steps.paid-creds.outputs.available == 'true' }}
         env:
           BASE_URL: https://api.apex-build.dev/api/v1
           MODE: ${{ matrix.mode }}
