@@ -153,7 +153,7 @@ func TestPreviewHandlerStartPreviewFallsBackWhenSandboxRequiredButDockerUnavaila
 	require.Contains(t, recorder.Body.String(), `"sandbox":false`)
 }
 
-func TestPreviewHandlerStartPreviewFallsBackWhenSandboxContainerStartFails(t *testing.T) {
+func TestPreviewHandlerStartPreviewRejectsProcessFallbackWhenSandboxContainerStartFails(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, true)
 	factory, err := preview.NewPreviewServerFactory(handler.db, &preview.FactoryConfig{EnableContainerPreviews: false})
 	require.NoError(t, err)
@@ -179,20 +179,19 @@ func TestPreviewHandlerStartPreviewFallsBackWhenSandboxContainerStartFails(t *te
 
 	handler.StartPreview(context)
 
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	require.Contains(t, recorder.Body.String(), `"success":true`)
-	require.Contains(t, recorder.Body.String(), `"degraded":true`)
-	require.Contains(t, recorder.Body.String(), `"frontend_fallback":true`)
-	require.Contains(t, recorder.Body.String(), `"sandbox":false`)
-	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `sandbox preview failed`)
 	require.Contains(t, recorder.Body.String(), "Docker is not available")
+	require.NotContains(t, recorder.Body.String(), `"success":true`)
+	require.NotContains(t, recorder.Body.String(), `"degraded":true`)
+	require.NotContains(t, recorder.Body.String(), `"frontend_fallback":true`)
 }
 
 func TestPreviewFrontendStartTimeoutAllowsContainerBuildWindow(t *testing.T) {
 	t.Setenv("APEX_PREVIEW_FRONTEND_START_TIMEOUT_MS", "")
 
-	require.GreaterOrEqual(t, previewFrontendStartTimeout(), 75*time.Second)
-	require.LessOrEqual(t, previewFrontendStartTimeout(), 90*time.Second)
+	require.GreaterOrEqual(t, previewFrontendStartTimeout(), 180*time.Second)
+	require.LessOrEqual(t, previewFrontendStartTimeout(), 210*time.Second)
 }
 
 func TestPreviewHandlerFullStackNextFallsBackToFrontendPreviewWhenRuntimeFails(t *testing.T) {

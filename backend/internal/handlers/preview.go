@@ -1665,7 +1665,7 @@ func previewOptionalBackendStartTimeout() time.Duration {
 }
 
 func previewFrontendStartTimeout() time.Duration {
-	return previewDurationFromEnv("APEX_PREVIEW_FRONTEND_START_TIMEOUT_MS", 75*time.Second)
+	return previewDurationFromEnv("APEX_PREVIEW_FRONTEND_START_TIMEOUT_MS", 180*time.Second)
 }
 
 func previewDurationFromEnv(key string, fallback time.Duration) time.Duration {
@@ -1755,7 +1755,7 @@ func (h *PreviewHandler) startFrontendPreviewWithFallback(ctx context.Context, c
 		if err == nil {
 			return status, useSandbox, false, "", nil
 		}
-		if useSandbox && h.server != nil {
+		if useSandbox && h.server != nil && (!h.requireSandbox || h.sandboxFallbackActive()) {
 			fallbackReason := err.Error()
 			if errors.Is(startCtx.Err(), context.DeadlineExceeded) {
 				fallbackReason = fmt.Sprintf("sandbox preview start exceeded %s", previewFrontendStartTimeout())
@@ -1765,6 +1765,13 @@ func (h *PreviewHandler) startFrontendPreviewWithFallback(ctx context.Context, c
 				return fallbackStatus, false, true, fallbackReason, nil
 			}
 			return nil, useSandbox, false, fallbackReason, fmt.Errorf("sandbox preview failed: %v; process fallback also failed: %w", err, fallbackErr)
+		}
+		if useSandbox {
+			fallbackReason := err.Error()
+			if errors.Is(startCtx.Err(), context.DeadlineExceeded) {
+				fallbackReason = fmt.Sprintf("sandbox preview start exceeded %s", previewFrontendStartTimeout())
+			}
+			return nil, useSandbox, false, fallbackReason, fmt.Errorf("sandbox preview failed: %w", err)
 		}
 		return nil, useSandbox, false, "", err
 	}
