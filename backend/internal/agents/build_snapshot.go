@@ -75,6 +75,7 @@ func snapshotStateForPersistenceLocked(build *Build) BuildSnapshotState {
 	state.RestoreContext = &BuildRestoreContext{
 		SubscriptionPlan:            build.SubscriptionPlan,
 		ProviderMode:                build.ProviderMode,
+		PollTokenHash:               strings.TrimSpace(build.PollTokenHash),
 		RequirePreviewReady:         build.RequirePreviewReady,
 		RequestsUsed:                build.RequestsUsed,
 		ReadinessRecoveryAttempts:   build.ReadinessRecoveryAttempts,

@@ -209,6 +209,7 @@ export interface StartAgentResponse {
   build_id: string
   websocket_url: string
   status: AgentStatus
+  poll_token?: string
 }
 
 export interface AgentStatusResponse {

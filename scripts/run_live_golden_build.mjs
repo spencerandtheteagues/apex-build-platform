@@ -46,6 +46,7 @@ const cookies = new Map()
 let csrfToken = ''
 let bearerToken = ''
 let autoRegisterAttempted = false
+let buildPollToken = ''
 
 function recordCookies(headers) {
   const raw = typeof headers.getSetCookie === 'function'
@@ -98,15 +99,18 @@ async function request(route, options = {}) {
         throw err
       }
       if (!skipReauth && error.status === 401 && !authRetried) {
+        authRetried = true
+        console.log(`[${new Date().toISOString()}] auth expired during ${route}; refreshing session and retrying`)
+        if (await refreshSession()) {
+          continue
+        }
         if (autoRegister && autoRegisterAttempted) {
-          const err = new Error(`AUTO_REGISTER session expired during ${route}; disposable unverified canary accounts cannot re-login after production restarts`)
+          const err = new Error(`AUTO_REGISTER session expired during ${route}; refresh failed and disposable unverified canary accounts cannot re-login`)
           err.status = error.status
           err.response = error.response
           err.code = 'AUTO_REGISTER_SESSION_EXPIRED'
           throw err
         }
-        authRetried = true
-        console.log(`[${new Date().toISOString()}] auth expired during ${route}; refreshing session and retrying`)
         cookies.clear()
         csrfToken = ''
         bearerToken = ''
@@ -182,6 +186,25 @@ async function login() {
   await fetchCSRF()
 }
 
+async function refreshSession() {
+  try {
+    const data = await requestOnce('/auth/refresh', {
+      method: 'POST',
+      body: {},
+    })
+    bearerToken = data?.access_token || data?.token || data?.data?.access_token || data?.tokens?.access_token || bearerToken
+    await fetchCSRF()
+    return true
+  } catch (error) {
+    writeArtifact(`auth-refresh-failed-${Date.now()}.json`, {
+      message: error.message,
+      status: error.status,
+      response: error.response,
+    })
+    return false
+  }
+}
+
 async function registerAndLogin() {
   if (autoRegisterAttempted) {
     throw new Error('AUTO_REGISTER attempted more than once in one harness process')
@@ -244,21 +267,40 @@ async function startBuild() {
     project_name: projectName,
   }
   const data = await request('/build/start', { method: 'POST', body: payload })
-  writeArtifact('build-start.json', data)
+  buildPollToken = typeof data?.poll_token === 'string' ? data.poll_token : ''
+  writeArtifact('build-start.json', buildPollToken ? { ...data, poll_token: '[redacted]' } : data)
   const buildID = data?.build_id || data?.buildID
   if (!buildID) throw new Error(`build/start did not return build_id: ${JSON.stringify(data)}`)
   console.log(`BUILD_ID=${buildID}`)
   return buildID
 }
 
+async function requestBuildStatus(buildID) {
+  if (buildPollToken && process.env.USE_BUILD_POLL_TOKEN !== '0') {
+    try {
+      return await request(`/build/${buildID}/poll-status`, {
+        skipReauth: true,
+        headers: {
+          'X-Apex-Build-Poll-Token': buildPollToken,
+        },
+      })
+    } catch (error) {
+      if (![404, 405].includes(error.status)) throw error
+      console.log(`[${new Date().toISOString()}] poll-status unavailable on this deployment; falling back to authenticated status`)
+    }
+  }
+  return request(`/build/${buildID}/status`)
+}
+
 async function pollBuild(buildID) {
   let finalStatus = ''
   let lastProgress = -1
   let sameProgressTicks = 0
+  let latestStatus = null
   for (let i = 0; i < maxPolls; i += 1) {
     let status
     try {
-      status = await request(`/build/${buildID}/status`)
+      status = await requestBuildStatus(buildID)
     } catch (error) {
       writeArtifact(`build-status-error-${i + 1}.json`, {
         message: error.message,
@@ -268,6 +310,7 @@ async function pollBuild(buildID) {
       })
       throw error
     }
+    latestStatus = status
     const summary = summarizeBuild(status)
     if (summary.progress === lastProgress) sameProgressTicks += 1
     else sameProgressTicks = 0
@@ -280,7 +323,24 @@ async function pollBuild(buildID) {
     await new Promise(resolve => setTimeout(resolve, pollSeconds * 1000))
   }
 
-  const detail = await request(`/build/${buildID}`)
+  let detail
+  try {
+    detail = await request(`/build/${buildID}`)
+  } catch (error) {
+    if (buildPollToken && latestStatus && (error.code === 'AUTO_REGISTER_SESSION_EXPIRED' || error.status === 401)) {
+      detail = {
+        ...latestStatus,
+        detail_fallback: 'poll-status',
+      }
+      writeArtifact('build-detail-fallback.json', {
+        reason: error.message,
+        status: error.status,
+        code: error.code,
+      })
+    } else {
+      throw error
+    }
+  }
   writeArtifact('build-detail.json', detail)
   console.log(`FINAL_BUILD=${JSON.stringify(summarizeBuild(detail))}`)
   if (finalStatus !== 'completed' && detail?.status !== 'completed') {

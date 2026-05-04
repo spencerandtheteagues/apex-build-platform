@@ -751,6 +751,7 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 	if effectiveDescription == "" {
 		effectiveDescription = strings.TrimSpace(req.Description)
 	}
+	pollToken, pollTokenHash := newBuildPollToken()
 
 	build := &Build{
 		ID:                     buildID,
@@ -760,6 +761,8 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		PowerMode:              powerMode,
 		SubscriptionPlan:       strings.ToLower(strings.TrimSpace(subscriptionPlan)),
 		ProviderMode:           providerMode,
+		PollToken:              pollToken,
+		PollTokenHash:          pollTokenHash,
 		RequirePreviewReady:    req.RequirePreviewReady,
 		Description:            effectiveDescription,
 		TechStack:              req.TechStack,
@@ -22603,6 +22606,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 	compileValidationAttempts := 0
 	compileValidationRepairs := 0
 	var compileValidationStartedAt *time.Time
+	pollTokenHash := ""
 	roleAssignments := map[string]string(nil)
 	providerModelOverrides := map[string]string(nil)
 	phasedPipelineComplete := false
@@ -22613,6 +22617,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		if planType := strings.TrimSpace(strings.ToLower(restoreContext.SubscriptionPlan)); planType != "" {
 			subscriptionPlan = planType
 		}
+		pollTokenHash = strings.TrimSpace(restoreContext.PollTokenHash)
 		requirePreviewReady = restoreContext.RequirePreviewReady
 		requestsUsed = restoreContext.RequestsUsed
 		readinessRecoveryAttempts = restoreContext.ReadinessRecoveryAttempts
@@ -22657,6 +22662,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		PowerMode:                   powerMode,
 		SubscriptionPlan:            subscriptionPlan,
 		ProviderMode:                providerMode,
+		PollTokenHash:               pollTokenHash,
 		RequirePreviewReady:         requirePreviewReady,
 		Description:                 snapshot.Description,
 		TechStack:                   techStack,

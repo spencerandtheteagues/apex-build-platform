@@ -1,5 +1,29 @@
 # Contracts
 
+## Build Poll Status Token
+- Source of truth: `backend/internal/agents/types.go` `BuildResponse.PollToken`, `Build.PollTokenHash`, and `BuildRestoreContext.PollTokenHash`.
+- Producers:
+  - `AgentManager.CreateBuild` creates a per-build bearer token and persists only its hash in snapshot state.
+  - `BuildHandler.StartBuild` returns the raw token once in the build-start response.
+  - `BuildHandler.GetBuildPollStatus` reads live or snapshot status using `X-Apex-Build-Poll-Token`.
+- Transport:
+  - `POST /api/v1/build/start` optional `poll_token`.
+  - Public read-only `GET /api/v1/build/:id/poll-status` with `X-Apex-Build-Poll-Token`.
+  - Existing snapshot `state_json.restore_context.poll_token_hash`.
+- Consumers:
+  - `scripts/run_live_golden_build.mjs` and matrix wrappers use the token to keep polling during backend restarts or disposable canary session loss.
+  - Frontend API types tolerate the additive `poll_token` field but do not use it for privileged app UI actions.
+- Defaults / zero-value behavior:
+  - Old builds without a token hash cannot be read through the public poll route and keep requiring authenticated status reads.
+  - Omitted or incorrect poll tokens return unauthorized/forbidden and do not fall back to build ownership.
+  - The poll route is read-only and exposes status/progress/project metadata only; editing, preview start, download, and websocket remain authenticated.
+- Backward compatibility risk:
+  - Low; additive response field plus a new route.
+  - Existing authenticated status/detail routes are unchanged.
+- Required tests / validations:
+  - Backend tests for token creation, live poll status, snapshot poll status, and wrong-token rejection.
+  - Harness syntax check proving token-aware polling is parseable.
+
 ## Frontend Preview Phase Execution
 - Source of truth: `backend/internal/agents/manager.go` phase construction and `backend/internal/agents/build_test_artifacts.go` delivery-mode classification.
 - Producers:

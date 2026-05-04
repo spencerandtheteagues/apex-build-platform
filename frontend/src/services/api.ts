@@ -578,6 +578,7 @@ export class ApiService {
     build_id: string
     websocket_url: string
     status: string
+    poll_token?: string
   }> {
     const response = await this.client.post('/build/start', data)
     return response.data

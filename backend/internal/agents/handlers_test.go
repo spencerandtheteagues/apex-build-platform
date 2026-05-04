@@ -31,6 +31,9 @@ func testRouterWithAdmin(am *AgentManager, isAdmin bool) *gin.Engine {
 	r := gin.New()
 	h := NewBuildHandler(am, nil)
 
+	public := r.Group("/api/v1")
+	h.RegisterPublicRoutes(public)
+
 	// Stub auth middleware: inject user_id=1
 	auth := func(c *gin.Context) {
 		c.Set("user_id", uint(1))
@@ -85,6 +88,138 @@ func openBuildTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate sqlite: %v", err)
 	}
 	return db
+}
+
+func TestBuildPollStatusServesLiveBuildWithScopedToken(t *testing.T) {
+	db := openBuildTestDB(t)
+	am := NewAgentManager(&stubAIRouter{
+		providers:             []ai.AIProvider{ai.ProviderGPT4},
+		hasConfiguredProvider: true,
+	}, db)
+	router := testRouter(am)
+
+	build, err := am.CreateBuild(1, "pro", &BuildRequest{
+		Description: "Build a live poll token reliability dashboard",
+		Mode:        ModeFull,
+		PowerMode:   PowerFast,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuild returned error: %v", err)
+	}
+	if strings.TrimSpace(build.PollToken) == "" || strings.TrimSpace(build.PollTokenHash) == "" {
+		t.Fatal("expected build to have a poll token and stored hash")
+	}
+	projectID := uint(77)
+	build.mu.Lock()
+	build.Status = BuildInProgress
+	build.Progress = 42
+	build.ProjectID = &projectID
+	build.SnapshotFiles = []GeneratedFile{{Path: "src/App.tsx", Content: "export default function App() {}", Language: "tsx"}}
+	build.Tasks = []*Task{{
+		ID:     "generate-ui",
+		Type:   TaskGenerateUI,
+		Status: TaskCompleted,
+		Output: &TaskOutput{Files: []GeneratedFile{{
+			Path:     "src/main.tsx",
+			Content:  "import './index.css'",
+			Language: "tsx",
+		}}},
+	}}
+	build.mu.Unlock()
+
+	req, _ := http.NewRequest("GET", "/api/v1/build/"+build.ID+"/poll-status", nil)
+	req.Header.Set(buildPollTokenHeader, build.PollToken)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected poll status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["id"] != build.ID {
+		t.Fatalf("expected id %s, got %v", build.ID, response["id"])
+	}
+	if response["status"] != string(BuildInProgress) {
+		t.Fatalf("expected status %s, got %v", BuildInProgress, response["status"])
+	}
+	if response["project_id"] == nil {
+		t.Fatal("expected project_id in poll status response")
+	}
+	if response["files_count"] != float64(2) {
+		t.Fatalf("expected files_count 2, got %v", response["files_count"])
+	}
+}
+
+func TestBuildPollStatusRejectsWrongToken(t *testing.T) {
+	db := openBuildTestDB(t)
+	am := NewAgentManager(&stubAIRouter{
+		providers:             []ai.AIProvider{ai.ProviderGPT4},
+		hasConfiguredProvider: true,
+	}, db)
+	router := testRouter(am)
+
+	build, err := am.CreateBuild(1, "pro", &BuildRequest{
+		Description: "Build a wrong token rejection dashboard",
+		Mode:        ModeFull,
+		PowerMode:   PowerFast,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuild returned error: %v", err)
+	}
+
+	req, _ := http.NewRequest("GET", "/api/v1/build/"+build.ID+"/poll-status", nil)
+	req.Header.Set(buildPollTokenHeader, "wrong-token")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected wrong token 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestBuildPollStatusServesSnapshotAfterLiveSessionGone(t *testing.T) {
+	db := openBuildTestDB(t)
+	am := NewAgentManager(&stubAIRouter{
+		providers:             []ai.AIProvider{ai.ProviderGPT4},
+		hasConfiguredProvider: true,
+	}, db)
+	router := testRouter(am)
+
+	build, err := am.CreateBuild(1, "pro", &BuildRequest{
+		Description: "Build a snapshot poll token reliability dashboard",
+		Mode:        ModeFull,
+		PowerMode:   PowerFast,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuild returned error: %v", err)
+	}
+	token := build.PollToken
+	am.ForgetBuild(build.ID)
+
+	req, _ := http.NewRequest("GET", "/api/v1/build/"+build.ID+"/poll-status", nil)
+	req.Header.Set(buildPollTokenHeader, token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected snapshot poll status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["id"] != build.ID {
+		t.Fatalf("expected id %s, got %v", build.ID, response["id"])
+	}
+	if response["live"] != false {
+		t.Fatalf("expected snapshot response live=false, got %v", response["live"])
+	}
+	if response["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", response["restored_from_snapshot"])
+	}
 }
 
 func TestBuildPlatformIssueFromErrorClassifiesRedisAllowlistAsConfiguration(t *testing.T) {

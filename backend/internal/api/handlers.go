@@ -1222,7 +1222,7 @@ func (s *Server) CORSMiddleware() gin.HandlerFunc {
 		}
 
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Request-ID")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Request-ID, X-Apex-Build-Poll-Token")
 		c.Header("Access-Control-Max-Age", "86400") // 24 hours preflight cache
 
 		if c.Request.Method == "OPTIONS" {

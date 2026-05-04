@@ -456,6 +456,7 @@ type BuildSnapshotState struct {
 type BuildRestoreContext struct {
 	SubscriptionPlan            string            `json:"subscription_plan,omitempty"`
 	ProviderMode                string            `json:"provider_mode,omitempty"`
+	PollTokenHash               string            `json:"poll_token_hash,omitempty"`
 	ActiveOwnerInstanceID       string            `json:"active_owner_instance_id,omitempty"`
 	ActiveOwnerHeartbeatAt      *time.Time        `json:"active_owner_heartbeat_at,omitempty"`
 	RequirePreviewReady         bool              `json:"require_preview_ready,omitempty"`
@@ -488,6 +489,8 @@ type Build struct {
 	PowerMode           PowerMode         `json:"power_mode"`
 	SubscriptionPlan    string            `json:"subscription_plan,omitempty"`
 	ProviderMode        string            `json:"provider_mode,omitempty"` // platform or byok
+	PollToken           string            `json:"-"`
+	PollTokenHash       string            `json:"-"`
 	RequirePreviewReady bool              `json:"require_preview_ready,omitempty"`
 	Description         string            `json:"description"` // User's app description
 	TechStack           *TechStack        `json:"tech_stack,omitempty"`
@@ -858,6 +861,7 @@ type BuildResponse struct {
 	BuildID      string `json:"build_id"`
 	WebSocketURL string `json:"websocket_url"`
 	Status       string `json:"status"`
+	PollToken    string `json:"poll_token,omitempty"`
 }
 
 // ChatMessage represents a message in the build chat

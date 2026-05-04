@@ -702,6 +702,7 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		BuildID:      build.ID,
 		WebSocketURL: "/ws/build/" + build.ID,
 		Status:       string(build.Status),
+		PollToken:    strings.TrimSpace(build.PollToken),
 	}
 	log.Printf("StartBuild: returning response for build %s", build.ID)
 	c.JSON(http.StatusCreated, response)
@@ -772,6 +773,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 
 	response := gin.H{
 		"id":                     snapshot.BuildID,
+		"project_id":             snapshot.ProjectID,
 		"status":                 snapshotStatus,
 		"mode":                   snapshot.Mode,
 		"power_mode":             snapshot.PowerMode,
@@ -793,6 +795,116 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		response[key] = value
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+// GetBuildPollStatus returns read-only build status using a build-scoped poll token.
+// GET /api/v1/build/:id/poll-status
+func (h *BuildHandler) GetBuildPollStatus(c *gin.Context) {
+	buildID := c.Param("id")
+	pollToken := strings.TrimSpace(c.GetHeader(buildPollTokenHeader))
+	if pollToken == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "build poll token required"})
+		return
+	}
+
+	if build, err := h.getLiveBuildForRead(buildID); err == nil && build != nil {
+		build.mu.RLock()
+		tokenOK := validBuildPollToken(pollToken, build.PollTokenHash)
+		userPlan := build.SubscriptionPlan
+		build.mu.RUnlock()
+		if !tokenOK {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+		payload, readErr := h.readLiveBuildStatusPayload(build, userPlan, false)
+		if readErr == nil {
+			c.JSON(http.StatusOK, payload.response)
+			return
+		}
+		if !errors.Is(readErr, errBuildReadTimeout) {
+			writeBuildLookupError(c, readErr, readErr)
+			return
+		}
+		log.Printf("Build %s: live poll status read timed out; falling back to snapshot", buildID)
+	}
+
+	snapshot, err := h.getBuildSnapshotByID(buildID)
+	if err != nil {
+		writeBuildLookupError(c, err, err)
+		return
+	}
+	snapshotState := parseBuildSnapshotState(snapshot.StateJSON)
+	if snapshotState.RestoreContext == nil || !validBuildPollToken(pollToken, snapshotState.RestoreContext.PollTokenHash) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	build, readableSnapshot, restored, loadErr := h.loadReadableBuild(buildID, snapshot.UserID)
+	if loadErr == nil && build != nil {
+		build.mu.RLock()
+		tokenOK := validBuildPollToken(pollToken, build.PollTokenHash)
+		userPlan := build.SubscriptionPlan
+		build.mu.RUnlock()
+		if !tokenOK {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+		payload, readErr := h.readLiveBuildStatusPayload(build, userPlan, restored)
+		if readErr == nil {
+			c.JSON(http.StatusOK, payload.response)
+			return
+		}
+		log.Printf("Build %s: restored poll status live read failed: %v", buildID, readErr)
+	}
+	if loadErr != nil && !errors.Is(loadErr, gorm.ErrRecordNotFound) {
+		log.Printf("Build %s: token poll snapshot restore lookup failed: %v", buildID, loadErr)
+	}
+	if readableSnapshot != nil {
+		snapshot = readableSnapshot
+		snapshotState = parseBuildSnapshotState(snapshot.StateJSON)
+	}
+
+	c.JSON(http.StatusOK, h.buildSnapshotStatusResponse(snapshot, snapshotState))
+}
+
+func (h *BuildHandler) buildSnapshotStatusResponse(snapshot *models.CompletedBuild, snapshotState BuildSnapshotState) gin.H {
+	if snapshot == nil {
+		return gin.H{}
+	}
+	userPlan := ""
+	if snapshotState.RestoreContext != nil {
+		userPlan = strings.TrimSpace(strings.ToLower(snapshotState.RestoreContext.SubscriptionPlan))
+	}
+	snapshotStatus := string(presentedSnapshotStatus(snapshot))
+	snapshotProgress := presentedSnapshotProgress(snapshot, BuildStatus(snapshotStatus), snapshotState)
+	agents := parseBuildAgents(snapshot.AgentsJSON)
+	tasks := parseBuildTasks(snapshot.TasksJSON)
+	checkpoints := parseBuildCheckpoints(snapshot.CheckpointsJSON)
+
+	response := gin.H{
+		"id":                     snapshot.BuildID,
+		"project_id":             snapshot.ProjectID,
+		"status":                 snapshotStatus,
+		"mode":                   snapshot.Mode,
+		"power_mode":             snapshot.PowerMode,
+		"description":            snapshot.Description,
+		"progress":               snapshotProgress,
+		"agents_count":           len(agents),
+		"tasks_count":            len(tasks),
+		"checkpoints":            len(checkpoints),
+		"created_at":             snapshot.CreatedAt,
+		"updated_at":             snapshot.UpdatedAt,
+		"completed_at":           snapshot.CompletedAt,
+		"error":                  presentedBuildError(BuildStatus(snapshotStatus), snapshot.Error),
+		"files_count":            snapshot.FilesCount,
+		"interaction":            parseBuildInteraction(snapshot.InteractionJSON),
+		"live":                   false,
+		"restored_from_snapshot": true,
+	}
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, snapshotStatus, userPlan) {
+		response[key] = value
+	}
+	return response
 }
 
 // latestFailedTaskErrorLocked extracts the latest actionable task failure from a live build.
@@ -1322,9 +1434,14 @@ func (h *BuildHandler) readLiveBuildStatusPayload(build *Build, userPlan string,
 		interaction := copyBuildInteractionStateLocked(build)
 		snapshotState := copyBuildSnapshotStateLocked(build)
 		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
+		filesCount := len(build.SnapshotFiles)
+		if h.manager != nil {
+			filesCount = len(h.manager.collectGeneratedFiles(build))
+		}
 
 		response := gin.H{
 			"id":                       build.ID,
+			"project_id":               build.ProjectID,
 			"status":                   string(build.Status),
 			"mode":                     string(build.Mode),
 			"power_mode":               string(build.PowerMode),
@@ -1340,6 +1457,7 @@ func (h *BuildHandler) readLiveBuildStatusPayload(build *Build, userPlan string,
 			"updated_at":               build.UpdatedAt,
 			"completed_at":             build.CompletedAt,
 			"error":                    errorMessage,
+			"files_count":              filesCount,
 			"interaction":              interaction,
 			"live":                     true,
 			"restored_from_snapshot":   restored,
@@ -2939,6 +3057,20 @@ func (h *BuildHandler) getBuildSnapshot(userID uint, buildID string) (*models.Co
 	return &snapshot, nil
 }
 
+func (h *BuildHandler) getBuildSnapshotByID(buildID string) (*models.CompletedBuild, error) {
+	if h.db == nil {
+		return nil, fmt.Errorf("build history not available")
+	}
+	var snapshot models.CompletedBuild
+	if err := h.db.Where("build_id = ?", buildID).
+		Order("updated_at DESC").
+		Order("id DESC").
+		First(&snapshot).Error; err != nil {
+		return nil, err
+	}
+	return &snapshot, nil
+}
+
 func parseBuildFiles(filesJSON string) ([]GeneratedFile, error) {
 	if strings.TrimSpace(filesJSON) == "" {
 		return []GeneratedFile{}, nil
@@ -3592,6 +3724,13 @@ func (h *BuildHandler) RollbackPromptPackVersion(c *gin.Context) {
 }
 
 // RegisterRoutes registers all build routes on the router
+func (h *BuildHandler) RegisterPublicRoutes(rg *gin.RouterGroup) {
+	build := rg.Group("/build")
+	{
+		build.GET("/:id/poll-status", h.GetBuildPollStatus)
+	}
+}
+
 func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	build := rg.Group("/build")
 	{

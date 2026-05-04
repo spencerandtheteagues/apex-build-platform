@@ -1538,6 +1538,10 @@ func setupRoutes(
 		// Raw body is required for signature verification — do NOT add body parsers here
 		v1.POST("/billing/webhook", paymentHandler.HandleWebhook)
 
+		// Build canary poll endpoint. Authenticated build/detail/preview routes
+		// remain protected; this route accepts only per-build read-only tokens.
+		buildHandler.RegisterPublicRoutes(v1)
+
 		// CSRF token endpoint — public GET, issues a time-limited HMAC token.
 		// The frontend fetches this once and attaches it as X-CSRF-Token on all
 		// state-mutating requests to the protected group.
