@@ -396,6 +396,10 @@ func (am *AgentManager) applyPreviewDeterministicRepair(
 		if previewFailureLooksLikeShellFallbackCandidate(result) {
 			return am.applyPreviewShellFallbackRepair(build, result, now)
 		}
+	case "app_route_not_found", "shell_only_preview":
+		if am.applyPreviewRouterContextRepair(build, result, now) {
+			return true
+		}
 	case "blank_screen", "missing_entrypoint", "invalid_html", "invalid_package_json":
 		return am.applyPreviewShellFallbackRepair(build, result, now)
 	}
@@ -674,14 +678,22 @@ func (am *AgentManager) applyPreviewFenceStripRepair(
 var reactRouterNamedImportPattern = regexp.MustCompile(`(?m)^import\s*\{([^}]*)\}\s*from\s*["']react-router-dom["'];?\s*$`)
 
 func previewFailureLooksLikeMissingRouterContext(result *PreviewVerificationResult) bool {
-	if result == nil || !strings.EqualFold(strings.TrimSpace(result.FailureKind), "js_runtime_error") {
+	if result == nil {
 		return false
 	}
-	haystack := strings.ToLower(strings.TrimSpace(result.Details + "\n" + strings.Join(result.RepairHints, "\n")))
-	return strings.Contains(haystack, "linkwithref") ||
+	kind := strings.ToLower(strings.TrimSpace(result.FailureKind))
+	switch kind {
+	case "js_runtime_error", "app_route_not_found", "shell_only_preview":
+	default:
+		return false
+	}
+	haystack := strings.ToLower(strings.TrimSpace(result.Details + "\n" + strings.Join(result.RepairHints, "\n") + "\n" + strings.Join(result.CanaryErrors, "\n")))
+	return strings.Contains(haystack, "no routes matched") ||
+		strings.Contains(haystack, "linkwithref") ||
 		strings.Contains(haystack, "basename") ||
 		strings.Contains(haystack, "react-router-dom") ||
 		strings.Contains(haystack, "browserrouter") ||
+		strings.Contains(haystack, "preview proxy") ||
 		strings.Contains(haystack, "router context")
 }
 
@@ -703,6 +715,7 @@ func (am *AgentManager) applyPreviewRouterContextRepair(
 	}
 
 	repaired := false
+	basenamePatched := false
 	packagePatched := false
 
 	build.mu.Lock()
@@ -712,6 +725,12 @@ func (am *AgentManager) applyPreviewRouterContextRepair(
 		}
 		for i := range task.Output.Files {
 			path := strings.TrimSpace(task.Output.Files[i].Path)
+			if updated := normalizeGeneratedReactRouterPreviewBasename(path, task.Output.Files[i].Content); updated != task.Output.Files[i].Content {
+				task.Output.Files[i].Content = updated
+				repaired = true
+				basenamePatched = true
+				continue
+			}
 			switch {
 			case entryCandidates[path]:
 				updated, changed := wrapPreviewEntryWithBrowserRouter(task.Output.Files[i].Content)
@@ -739,7 +758,7 @@ func (am *AgentManager) applyPreviewRouterContextRepair(
 		build,
 		beforeFiles,
 		am.collectGeneratedFiles(build),
-		"Preview deterministic repair: wrapped preview entry with BrowserRouter",
+		"Preview deterministic repair: patched BrowserRouter preview proxy routing",
 	)
 
 	build.mu.Lock()
@@ -748,10 +767,18 @@ func (am *AgentManager) applyPreviewRouterContextRepair(
 	build.CompletedAt = nil
 	build.UpdatedAt = now
 	build.Progress = 95
-	build.Error = fmt.Sprintf("Preview verification: wrapped the app entry with BrowserRouter after router-context runtime failure. Re-checking. (%s)", result.Details)
+	if basenamePatched {
+		build.Error = fmt.Sprintf("Preview verification: added BrowserRouter basename for proxy routing. Re-checking. (%s)", result.Details)
+	} else {
+		build.Error = fmt.Sprintf("Preview verification: wrapped the app entry with BrowserRouter after router-context failure. Re-checking. (%s)", result.Details)
+	}
 	build.mu.Unlock()
 
-	log.Printf("Build %s: preview router-context repair applied (package patched=%t), re-checking", build.ID, packagePatched)
+	log.Printf("Build %s: preview router-context repair applied (basename patched=%t package patched=%t), re-checking", build.ID, basenamePatched, packagePatched)
+	message := "Preview verification: wrapped the entry in BrowserRouter after a router-context failure. Re-checking preview readiness."
+	if basenamePatched {
+		message = "Preview verification: added BrowserRouter basename for Apex preview proxy routing. Re-checking preview readiness."
+	}
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
 		BuildID:   build.ID,
@@ -759,7 +786,7 @@ func (am *AgentManager) applyPreviewRouterContextRepair(
 		Data: map[string]any{
 			"phase":   "preview_verification",
 			"status":  string(BuildTesting),
-			"message": "Preview verification: wrapped the entry in BrowserRouter after a router-context runtime failure. Re-checking preview readiness.",
+			"message": message,
 		},
 	})
 	am.checkBuildCompletion(build)

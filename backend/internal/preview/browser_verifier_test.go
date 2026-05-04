@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	cdpruntime "github.com/chromedp/cdproto/runtime"
 )
 
 // ── filterBrowserNoise ────────────────────────────────────────────────────────
@@ -233,6 +235,28 @@ func TestBrowserVerifier_Skipped_WhenNotAvailable(t *testing.T) {
 	result := bv.VerifyPageLoad(context.Background(), srv.URL)
 	if !result.Skipped {
 		t.Error("expected Skipped=true when Chrome unavailable")
+	}
+}
+
+func TestConsoleAPIArgsTextDecodesPrimitiveValues(t *testing.T) {
+	got := consoleAPIArgsText([]*cdpruntime.RemoteObject{
+		{Value: []byte(`"No routes matched location \"/api/v1/preview/proxy/89/\" "`)},
+		{Description: "fallback-description"},
+	})
+	if !strings.Contains(got, `No routes matched location "/api/v1/preview/proxy/89/"`) {
+		t.Fatalf("expected decoded console value, got %q", got)
+	}
+	if !strings.Contains(got, "fallback-description") {
+		t.Fatalf("expected description fallback, got %q", got)
+	}
+}
+
+func TestLooksLikeReactRouterNoMatch(t *testing.T) {
+	if !looksLikeReactRouterNoMatch(`No routes matched location "/api/v1/preview/proxy/89/" `) {
+		t.Fatal("expected preview proxy router no-match warning to be detected")
+	}
+	if looksLikeReactRouterNoMatch(`No routes matched location "/settings"`) {
+		t.Fatal("expected non-preview router warning to be ignored")
 	}
 }
 

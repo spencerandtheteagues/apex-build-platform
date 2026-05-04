@@ -17,6 +17,7 @@
 package preview
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -138,6 +139,35 @@ type BrowserPageLoadResult struct {
 	MountChildCount int
 	VisibleText     int // length of innerText visible to the user (0 = likely blank or CSS failure)
 	ScreenshotData  []byte
+}
+
+func consoleAPIArgsText(args []*cdpruntime.RemoteObject) string {
+	var parts []string
+	for _, arg := range args {
+		switch {
+		case arg == nil:
+			continue
+		case len(arg.Value) > 0:
+			var decoded any
+			decoder := json.NewDecoder(bytes.NewReader(arg.Value))
+			decoder.UseNumber()
+			if err := decoder.Decode(&decoded); err == nil {
+				switch value := decoded.(type) {
+				case string:
+					parts = append(parts, value)
+				case nil:
+					parts = append(parts, "null")
+				default:
+					parts = append(parts, fmt.Sprint(value))
+				}
+				continue
+			}
+		}
+		if arg.Description != "" {
+			parts = append(parts, arg.Description)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // ── earlyInjection is added via Page.addScriptToEvaluateOnNewDocument so it
@@ -301,16 +331,11 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 				}
 			}
 		case *cdpruntime.EventConsoleAPICalled:
-			if e.Type == cdpruntime.APITypeError {
-				var parts []string
-				for _, arg := range e.Args {
-					if arg.Description != "" {
-						parts = append(parts, arg.Description)
-					}
-				}
-				if len(parts) > 0 {
+			if e.Type == cdpruntime.APITypeError || e.Type == cdpruntime.APITypeWarning {
+				text := consoleAPIArgsText(e.Args)
+				if text != "" {
 					mu.Lock()
-					consoleErrors = append(consoleErrors, strings.Join(parts, " "))
+					consoleErrors = append(consoleErrors, text)
 					mu.Unlock()
 				}
 			}
@@ -436,6 +461,25 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		}
 	}
 
+	for _, consoleMessage := range capturedConsole {
+		if looksLikeReactRouterNoMatch(consoleMessage) {
+			return &BrowserPageLoadResult{
+				Passed:      false,
+				FailureKind: "app_route_not_found",
+				Details:     fmt.Sprintf("React Router did not match the preview proxy path: %q", consoleMessage),
+				RepairHints: []string{
+					"If using react-router-dom BrowserRouter behind the Apex preview proxy, set BrowserRouter basename from window.location.pathname before '/preview/proxy/{projectID}'.",
+					"Ensure the preview root route renders the requested app instead of only the navigation shell.",
+				},
+				Duration:       time.Since(start),
+				JSErrors:       capturedJS,
+				ConsoleErrors:  capturedConsole,
+				VisibleText:    mount.VisibleText,
+				ScreenshotData: screenshotData,
+			}
+		}
+	}
+
 	if looksLikeShellOnlyPreview(mount.Snippet, mount.VisibleText) {
 		return &BrowserPageLoadResult{
 			Passed:      false,
@@ -477,6 +521,12 @@ func looksLikeAppLevelNotFound(text string) bool {
 		return true
 	}
 	return strings.Contains(lower, "404") && strings.Contains(lower, "not found")
+}
+
+func looksLikeReactRouterNoMatch(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.Contains(lower, "no routes matched location") &&
+		strings.Contains(lower, "/preview/proxy/")
 }
 
 func looksLikeShellOnlyPreview(text string, visibleText int) bool {

@@ -420,29 +420,6 @@ async function verifyPreview(url) {
       mainFrameNavigationsAfterStableStart += 1
     }
   })
-  const response = await page.goto(absolutePreviewURL(url), { waitUntil: 'networkidle', timeout: 60000 })
-  if (!response || !response.ok()) {
-    throw new Error(`preview navigation failed: status=${response?.status()}`)
-  }
-  await page.waitForFunction(() => document.body && document.body.innerText.trim().length > 80, null, { timeout: 30000 })
-  const bodyText = await page.locator('body').innerText({ timeout: 5000 })
-  if (/failed to start preview|application error|vite error|runtime error/i.test(bodyText)) {
-    throw new Error(`preview rendered failure text: ${bodyText.slice(0, 500)}`)
-  }
-  if (/page not found|sorry,\s*that page does not exist|route not found|\b404\b[\s\S]{0,80}not found|not found[\s\S]{0,80}\b404\b/i.test(bodyText)) {
-    throw new Error(`preview rendered an app-level not-found route: ${bodyText.slice(0, 500)}`)
-  }
-  const shellOnlyNav = /dashboard/i.test(bodyText) &&
-    /job pipeline/i.test(bodyText) &&
-    /new job/i.test(bodyText) &&
-    /crew management/i.test(bodyText) &&
-    /settings/i.test(bodyText) &&
-    /bootstrapped by apex\.build/i.test(bodyText) &&
-    bodyText.trim().length < 180 &&
-    !/open jobs|pending estimate|launch estimate swarm|recommended final quote/i.test(bodyText)
-  if (shellOnlyNav || /future patches|real ui screens will be routed here|routes will be added later/i.test(bodyText)) {
-    throw new Error(`preview rendered only an app shell instead of working screen content: ${bodyText.slice(0, 500)}`)
-  }
 
   async function samplePreviewHealth(label) {
     const sample = await page.evaluate((sampleLabel) => {
@@ -473,26 +450,85 @@ async function verifyPreview(url) {
     return sample
   }
 
-  const stabilitySamples = []
-  if (previewStabilitySeconds > 0) {
-    stabilityStarted = true
-    const deadline = Date.now() + previewStabilitySeconds * 1000
-    let sampleIndex = 0
-    while (Date.now() < deadline) {
-      stabilitySamples.push(await samplePreviewHealth(`stability-${sampleIndex}`))
-      if (mainFrameNavigationsAfterStableStart > 0) {
-        throw new Error(`preview reloaded or navigated during stability window: ${mainFrameNavigationsAfterStableStart} navigation(s)`)
-      }
-      if (pageErrors.length > 0) {
-        throw new Error(`preview page errors during stability window: ${pageErrors.slice(0, 5).join(' | ')}`)
-      }
-      await page.waitForTimeout(previewStabilityPollMS)
-      sampleIndex += 1
+  async function capturePreviewFailureArtifact(error) {
+    try {
+      const failurePath = path.join(artifactDir, 'preview-failure.png')
+      const debug = await page.evaluate(() => {
+        const root = document.querySelector('#root')
+        const rootRect = root?.getBoundingClientRect()
+        return {
+          url: location.href,
+          readyState: document.readyState,
+          title: document.title,
+          bodyText: String(document.body?.innerText || '').slice(0, 2000),
+          bodyTextLength: String(document.body?.innerText || '').trim().length,
+          bodyHTMLLength: String(document.body?.innerHTML || '').length,
+          rootText: String(root?.textContent || '').slice(0, 2000),
+          rootTextLength: String(root?.textContent || '').trim().length,
+          rootChildCount: root?.children?.length ?? null,
+          rootHeight: rootRect?.height || 0,
+        }
+      }).catch(evalError => ({ evaluate_error: String(evalError?.message || evalError) }))
+      await page.screenshot({ path: failurePath, fullPage: true }).catch(() => {})
+      writeArtifact('preview-failure.json', {
+        url: absolutePreviewURL(url),
+        error: String(error?.message || error),
+        console_errors: consoleErrors,
+        page_errors: pageErrors,
+        main_frame_navigations_after_stable_start: mainFrameNavigationsAfterStableStart,
+        debug,
+        screenshot: failurePath,
+      })
+    } catch {
+      // Keep the original preview verification error as the primary failure.
     }
-    stabilitySamples.push(await samplePreviewHealth('stability-final'))
   }
 
-  const visualProof = await page.evaluate(() => {
+  try {
+    const response = await page.goto(absolutePreviewURL(url), { waitUntil: 'networkidle', timeout: 60000 })
+    if (!response || !response.ok()) {
+      throw new Error(`preview navigation failed: status=${response?.status()}`)
+    }
+    await page.waitForFunction(() => document.body && document.body.innerText.trim().length > 80, null, { timeout: 30000 })
+    const bodyText = await page.locator('body').innerText({ timeout: 5000 })
+    if (/failed to start preview|application error|vite error|runtime error/i.test(bodyText)) {
+      throw new Error(`preview rendered failure text: ${bodyText.slice(0, 500)}`)
+    }
+    if (/page not found|sorry,\s*that page does not exist|route not found|\b404\b[\s\S]{0,80}not found|not found[\s\S]{0,80}\b404\b/i.test(bodyText)) {
+      throw new Error(`preview rendered an app-level not-found route: ${bodyText.slice(0, 500)}`)
+    }
+    const shellOnlyNav = /dashboard/i.test(bodyText) &&
+      /job pipeline/i.test(bodyText) &&
+      /new job/i.test(bodyText) &&
+      /crew management/i.test(bodyText) &&
+      /settings/i.test(bodyText) &&
+      /bootstrapped by apex\.build/i.test(bodyText) &&
+      bodyText.trim().length < 180 &&
+      !/open jobs|pending estimate|launch estimate swarm|recommended final quote/i.test(bodyText)
+    if (shellOnlyNav || /future patches|real ui screens will be routed here|routes will be added later/i.test(bodyText)) {
+      throw new Error(`preview rendered only an app shell instead of working screen content: ${bodyText.slice(0, 500)}`)
+    }
+
+    const stabilitySamples = []
+    if (previewStabilitySeconds > 0) {
+      stabilityStarted = true
+      const deadline = Date.now() + previewStabilitySeconds * 1000
+      let sampleIndex = 0
+      while (Date.now() < deadline) {
+        stabilitySamples.push(await samplePreviewHealth(`stability-${sampleIndex}`))
+        if (mainFrameNavigationsAfterStableStart > 0) {
+          throw new Error(`preview reloaded or navigated during stability window: ${mainFrameNavigationsAfterStableStart} navigation(s)`)
+        }
+        if (pageErrors.length > 0) {
+          throw new Error(`preview page errors during stability window: ${pageErrors.slice(0, 5).join(' | ')}`)
+        }
+        await page.waitForTimeout(previewStabilityPollMS)
+        sampleIndex += 1
+      }
+      stabilitySamples.push(await samplePreviewHealth('stability-final'))
+    }
+
+    const visualProof = await page.evaluate(() => {
     const readStyle = (selector) => {
       const el = document.querySelector(selector)
       if (!el) return null
@@ -543,35 +579,40 @@ async function verifyPreview(url) {
       leakedTailwindDirectives: /@tailwind|@import\s+["']tailwindcss["']/.test(stylesheetTextSample),
     }
   })
-  const screenshotPath = path.join(artifactDir, 'preview.png')
-  await page.screenshot({ path: screenshotPath, fullPage: true })
-  await browser.close()
-  writeArtifact('preview-proof.json', {
-    url: absolutePreviewURL(url),
-    body_length: bodyText.length,
-    console_errors: consoleErrors,
-    page_errors: pageErrors,
-    stability: {
-      seconds: previewStabilitySeconds,
-      poll_ms: previewStabilityPollMS,
-      main_frame_navigations_after_stable_start: mainFrameNavigationsAfterStableStart,
-      samples: stabilitySamples,
-    },
-    visual: visualProof,
-    screenshot: screenshotPath,
-  })
-  const usesTailwindUtilities = visualProof.utilityClassCount >= 20
-  const hasCompiledUtilityCSS = visualProof.accessibleRuleCount >= 100
-  if (usesTailwindUtilities && (!hasCompiledUtilityCSS || visualProof.leakedTailwindDirectives)) {
-    throw new Error(`preview rendered Tailwind utility markup without compiled CSS: utility_classes=${visualProof.utilityClassCount} css_rules=${visualProof.accessibleRuleCount} leaked_directives=${visualProof.leakedTailwindDirectives}`)
+    const screenshotPath = path.join(artifactDir, 'preview.png')
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+    writeArtifact('preview-proof.json', {
+      url: absolutePreviewURL(url),
+      body_length: bodyText.length,
+      console_errors: consoleErrors,
+      page_errors: pageErrors,
+      stability: {
+        seconds: previewStabilitySeconds,
+        poll_ms: previewStabilityPollMS,
+        main_frame_navigations_after_stable_start: mainFrameNavigationsAfterStableStart,
+        samples: stabilitySamples,
+      },
+      visual: visualProof,
+      screenshot: screenshotPath,
+    })
+    const usesTailwindUtilities = visualProof.utilityClassCount >= 20
+    const hasCompiledUtilityCSS = visualProof.accessibleRuleCount >= 100
+    if (usesTailwindUtilities && (!hasCompiledUtilityCSS || visualProof.leakedTailwindDirectives)) {
+      throw new Error(`preview rendered Tailwind utility markup without compiled CSS: utility_classes=${visualProof.utilityClassCount} css_rules=${visualProof.accessibleRuleCount} leaked_directives=${visualProof.leakedTailwindDirectives}`)
+    }
+    if (consoleErrors.length > 0 && process.env.ALLOW_CONSOLE_ERRORS !== '1') {
+      throw new Error(`preview console errors: ${consoleErrors.slice(0, 5).join(' | ')}`)
+    }
+    if (pageErrors.length > 0) {
+      throw new Error(`preview page errors: ${pageErrors.slice(0, 5).join(' | ')}`)
+    }
+    console.log(`PREVIEW_SCREENSHOT=${screenshotPath}`)
+  } catch (error) {
+    await capturePreviewFailureArtifact(error)
+    throw error
+  } finally {
+    await browser.close()
   }
-  if (consoleErrors.length > 0 && process.env.ALLOW_CONSOLE_ERRORS !== '1') {
-    throw new Error(`preview console errors: ${consoleErrors.slice(0, 5).join(' | ')}`)
-  }
-  if (pageErrors.length > 0) {
-    throw new Error(`preview page errors: ${pageErrors.slice(0, 5).join(' | ')}`)
-  }
-  console.log(`PREVIEW_SCREENSHOT=${screenshotPath}`)
 }
 
 try {

@@ -746,6 +746,72 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 	}
 }
 
+func TestApplyPreviewRouterContextRepairAddsProxyBasenameToAliasRouter(t *testing.T) {
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		builds:      make(map[string]*Build),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:        "preview-router-alias-basename",
+		Status:    BuildCompleted,
+		Progress:  100,
+		UpdatedAt: now,
+		Tasks: []*Task{
+			{
+				ID:   "gen-app",
+				Type: TaskGenerateUI,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "src/App.tsx",
+							Content: `import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+
+export default function App() {
+  return <Router><Routes><Route path="/" element={<main>Dashboard</main>} /></Routes></Router>;
+}`,
+						},
+						{
+							Path: "package.json",
+							Content: `{
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  }
+}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ok := manager.applyPreviewRouterContextRepair(build, &PreviewVerificationResult{
+		FailureKind: "app_route_not_found",
+		Details:     `No routes matched location "/api/v1/preview/proxy/89/"`,
+		RepairHints: []string{"If using react-router-dom BrowserRouter behind the Apex preview proxy, set BrowserRouter basename from window.location.pathname before '/preview/proxy/{projectID}'."},
+	}, now)
+	if !ok {
+		t.Fatal("expected router-context repair to apply")
+	}
+
+	app := build.Tasks[0].Output.Files[0].Content
+	if !strings.Contains(app, "<Router basename={window.location.pathname.match") {
+		t.Fatalf("expected aliased BrowserRouter to receive preview basename, got %q", app)
+	}
+	if strings.Contains(app, "<Router><Routes>") {
+		t.Fatalf("expected Router opening tag to be rewritten, got %q", app)
+	}
+	if build.PreviewVerificationAttempts != 1 {
+		t.Fatalf("expected preview verification attempts=1, got %d", build.PreviewVerificationAttempts)
+	}
+	if !strings.Contains(build.Error, "BrowserRouter basename") {
+		t.Fatalf("expected basename repair message, got %q", build.Error)
+	}
+}
+
 func TestRunPreviewVerificationGatePassingReportSupersedesEarlierFailure(t *testing.T) {
 	manager := &AgentManager{
 		ctx: context.Background(),

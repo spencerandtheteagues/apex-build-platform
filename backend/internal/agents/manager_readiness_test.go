@@ -1567,6 +1567,24 @@ export default function App() {
 		}
 	})
 
+	t.Run("adds_proxy_safe_browserrouter_basename_to_alias", func(t *testing.T) {
+		t.Parallel()
+
+		in := `import React from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+
+export default function App() {
+  return <Router><Routes><Route path="/" element={<main>Dashboard</main>} /></Routes></Router>;
+}`
+		got := normalizeGeneratedFileContent("src/App.tsx", in)
+		if !strings.Contains(got, "<Router basename={window.location.pathname.match") {
+			t.Fatalf("expected BrowserRouter alias to receive preview proxy basename, got %q", got)
+		}
+		if strings.Contains(got, "<Router><Routes>") {
+			t.Fatalf("expected Router opening tag to be rewritten, got %q", got)
+		}
+	})
+
 	t.Run("does_not_touch_non_code_without_strong_indicators", func(t *testing.T) {
 		t.Parallel()
 
