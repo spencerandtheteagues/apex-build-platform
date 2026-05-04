@@ -83,6 +83,37 @@ func previewVerificationGateTimeout(mode PowerMode) time.Duration {
 	}
 }
 
+const previewVerificationHeartbeatInterval = 15 * time.Second
+
+func (am *AgentManager) broadcastPreviewVerificationProgress(build *Build, startedAt time.Time, timeout time.Duration, files int, isFullStack bool, heartbeat bool) {
+	if am == nil || build == nil {
+		return
+	}
+	message := "Preview-verifying generated app boot, render, and interaction stability..."
+	if heartbeat {
+		elapsed := time.Since(startedAt).Round(time.Second)
+		message = fmt.Sprintf("Preview verification still running (%s elapsed, timeout %s)...", elapsed, timeout.Round(time.Second))
+	}
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":                        "preview_verification",
+			"phase_key":                    "preview_verification",
+			"status":                       string(BuildReviewing),
+			"progress":                     98,
+			"message":                      message,
+			"quality_gate_required":        true,
+			"quality_gate_active":          true,
+			"quality_gate_stage":           "preview_verification",
+			"preview_verification_files":   files,
+			"preview_verification_runtime": isFullStack,
+			"preview_timeout_seconds":      int(timeout.Seconds()),
+		},
+	})
+}
+
 // runPreviewVerificationGate verifies that the generated files would produce a
 // loadable preview. Called from runBuildFinalization after code validation passes.
 //
@@ -109,11 +140,34 @@ func (am *AgentManager) runPreviewVerificationGate(
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(am.ctx, previewVerificationGateTimeout(build.PowerMode))
-	defer cancel()
-
+	previewTimeout := previewVerificationGateTimeout(build.PowerMode)
+	baseCtx := am.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, previewTimeout)
 	pLog(build.ID).PreviewGateStart(len(vFiles), isFS)
 	gateStart := time.Now()
+	am.broadcastPreviewVerificationProgress(build, gateStart, previewTimeout, len(vFiles), isFS, false)
+
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(previewVerificationHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				am.broadcastPreviewVerificationProgress(build, gateStart, previewTimeout, len(vFiles), isFS, true)
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		<-heartbeatDone
+	}()
 
 	checksRun := []string{"preview_entrypoint", "preview_content", "preview_structure"}
 	result := am.previewVerifier.VerifyBuildFiles(ctx, vFiles, isFS)

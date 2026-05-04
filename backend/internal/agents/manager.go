@@ -18845,6 +18845,10 @@ func buildPhaseProgressWindow(currentPhase string, status BuildStatus) (int, int
 		return 60, 79, true
 	case "integration", "testing":
 		return 80, 89, true
+	case "compile_validation":
+		return 92, 97, true
+	case "preview_verification":
+		return 98, 99, true
 	case "review", "validation":
 		return 90, 98, true
 	case "completed":

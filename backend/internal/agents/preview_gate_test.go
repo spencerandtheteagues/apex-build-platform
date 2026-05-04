@@ -40,6 +40,69 @@ func TestPreviewVerificationGateTimeoutScalesByPowerMode(t *testing.T) {
 	}
 }
 
+func TestRunPreviewVerificationGateBroadcastsPreviewPhaseBeforeVerifier(t *testing.T) {
+	var phaseDuringVerifier string
+	var stageDuringVerifier string
+	var build *Build
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		builds:      map[string]*Build{},
+		subscribers: map[string][]chan *WSMessage{},
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{Passed: true},
+			onVerify: func(_ []VerifiableFile) {
+				build.mu.RLock()
+				phaseDuringVerifier = build.SnapshotState.CurrentPhase
+				stageDuringVerifier = build.SnapshotState.QualityGateStage
+				build.mu.RUnlock()
+			},
+		},
+	}
+
+	now := time.Now().UTC()
+	build = &Build{
+		ID:        "preview-phase-telemetry",
+		Status:    BuildReviewing,
+		Progress:  99,
+		UpdatedAt: now,
+		Tasks:     []*Task{},
+		Agents:    map[string]*Agent{},
+	}
+	manager.builds[build.ID] = build
+
+	updates := make(chan *WSMessage, 4)
+	manager.Subscribe(build.ID, updates)
+
+	status := BuildCompleted
+	buildError := ""
+	if manager.runPreviewVerificationGate(build, []GeneratedFile{
+		{Path: "index.html", Content: `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`},
+		{Path: "src/main.tsx", Content: `console.log("preview")`},
+	}, &status, &buildError, now) {
+		t.Fatal("expected passing preview gate to continue finalization")
+	}
+
+	if phaseDuringVerifier != "preview_verification" {
+		t.Fatalf("expected preview phase before verifier started, got %q", phaseDuringVerifier)
+	}
+	if stageDuringVerifier != "preview_verification" {
+		t.Fatalf("expected preview quality stage before verifier started, got %q", stageDuringVerifier)
+	}
+
+	select {
+	case msg := <-updates:
+		data, _ := msg.Data.(map[string]any)
+		if got := buildActivityString(data["phase_key"]); got != "preview_verification" {
+			t.Fatalf("expected preview phase broadcast, got data=%+v", data)
+		}
+		if got := buildActivityString(data["quality_gate_stage"]); got != "preview_verification" {
+			t.Fatalf("expected preview quality stage broadcast, got data=%+v", data)
+		}
+	default:
+		t.Fatal("expected preview phase progress broadcast")
+	}
+}
+
 func TestApplyPreviewFenceStripRepairResetsProgressAndAttempts(t *testing.T) {
 	manager := &AgentManager{
 		ctx:         context.Background(),

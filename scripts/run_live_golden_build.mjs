@@ -174,9 +174,10 @@ async function registerAndLogin() {
     email: loginEmail,
   })
   await fetchCSRF()
-  if (!bearerToken && cookies.size === 0) {
-    await login()
-  }
+  // Registration issues httpOnly auth cookies and intentionally does not return
+  // bearer tokens in JSON. Do not immediately call /auth/login here: production
+  // login blocks unverified users, while the registration session is allowed to
+  // continue into the app's verification flow.
 }
 
 function writeArtifact(name, data) {

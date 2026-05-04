@@ -65,6 +65,18 @@ func TestUpdateBuildProgressKeepsReviewPhaseBelowCompletion(t *testing.T) {
 	}
 }
 
+func TestBuildPhaseProgressWindowSeparatesCompileAndPreviewVerification(t *testing.T) {
+	compileMin, compileMax, ok := buildPhaseProgressWindow("compile_validation", BuildReviewing)
+	if !ok || compileMin != 92 || compileMax != 97 {
+		t.Fatalf("compile validation window = (%d,%d,%t), want (92,97,true)", compileMin, compileMax, ok)
+	}
+
+	previewMin, previewMax, ok := buildPhaseProgressWindow("preview_verification", BuildReviewing)
+	if !ok || previewMin != 98 || previewMax != 99 {
+		t.Fatalf("preview verification window = (%d,%d,%t), want (98,99,true)", previewMin, previewMax, ok)
+	}
+}
+
 func TestShouldPersistBuildSnapshotMessageIncludesRetryLearningEvents(t *testing.T) {
 	for _, msgType := range []WSMessageType{
 		"agent:retrying",
