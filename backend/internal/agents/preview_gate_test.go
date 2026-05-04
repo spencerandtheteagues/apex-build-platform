@@ -406,7 +406,7 @@ func TestRunPreviewVerificationGateUsesDeterministicShellFallbackBeforeSolverFor
 	}
 }
 
-func TestRunPreviewVerificationGateCompletesAfterVerifiedFallbackStillReportsShellFailure(t *testing.T) {
+func TestRunPreviewVerificationGateFailsAfterFallbackStillReportsShellFailure(t *testing.T) {
 	manager := &AgentManager{
 		ctx:         context.Background(),
 		agents:      map[string]*Agent{},
@@ -462,30 +462,93 @@ func TestRunPreviewVerificationGateCompletesAfterVerifiedFallbackStillReportsShe
 	status := BuildCompleted
 	buildError := "previous preview error"
 	if manager.runPreviewVerificationGate(build, manager.collectGeneratedFiles(build), &status, &buildError, now) {
-		t.Fatal("expected fallback-verified second pass to continue finalization, not queue another repair")
+		t.Fatal("expected fallback second pass to fail terminally, not queue another repair")
 	}
-	if status != BuildCompleted {
-		t.Fatalf("expected status to remain completed for finalization, got %s", status)
+	if status != BuildFailed {
+		t.Fatalf("expected terminal failure for recovered preview shell, got %s", status)
 	}
-	if build.Status == BuildFailed {
-		t.Fatalf("expected build not to be failed after verified deterministic fallback")
+	if build.Status != BuildFailed {
+		t.Fatalf("expected build to be failed after recovered preview shell, got %s", build.Status)
 	}
-	if buildError != "" {
-		t.Fatalf("expected build error to be cleared after verified deterministic fallback, got %q", buildError)
+	if !strings.Contains(buildError, "Preview verification failed after repair attempt") {
+		t.Fatalf("expected terminal preview failure, got %q", buildError)
 	}
 	reports := build.SnapshotState.Orchestration.VerificationReports
-	if len(reports) < 2 {
-		t.Fatalf("expected failed report followed by fallback pass report, got %+v", reports)
+	if len(reports) < 1 {
+		t.Fatalf("expected failed preview report, got %+v", reports)
 	}
 	latest := reports[len(reports)-1]
-	if latest.Status != VerificationPassed {
-		t.Fatalf("expected latest preview report to pass with advisory, got %+v", latest)
+	if latest.Status != VerificationFailed {
+		t.Fatalf("expected latest preview report to fail, got %+v", latest)
 	}
-	if len(latest.Warnings) != 1 || !strings.Contains(latest.Warnings[0], "preview_fallback") {
-		t.Fatalf("expected fallback advisory warning, got %+v", latest.Warnings)
+	if !containsString(latest.Blockers, "preview_verification_failed:blank_screen") {
+		t.Fatalf("expected blank-screen preview blocker, got %+v", latest.Blockers)
 	}
-	if build.SnapshotState.FailureTaxonomy != nil && build.SnapshotState.FailureTaxonomy.CurrentClass != "" {
-		t.Fatalf("expected fallback pass report to clear current failure taxonomy, got %+v", build.SnapshotState.FailureTaxonomy)
+	if build.SnapshotState.FailureTaxonomy == nil || build.SnapshotState.FailureTaxonomy.CurrentClass == "" {
+		t.Fatalf("expected terminal failure taxonomy, got %+v", build.SnapshotState.FailureTaxonomy)
+	}
+}
+
+func TestRunPreviewVerificationGateFailsPassedFallbackShell(t *testing.T) {
+	manager := &AgentManager{
+		ctx: context.Background(),
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{Passed: true},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:                          "preview-fallback-passed",
+		Description:                 "Build a reliable React SaaS app",
+		Status:                      BuildTesting,
+		Progress:                    99,
+		UpdatedAt:                   now,
+		TechStack:                   &TechStack{Frontend: "React", Styling: "Tailwind"},
+		PreviewVerificationAttempts: 1,
+		Agents:                      map[string]*Agent{},
+		Tasks: []*Task{
+			{
+				ID:     "frontend",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{Files: []GeneratedFile{
+					{Path: "package.json", Content: `{"private":true,"scripts":{"dev":"vite","build":"vite build","preview":"vite preview"},"dependencies":{"vite":"latest","react":"latest","react-dom":"latest"}}`},
+					{Path: "index.html", Content: `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`},
+					{Path: "src/main.tsx", Content: `import React from "react"; import { createRoot } from "react-dom/client"; import App from "./App"; createRoot(document.getElementById("root")!).render(<App />);`},
+					{Path: "src/App.tsx", Content: `export default function App(){ return <main>APEX recovered preview</main>; }`},
+					{Path: "src/index.css", Content: `@tailwind base; @tailwind components; @tailwind utilities;`},
+					{Path: "vite.config.ts", Content: `import { defineConfig } from "vite"; export default defineConfig({});`},
+				}},
+			},
+		},
+	}
+	build.SnapshotState.Orchestration = &BuildOrchestrationState{
+		PatchBundles: []PatchBundle{
+			{
+				ID:            "preview-fallback",
+				BuildID:       build.ID,
+				Justification: "preview_fallback_repair: replaced unrepaired frontend output with validated React/Vite preview baseline",
+				CreatedAt:     now,
+			},
+		},
+	}
+	manager.builds = map[string]*Build{build.ID: build}
+
+	status := BuildCompleted
+	buildError := ""
+	if manager.runPreviewVerificationGate(build, manager.collectGeneratedFiles(build), &status, &buildError, now) {
+		t.Fatal("expected recovered shell to fail terminally, not queue repair")
+	}
+	if status != BuildFailed || build.Status != BuildFailed {
+		t.Fatalf("expected recovered shell to fail, status=%s build=%s", status, build.Status)
+	}
+	if !strings.Contains(buildError, "deterministic recovery shell") {
+		t.Fatalf("expected recovered-shell error, got %q", buildError)
+	}
+	reports := build.SnapshotState.Orchestration.VerificationReports
+	if len(reports) == 0 || reports[len(reports)-1].Status != VerificationFailed {
+		t.Fatalf("expected failed preview report, got %+v", reports)
 	}
 }
 

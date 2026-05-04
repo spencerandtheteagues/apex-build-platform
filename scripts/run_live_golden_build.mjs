@@ -435,7 +435,7 @@ async function verifyPreview(url) {
         rootChildCount: root?.children?.length ?? null,
         rootTextLength: String(root?.textContent || '').trim().length,
         rootHeight: rootRect?.height || 0,
-        failureText: /failed to start preview|application error|vite error|runtime error|page not found|route not found/i.test(bodyText),
+        failureText: /failed to start preview|application error|vite error|runtime error|page not found|route not found|apex recovered preview|frontend-first recovery|recovered baseline|synthesized a stable preview shell/i.test(bodyText),
       }
     }, label)
     if (!['interactive', 'complete'].includes(sample.readyState)) {
@@ -496,6 +496,9 @@ async function verifyPreview(url) {
     }
     if (/page not found|sorry,\s*that page does not exist|route not found|\b404\b[\s\S]{0,80}not found|not found[\s\S]{0,80}\b404\b/i.test(bodyText)) {
       throw new Error(`preview rendered an app-level not-found route: ${bodyText.slice(0, 500)}`)
+    }
+    if (/apex recovered preview|frontend-first recovery|recovered baseline|generated project produced a backend runtime without a frontend entrypoint|synthesized a stable preview shell/i.test(bodyText)) {
+      throw new Error(`preview rendered the deterministic recovery shell instead of the requested app: ${bodyText.slice(0, 500)}`)
     }
     const shellOnlyNav = /dashboard/i.test(bodyText) &&
       /job pipeline/i.test(bodyText) &&
