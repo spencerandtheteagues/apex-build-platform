@@ -703,6 +703,236 @@ func TestFinalValidationRepairHintsIncludesScaffoldReplacementGuidance(t *testin
 	}
 }
 
+func TestFinalValidationRepairHintsIncludesPlannedFeatureCoverageGuidance(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+
+	hints := am.finalValidationRepairHints([]string{
+		`planned feature coverage failed: "Estimate Swarm Feature" is missing the Estimate Swarm modal, named AI-agent panels, and simulated streaming/results signals`,
+	}, nil, 0)
+
+	if !containsError(hints, "Implement the missing planned features as working UI") {
+		t.Fatalf("expected planned-feature coverage hint, got %v", hints)
+	}
+	if !containsError(hints, "Do not replace the app with a simplified preview shell") {
+		t.Fatalf("expected fallback avoidance hint, got %v", hints)
+	}
+}
+
+func TestValidateFinalBuildReadinessDetectsUnderbuiltPlannedFrontendFeatures(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := fieldOpsFeatureCoverageBuild()
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `import Dashboard from "./pages/Dashboard";
+import JobPipeline from "./pages/JobPipeline";
+import NewJob from "./pages/NewJob";
+import CrewManagement from "./pages/CrewManagement";
+import Settings from "./pages/Settings";
+
+export default function App() {
+  return <main><Dashboard /><JobPipeline /><NewJob /><CrewManagement /><Settings /></main>;
+}`},
+		GeneratedFile{Path: "src/pages/Dashboard.tsx", Language: "typescript", Content: `export default function Dashboard() {
+  return <section><h1>Dashboard</h1><div>Open Jobs</div><div>Pending Estimate Value</div><div>Accepted Job Value</div><div>Average Gross Margin</div><div>Jobs Needing Follow-up</div></section>;
+}`},
+		GeneratedFile{Path: "src/pages/JobPipeline.tsx", Language: "typescript", Content: `export default function JobPipeline(){ return <div>Job Pipeline</div>; }`},
+		GeneratedFile{Path: "src/pages/NewJob.tsx", Language: "typescript", Content: `export default function NewJob(){ return <div>New Job Form</div>; }`},
+		GeneratedFile{Path: "src/pages/CrewManagement.tsx", Language: "typescript", Content: `export default function CrewManagement(){ return <div>Crew Management</div>; }`},
+		GeneratedFile{Path: "src/pages/Settings.tsx", Language: "typescript", Content: `export default function Settings(){ return <div>Settings</div>; }`},
+	)
+
+	normalized, compact := frontendFeatureCoverageText(files)
+	for _, term := range []string{"sparkline", "trend", "chart", "svg", "polyline"} {
+		if featureCoverageContainsSignal(normalized, compact, term) {
+			t.Fatalf("stub dashboard unexpectedly contains sparkline/trend signal %q in normalized=%q compact=%q", term, normalized, compact)
+		}
+	}
+
+	errs := am.validateFinalBuildReadiness(build, files)
+	for _, featureName := range []string{
+		"Dashboard",
+		"Job Pipeline (Kanban)",
+		"New Job / Estimate Builder",
+		"Job Detail Page",
+		"Crew Management",
+		"Settings Page",
+		"Estimate Swarm Feature",
+	} {
+		if !containsErrorParts(errs, "planned feature coverage failed", featureName) {
+			t.Fatalf("expected planned-feature readiness error for %q, got %v", featureName, errs)
+		}
+	}
+}
+
+func TestPlannedFeatureCoverageErrorsAcceptsRichFieldOpsSignals(t *testing.T) {
+	t.Parallel()
+
+	build := fieldOpsFeatureCoverageBuild()
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const statuses = ["New Lead", "Estimate Needed", "Proposal Sent", "Accepted", "In Progress", "Completed"];
+const crews = [{ name: "North Ridge Crew", members: ["Maya", "Eli"], currentJobs: 2, availability: "Available" }];
+
+function MetricCard({ label }: { label: string }) {
+  return <article><strong>{label}</strong><svg aria-label="sparkline trend"><polyline points="0,20 20,12 40,18 60,4" /></svg></article>;
+}
+
+export default function App() {
+  const onDragEnd = () => {};
+  const subtotal = 32 * 86 + 4200;
+  const markupAmount = subtotal * 0.28;
+  const finalCustomerPrice = subtotal + markupAmount;
+  const profit = finalCustomerPrice - subtotal;
+  const grossMargin = profit / finalCustomerPrice;
+
+  return <main>
+    <section aria-label="Dashboard metrics">
+      <MetricCard label="Open Jobs" />
+      <MetricCard label="Pending Estimate Value" />
+      <MetricCard label="Accepted Job Value" />
+      <MetricCard label="Average Gross Margin" />
+      <MetricCard label="Jobs Needing Follow-up" />
+    </section>
+    <section aria-label="Job Pipeline Kanban board">
+      {statuses.map((status) => <article key={status} className="column" draggable onDragEnd={onDragEnd}>{status}</article>)}
+    </section>
+    <form onSubmit={(event) => event.preventDefault()}>
+      <input name="customerName" aria-label="customer name" />
+      <input name="phone" aria-label="phone" />
+      <input name="email" aria-label="email" />
+      <input name="address" aria-label="address" />
+      <select name="jobType" aria-label="job type"><option>Roofing</option></select>
+      <select name="urgency" aria-label="urgency"><option>High</option></select>
+      <input name="laborHours" aria-label="labor hours" />
+      <input name="laborRate" aria-label="labor rate" />
+      <input name="materialsCost" aria-label="materials cost" />
+      <input name="markup" aria-label="markup percentage" />
+      <output>Subtotal {subtotal} final customer price {finalCustomerPrice} estimated profit {profit} gross margin {grossMargin}</output>
+    </form>
+    <section aria-label="Job Detail Page">
+      <h2>Job Detail</h2>
+      <p>Full customer info and job info with estimate breakdown.</p>
+      <select aria-label="status dropdown"><option>Proposal Sent</option></select>
+      <select aria-label="assigned crew"><option>North Ridge Crew</option></select>
+      <ol aria-label="activity timeline"><li>Proposal preview sent to customer.</li></ol>
+    </section>
+    <button>Launch Estimate Swarm</button>
+    <div role="dialog" aria-label="Estimate Swarm modal" className="fullscreen modal overlay">
+      <section>Kimi K2.6 Orchestrator streaming estimate assumptions.</section>
+      <section>GLM-5.1 Proposal Agent streaming customer-ready proposal text.</section>
+      <section>DeepSeek V4 Risk Agent streaming risk flags.</section>
+      <strong>Recommended quote and results</strong>
+    </div>
+    <section aria-label="Crew Management">
+      {crews.map((crew) => <article key={crew.name}>Crew {crew.name} members {crew.members.join(", ")} current jobs {crew.currentJobs} availability {crew.availability} assigned job</article>)}
+    </section>
+    <section aria-label="Settings">
+      <input aria-label="company name" />
+      <input aria-label="default labor rate" />
+      <input aria-label="default markup" />
+      <table><tbody><tr><td>AI provider</td><td>model routing table</td></tr></tbody></table>
+      <button>Reset Demo Data</button>
+    </section>
+  </main>;
+}`},
+	)
+
+	if errs := plannedFeatureCoverageErrors(build, files); len(errs) != 0 {
+		t.Fatalf("expected rich FieldOps feature signals to pass planned coverage, got %v", errs)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsSkipsPreviewFallbackForPlannedFeatureCoverage(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := fieldOpsFeatureCoverageBuild()
+	build.ID = "build-planned-feature-coverage-repair"
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `export default function App(){ return <main>Job Pipeline New Job Form Crew Management Settings</main>; }`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`planned feature coverage failed: "Estimate Swarm Feature" is missing the Estimate Swarm modal, named AI-agent panels, and simulated streaming/results signals`},
+		"planned feature coverage failed",
+		time.Now(),
+	)
+	if repaired {
+		t.Fatal("planned feature coverage failures must route to solver recovery instead of deterministic preview fallback")
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		t.Fatalf("expected no fallback patch bundle, got %+v", state.PatchBundles)
+	}
+}
+
+func fieldOpsFeatureCoverageBuild() *Build {
+	return &Build{
+		ID:          "build-fieldops-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build Apex FieldOps AI with five dashboard metric cards and sparkline trends, draggable job pipeline, estimate builder, job details, crew management, settings, and Estimate Swarm.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "frontend",
+			TechStack: TechStack{
+				Frontend: "React",
+			},
+			Features: []Feature{
+				{Name: "Dashboard", Description: "Displays key metrics related to jobs and estimates.", Priority: 100},
+				{Name: "Job Pipeline (Kanban)", Description: "Allows users to manage job statuses through a draggable Kanban board.", Priority: 100},
+				{Name: "New Job / Estimate Builder", Description: "Form for creating new job estimates with live calculations.", Priority: 100},
+				{Name: "Job Detail Page", Description: "Displays detailed information about a specific job and customer.", Priority: 100},
+				{Name: "Crew Management", Description: "Manages crews, their members, current jobs, and availability.", Priority: 60},
+				{Name: "Settings Page", Description: "Allows users to configure company settings and reset demo data.", Priority: 60},
+				{Name: "Estimate Swarm Feature", Description: "Launches a modal with AI agents to generate job estimates.", Priority: 100},
+			},
+		},
+	}
+}
+
+func fieldOpsFeatureCoverageBaseFiles(extraFiles ...GeneratedFile) []GeneratedFile {
+	files := []GeneratedFile{
+		{
+			Path:     "package.json",
+			Language: "json",
+			Content: `{
+  "name": "apex-fieldops-ai",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.0.0",
+    "typescript": "^5.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  }
+}`,
+		},
+		{Path: "index.html", Language: "html", Content: "<!doctype html><html><body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.tsx\"></script></body></html>"},
+		{Path: "src/main.tsx", Language: "typescript", Content: `import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+createRoot(document.getElementById("root")!).render(<App />);`},
+		{Path: "README.md", Language: "markdown", Content: "# Apex FieldOps AI\n\nRun `npm install` and `npm run dev`.\n"},
+		{Path: ".env.example", Language: "dotenv", Content: "VITE_API_URL=http://localhost:3001\n"},
+	}
+	return append(files, extraFiles...)
+}
+
 func containsError(errors []string, want string) bool {
 	for _, err := range errors {
 		if strings.Contains(err, want) {

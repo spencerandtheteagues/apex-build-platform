@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"apex-build/internal/ai"
 	"apex-build/internal/budget"
@@ -19637,6 +19638,9 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 
 	candidate := am.selectBestDeterministicValidationRepair(build, readinessErrors, repairs)
 	if candidate == nil || candidate.bundle == nil {
+		if readinessErrorsContainPlannedFeatureCoverageFailure(readinessErrors) {
+			return false
+		}
 		fallbackBundle, fallbackSummary := am.applyDeterministicPreviewFallbackRepair(build, readinessErrors)
 		if fallbackBundle == nil {
 			return false
@@ -19689,6 +19693,9 @@ func (am *AgentManager) finalValidationRepairHints(
 	heuristicHints := extractDependencyRepairHintsFromReadinessErrors(readinessErrors)
 	if repairNeedsScaffoldReplacement(readinessErrors) {
 		heuristicHints = append(heuristicHints, "CRITICAL: Replace the untouched deterministic scaffold with the requested product UI. Remove starter copy such as 'The deterministic scaffold is live', 'Replace this shell...', and 'Next.js App Router scaffold — ready to build.'")
+	}
+	if readinessErrorsContainPlannedFeatureCoverageFailure(readinessErrors) {
+		heuristicHints = append(heuristicHints, "CRITICAL: Implement the missing planned features as working UI, state, and interactions. Do not replace the app with a simplified preview shell; preserve runnable scripts while adding the missing screens, forms, drag/drop behavior, detail views, settings, and modal flows named in the validation errors.")
 	}
 	if am.ctxSelector == nil || am.errorAnalyzer == nil {
 		return dedupeStringsPreserveOrder(heuristicHints)
@@ -27770,6 +27777,9 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 				addError(msg, &frontendErrors)
 			}
 		}
+		for _, msg := range plannedFeatureCoverageErrors(build, files) {
+			addError(msg, &frontendErrors)
+		}
 	}
 	if am.shouldRunPreviewReadinessVerification(build) {
 		for _, msg := range am.verifyGeneratedBackendBuildReadiness(files, am.shouldRequireBackendRuntimeProof(build)) {
@@ -27806,7 +27816,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		readinessVerificationBucket{
 			surface:    SurfaceFrontend,
 			phase:      "surface_local_verification",
-			checks:     []string{"frontend_entry_integrity", "frontend_runtime_scripts", "frontend_preview_build"},
+			checks:     []string{"frontend_entry_integrity", "frontend_runtime_scripts", "frontend_preview_build", "planned_feature_coverage"},
 			errors:     frontendErrors,
 			applicable: isFrontendApp,
 		},
@@ -27827,6 +27837,235 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	)
 
 	return errors
+}
+
+func plannedFeatureCoverageErrors(build *Build, files []GeneratedFile) []string {
+	if build == nil || build.Plan == nil || len(build.Plan.Features) == 0 {
+		return nil
+	}
+	if build.Mode != ModeFull {
+		return nil
+	}
+
+	normalized, compact := frontendFeatureCoverageText(files)
+	if strings.TrimSpace(normalized) == "" {
+		return nil
+	}
+	requirementText := plannedFeatureCoverageRequirementText(build)
+
+	errors := make([]string, 0)
+	for _, feature := range build.Plan.Features {
+		if feature.Priority < 60 {
+			continue
+		}
+		if reason := plannedFeatureCoverageMissingReason(feature, requirementText, normalized, compact); reason != "" {
+			name := firstNonEmptyString(strings.TrimSpace(feature.Name), strings.TrimSpace(feature.ID), "planned feature")
+			errors = append(errors, fmt.Sprintf("planned feature coverage failed: %q %s", name, reason))
+		}
+	}
+	return dedupeStringsPreserveOrder(errors)
+}
+
+func plannedFeatureCoverageRequirementText(build *Build) string {
+	if build == nil {
+		return ""
+	}
+	parts := []string{build.Description}
+	if build.Plan != nil {
+		for _, check := range build.Plan.Acceptance {
+			parts = append(parts, check.Description)
+		}
+	}
+	return normalizeDetectionText(strings.Join(parts, " "))
+}
+
+func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement, normalizedSource, compactSource string) string {
+	featureText := normalizeDetectionText(strings.Join([]string{feature.ID, feature.Name, feature.Description}, " "))
+	if featureText == "" {
+		return ""
+	}
+
+	switch {
+	case featureCoverageHasAnySignal(featureText, "", []string{"swarm", "ai agent", "orchestrator", "proposal agent", "risk agent"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"swarm", "launch estimate", "estimate swarm"},
+			[]string{"modal", "dialog", "overlay", "fullscreen", "full screen"},
+			[]string{"kimi", "glm", "deepseek", "orchestrator", "proposal agent", "risk agent"},
+			[]string{"stream", "streaming", "typewriter", "typing", "results", "recommended quote"},
+		) {
+			return "is missing the Estimate Swarm modal, named AI-agent panels, and simulated streaming/results signals"
+		}
+	case featureCoverageHasAnySignal(featureText, "", []string{"kanban", "pipeline", "draggable", "drag and drop"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"kanban", "pipeline", "board", "column"},
+			[]string{"drag", "draggable", "drop", "ondrag", "ondragend", "dnd", "dnd kit", "sortable", "droppable"},
+			[]string{"new lead", "estimate needed", "proposal sent", "accepted", "in progress", "completed", "status"},
+		) {
+			return "is missing drag-and-drop Kanban implementation signals with job status columns"
+		}
+	case featureCoverageHasAnySignal(featureText, "", []string{"estimate builder", "new job", "live calculation", "live calculations"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"form", "onsubmit", "useform", "input", "select"},
+			[]string{"labor", "materials", "material cost", "markup"},
+			[]string{"subtotal", "profit", "gross margin", "margin", "final price", "customer price"},
+			[]string{"customer", "phone", "email", "address", "urgency", "job type"},
+		) {
+			return "is missing the estimate-builder form, required fields, and live pricing/profit calculations"
+		}
+	case featureCoverageHasAnySignal(featureText, "", []string{"job detail", "detail page", "specific job", "customer proposal"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"job detail", "selected job", "full customer", "customer info"},
+			[]string{"status", "status dropdown", "select status"},
+			[]string{"crew", "assigned crew"},
+			[]string{"timeline", "activity", "proposal", "breakdown"},
+		) {
+			return "is missing job-detail status, crew assignment, activity timeline, and proposal/breakdown signals"
+		}
+	case featureCoverageHasAnySignal(featureText, "", []string{"crew management", "crew", "crews"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"crew", "crews"},
+			[]string{"member", "members"},
+			[]string{"availability", "available"},
+			[]string{"current job", "current jobs", "assigned", "job"},
+		) {
+			return "is missing crew members, availability, and current-job assignment signals"
+		}
+	case featureCoverageHasAnySignal(featureText, "", []string{"settings", "company settings", "reset demo"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"settings"},
+			[]string{"company", "company name"},
+			[]string{"labor rate", "default labor", "markup", "default markup"},
+			[]string{"provider", "ai provider", "model", "routing"},
+			[]string{"reset", "reset demo"},
+		) {
+			return "is missing company defaults, labor/markup settings, AI provider/model routing, and reset-demo signals"
+		}
+	case featureCoverageHasAnySignal(featureText, "", []string{"dashboard", "metric", "metrics"}):
+		metricCount := featureCoverageSignalCount(normalizedSource, compactSource, []string{
+			"open jobs", "pending estimate", "accepted job", "gross margin", "follow up", "follow-up", "needing follow up",
+		})
+		requireTrend := featureCoverageHasAnySignal(normalizedRequirement, "", []string{"sparkline", "trend", "chart"})
+		if metricCount < 3 || (requireTrend && !featureCoverageHasAnySignal(normalizedSource, compactSource, []string{"sparkline", "trend", "chart", "svg", "polyline"})) {
+			return "is missing multiple required metric labels and sparkline/trend signals"
+		}
+	}
+
+	return ""
+}
+
+func frontendFeatureCoverageText(files []GeneratedFile) (string, string) {
+	var builder strings.Builder
+	for _, file := range files {
+		path := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Path), "./"))
+		if !isFrontendFeatureCoverageSourcePath(path) {
+			continue
+		}
+		content := strings.TrimSpace(file.Content)
+		if content == "" {
+			continue
+		}
+		builder.WriteString(" ")
+		builder.WriteString(path)
+		builder.WriteString(" ")
+		builder.WriteString(stripFeatureCoverageCodeComments(content))
+	}
+	raw := builder.String()
+	return normalizeDetectionText(raw), compactFeatureCoverageText(raw)
+}
+
+func isFrontendFeatureCoverageSourcePath(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(path), "./")))
+	if path == "" {
+		return false
+	}
+	if strings.Contains(path, ".test.") || strings.Contains(path, ".spec.") ||
+		strings.Contains(path, "/__tests__/") || strings.Contains(path, "/tests/") {
+		return false
+	}
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, "vite.config") || strings.HasPrefix(base, "tailwind.config") ||
+		strings.HasPrefix(base, "postcss.config") || strings.HasPrefix(base, "tsconfig") ||
+		base == "package.json" {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ts", ".tsx", ".js", ".jsx":
+	default:
+		return false
+	}
+	return strings.HasPrefix(path, "src/") ||
+		strings.Contains(path, "/src/") ||
+		strings.HasPrefix(path, "app/") ||
+		strings.HasPrefix(path, "pages/") ||
+		strings.HasPrefix(path, "components/")
+}
+
+func stripFeatureCoverageCodeComments(content string) string {
+	if strings.TrimSpace(content) == "" {
+		return ""
+	}
+	withoutBlocks := featureCoverageBlockCommentPattern.ReplaceAllString(content, " ")
+	return featureCoverageLineCommentPattern.ReplaceAllString(withoutBlocks, " ")
+}
+
+func compactFeatureCoverageText(input string) string {
+	if strings.TrimSpace(input) == "" {
+		return ""
+	}
+	var builder strings.Builder
+	for _, r := range input {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			continue
+		}
+		builder.WriteRune(unicode.ToLower(r))
+	}
+	return builder.String()
+}
+
+func featureCoverageHasSignalGroups(normalizedSource, compactSource string, groups ...[]string) bool {
+	for _, group := range groups {
+		if !featureCoverageHasAnySignal(normalizedSource, compactSource, group) {
+			return false
+		}
+	}
+	return true
+}
+
+func featureCoverageHasAnySignal(normalizedSource, compactSource string, terms []string) bool {
+	for _, term := range terms {
+		if featureCoverageContainsSignal(normalizedSource, compactSource, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func featureCoverageSignalCount(normalizedSource, compactSource string, terms []string) int {
+	count := 0
+	for _, term := range terms {
+		if featureCoverageContainsSignal(normalizedSource, compactSource, term) {
+			count++
+		}
+	}
+	return count
+}
+
+func featureCoverageContainsSignal(normalizedSource, compactSource, term string) bool {
+	normalizedTerm := strings.Join(strings.Fields(normalizeDetectionText(term)), " ")
+	if normalizedTerm != "" && containsAffirmedTerm(normalizedSource, normalizedTerm) {
+		return true
+	}
+	compactTerm := compactFeatureCoverageText(term)
+	return len(compactTerm) >= 6 && compactSource != "" && strings.Contains(compactSource, compactTerm)
+}
+
+func readinessErrorsContainPlannedFeatureCoverageFailure(readinessErrors []string) bool {
+	for _, err := range readinessErrors {
+		if strings.Contains(strings.ToLower(err), "planned feature coverage failed") {
+			return true
+		}
+	}
+	return false
 }
 
 func (am *AgentManager) shouldRunPreviewReadinessVerification(build *Build) bool {
@@ -27898,6 +28137,8 @@ var integrationTemplateParamPattern = regexp.MustCompile(`\$\{[^}]+\}`)
 var integrationNamedParamPattern = regexp.MustCompile(`:[A-Za-z_][A-Za-z0-9_]*`)
 var integrationBraceParamPattern = regexp.MustCompile(`\{[^}]+\}`)
 var integrationSlashPattern = regexp.MustCompile(`/+`)
+var featureCoverageBlockCommentPattern = regexp.MustCompile(`(?s)/\*.*?\*/`)
+var featureCoverageLineCommentPattern = regexp.MustCompile(`(?m)//.*$`)
 
 func manifestDeclaresDependency(manifest previewManifest, pkg string) bool {
 	pkg = canonicalGeneratedDependencyName(pkg)
