@@ -17803,6 +17803,11 @@ func syntheticFrontendViteEnvDTS() string {
 `
 }
 
+const (
+	canonicalPreviewTailwindConfigPath = "tailwind.config.cjs"
+	canonicalPreviewPostCSSConfigPath  = "postcss.config.cjs"
+)
+
 func isCanonicalFrontendScaffoldPath(path string) bool {
 	switch sanitizeFilePath(strings.TrimSpace(path)) {
 	case "index.html",
@@ -17811,7 +17816,9 @@ func isCanonicalFrontendScaffoldPath(path string) bool {
 		"src/vite-env.d.ts",
 		"vite.config.ts",
 		"tailwind.config.js",
+		"tailwind.config.cjs",
 		"postcss.config.js",
+		"postcss.config.cjs",
 		"src/index.css",
 		"tsconfig.json":
 		return true
@@ -17942,9 +17949,9 @@ func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *T
 		return syntheticFrontendViteEnvDTS(), "typescript", true
 	case "vite.config.ts":
 		return syntheticFrontendViteConfig(backendPort), "typescript", true
-	case "tailwind.config.js":
+	case "tailwind.config.js", "tailwind.config.cjs":
 		return syntheticFrontendTailwindConfigForPath(path, packageUsesESM), "javascript", true
-	case "postcss.config.js":
+	case "postcss.config.js", "postcss.config.cjs":
 		return syntheticFrontendPostCSSConfigForPath(path, packageUsesESM), "javascript", true
 	case "src/index.css":
 		return syntheticFrontendIndexCSS(), "css", true
@@ -18111,9 +18118,8 @@ func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(b
 			applied = append(applied, manifestPath)
 		}
 	}
-	packageUsesESM := manifestContentUsesESModulePackage(plan.content(manifestPath))
-	upsertPreviewFile("tailwind.config.js", syntheticFrontendTailwindConfigForPath("tailwind.config.js", packageUsesESM), "javascript")
-	upsertPreviewFile("postcss.config.js", syntheticFrontendPostCSSConfigForPath("postcss.config.js", packageUsesESM), "javascript")
+	upsertPreviewFile(canonicalPreviewTailwindConfigPath, syntheticFrontendTailwindConfigForPath(canonicalPreviewTailwindConfigPath, false), "javascript")
+	upsertPreviewFile(canonicalPreviewPostCSSConfigPath, syntheticFrontendPostCSSConfigForPath(canonicalPreviewPostCSSConfigPath, false), "javascript")
 	if strings.TrimSpace(plan.content("src/App.tsx")) == "" {
 		if content, language, ok := am.canonicalFrontendScaffoldContent(build, output, "src/App.tsx"); ok && plan.createFile("src/App.tsx", content, language) {
 			applied = append(applied, "src/App.tsx")
@@ -18195,9 +18201,8 @@ func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Buil
 	createIfMissing("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
 	createIfMissing("src/App.tsx", syntheticFrontendAppTSXWithDescription(title, summary, description, backendEntry, backendPort), "typescript")
 	createIfMissing("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
-	packageUsesESM := manifestContentUsesESModulePackage(plan.content(manifestPath))
-	createIfMissing("tailwind.config.js", syntheticFrontendTailwindConfigForPath("tailwind.config.js", packageUsesESM), "javascript")
-	createIfMissing("postcss.config.js", syntheticFrontendPostCSSConfigForPath("postcss.config.js", packageUsesESM), "javascript")
+	createIfMissing(canonicalPreviewTailwindConfigPath, syntheticFrontendTailwindConfigForPath(canonicalPreviewTailwindConfigPath, false), "javascript")
+	createIfMissing(canonicalPreviewPostCSSConfigPath, syntheticFrontendPostCSSConfigForPath(canonicalPreviewPostCSSConfigPath, false), "javascript")
 	createIfMissing("src/index.css", syntheticFrontendIndexCSS(), "css")
 	applyDeterministicShadcnScaffold(createIfMissing)
 	if strings.TrimSpace(plan.content("tsconfig.json")) == "" {
@@ -18308,7 +18313,19 @@ func (am *AgentManager) applyDeterministicPreviewFallbackRepair(build *Build, re
 
 	title := synthesizedFrontendShellAppName(description)
 	summary := synthesizedFrontendShellSummary(description)
-	packageUsesESM := manifestContentUsesESModulePackage(plan.content(manifestPath))
+	removeConflictingConfigFiles := func(keep string, candidates ...string) {
+		for _, candidate := range candidates {
+			candidate = sanitizeFilePath(candidate)
+			if candidate == "" || candidate == keep || strings.TrimSpace(plan.content(candidate)) == "" {
+				continue
+			}
+			if plan.deleteFile(candidate) {
+				applied = append(applied, "removed "+candidate)
+			}
+		}
+	}
+	removeConflictingConfigFiles(canonicalPreviewTailwindConfigPath, "tailwind.config.js", "tailwind.config.mjs", "tailwind.config.ts")
+	removeConflictingConfigFiles(canonicalPreviewPostCSSConfigPath, "postcss.config.js", "postcss.config.mjs", "postcss.config.ts")
 	upsertPreviewFile("index.html", syntheticFrontendIndexHTML(title), "html")
 	upsertPreviewFile("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
 	upsertPreviewFile("src/App.tsx", syntheticFrontendAppTSXWithDescription(title, summary, description, backendEntry, backendPort), "typescript")
@@ -18316,8 +18333,8 @@ func (am *AgentManager) applyDeterministicPreviewFallbackRepair(build *Build, re
 	upsertPreviewFile("src/vite-env.d.ts", syntheticFrontendViteEnvDTS(), "typescript")
 	upsertPreviewFile("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
 	upsertPreviewFile("tsconfig.json", syntheticFrontendTSConfig(), "json")
-	upsertPreviewFile("tailwind.config.js", syntheticFrontendTailwindConfigForPath("tailwind.config.js", packageUsesESM), "javascript")
-	upsertPreviewFile("postcss.config.js", syntheticFrontendPostCSSConfigForPath("postcss.config.js", packageUsesESM), "javascript")
+	upsertPreviewFile(canonicalPreviewTailwindConfigPath, syntheticFrontendTailwindConfigForPath(canonicalPreviewTailwindConfigPath, false), "javascript")
+	upsertPreviewFile(canonicalPreviewPostCSSConfigPath, syntheticFrontendPostCSSConfigForPath(canonicalPreviewPostCSSConfigPath, false), "javascript")
 	for _, path := range shadcnScaffoldPaths() {
 		content, language, ok := shadcnScaffoldContent(path)
 		if !ok {

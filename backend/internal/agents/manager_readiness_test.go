@@ -522,7 +522,8 @@ app.listen(process.env.PORT || 3001);`,
 		"src/main.tsx":                 false,
 		"src/App.tsx":                  false,
 		"src/index.css":                false,
-		"tailwind.config.js":           false,
+		"tailwind.config.cjs":          false,
+		"postcss.config.cjs":           false,
 	}
 
 	for _, op := range bundle.Operations {
@@ -530,9 +531,6 @@ app.listen(process.env.PORT || 3001);`,
 			if _, ok := requiredCreates[op.Path]; ok {
 				requiredCreates[op.Path] = true
 			}
-		}
-		if op.Path == "package.json" && strings.Contains(op.Content, `"tailwindcss-animate"`) && strings.Contains(op.Content, `"@radix-ui/react-dialog"`) {
-			requiredCreates["tailwind.config.js"] = requiredCreates["tailwind.config.js"]
 		}
 	}
 

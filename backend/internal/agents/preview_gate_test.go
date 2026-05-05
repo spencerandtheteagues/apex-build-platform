@@ -358,6 +358,8 @@ func TestRunPreviewVerificationGateUsesDeterministicShellFallbackBeforeSolverFor
 					{Path: "index.html", Content: `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`},
 					{Path: "src/main.tsx", Content: `import React from "react"; import { createRoot } from "react-dom/client"; import App from "./App"; createRoot(document.getElementById("root")!).render(<App />);`},
 					{Path: "src/App.tsx", Content: `export default function App(){ return null; }`},
+					{Path: "tailwind.config.js", Content: `export default { content: [], theme: { extend: {} }, plugins: [] };`},
+					{Path: "postcss.config.js", Content: `export default { plugins: { tailwindcss: {}, autoprefixer: {} } };`},
 				}},
 			},
 		},
@@ -397,8 +399,14 @@ func TestRunPreviewVerificationGateUsesDeterministicShellFallbackBeforeSolverFor
 		!strings.Contains(lowerApp, "add live item") {
 		t.Fatalf("expected blank App.tsx to be replaced by prompt-adaptive contractor app shell, got %q", app)
 	}
-	if strings.TrimSpace(filesByPath["src/index.css"]) == "" || strings.TrimSpace(filesByPath["vite.config.ts"]) == "" {
+	if strings.TrimSpace(filesByPath["src/index.css"]) == "" ||
+		strings.TrimSpace(filesByPath["vite.config.ts"]) == "" ||
+		strings.TrimSpace(filesByPath["tailwind.config.cjs"]) == "" ||
+		strings.TrimSpace(filesByPath["postcss.config.cjs"]) == "" {
 		t.Fatalf("expected fallback to install canonical preview scaffold files, got paths: %+v", filesByPath)
+	}
+	if strings.TrimSpace(filesByPath["tailwind.config.js"]) != "" || strings.TrimSpace(filesByPath["postcss.config.js"]) != "" {
+		t.Fatalf("expected fallback to avoid ambiguous .js config files, got paths: %+v", filesByPath)
 	}
 	state := build.SnapshotState.Orchestration
 	if state == nil || len(state.PatchBundles) == 0 {
