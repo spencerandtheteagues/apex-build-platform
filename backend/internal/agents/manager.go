@@ -8467,6 +8467,31 @@ func findGeneratedManifestPath(files []GeneratedFile, candidates []string) strin
 	return ""
 }
 
+func generatedFilesSuggestViteFrontend(files []GeneratedFile, manifestPath string) bool {
+	prefix := strings.ToLower(strings.TrimSpace(generatedManifestPrefix(manifestPath)))
+	for _, file := range files {
+		path := strings.ToLower(filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Path), "./")))
+		if path == "" {
+			continue
+		}
+		if prefix != "" {
+			if !strings.HasPrefix(path, prefix) {
+				continue
+			}
+			path = strings.TrimPrefix(path, prefix)
+			path = strings.TrimPrefix(path, "/")
+		}
+		switch path {
+		case "index.html", "vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.mts", "src/main.jsx", "src/main.tsx":
+			return true
+		}
+		if strings.HasPrefix(path, "src/") && (strings.HasSuffix(path, ".tsx") || strings.HasSuffix(path, ".jsx")) {
+			return true
+		}
+	}
+	return false
+}
+
 func patchManifestDependenciesJSON(content string, pkgs []string) (string, []string) {
 	if strings.TrimSpace(content) == "" || len(pkgs) == 0 {
 		return content, nil
@@ -8521,6 +8546,94 @@ func patchManifestDependenciesJSON(content string, pkgs []string) (string, []str
 		return content, nil
 	}
 	return string(updated), added
+}
+
+func patchViteRunnableScriptsJSON(content string) (string, []string) {
+	if strings.TrimSpace(content) == "" {
+		return content, nil
+	}
+
+	var manifest previewManifest
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return content, nil
+	}
+	if manifest.Scripts == nil {
+		manifest.Scripts = map[string]string{}
+	}
+	if !manifestUsesVite(manifest) || manifestDeclaresDependency(manifest, "next") {
+		return content, nil
+	}
+
+	return patchManifestScriptsJSON(content, map[string]string{
+		"build":   "vite build",
+		"dev":     "vite",
+		"preview": "vite preview",
+	})
+}
+
+func readinessErrorsContainMissingRunnableScripts(readinessErrors []string) bool {
+	for _, errText := range readinessErrors {
+		if strings.Contains(strings.ToLower(errText), "package.json is missing runnable scripts") {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) applyDeterministicFrontendRunnableScriptsRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || !readinessErrorsContainMissingRunnableScripts(readinessErrors) {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return nil, ""
+	}
+
+	summaries := make([]string, 0, 1)
+	for _, manifestPath := range generatedManifestCandidates(files) {
+		content := plan.content(manifestPath)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+
+		var manifest previewManifest
+		if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+			continue
+		}
+		if manifest.Scripts == nil {
+			manifest.Scripts = map[string]string{}
+		}
+		if manifestDeclaresDependency(manifest, "next") || !manifestLooksLikeFrontendSurface(manifest, manifestPath) {
+			continue
+		}
+
+		updatedContent := content
+		changes := make([]string, 0, 2)
+		if !manifestUsesVite(manifest) && generatedFilesSuggestViteFrontend(files, manifestPath) {
+			if patched, added := patchManifestDependenciesJSON(updatedContent, []string{"vite"}); len(added) > 0 {
+				updatedContent = patched
+				changes = append(changes, "deps: "+strings.Join(added, ", "))
+			}
+		}
+		if patched, added := patchViteRunnableScriptsJSON(updatedContent); len(added) > 0 {
+			updatedContent = patched
+			changes = append(changes, "scripts: "+strings.Join(added, ", "))
+		}
+		if len(changes) == 0 {
+			continue
+		}
+		if !plan.patchFile(manifestPath, updatedContent, "json") {
+			continue
+		}
+		summaries = append(summaries, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(changes, "; ")))
+	}
+	if len(summaries) == 0 {
+		return nil, ""
+	}
+
+	summary := strings.Join(summaries, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "frontend_runtime_script_repair: "+summary), summary
 }
 
 func missingManifestDependenciesForGeneratedFiles(files []GeneratedFile, manifestPath string, manifest previewManifest, seeded []string) []string {
@@ -10265,11 +10378,16 @@ func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build,
 		if len(added) == 0 {
 			continue
 		}
+		summaryParts := append([]string(nil), added...)
+		if patched, scriptsAdded := patchViteRunnableScriptsJSON(updated); len(scriptsAdded) > 0 {
+			updated = patched
+			summaryParts = append(summaryParts, "scripts: "+strings.Join(scriptsAdded, ", "))
+		}
 		if !plan.patchFile(r.path, updated, "json") {
 			continue
 		}
 		applied = true
-		summaries = append(summaries, fmt.Sprintf("%s %s (%s)", r.role, r.path, strings.Join(added, ", ")))
+		summaries = append(summaries, fmt.Sprintf("%s %s (%s)", r.role, r.path, strings.Join(summaryParts, ", ")))
 	}
 	if !applied {
 		return nil, ""
@@ -10358,11 +10476,16 @@ func (am *AgentManager) ensureGeneratedManifestDependencyClosure(build *Build, f
 		if len(added) == 0 {
 			continue
 		}
+		summaryParts := append([]string(nil), added...)
+		if patched, scriptsAdded := patchViteRunnableScriptsJSON(updated); len(scriptsAdded) > 0 {
+			updated = patched
+			summaryParts = append(summaryParts, "scripts: "+strings.Join(scriptsAdded, ", "))
+		}
 		if !plan.patchFile(manifestPath, updated, "json") {
 			continue
 		}
 		changed = true
-		summaries = append(summaries, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(added, ", ")))
+		summaries = append(summaries, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(summaryParts, ", ")))
 	}
 
 	if !changed {
@@ -15653,12 +15776,10 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 				manifestChanges = append(manifestChanges, "deps: "+strings.Join(added, ", "))
 			}
 		}
-		if manifestUsesVite(manifest) {
-			if patched, added := patchManifestScriptsJSON(updatedContent, map[string]string{"preview": "vite preview"}); len(added) > 0 {
-				updatedContent = patched
-				manifestChanged = true
-				manifestChanges = append(manifestChanges, "scripts: "+strings.Join(added, ", "))
-			}
+		if patched, added := patchViteRunnableScriptsJSON(updatedContent); len(added) > 0 {
+			updatedContent = patched
+			manifestChanged = true
+			manifestChanges = append(manifestChanges, "scripts: "+strings.Join(added, ", "))
 		}
 		if manifestChanged {
 			if !plan.patchFile(manifestPath, updatedContent, "json") {
@@ -19433,6 +19554,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied React prop repair: %s)",
 			message:     "Applied deterministic React component prop passthrough repair for generated frontend modules. Re-running final validation before solver recovery.",
 			summaryKey:  "react_prop_mismatch_repair",
+		},
+		{
+			apply:       am.applyDeterministicFrontendRunnableScriptsRepair,
+			errorFormat: "Final output validation failed: %s (applied frontend runtime script repair: %s)",
+			message:     "Applied deterministic frontend runtime script repair. Re-running final validation before solver recovery.",
+			summaryKey:  "frontend_runtime_script_repair",
 		},
 		{
 			apply:       am.applyDeterministicManifestDependencyRepair,

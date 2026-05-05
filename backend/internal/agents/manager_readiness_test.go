@@ -2836,7 +2836,7 @@ func TestEnsureGeneratedManifestDependencyClosureRepairsBeforePreviewValidation(
 				Content: `{
   "name": "fieldops",
   "private": true,
-  "scripts": { "build": "tsc && vite build", "dev": "vite" },
+  "scripts": { "build": "tsc && vite build" },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -2890,13 +2890,86 @@ export default function App() {
 			t.Fatalf("expected dependency closure to include %s, got %s", pkg, manifest)
 		}
 	}
+	for _, script := range []string{`"dev": "vite"`, `"preview": "vite preview"`} {
+		if !strings.Contains(manifest, script) {
+			t.Fatalf("expected dependency closure to preserve Vite runtime script %s, got %s", script, manifest)
+		}
+	}
 
 	var parsed previewManifest
 	if err := json.Unmarshal([]byte(manifest), &parsed); err != nil {
 		t.Fatalf("expected repaired manifest to be valid JSON: %v", err)
 	}
+	if _, _, _, hasScripts, missingScripts, err := analyzeFrontendPackageJSON(manifest); err != nil || !hasScripts {
+		t.Fatalf("expected repaired manifest to satisfy frontend runnable scripts, missing=%v err=%v manifest=%s", missingScripts, err, manifest)
+	}
 	if issues := validateGeneratedImportDependencies(files, "", parsed); len(issues) > 0 {
 		t.Fatalf("expected repaired manifest to satisfy import dependency check, got %v", issues)
+	}
+}
+
+func TestApplyDeterministicFrontendRunnableScriptsRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-frontend-runtime-script-repair",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": { "build": "vite build" },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}`,
+				IsNew: true,
+			},
+			{Path: "index.html", Content: `<!doctype html><html><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>`, IsNew: true},
+			{Path: "src/main.tsx", Content: `import React from "react"; import { createRoot } from "react-dom/client"; createRoot(document.getElementById("root")!).render(<App />); function App(){ return <div>ok</div>; }`, IsNew: true},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{"package.json is missing runnable scripts (dev|preview|start)"},
+		"missing runnable scripts",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected frontend runtime script repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	manifest := ""
+	for _, file := range files {
+		if file.Path == "package.json" {
+			manifest = file.Content
+			break
+		}
+	}
+	for _, script := range []string{`"dev": "vite"`, `"preview": "vite preview"`} {
+		if !strings.Contains(manifest, script) {
+			t.Fatalf("expected runtime script repair to add %s, got %s", script, manifest)
+		}
+	}
+	if _, _, _, hasScripts, missingScripts, err := analyzeFrontendPackageJSON(manifest); err != nil || !hasScripts {
+		t.Fatalf("expected runtime script repair to satisfy frontend scripts, missing=%v err=%v manifest=%s", missingScripts, err, manifest)
 	}
 }
 
