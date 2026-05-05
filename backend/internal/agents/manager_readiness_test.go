@@ -844,6 +844,168 @@ export default function App() {
 	}
 }
 
+func TestPlannedFeatureCoverageErrorsAcceptsDocumentIntelligenceSignals(t *testing.T) {
+	t.Parallel()
+
+	build := documentIntelligenceFeatureCoverageBuild()
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const recentAnalyses = ["Master Services Agreement", "Lease Addendum"];
+const routingRoles = ["Intake Router", "Risk Reviewer", "Follow-up Assistant"];
+
+export default function App() {
+  return <main>
+    <section aria-label="Dashboard">
+      <article className="card">Usage cards 41 documents analyzed this month</article>
+      <article>Recent document analyses {recentAnalyses.join(", ")}</article>
+      <article>Risk summary: 3 high risk clauses and 8 medium status items</article>
+    </section>
+    <section aria-label="Upload Analyze Page">
+      <div role="button">Drag and drop mock upload file input</div>
+      <select aria-label="document type selector"><option>Contract</option></select>
+      <select aria-label="model selector"><option>GLM Legal Draft</option></select>
+      <button>Run Analysis</button>
+      <pre>Simulated streaming analysis is running...</pre>
+    </section>
+    <section aria-label="Analysis Detail Page">
+      <h2>Analysis Detail</h2>
+      <article>Extracted clauses: indemnity, termination, auto-renewal</article>
+      <strong>Risk score 82</strong>
+      <p>Summary and action items for counsel review.</p>
+      <form><input aria-label="chat-style follow-up" placeholder="Ask follow-up" /></form>
+    </section>
+    <section aria-label="History Page">
+      <input aria-label="filters" />
+      <span>Status chips</span>
+      <article>Reusable analysis cards</article>
+    </section>
+    <section aria-label="Settings Page">
+      <input aria-label="BYOK API key placeholder" />
+      <table><tbody><tr><td>Token usage table</td><td>128k tokens</td></tr></tbody></table>
+      <ul>{routingRoles.map((role) => <li key={role}>Model routing roles {role}</li>)}</ul>
+      <button>Reset Demo Data</button>
+    </section>
+  </main>;
+}`},
+	)
+
+	if errs := plannedFeatureCoverageErrors(build, files); len(errs) != 0 {
+		t.Fatalf("expected rich document-intelligence feature signals to pass planned coverage, got %v", errs)
+	}
+}
+
+func TestPlannedFeatureCoverageErrorsRejectsUnderbuiltDocumentIntelligenceSignals(t *testing.T) {
+	t.Parallel()
+
+	build := documentIntelligenceFeatureCoverageBuild()
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `export default function App() {
+  return <main>
+    <section>Dashboard Usage</section>
+    <section>Analyze Document</section>
+    <section>Analysis Detail</section>
+    <section>History</section>
+    <section>Settings</section>
+  </main>;
+}`},
+	)
+
+	errs := plannedFeatureCoverageErrors(build, files)
+	for _, featureName := range []string{
+		"Dashboard",
+		"Upload/Analyze Page",
+		"Analysis Detail Page",
+		"Settings Page",
+	} {
+		if !containsErrorParts(errs, "planned feature coverage failed", featureName) {
+			t.Fatalf("expected document-intelligence planned-feature error for %q, got %v", featureName, errs)
+		}
+	}
+}
+
+func TestPlannedFeatureCoverageErrorsAcceptsGenericCRMSignals(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{
+		ID:          "build-crm-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build CloseForge CRM with dashboard follow-up metrics, draggable deals pipeline Kanban, deal details, new deal form, and settings.",
+		TechStack:   &TechStack{Frontend: "React"},
+		Plan: &BuildPlan{
+			AppType:   "frontend",
+			TechStack: TechStack{Frontend: "React"},
+			Features: []Feature{
+				{Name: "Dashboard", Description: "Dashboard with pipeline value, weighted forecast, win rate, open deals, and follow-up metrics.", Priority: 100},
+				{Name: "Deals Pipeline Kanban", Description: "Draggable cards across Prospecting, Qualified, Proposal, Negotiation, Won, and Lost.", Priority: 100},
+				{Name: "Settings Page", Description: "Settings page with stages, owners, default probability, and reset demo data.", Priority: 60},
+			},
+		},
+	}
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const stages = ["Prospecting", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
+
+export default function App() {
+  const onDragEnd = () => {};
+  return <main>
+    <section aria-label="Dashboard">
+      <article className="card">Pipeline value $842,000</article>
+      <article className="card">Weighted forecast $421,000</article>
+      <article className="card">Win rate 37%</article>
+      <article className="card">Open deals 24</article>
+      <article className="card">Follow-up metrics 9 due today</article>
+      <svg aria-label="forecast chart"><polyline points="0,20 20,10 40,16" /></svg>
+    </section>
+    <section aria-label="Deals Pipeline Kanban board">
+      {stages.map((stage) => <article key={stage} className="column" draggable onDragEnd={onDragEnd}>{stage}</article>)}
+    </section>
+    <section aria-label="Settings">
+      <label>Stages<input defaultValue="Prospecting, Qualified, Proposal" /></label>
+      <label>Owners<input defaultValue="Avery, Quinn" /></label>
+      <label>Default probability<input defaultValue="35%" /></label>
+      <button>Reset Demo Data</button>
+    </section>
+  </main>;
+}`},
+	)
+
+	if errs := plannedFeatureCoverageErrors(build, files); len(errs) != 0 {
+		t.Fatalf("expected CRM feature signals to pass planned coverage, got %v", errs)
+	}
+}
+
+func TestPlannedFeatureCoverageErrorsAcceptsDashboardWithoutChartRequirement(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{
+		ID:          "build-marketplace-dashboard-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build TradeMatch Pro with a vendor dashboard showing leads, quote requests, profile completeness, and response metrics.",
+		TechStack:   &TechStack{Frontend: "React"},
+		Plan: &BuildPlan{
+			AppType:   "frontend",
+			TechStack: TechStack{Frontend: "React"},
+			Features: []Feature{
+				{Name: "Vendor Dashboard", Description: "Vendor dashboard with leads, quote requests, profile completeness, and response metrics.", Priority: 100},
+			},
+		},
+	}
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `export default function App() {
+  return <main>
+    <section aria-label="Vendor Dashboard">
+      <article className="card">Leads 18 active property manager requests</article>
+      <article className="card">Quote requests 7 pending</article>
+      <article className="card">Profile completeness 92% progress</article>
+      <article className="card">Response metrics 1.8 hour average response rate</article>
+    </section>
+  </main>;
+}`},
+	)
+
+	if errs := plannedFeatureCoverageErrors(build, files); len(errs) != 0 {
+		t.Fatalf("expected dashboard metrics without chart requirement to pass planned coverage, got %v", errs)
+	}
+}
+
 func TestApplyDeterministicValidationRepairsUsesFieldOpsPlannedFeatureRepair(t *testing.T) {
 	t.Parallel()
 
@@ -965,6 +1127,30 @@ func fieldOpsFeatureCoverageBuild() *Build {
 				{Name: "Crew Management", Description: "Manages crews, their members, current jobs, and availability.", Priority: 60},
 				{Name: "Settings Page", Description: "Allows users to configure company settings and reset demo data.", Priority: 60},
 				{Name: "Estimate Swarm Feature", Description: "Launches a modal with AI agents to generate job estimates.", Priority: 100},
+			},
+		},
+	}
+}
+
+func documentIntelligenceFeatureCoverageBuild() *Build {
+	return &Build{
+		ID:          "build-document-intelligence-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build DocuLens AI, a document intelligence workspace with dashboard usage cards, upload/analyze document flow, analysis detail page, history, BYOK settings, token usage table, routing roles, and reset demo data.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "frontend",
+			TechStack: TechStack{
+				Frontend: "React",
+			},
+			Features: []Feature{
+				{Name: "Dashboard", Description: "Dashboard with usage cards, recent document analyses, and risk summary.", Priority: 100},
+				{Name: "Upload/Analyze Page", Description: "Upload/analyze page with drag-and-drop mock upload, document type selector, model selector, and simulated streaming analysis.", Priority: 100},
+				{Name: "Analysis Detail Page", Description: "Analysis detail page with extracted clauses, risk score, summary, action items, and chat-style follow-up.", Priority: 100},
+				{Name: "History Page", Description: "History page with filters, status chips, and reusable analysis cards.", Priority: 60},
+				{Name: "Settings Page", Description: "Settings page with BYOK placeholders, token usage table, routing roles, and reset demo data.", Priority: 60},
 			},
 		},
 	}

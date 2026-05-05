@@ -27956,6 +27956,13 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 	if featureText == "" {
 		return ""
 	}
+	requirementAndFeature := strings.TrimSpace(normalizedRequirement + " " + featureText)
+	fieldOpsLike := featureCoverageHasAnySignal(requirementAndFeature, "", []string{
+		"fieldops", "field ops", "field operations", "contractor field", "contractor field operations", "job pipeline", "estimate builder", "crew management", "estimate swarm",
+	})
+	documentIntelligenceLike := featureCoverageHasAnySignal(requirementAndFeature, "", []string{
+		"document intelligence", "document analysis", "document analyses", "analyze document", "upload/analyze", "extracted clauses", "doculens",
+	})
 
 	switch {
 	case featureCoverageHasAnySignal(featureText, "", []string{"swarm", "ai agent", "orchestrator", "proposal agent", "risk agent"}):
@@ -27967,13 +27974,34 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 		) {
 			return "is missing the Estimate Swarm modal, named AI-agent panels, and simulated streaming/results signals"
 		}
-	case featureCoverageHasAnySignal(featureText, "", []string{"kanban", "pipeline", "draggable", "drag and drop"}):
+	case featureCoverageHasAnySignal(featureText, "", []string{"upload", "analyze document", "document analysis", "drag and drop mock upload"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"upload", "analyze", "analyze document", "document"},
+			[]string{"drag", "drop", "drag and drop", "file", "input"},
+			[]string{"document type", "model selector", "model"},
+			[]string{"stream", "streaming", "analysis", "run analysis"},
+		) {
+			return "is missing the upload/analyze flow, drag-and-drop file input, selectors, and simulated streaming analysis signals"
+		}
+	case featureCoverageHasAnySignal(featureText, "", []string{"kanban"}) ||
+		(fieldOpsLike && featureCoverageHasAnySignal(featureText, "", []string{"pipeline", "draggable", "drag and drop"})) ||
+		(featureCoverageHasAnySignal(featureText, "", []string{"pipeline"}) && featureCoverageHasAnySignal(featureText, "", []string{"deal", "task", "project board", "status", "lead", "proposal"})):
+		if fieldOpsLike {
+			if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+				[]string{"kanban", "pipeline", "board", "column"},
+				[]string{"drag", "draggable", "drop", "ondrag", "ondragend", "dnd", "dnd kit", "sortable", "droppable"},
+				[]string{"new lead", "estimate needed", "proposal sent", "accepted", "in progress", "completed", "status"},
+			) {
+				return "is missing drag-and-drop Kanban implementation signals with job status columns"
+			}
+			break
+		}
 		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
 			[]string{"kanban", "pipeline", "board", "column"},
 			[]string{"drag", "draggable", "drop", "ondrag", "ondragend", "dnd", "dnd kit", "sortable", "droppable"},
-			[]string{"new lead", "estimate needed", "proposal sent", "accepted", "in progress", "completed", "status"},
+			[]string{"prospecting", "qualified", "proposal", "negotiation", "won", "lost", "backlog", "ready", "in progress", "review", "done", "status", "column"},
 		) {
-			return "is missing drag-and-drop Kanban implementation signals with job status columns"
+			return "is missing draggable Kanban/pipeline board signals with status columns"
 		}
 	case featureCoverageHasAnySignal(featureText, "", []string{"estimate builder", "new job", "live calculation", "live calculations"}):
 		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
@@ -27984,7 +28012,17 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 		) {
 			return "is missing the estimate-builder form, required fields, and live pricing/profit calculations"
 		}
-	case featureCoverageHasAnySignal(featureText, "", []string{"job detail", "detail page", "specific job", "customer proposal"}):
+	case documentIntelligenceLike && featureCoverageHasAnySignal(featureText, "", []string{"analysis detail", "document detail", "extracted clauses", "risk score", "action items", "follow-up"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"analysis detail", "detail", "view result"},
+			[]string{"clause", "clauses", "extracted"},
+			[]string{"risk score", "risk", "summary"},
+			[]string{"action item", "action items", "follow up", "follow-up", "chat"},
+		) {
+			return "is missing analysis-detail clauses, risk score, summary, action items, and follow-up signals"
+		}
+	case featureCoverageHasAnySignal(featureText, "", []string{"job detail", "specific job", "customer proposal"}) ||
+		(fieldOpsLike && featureCoverageHasAnySignal(featureText, "", []string{"detail page"})):
 		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
 			[]string{"job detail", "selected job", "full customer", "customer info"},
 			[]string{"status", "status dropdown", "select status"},
@@ -28003,21 +28041,67 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 			return "is missing crew members, availability, and current-job assignment signals"
 		}
 	case featureCoverageHasAnySignal(featureText, "", []string{"settings", "company settings", "reset demo"}):
+		if fieldOpsLike || featureCoverageHasAnySignal(requirementAndFeature, "", []string{"company name", "default labor", "default markup", "labor rate", "markup"}) {
+			if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+				[]string{"settings"},
+				[]string{"company", "company name"},
+				[]string{"labor rate", "default labor", "markup", "default markup"},
+				[]string{"provider", "ai provider", "model", "routing"},
+				[]string{"reset", "reset demo"},
+			) {
+				return "is missing company defaults, labor/markup settings, AI provider/model routing, and reset-demo signals"
+			}
+			break
+		}
+		if documentIntelligenceLike || featureCoverageHasAnySignal(requirementAndFeature, "", []string{"byok", "bring your own key", "token usage", "routing roles"}) {
+			if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+				[]string{"settings"},
+				[]string{"byok", "bring your own key", "api key", "provider"},
+				[]string{"token", "usage", "table"},
+				[]string{"routing", "roles", "model"},
+				[]string{"reset", "reset demo"},
+			) {
+				return "is missing settings signals for BYOK/provider placeholders, token usage, model routing roles, and reset-demo controls"
+			}
+			break
+		}
 		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
 			[]string{"settings"},
-			[]string{"company", "company name"},
-			[]string{"labor rate", "default labor", "markup", "default markup"},
-			[]string{"provider", "ai provider", "model", "routing"},
+			[]string{"profile", "company", "account", "notification", "preference", "branding", "business hours", "deposit", "service catalog", "warehouse", "supplier", "reorder", "stage", "owner", "probability", "project default", "status", "label", "privacy", "control", "provider", "model"},
 			[]string{"reset", "reset demo"},
 		) {
-			return "is missing company defaults, labor/markup settings, AI provider/model routing, and reset-demo signals"
+			return "is missing settings configuration and reset-demo signals"
 		}
 	case featureCoverageHasAnySignal(featureText, "", []string{"dashboard", "metric", "metrics"}):
-		metricCount := featureCoverageSignalCount(normalizedSource, compactSource, []string{
-			"open jobs", "pending estimate", "accepted job", "gross margin", "follow up", "follow-up", "needing follow up",
+		if featureCoverageHasAnySignal(normalizedRequirement, "", []string{"open jobs", "pending estimate", "accepted job", "jobs needing follow-up"}) {
+			metricCount := featureCoverageSignalCount(normalizedSource, compactSource, []string{
+				"open jobs", "pending estimate", "accepted job", "gross margin", "follow up", "follow-up", "needing follow up",
+			})
+			requireTrend := featureCoverageHasAnySignal(normalizedRequirement, "", []string{"sparkline", "trend", "chart"})
+			if metricCount < 3 || (requireTrend && !featureCoverageHasAnySignal(normalizedSource, compactSource, []string{"sparkline", "trend", "chart", "svg", "polyline"})) {
+				return "is missing multiple required metric labels and sparkline/trend signals"
+			}
+			break
+		}
+		if documentIntelligenceLike {
+			if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+				[]string{"dashboard"},
+				[]string{"card", "cards", "metric", "metrics", "usage"},
+				[]string{"recent", "history", "analysis", "analyses", "activity"},
+				[]string{"risk", "summary", "status"},
+			) {
+				return "is missing dashboard cards, recent activity/analysis, and risk/status summary signals"
+			}
+			break
+		}
+		genericMetricCount := featureCoverageSignalCount(normalizedSource, compactSource, []string{
+			"card", "cards", "metric", "metrics", "kpi", "forecast", "rate", "value", "revenue", "utilization", "lead", "leads", "request", "requests", "appointment", "appointments", "invoice", "invoices", "project", "projects", "task", "tasks", "stock", "movement", "activity", "status", "availability", "progress", "summary",
 		})
+		if !featureCoverageHasAnySignal(normalizedSource, compactSource, []string{"dashboard", "overview"}) || genericMetricCount < 2 {
+			return "is missing dashboard KPI cards and supporting metric/status signals"
+		}
 		requireTrend := featureCoverageHasAnySignal(normalizedRequirement, "", []string{"sparkline", "trend", "chart"})
-		if metricCount < 3 || (requireTrend && !featureCoverageHasAnySignal(normalizedSource, compactSource, []string{"sparkline", "trend", "chart", "svg", "polyline"})) {
+		if requireTrend && !featureCoverageHasAnySignal(normalizedSource, compactSource, []string{"sparkline", "trend", "chart", "svg", "polyline"}) {
 			return "is missing multiple required metric labels and sparkline/trend signals"
 		}
 	}
@@ -29902,11 +29986,14 @@ func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, a
 		default:
 		}
 
+		passHadConnectionError := false
+		passHTTPFailure := ""
 		for _, healthPath := range normalizedPaths {
 			url := fmt.Sprintf("http://127.0.0.1:%d%s", port, healthPath)
 			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 			resp, err := client.Do(req)
 			if err != nil {
+				passHadConnectionError = true
 				continue
 			}
 			_, _ = io.Copy(io.Discard, resp.Body)
@@ -29917,13 +30004,20 @@ func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, a
 			if resp.StatusCode >= 500 {
 				continue
 			}
-			if firstHTTPFailure == "" {
-				firstHTTPFailure = fmt.Sprintf("%s returned HTTP %d", healthPath, resp.StatusCode)
+			if passHTTPFailure == "" {
+				passHTTPFailure = fmt.Sprintf("%s returned HTTP %d", healthPath, resp.StatusCode)
 			}
 		}
-		// Server is up and responding with a client error — no point retrying.
-		if firstHTTPFailure != "" {
-			return firstHTTPFailure, false
+		if passHTTPFailure != "" {
+			if firstHTTPFailure == "" {
+				firstHTTPFailure = passHTTPFailure
+			}
+			// If the server started mid-scan, an earlier health path may have seen
+			// connection refused while a later fallback returned 404. Retry once the
+			// listener is consistently reachable before treating that 404 as final.
+			if !passHadConnectionError {
+				return passHTTPFailure, false
+			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
