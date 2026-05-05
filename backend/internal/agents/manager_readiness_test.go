@@ -958,6 +958,56 @@ export default function App() {
 	}
 }
 
+func TestPlannedFeatureCoverageErrorsAcceptsClientPortalSignals(t *testing.T) {
+	t.Parallel()
+
+	build := clientPortalFeatureCoverageBuild()
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const projects = ["Brand Refresh", "Q3 Paid Media"];
+const files = ["Brand-guidelines-v4.pdf", "Q3-media-plan.xlsx"];
+
+export default function App() {
+  return <main>
+    <section aria-label="Client dashboard">
+      <article>Project status 72% progress</article>
+      <article>Pending approvals 3 review queue</article>
+      <article>Invoices $18.7K</article>
+      <article>Messages 2 unread</article>
+      <article>Upcoming milestones 5 next 14 days</article>
+    </section>
+    <section aria-label="Projects page">
+      <select aria-label="status filters"><option>Active</option></select>
+      {projects.map((project) => <article key={project}>Project card {project}<progress value={72} max={100} />Project detail view</article>)}
+    </section>
+    <section aria-label="Approvals page">
+      <article>Review queue approve request changes notes success toast</article>
+      <button>Approve</button><button>Request changes</button>
+    </section>
+    <section aria-label="Files Page">
+      <div>Folders Creative Media Invoices Uploads</div>
+      <input aria-label="Search files" />
+      {files.map((file) => <article key={file}>File list {file} tag Design mock upload</article>)}
+      <button>Mock upload</button>
+    </section>
+    <section aria-label="Messages page">
+      <article>Thread list</article>
+      <form><textarea aria-label="working compose form" /><button>Send message</button></form>
+    </section>
+    <section aria-label="Settings Page">
+      <label>Client profile<input /></label>
+      <label>Notification preferences<input type="checkbox" /></label>
+      <label>Portal branding<input /></label>
+      <button>Reset Demo Data</button>
+    </section>
+  </main>;
+}`},
+	)
+
+	if errs := plannedFeatureCoverageErrors(build, files); len(errs) != 0 {
+		t.Fatalf("expected client-portal feature signals to pass planned coverage, got %v", errs)
+	}
+}
+
 func TestPlannedFeatureCoverageErrorsAcceptsDashboardWithoutChartRequirement(t *testing.T) {
 	t.Parallel()
 
@@ -1222,6 +1272,95 @@ export default function App() {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsUsesClientPortalPlannedFeatureRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := clientPortalFeatureCoverageBuild()
+	build.ID = "build-client-portal-planned-feature-coverage-repair"
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `import Dashboard from "./pages/Dashboard";
+import Files from "./pages/Files";
+import Settings from "./pages/Settings";
+
+export default function App() {
+  return <main><Dashboard /><Files /><Settings /></main>;
+}`},
+		GeneratedFile{Path: "src/pages/Dashboard.tsx", Language: "typescript", Content: `export default function Dashboard(){ return null; }`},
+		GeneratedFile{Path: "src/pages/Files.tsx", Language: "typescript", Content: `export default function Files(){ return null; }`},
+		GeneratedFile{Path: "src/pages/Settings.tsx", Language: "typescript", Content: `export default function Settings(){ return null; }`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`planned feature coverage failed: "Files Page" is missing client-portal files signals for folders, file list, search, tags, and mock upload`,
+			`planned feature coverage failed: "Settings Page" is missing settings configuration and reset-demo signals`,
+		},
+		"planned feature coverage failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected client-portal planned-feature coverage failure to use deterministic workflow repair")
+	}
+	repairedFiles := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range repairedFiles {
+		if sanitizeFilePath(file.Path) == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if strings.TrimSpace(app) == "" {
+		t.Fatalf("expected repaired client portal app file, got %+v", repairedFiles)
+	}
+	for _, expected := range []string{
+		"Northstar Client Hub",
+		"Client dashboard",
+		"Project status",
+		"Pending approvals",
+		"Projects page",
+		"Approvals page",
+		"Files Page",
+		"Folders",
+		"file list",
+		"Search files",
+		"tags",
+		"Mock upload",
+		"Messages page",
+		"Working compose form",
+		"Client profile",
+		"Notification preferences",
+		"Portal branding",
+		"Reset Demo Data",
+	} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired client portal app to contain %q, got %q", expected, app)
+		}
+	}
+	if errs := plannedFeatureCoverageErrors(build, repairedFiles); len(errs) != 0 {
+		t.Fatalf("expected repaired client portal app to pass planned-feature coverage, got %v", errs)
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		found := false
+		for _, bundle := range state.PatchBundles {
+			if strings.Contains(bundle.Justification, "planned_feature_coverage_repair") &&
+				strings.Contains(bundle.Justification, "client-portal") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected client portal planned-feature repair patch bundle, got %+v", state.PatchBundles)
+		}
+	}
+}
+
 func TestApplyDeterministicValidationRepairsSkipsGenericPreviewFallbackForNonFieldOpsPlannedFeatureCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -1323,6 +1462,31 @@ func crmFeatureCoverageBuild() *Build {
 				{Name: "Deal Detail Page", Description: "Deal detail page with contact info, activity timeline, notes, tasks, next step, and value calculator.", Priority: 80},
 				{Name: "New Deal Form", Description: "New deal form with validation and live forecast calculation.", Priority: 80},
 				{Name: "Settings Page", Description: "Settings page with stages, owners, default probability, and reset demo data.", Priority: 60},
+			},
+		},
+	}
+}
+
+func clientPortalFeatureCoverageBuild() *Build {
+	return &Build{
+		ID:          "build-client-portal-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build Northstar Client Hub, a secure-looking agency client portal for project updates, approvals, files, invoices, messages, upcoming milestones, client profile settings, portal branding, and reset demo data.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "frontend",
+			TechStack: TechStack{
+				Frontend: "React",
+			},
+			Features: []Feature{
+				{Name: "Client Dashboard", Description: "Client dashboard with project status, pending approvals, invoices, messages, and upcoming milestones.", Priority: 100},
+				{Name: "Projects Page", Description: "Projects page with cards, progress bars, status filters, and project detail view.", Priority: 80},
+				{Name: "Approvals Page", Description: "Approvals page with review queue, approve/request-changes actions, notes, and success toasts.", Priority: 80},
+				{Name: "Files Page", Description: "Files page with folders, file list, search, tags, and mock upload.", Priority: 100},
+				{Name: "Messages Page", Description: "Messages page with thread list and working compose form.", Priority: 80},
+				{Name: "Settings Page", Description: "Settings page with client profile, notification preferences, portal branding, and reset demo data.", Priority: 60},
 			},
 		},
 	}
@@ -7730,9 +7894,83 @@ func TestApplyDeterministicTypeDeclarationRepairAddsViteEnvDeclaration(t *testin
 	if !strings.Contains(viteEnv, `/// <reference types="vite/client" />`) {
 		t.Fatalf("expected vite client type reference, got %q", viteEnv)
 	}
-	if !strings.Contains(viteEnv, `readonly env: ImportMetaEnv`) {
-		t.Fatalf("expected ImportMeta env declaration, got %q", viteEnv)
+	if strings.Contains(viteEnv, `interface ImportMetaEnv`) || strings.Contains(viteEnv, `readonly [key: string]`) {
+		t.Fatalf("expected Vite client reference without duplicate ImportMetaEnv redeclaration, got %q", viteEnv)
 	}
+}
+
+func TestApplyDeterministicTypeDeclarationRepairRemovesDuplicateViteEnvDeclaration(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-vite-env-duplicate-repair",
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": {
+    "build": "tsc && vite build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{Path: "vite.config.ts", Content: `import { defineConfig } from "vite"; export default defineConfig({});`},
+						{Path: "src/main.tsx", Content: `console.log(import.meta.env.VITE_API_URL);`},
+						{Path: "src/vite-env.d.ts", Content: `/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly [key: string]: string | boolean | undefined
+  readonly VITE_API_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+`},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
+		"Preview verification build failed: node_modules/vite/types/importMeta.d.ts(6,3): error TS2374: Duplicate index signature for type 'string'.\nsrc/vite-env.d.ts(4,3): error TS2374: Duplicate index signature for type 'string'.",
+	})
+	if bundle == nil {
+		t.Fatalf("expected duplicate vite env declaration repair to trigger")
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatalf("expected patch bundle to apply")
+	}
+	if !strings.Contains(summary, "src/vite-env.d.ts") {
+		t.Fatalf("expected vite env declaration path in summary, got %q", summary)
+	}
+	for _, file := range am.collectGeneratedFiles(build) {
+		if file.Path != "src/vite-env.d.ts" {
+			continue
+		}
+		if !strings.Contains(file.Content, `/// <reference types="vite/client" />`) {
+			t.Fatalf("expected vite client type reference, got %q", file.Content)
+		}
+		if strings.Contains(file.Content, `interface ImportMetaEnv`) || strings.Contains(file.Content, `readonly [key: string]`) {
+			t.Fatalf("expected duplicate ImportMetaEnv declaration to be removed, got %q", file.Content)
+		}
+		return
+	}
+	t.Fatalf("expected src/vite-env.d.ts to be present")
 }
 
 func TestApplyDeterministicPreValidationNormalizationRepairsStaticReactViteBuild(t *testing.T) {

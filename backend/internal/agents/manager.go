@@ -14534,7 +14534,8 @@ func requiresViteEnvTypeDeclarationRepair(files []GeneratedFile, errors []string
 		lower := strings.ToLower(strings.TrimSpace(msg))
 		if strings.Contains(lower, "property 'env' does not exist on type 'importmeta'") ||
 			strings.Contains(lower, "cannot find name 'importmetaenv'") ||
-			(strings.Contains(lower, "importmetaenv") && strings.Contains(msg, "VITE_")) {
+			(strings.Contains(lower, "importmetaenv") && strings.Contains(msg, "VITE_")) ||
+			(strings.Contains(lower, "duplicate index signature") && (strings.Contains(lower, "vite-env.d.ts") || strings.Contains(lower, "importmetaenv"))) {
 			hasImportMetaTypeError = true
 			break
 		}
@@ -14563,17 +14564,6 @@ func viteEnvDeclarationPathFromManifest(manifestPath string) string {
 
 func viteEnvDeclarationContent() string {
 	return `/// <reference types="vite/client" />
-
-interface ImportMetaEnv {
-  readonly [key: string]: string | boolean | undefined
-  readonly VITE_API_URL?: string
-  readonly VITE_API_BASE_URL?: string
-  readonly VITE_WS_URL?: string
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv
-}
 `
 }
 
@@ -16982,6 +16972,301 @@ func promptLooksLikeCRMApp(description string) bool {
 	return revenueSignals >= 2
 }
 
+func promptLooksLikeClientPortalApp(description string) bool {
+	normalized := strings.ToLower(description)
+	if strings.TrimSpace(normalized) == "" {
+		return false
+	}
+	if promptLooksLikeFieldOpsApp(normalized) || promptLooksLikeDocumentIntelligenceApp(normalized) || promptLooksLikeCRMApp(normalized) {
+		return false
+	}
+	if !strings.Contains(normalized, "client portal") && !strings.Contains(normalized, "portal") && !strings.Contains(normalized, "northstar client hub") {
+		return false
+	}
+	signals := 0
+	for _, token := range []string{"agency", "project", "projects", "approval", "approvals", "files", "folders", "invoices", "messages", "milestones", "client profile", "portal branding"} {
+		if strings.Contains(normalized, token) {
+			signals++
+		}
+	}
+	return signals >= 3
+}
+
+func syntheticClientPortalAppTSX() string {
+	return `import { type FormEvent, useMemo, useState } from "react";
+
+type Page = "Dashboard" | "Projects" | "Approvals" | "Files" | "Messages" | "Settings";
+
+type Project = {
+  id: number;
+  name: string;
+  status: string;
+  progress: number;
+  budget: string;
+  nextMilestone: string;
+};
+
+type Approval = {
+  id: number;
+  title: string;
+  project: string;
+  due: string;
+  status: string;
+};
+
+type FileItem = {
+  id: number;
+  name: string;
+  folder: string;
+  tag: string;
+  size: string;
+};
+
+const initialProjects: Project[] = [
+  { id: 1, name: "Brand Refresh", status: "In Review", progress: 72, budget: "$18,400", nextMilestone: "Homepage concept approval" },
+  { id: 2, name: "Q3 Paid Media", status: "Active", progress: 58, budget: "$42,000", nextMilestone: "Audience test report" },
+  { id: 3, name: "Sales Deck Sprint", status: "On Track", progress: 86, budget: "$9,800", nextMilestone: "Final copy lock" },
+];
+
+const initialApprovals: Approval[] = [
+  { id: 1, title: "Homepage hero direction", project: "Brand Refresh", due: "Today", status: "Pending approval" },
+  { id: 2, title: "Paid search copy set", project: "Q3 Paid Media", due: "Tomorrow", status: "Needs notes" },
+  { id: 3, title: "Investor deck chart", project: "Sales Deck Sprint", due: "Friday", status: "Pending approval" },
+];
+
+const initialFiles: FileItem[] = [
+  { id: 1, name: "Brand-guidelines-v4.pdf", folder: "Creative", tag: "Design", size: "4.8 MB" },
+  { id: 2, name: "Q3-media-plan.xlsx", folder: "Media", tag: "Budget", size: "1.2 MB" },
+  { id: 3, name: "Homepage-wireframes.fig", folder: "Creative", tag: "Wireframe", size: "8.4 MB" },
+  { id: 4, name: "Invoice-1048.pdf", folder: "Invoices", tag: "Finance", size: "640 KB" },
+];
+
+const initialThreads = [
+  { id: 1, subject: "Homepage review notes", from: "Maya at Northstar", unread: true },
+  { id: 2, subject: "Invoice question", from: "Apex Studio Finance", unread: false },
+  { id: 3, subject: "Milestone moved up", from: "Campaign Team", unread: true },
+];
+
+export default function App() {
+  const [page, setPage] = useState<Page>("Dashboard");
+  const [projects] = useState<Project[]>(initialProjects);
+  const [approvals, setApprovals] = useState<Approval[]>(initialApprovals);
+  const [files, setFiles] = useState<FileItem[]>(initialFiles);
+  const [fileSearch, setFileSearch] = useState("");
+  const [message, setMessage] = useState("");
+  const [toast, setToast] = useState("");
+  const [settings, setSettings] = useState({ clientProfile: "Northstar Ventures", notifications: true, portalBranding: "Midnight blue + cyan" });
+  const [selectedProject, setSelectedProject] = useState(projects[0]);
+
+  const filteredFiles = files.filter((file) => (file.name + " " + file.folder + " " + file.tag).toLowerCase().includes(fileSearch.toLowerCase()));
+  const dashboard = useMemo(() => ({
+    pendingApprovals: approvals.filter((approval) => approval.status !== "Approved").length,
+    invoices: 3,
+    messages: initialThreads.filter((thread) => thread.unread).length,
+    averageProgress: Math.round(projects.reduce((sum, project) => sum + project.progress, 0) / projects.length),
+  }), [approvals, projects]);
+
+  function showToast(text: string) {
+    setToast(text);
+    window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function updateApproval(id: number, status: string) {
+    setApprovals((current) => current.map((approval) => approval.id === id ? { ...approval, status } : approval));
+    showToast(status === "Approved" ? "Approval saved." : "Change request sent.");
+  }
+
+  function mockUpload() {
+    const nextId = Math.max(...files.map((file) => file.id)) + 1;
+    setFiles((current) => [{ id: nextId, name: "Uploaded-client-asset.pdf", folder: "Uploads", tag: "Mock upload", size: "2.1 MB" }, ...current]);
+    showToast("Mock upload added to Files page.");
+  }
+
+  function submitMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!message.trim()) {
+      showToast("Write a message before sending.");
+      return;
+    }
+    setMessage("");
+    showToast("Message sent to agency team.");
+  }
+
+  function resetDemoData() {
+    setApprovals(initialApprovals);
+    setFiles(initialFiles);
+    setSettings({ clientProfile: "Northstar Ventures", notifications: true, portalBranding: "Midnight blue + cyan" });
+    showToast("Reset demo data complete.");
+  }
+
+  const nav: Page[] = ["Dashboard", "Projects", "Approvals", "Files", "Messages", "Settings"];
+
+  return (
+    <main className="min-h-screen bg-[#0F172A] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_16%_8%,rgba(34,211,238,0.2),transparent_28%),radial-gradient(circle_at_90%_12%,rgba(59,130,246,0.18),transparent_26%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,1))]" />
+      <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-5 py-6 md:px-8">
+        <header className="rounded-[2rem] border border-cyan-300/20 bg-slate-950/75 p-6 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.42em] text-cyan-200">Secure agency client portal</p>
+              <h1 className="mt-3 text-4xl font-black tracking-tight text-white md:text-6xl">Northstar Client Hub</h1>
+              <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">A premium client portal for project updates, approvals, files, invoices, milestones, and agency messages with simulated auth and in-memory data.</p>
+            </div>
+            <button type="button" onClick={() => setPage("Approvals")} className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 shadow-xl shadow-cyan-500/25">Review approvals</button>
+          </div>
+          <nav className="mt-6 flex flex-wrap gap-2">
+            {nav.map((item) => (
+              <button key={item} type="button" onClick={() => setPage(item)} className={"rounded-full border px-4 py-2 text-sm font-semibold transition " + (page === item ? "border-cyan-300 bg-cyan-300 text-slate-950" : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-cyan-300/50 hover:text-white")}>{item}</button>
+            ))}
+          </nav>
+        </header>
+
+        {page === "Dashboard" && (
+          <section className="space-y-6" aria-label="Client dashboard">
+            <div className="grid gap-4 md:grid-cols-5">
+              {[
+                ["Project status", dashboard.averageProgress + "%", "average progress"],
+                ["Pending approvals", String(dashboard.pendingApprovals), "review queue"],
+                ["Invoices", "$18.7K", dashboard.invoices + " open"],
+                ["Messages", String(dashboard.messages), "unread"],
+                ["Upcoming milestones", "5", "next 14 days"],
+              ].map(([label, value, detail]) => (
+                <article key={label} className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-5 shadow-xl shadow-black/20">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{label}</p>
+                  <strong className="mt-4 block text-3xl font-black text-white">{value}</strong>
+                  <span className="mt-3 inline-block rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-bold text-cyan-100">{detail}</span>
+                </article>
+              ))}
+            </div>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Upcoming milestones</h2>
+              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                {projects.map((project) => (
+                  <button key={project.id} type="button" onClick={() => { setSelectedProject(project); setPage("Projects"); }} className="rounded-3xl border border-slate-700/70 bg-slate-950/60 p-5 text-left transition hover:border-cyan-300/50">
+                    <strong className="text-white">{project.name}</strong>
+                    <p className="mt-2 text-sm text-slate-400">{project.nextMilestone}</p>
+                    <div className="mt-4 h-2 rounded-full bg-slate-800"><div className="h-2 rounded-full bg-cyan-300" style={{ width: project.progress + "%" }} /></div>
+                  </button>
+                ))}
+              </div>
+            </article>
+          </section>
+        )}
+
+        {page === "Projects" && (
+          <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]" aria-label="Projects page">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-2xl font-black text-white">Projects page</h2>
+                <select aria-label="status filters" className="rounded-2xl border border-slate-700 bg-slate-950 p-3"><option>Status filters</option><option>Active</option><option>In Review</option></select>
+              </div>
+              <div className="mt-5 space-y-3">
+                {projects.map((project) => (
+                  <button key={project.id} onClick={() => setSelectedProject(project)} className="w-full rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4 text-left hover:border-cyan-300/50">
+                    <div className="flex items-center justify-between"><strong>{project.name}</strong><span>{project.status}</span></div>
+                    <div className="mt-3 h-2 rounded-full bg-slate-800"><div className="h-2 rounded-full bg-cyan-300" style={{ width: project.progress + "%" }} /></div>
+                  </button>
+                ))}
+              </div>
+            </article>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6" aria-label="Project detail view">
+              <p className="text-xs uppercase tracking-[0.32em] text-cyan-200">Project detail view</p>
+              <h3 className="mt-2 text-3xl font-black text-white">{selectedProject.name}</h3>
+              <p className="mt-3 text-slate-300">Status: {selectedProject.status}. Budget: {selectedProject.budget}. Next milestone: {selectedProject.nextMilestone}.</p>
+            </article>
+          </section>
+        )}
+
+        {page === "Approvals" && (
+          <section className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6" aria-label="Approvals page">
+            <h2 className="text-2xl font-black text-white">Approvals page</h2>
+            <p className="mt-2 text-slate-300">Review queue with approve/request-changes actions, notes, and success toasts.</p>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              {approvals.map((approval) => (
+                <article key={approval.id} className="rounded-3xl border border-slate-700/70 bg-slate-950/60 p-5">
+                  <span className="rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-bold text-cyan-100">{approval.status}</span>
+                  <h3 className="mt-4 text-lg font-black text-white">{approval.title}</h3>
+                  <p className="mt-2 text-sm text-slate-400">{approval.project} - due {approval.due}</p>
+                  <textarea aria-label="approval notes" className="mt-4 min-h-20 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" placeholder="Add notes..." />
+                  <div className="mt-4 flex gap-2">
+                    <button type="button" onClick={() => updateApproval(approval.id, "Approved")} className="rounded-xl bg-cyan-300 px-3 py-2 text-xs font-black text-slate-950">Approve</button>
+                    <button type="button" onClick={() => updateApproval(approval.id, "Changes requested")} className="rounded-xl border border-slate-600 px-3 py-2 text-xs font-bold">Request changes</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === "Files" && (
+          <section className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6" aria-label="Files Page">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-2xl font-black text-white">Files Page</h2>
+                <p className="mt-2 text-slate-300">Folders, file list, search, tags, and mock upload for client assets.</p>
+              </div>
+              <button type="button" onClick={mockUpload} className="rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950">Mock upload</button>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-3">
+              {["Creative", "Media", "Invoices", "Uploads"].map((folder) => <span key={folder} className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-bold text-cyan-100">Folder: {folder}</span>)}
+            </div>
+            <input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="Search files by name, folder, or tags..." className="mt-5 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 outline-none focus:border-cyan-300" />
+            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-700/70">
+              {filteredFiles.map((file) => (
+                <div key={file.id} className="grid gap-2 border-b border-slate-800 px-4 py-4 text-sm md:grid-cols-[1.2fr_0.7fr_0.7fr_0.4fr]">
+                  <strong className="text-white">{file.name}</strong><span>{file.folder}</span><span>Tag: {file.tag}</span><span>{file.size}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === "Messages" && (
+          <section className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]" aria-label="Messages page">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Thread list</h2>
+              <div className="mt-4 space-y-3">{initialThreads.map((thread) => <div key={thread.id} className="rounded-2xl bg-slate-950/60 p-4">{thread.subject} - {thread.from}</div>)}</div>
+            </article>
+            <form onSubmit={submitMessage} className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Working compose form</h3>
+              <textarea value={message} onChange={(event) => setMessage(event.target.value)} className="mt-4 min-h-40 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" placeholder="Write a message to the agency team..." />
+              <button className="mt-4 rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950">Send message</button>
+            </form>
+          </section>
+        )}
+
+        {page === "Settings" && (
+          <section className="grid gap-6 lg:grid-cols-2" aria-label="Settings Page">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Settings Page</h2>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Client profile
+                <input value={settings.clientProfile} onChange={(event) => setSettings((current) => ({ ...current, clientProfile: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-5 flex items-center gap-3 text-sm font-bold text-slate-200">
+                <input type="checkbox" checked={settings.notifications} onChange={(event) => setSettings((current) => ({ ...current, notifications: event.target.checked }))} />
+                Notification preferences enabled
+              </label>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Portal branding
+                <input value={settings.portalBranding} onChange={(event) => setSettings((current) => ({ ...current, portalBranding: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <button type="button" onClick={resetDemoData} className="mt-6 rounded-2xl border border-cyan-300/50 px-5 py-3 font-black text-cyan-100">Reset Demo Data</button>
+            </article>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Simulated auth</h3>
+              <p className="mt-3 text-slate-300">Signed in as Maya at Northstar. No backend calls or real credentials are required.</p>
+              <div className="mt-5 rounded-2xl bg-emerald-300/10 p-4 text-emerald-100">Secure-looking session active</div>
+            </article>
+          </section>
+        )}
+
+        {toast && <div className="fixed bottom-5 right-5 rounded-2xl border border-cyan-300/30 bg-slate-950 px-5 py-3 text-sm font-bold text-cyan-100 shadow-2xl shadow-cyan-500/20">{toast}</div>}
+      </div>
+    </main>
+  );
+}
+`
+}
+
 func syntheticCRMAppTSX() string {
 	return `import { type DragEvent, type FormEvent, useMemo, useState } from "react";
 
@@ -18520,6 +18805,9 @@ func syntheticFrontendAppTSXWithDescription(title string, summary string, descri
 	if promptLooksLikeDocumentIntelligenceApp(description) || promptLooksLikeDocumentIntelligenceApp(title+" "+summary) {
 		return syntheticDocumentIntelligenceAppTSX()
 	}
+	if promptLooksLikeClientPortalApp(description) || promptLooksLikeClientPortalApp(title+" "+summary) {
+		return syntheticClientPortalAppTSX()
+	}
 	if promptLooksLikeCRMApp(description) || promptLooksLikeCRMApp(title+" "+summary) {
 		return syntheticCRMAppTSX()
 	}
@@ -19207,6 +19495,8 @@ func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Bu
 		repairLabel = "FieldOps"
 	case promptLooksLikeDocumentIntelligenceApp(description):
 		repairLabel = "document-intelligence"
+	case promptLooksLikeClientPortalApp(description):
+		repairLabel = "client-portal"
 	case promptLooksLikeCRMApp(description):
 		repairLabel = "CRM"
 	default:
@@ -28749,6 +29039,9 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 	documentIntelligenceLike := featureCoverageHasAnySignal(requirementAndFeature, "", []string{
 		"document intelligence", "document analysis", "document analyses", "analyze document", "upload/analyze", "extracted clauses", "doculens",
 	})
+	clientPortalLike := featureCoverageHasAnySignal(requirementAndFeature, "", []string{
+		"client portal", "agency client portal", "northstar client hub", "pending approvals", "portal branding", "client profile", "project status", "upcoming milestones",
+	})
 
 	switch {
 	case featureCoverageHasAnySignal(featureText, "", []string{"swarm", "ai agent", "orchestrator", "proposal agent", "risk agent"}):
@@ -28760,7 +29053,17 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 		) {
 			return "is missing the Estimate Swarm modal, named AI-agent panels, and simulated streaming/results signals"
 		}
-	case featureCoverageHasAnySignal(featureText, "", []string{"upload", "analyze document", "document analysis", "drag and drop mock upload"}):
+	case clientPortalLike && featureCoverageHasAnySignal(featureText, "", []string{"files page", "file list", "folders", "mock upload"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"files", "file list", "file"},
+			[]string{"folder", "folders"},
+			[]string{"search", "filter"},
+			[]string{"tag", "tags"},
+			[]string{"upload", "mock upload"},
+		) {
+			return "is missing client-portal files signals for folders, file list, search, tags, and mock upload"
+		}
+	case documentIntelligenceLike && featureCoverageHasAnySignal(featureText, "", []string{"upload", "analyze document", "document analysis", "drag and drop mock upload"}):
 		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
 			[]string{"upload", "analyze", "analyze document", "document"},
 			[]string{"drag", "drop", "drag and drop", "file", "input"},
