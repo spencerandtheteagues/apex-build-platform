@@ -84,8 +84,13 @@ function isStartupError(error) {
   )
 }
 
+function isTransientGatewayError(error) {
+  return [502, 503, 504].includes(error?.status) && !isStartupError(error)
+}
+
 async function request(route, options = {}) {
   const { skipReauth = false, ...fetchOptions } = options
+  const method = String(fetchOptions.method || 'GET').toUpperCase()
   const startedAt = Date.now()
   let authRetried = false
   for (;;) {
@@ -120,6 +125,11 @@ async function request(route, options = {}) {
       }
       if (isStartupError(error) && Date.now() - startedAt < startupRetrySeconds * 1000) {
         console.log(`[${new Date().toISOString()}] API is restarting during ${route}; retrying after startup gate`)
+        await sleep(5000)
+        continue
+      }
+      if (['GET', 'HEAD'].includes(method) && isTransientGatewayError(error) && Date.now() - startedAt < startupRetrySeconds * 1000) {
+        console.log(`[${new Date().toISOString()}] transient gateway error during ${route} (HTTP ${error.status}); retrying`)
         await sleep(5000)
         continue
       }
