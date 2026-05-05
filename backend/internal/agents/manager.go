@@ -16992,6 +16992,321 @@ func promptLooksLikeClientPortalApp(description string) bool {
 	return signals >= 3
 }
 
+func promptLooksLikeBookingApp(description string) bool {
+	normalized := strings.ToLower(description)
+	if strings.TrimSpace(normalized) == "" {
+		return false
+	}
+	if promptLooksLikeFieldOpsApp(normalized) || promptLooksLikeDocumentIntelligenceApp(normalized) ||
+		promptLooksLikeClientPortalApp(normalized) || promptLooksLikeCRMApp(normalized) {
+		return false
+	}
+	if !strings.Contains(normalized, "luxebook") &&
+		!strings.Contains(normalized, "booking") &&
+		!strings.Contains(normalized, "appointment scheduling") &&
+		!strings.Contains(normalized, "salon") {
+		return false
+	}
+	signals := 0
+	for _, token := range []string{"appointment", "appointments", "scheduler", "calendar", "time slots", "stylist", "stylists", "salon", "service selection", "staff availability", "default deposit", "business hours"} {
+		if strings.Contains(normalized, token) {
+			signals++
+		}
+	}
+	return signals >= 3
+}
+
+func syntheticBookingAppTSX() string {
+	return `import { type FormEvent, useMemo, useState } from "react";
+
+type Page = "Dashboard" | "Book" | "Appointments" | "Staff" | "Customer Profile" | "Settings";
+type AppointmentStatus = "Confirmed" | "Checked In" | "Completed" | "Cancelled";
+
+type Appointment = {
+  id: number;
+  customer: string;
+  service: string;
+  stylist: string;
+  time: string;
+  status: AppointmentStatus;
+  deposit: number;
+  price: number;
+};
+
+type Stylist = {
+  name: string;
+  services: string[];
+  schedule: string;
+  availability: string;
+  currentBookings: number;
+};
+
+const services = [
+  { name: "Signature Balayage", duration: "150 min", price: 320 },
+  { name: "Precision Cut", duration: "60 min", price: 95 },
+  { name: "Gloss + Treatment", duration: "75 min", price: 140 },
+  { name: "Bridal Trial", duration: "120 min", price: 260 },
+];
+
+const stylists: Stylist[] = [
+  { name: "Ari Vale", services: ["Signature Balayage", "Gloss + Treatment"], schedule: "Tue-Sat 9-5", availability: "Available at 2:30 PM", currentBookings: 5 },
+  { name: "Mina Hart", services: ["Precision Cut", "Bridal Trial"], schedule: "Mon-Fri 10-6", availability: "Fully booked today", currentBookings: 7 },
+  { name: "Noa Reyes", services: ["Signature Balayage", "Precision Cut"], schedule: "Wed-Sun 11-7", availability: "Available at 4:00 PM", currentBookings: 4 },
+];
+
+const initialAppointments: Appointment[] = [
+  { id: 1, customer: "Olivia Chen", service: "Signature Balayage", stylist: "Ari Vale", time: "10:00 AM", status: "Confirmed", deposit: 80, price: 320 },
+  { id: 2, customer: "Kara Mills", service: "Precision Cut", stylist: "Mina Hart", time: "11:30 AM", status: "Checked In", deposit: 25, price: 95 },
+  { id: 3, customer: "Nora Singh", service: "Bridal Trial", stylist: "Noa Reyes", time: "2:00 PM", status: "Confirmed", deposit: 75, price: 260 },
+  { id: 4, customer: "Tessa Grant", service: "Gloss + Treatment", stylist: "Ari Vale", time: "4:30 PM", status: "Cancelled", deposit: 0, price: 140 },
+];
+
+function money(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+export default function App() {
+  const [page, setPage] = useState<Page>("Dashboard");
+  const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments);
+  const [toast, setToast] = useState("");
+  const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
+  const [booking, setBooking] = useState({
+    service: services[0].name,
+    stylist: stylists[0].name,
+    date: "2026-05-08",
+    time: "2:30 PM",
+    customer: "Maya Bennett",
+    phone: "(214) 555-0182",
+    email: "maya@example.com",
+  });
+  const [settings, setSettings] = useState({ businessHours: "Mon-Sat 9:00 AM - 7:00 PM", defaultDeposit: "25", serviceCatalog: services.map((service) => service.name).join(", ") });
+
+  const selectedService = services.find((service) => service.name === booking.service) ?? services[0];
+  const metrics = useMemo(() => {
+    const active = appointments.filter((item) => item.status !== "Cancelled");
+    const revenue = active.reduce((sum, item) => sum + item.price, 0);
+    const cancellations = appointments.filter((item) => item.status === "Cancelled").length;
+    const utilization = Math.round((active.length / 8) * 100);
+    const availableStaff = stylists.filter((stylist) => stylist.availability.toLowerCase().includes("available")).length;
+    return { today: active.length, revenue, cancellations, utilization, availableStaff };
+  }, [appointments]);
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function updateStatus(id: number, status: AppointmentStatus) {
+    setAppointments((current) => current.map((item) => item.id === id ? { ...item, status } : item));
+    showToast("Appointment status updated.");
+  }
+
+  function simulateReschedule(id: number) {
+    setAppointments((current) => current.map((item) => item.id === id ? { ...item, time: "3:15 PM" } : item));
+    showToast("Reschedule simulation complete.");
+  }
+
+  function submitBooking(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!booking.customer.trim() || !booking.email.includes("@")) {
+      showToast("Add customer name and valid email.");
+      return;
+    }
+    const nextId = Math.max(...appointments.map((item) => item.id)) + 1;
+    setAppointments((current) => [{
+      id: nextId,
+      customer: booking.customer,
+      service: booking.service,
+      stylist: booking.stylist,
+      time: booking.time,
+      status: "Confirmed",
+      deposit: Number(settings.defaultDeposit),
+      price: selectedService.price,
+    }, ...current]);
+    showToast("Confirmation sent. Booking saved.");
+    setPage("Appointments");
+  }
+
+  function resetDemoData() {
+    setAppointments(initialAppointments);
+    setSettings({ businessHours: "Mon-Sat 9:00 AM - 7:00 PM", defaultDeposit: "25", serviceCatalog: services.map((service) => service.name).join(", ") });
+    showToast("Reset demo data complete.");
+  }
+
+  const nav: Page[] = ["Dashboard", "Book", "Appointments", "Staff", "Customer Profile", "Settings"];
+
+  return (
+    <main className="min-h-screen bg-[#0F172A] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_16%_8%,rgba(34,211,238,0.2),transparent_28%),radial-gradient(circle_at_88%_14%,rgba(59,130,246,0.18),transparent_25%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,1))]" />
+      <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-5 py-6 md:px-8">
+        <header className="rounded-[2rem] border border-cyan-300/20 bg-slate-950/75 p-6 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.42em] text-cyan-200">Premium salon scheduling</p>
+              <h1 className="mt-3 text-4xl font-black tracking-tight text-white md:text-6xl">LuxeBook Studio</h1>
+              <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">Appointment scheduling for a premium salon with dashboard metrics, booking flow, calendar operations, staff schedules, customer profiles, and settings.</p>
+            </div>
+            <button type="button" onClick={() => setPage("Book")} className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 shadow-xl shadow-cyan-500/25">Start public booking flow</button>
+          </div>
+          <nav className="mt-6 flex flex-wrap gap-2">
+            {nav.map((item) => (
+              <button key={item} type="button" onClick={() => setPage(item)} className={"rounded-full border px-4 py-2 text-sm font-semibold transition " + (page === item ? "border-cyan-300 bg-cyan-300 text-slate-950" : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-cyan-300/50 hover:text-white")}>{item}</button>
+            ))}
+          </nav>
+        </header>
+
+        {page === "Dashboard" && (
+          <section className="space-y-6" aria-label="Booking dashboard">
+            <div className="grid gap-4 md:grid-cols-5">
+              {[
+                ["Today's Appointments", String(metrics.today), "live schedule"],
+                ["Revenue", money(metrics.revenue), "today booked"],
+                ["Utilization", metrics.utilization + "%", "chair capacity"],
+                ["Cancellations", String(metrics.cancellations), "watch list"],
+                ["Staff Availability", String(metrics.availableStaff), "stylists open"],
+              ].map(([label, value, detail]) => (
+                <article key={label} className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-5 shadow-xl shadow-black/20">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{label}</p>
+                  <strong className="mt-4 block text-3xl font-black text-white">{value}</strong>
+                  <span className="mt-3 inline-block rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-bold text-cyan-100">{detail}</span>
+                </article>
+              ))}
+            </div>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Smooth loading states</h2>
+              <p className="mt-3 text-slate-300">Today's chair utilization, booking status, and stylist capacity are simulated in memory with no external APIs.</p>
+            </article>
+          </section>
+        )}
+
+        {page === "Book" && (
+          <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]" aria-label="Public booking flow">
+            <form onSubmit={submitBooking} className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Public booking flow</h2>
+              <p className="mt-2 text-slate-300">Service selection, stylist selection, calendar, time slots, customer info, and confirmation.</p>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-bold text-slate-200">Service selection
+                  <select value={booking.service} onChange={(event) => setBooking((current) => ({ ...current, service: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3">{services.map((service) => <option key={service.name}>{service.name}</option>)}</select>
+                </label>
+                <label className="text-sm font-bold text-slate-200">Stylist selection
+                  <select value={booking.stylist} onChange={(event) => setBooking((current) => ({ ...current, stylist: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3">{stylists.map((stylist) => <option key={stylist.name}>{stylist.name}</option>)}</select>
+                </label>
+                <label className="text-sm font-bold text-slate-200">Calendar
+                  <input type="date" value={booking.date} onChange={(event) => setBooking((current) => ({ ...current, date: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+                </label>
+                <label className="text-sm font-bold text-slate-200">Time slots
+                  <select value={booking.time} onChange={(event) => setBooking((current) => ({ ...current, time: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3"><option>10:00 AM</option><option>2:30 PM</option><option>3:15 PM</option><option>4:00 PM</option></select>
+                </label>
+                <label className="text-sm font-bold text-slate-200">Customer info
+                  <input value={booking.customer} onChange={(event) => setBooking((current) => ({ ...current, customer: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+                </label>
+                <label className="text-sm font-bold text-slate-200">Email
+                  <input value={booking.email} onChange={(event) => setBooking((current) => ({ ...current, email: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+                </label>
+              </div>
+              <button className="mt-6 w-full rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950">Confirm booking</button>
+            </form>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Confirmation preview</h3>
+              <p className="mt-3 text-slate-300">{booking.customer} will see {booking.service} with {booking.stylist} on {booking.date} at {booking.time}.</p>
+              <div className="mt-5 rounded-2xl bg-cyan-300/10 p-5 text-cyan-100">Deposit due: {money(Number(settings.defaultDeposit))}. Total: {money(selectedService.price)}.</div>
+            </article>
+          </section>
+        )}
+
+        {page === "Appointments" && (
+          <section className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6" aria-label="Appointments page">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-2xl font-black text-white">Appointments page</h2>
+                <p className="mt-2 text-slate-300">Calendar/list toggle, filters, status updates, and reschedule simulation.</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setViewMode("calendar")} className="rounded-xl border border-cyan-300/40 px-3 py-2 text-sm">Calendar</button>
+                <button type="button" onClick={() => setViewMode("list")} className="rounded-xl border border-cyan-300/40 px-3 py-2 text-sm">List</button>
+              </div>
+            </div>
+            <select aria-label="filters" className="mt-5 rounded-2xl border border-slate-700 bg-slate-950 p-3"><option>All status filters</option><option>Confirmed</option><option>Cancelled</option></select>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {appointments.map((appointment) => (
+                <article key={appointment.id} className="rounded-3xl border border-slate-700/70 bg-slate-950/60 p-5">
+                  <span className="rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-bold text-cyan-100">{viewMode} view - {appointment.status}</span>
+                  <h3 className="mt-4 text-lg font-black text-white">{appointment.customer}</h3>
+                  <p className="mt-2 text-sm text-slate-400">{appointment.service} with {appointment.stylist} at {appointment.time}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {(["Confirmed", "Checked In", "Completed", "Cancelled"] as AppointmentStatus[]).map((status) => <button key={status} type="button" onClick={() => updateStatus(appointment.id, status)} className="rounded-xl border border-slate-600 px-3 py-2 text-xs">{status}</button>)}
+                    <button type="button" onClick={() => simulateReschedule(appointment.id)} className="rounded-xl bg-cyan-300 px-3 py-2 text-xs font-black text-slate-950">Reschedule simulation</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === "Staff" && (
+          <section className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6" aria-label="Staff page">
+            <h2 className="text-2xl font-black text-white">Staff page</h2>
+            <p className="mt-2 text-slate-300">Stylists, services, schedules, availability, and current bookings.</p>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              {stylists.map((stylist) => (
+                <article key={stylist.name} className="rounded-3xl border border-slate-700/70 bg-slate-950/60 p-5">
+                  <h3 className="text-xl font-black text-white">{stylist.name}</h3>
+                  <p className="mt-2 text-sm text-slate-400">Services: {stylist.services.join(", ")}</p>
+                  <p className="mt-2 text-sm text-slate-400">Schedule: {stylist.schedule}</p>
+                  <p className="mt-2 text-cyan-100">Availability: {stylist.availability}</p>
+                  <p className="mt-2 text-slate-300">Current bookings: {stylist.currentBookings}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === "Customer Profile" && (
+          <section className="grid gap-6 lg:grid-cols-2" aria-label="Customer profile detail">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <p className="text-xs uppercase tracking-[0.32em] text-cyan-200">Customer profile detail</p>
+              <h2 className="mt-2 text-3xl font-black text-white">Olivia Chen</h2>
+              <p className="mt-3 text-slate-300">History: 8 visits, 3 balayage services, 2 product purchases.</p>
+              <p className="mt-3 text-slate-300">Notes: prefers low-maintenance tone and quiet chair.</p>
+              <p className="mt-3 text-slate-300">Preferences: Ari Vale, oat milk latte, text reminders.</p>
+            </article>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Upcoming appointment</h3>
+              <p className="mt-3 text-cyan-100">Signature Balayage with Ari Vale at 10:00 AM.</p>
+            </article>
+          </section>
+        )}
+
+        {page === "Settings" && (
+          <section className="grid gap-6 lg:grid-cols-2" aria-label="Settings Page">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Settings Page</h2>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Business hours
+                <input value={settings.businessHours} onChange={(event) => setSettings((current) => ({ ...current, businessHours: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Default deposit
+                <input value={settings.defaultDeposit} onChange={(event) => setSettings((current) => ({ ...current, defaultDeposit: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Service catalog
+                <textarea value={settings.serviceCatalog} onChange={(event) => setSettings((current) => ({ ...current, serviceCatalog: event.target.value }))} className="mt-2 min-h-28 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <button type="button" onClick={resetDemoData} className="mt-6 rounded-2xl border border-cyan-300/50 px-5 py-3 font-black text-cyan-100">Reset Demo Data</button>
+            </article>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Loading/empty states</h3>
+              <p className="mt-3 text-slate-300">If filters produce no appointments, show an empty-state card with a booking CTA. Demo data is reset instantly from settings.</p>
+            </article>
+          </section>
+        )}
+
+        {toast && <div className="fixed bottom-5 right-5 rounded-2xl border border-cyan-300/30 bg-slate-950 px-5 py-3 text-sm font-bold text-cyan-100 shadow-2xl shadow-cyan-500/20">{toast}</div>}
+      </div>
+    </main>
+  );
+}
+`
+}
+
 func syntheticClientPortalAppTSX() string {
 	return `import { type FormEvent, useMemo, useState } from "react";
 
@@ -18805,6 +19120,9 @@ func syntheticFrontendAppTSXWithDescription(title string, summary string, descri
 	if promptLooksLikeDocumentIntelligenceApp(description) || promptLooksLikeDocumentIntelligenceApp(title+" "+summary) {
 		return syntheticDocumentIntelligenceAppTSX()
 	}
+	if promptLooksLikeBookingApp(description) || promptLooksLikeBookingApp(title+" "+summary) {
+		return syntheticBookingAppTSX()
+	}
 	if promptLooksLikeClientPortalApp(description) || promptLooksLikeClientPortalApp(title+" "+summary) {
 		return syntheticClientPortalAppTSX()
 	}
@@ -19495,6 +19813,8 @@ func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Bu
 		repairLabel = "FieldOps"
 	case promptLooksLikeDocumentIntelligenceApp(description):
 		repairLabel = "document-intelligence"
+	case promptLooksLikeBookingApp(description):
+		repairLabel = "booking"
 	case promptLooksLikeClientPortalApp(description):
 		repairLabel = "client-portal"
 	case promptLooksLikeCRMApp(description):

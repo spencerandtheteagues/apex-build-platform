@@ -1008,6 +1008,57 @@ export default function App() {
 	}
 }
 
+func TestPlannedFeatureCoverageErrorsAcceptsBookingSignals(t *testing.T) {
+	t.Parallel()
+
+	build := bookingFeatureCoverageBuild()
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const appointments = ["Olivia Chen", "Kara Mills"];
+const stylists = ["Ari Vale", "Mina Hart"];
+
+export default function App() {
+  return <main>
+    <section aria-label="Booking dashboard">
+      <article>Today's Appointments 4 live schedule</article>
+      <article>Revenue $815 today booked</article>
+      <article>Utilization 75% chair capacity</article>
+      <article>Cancellations 1 watch list</article>
+      <article>Staff Availability 2 stylists open</article>
+    </section>
+    <section aria-label="Public booking flow">
+      <select aria-label="Service selection"><option>Signature Balayage</option></select>
+      <select aria-label="Stylist selection"><option>Ari Vale</option></select>
+      <input aria-label="Calendar" type="date" />
+      <select aria-label="Time slots"><option>2:30 PM</option></select>
+      <input aria-label="Customer info" />
+      <button>Confirmation</button>
+    </section>
+    <section aria-label="Appointments page">
+      <button>Calendar/list toggle</button>
+      <select aria-label="filters"><option>Confirmed</option></select>
+      {appointments.map((appointment) => <article key={appointment}>status updates reschedule simulation {appointment}</article>)}
+    </section>
+    <section aria-label="Staff page">
+      {stylists.map((stylist) => <article key={stylist}>Stylists services schedules availability current bookings {stylist}</article>)}
+    </section>
+    <section aria-label="Customer profile detail">
+      <article>history notes preferences upcoming appointment</article>
+    </section>
+    <section aria-label="Settings Page">
+      <label>Business hours<input /></label>
+      <label>Default deposit<input /></label>
+      <label>Service catalog<textarea /></label>
+      <button>Reset Demo Data</button>
+    </section>
+  </main>;
+}`},
+	)
+
+	if errs := plannedFeatureCoverageErrors(build, files); len(errs) != 0 {
+		t.Fatalf("expected booking feature signals to pass planned coverage, got %v", errs)
+	}
+}
+
 func TestPlannedFeatureCoverageErrorsAcceptsDashboardWithoutChartRequirement(t *testing.T) {
 	t.Parallel()
 
@@ -1361,6 +1412,105 @@ export default function App() {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsUsesBookingPlannedFeatureRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := bookingFeatureCoverageBuild()
+	build.ID = "build-booking-planned-feature-coverage-repair"
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `import BookingDashboard from "./components/BookingDashboard";
+import SettingsPage from "./components/SettingsPage";
+
+export default function App() {
+  return <main><BookingDashboard /><SettingsPage /></main>;
+}`},
+		GeneratedFile{Path: "src/components/BookingDashboard.tsx", Language: "typescript", Content: `import React from 'react';
+export const BookingDashboard: React.FC = () => <div>Dashboard</div>;
+// File: src/components/BookingDashboard.tsx
+import React, { useEffect, useState } from 'react';
+const BookingDashboard: React.FC = () => null;
+export default BookingDashboard;`},
+		GeneratedFile{Path: "src/components/SettingsPage.tsx", Language: "typescript", Content: `export default function SettingsPage(){ return null; }`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: src/components/BookingDashboard.tsx(1,8): error TS2300: Duplicate identifier 'React'.`,
+			`planned feature coverage failed: "Settings Page" is missing settings configuration and reset-demo signals`,
+		},
+		"planned feature coverage failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected booking planned-feature coverage failure to use deterministic workflow repair")
+	}
+	repairedFiles := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range repairedFiles {
+		if sanitizeFilePath(file.Path) == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if strings.TrimSpace(app) == "" {
+		t.Fatalf("expected repaired booking app file, got %+v", repairedFiles)
+	}
+	for _, expected := range []string{
+		"LuxeBook Studio",
+		"Booking dashboard",
+		"Today's Appointments",
+		"Revenue",
+		"Utilization",
+		"Cancellations",
+		"Staff Availability",
+		"Public booking flow",
+		"Service selection",
+		"Stylist selection",
+		"Calendar",
+		"Time slots",
+		"Customer info",
+		"Confirmation",
+		"Appointments page",
+		"Reschedule simulation",
+		"Staff page",
+		"Customer profile detail",
+		"Business hours",
+		"Default deposit",
+		"Service catalog",
+		"Reset Demo Data",
+	} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired booking app to contain %q, got %q", expected, app)
+		}
+	}
+	if strings.Contains(app, "Duplicate identifier") || strings.Contains(app, "fetchAppointments") {
+		t.Fatalf("expected booking repair to remove corrupt duplicate/API code, got %q", app)
+	}
+	if errs := plannedFeatureCoverageErrors(build, repairedFiles); len(errs) != 0 {
+		t.Fatalf("expected repaired booking app to pass planned-feature coverage, got %v", errs)
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		found := false
+		for _, bundle := range state.PatchBundles {
+			if strings.Contains(bundle.Justification, "planned_feature_coverage_repair") &&
+				strings.Contains(bundle.Justification, "booking") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected booking planned-feature repair patch bundle, got %+v", state.PatchBundles)
+		}
+	}
+}
+
 func TestApplyDeterministicValidationRepairsSkipsGenericPreviewFallbackForNonFieldOpsPlannedFeatureCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -1487,6 +1637,31 @@ func clientPortalFeatureCoverageBuild() *Build {
 				{Name: "Files Page", Description: "Files page with folders, file list, search, tags, and mock upload.", Priority: 100},
 				{Name: "Messages Page", Description: "Messages page with thread list and working compose form.", Priority: 80},
 				{Name: "Settings Page", Description: "Settings page with client profile, notification preferences, portal branding, and reset demo data.", Priority: 60},
+			},
+		},
+	}
+}
+
+func bookingFeatureCoverageBuild() *Build {
+	return &Build{
+		ID:          "build-booking-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build LuxeBook Studio, a booking app for a premium salon with booking dashboard, public booking flow, appointments page, staff page, customer profile detail, settings, business hours, default deposit, service catalog, and reset demo data.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "frontend",
+			TechStack: TechStack{
+				Frontend: "React",
+			},
+			Features: []Feature{
+				{Name: "Booking Dashboard", Description: "Booking dashboard with today's appointments, revenue, utilization, cancellations, and staff availability.", Priority: 100},
+				{Name: "Public Booking Flow", Description: "Public booking flow with service selection, stylist selection, calendar, time slots, customer info, and confirmation.", Priority: 80},
+				{Name: "Appointments Page", Description: "Appointments page with calendar/list toggle, filters, status updates, and reschedule simulation.", Priority: 80},
+				{Name: "Staff Page", Description: "Staff page with stylists, services, schedules, availability, and current bookings.", Priority: 80},
+				{Name: "Customer Profile Detail", Description: "Customer profile detail with history, notes, preferences, and upcoming appointment.", Priority: 80},
+				{Name: "Settings Page", Description: "Settings page with business hours, default deposit, service catalog, and reset demo data.", Priority: 60},
 			},
 		},
 	}
