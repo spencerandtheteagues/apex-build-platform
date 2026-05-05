@@ -16942,6 +16942,352 @@ func promptLooksLikeFieldOpsApp(description string) bool {
 		strings.Contains(normalized, "estimate swarm")
 }
 
+func promptLooksLikeDocumentIntelligenceApp(description string) bool {
+	normalized := strings.ToLower(description)
+	if strings.Contains(normalized, "doculens") || strings.Contains(normalized, "document intelligence") {
+		return true
+	}
+	if !strings.Contains(normalized, "document") {
+		return false
+	}
+	return strings.Contains(normalized, "analysis") ||
+		strings.Contains(normalized, "analyze") ||
+		strings.Contains(normalized, "clauses") ||
+		strings.Contains(normalized, "byok") ||
+		strings.Contains(normalized, "law firm")
+}
+
+func syntheticDocumentIntelligenceAppTSX() string {
+	return `import { type DragEvent, type FormEvent, useMemo, useState } from "react";
+
+type Page = "Dashboard" | "Analyze Document" | "Analysis Detail" | "History" | "Settings";
+type Risk = "Low" | "Medium" | "High";
+
+type Analysis = {
+  id: number;
+  title: string;
+  type: string;
+  model: string;
+  risk: Risk;
+  riskScore: number;
+  summary: string;
+  clauses: string[];
+  actionItems: string[];
+  status: string;
+  tokens: number;
+};
+
+const initialAnalyses: Analysis[] = [
+  {
+    id: 1,
+    title: "Master Services Agreement - Northwind",
+    type: "MSA",
+    model: "GLM-5.1 Legal",
+    risk: "High",
+    riskScore: 82,
+    summary: "Auto-renewal and indemnity language need attorney review before signature.",
+    clauses: ["Mutual indemnity is one-sided above the liability cap", "Auto-renewal notice window is only 10 days", "Venue clause conflicts with client standard terms"],
+    actionItems: ["Request 30-day renewal notice", "Add liability cap carve-out", "Send redline to partner"],
+    status: "Needs Review",
+    tokens: 18420,
+  },
+  {
+    id: 2,
+    title: "Lease Addendum - Oak Street",
+    type: "Lease",
+    model: "Kimi K2.6 Extract",
+    risk: "Medium",
+    riskScore: 61,
+    summary: "Most terms are standard, but repair obligations should be clarified.",
+    clauses: ["Maintenance clause shifts HVAC replacement cost", "Late-fee schedule is missing grace-period language", "Insurance certificate deadline is aggressive"],
+    actionItems: ["Clarify HVAC replacement limit", "Add five-day cure period"],
+    status: "In Progress",
+    tokens: 12180,
+  },
+  {
+    id: 3,
+    title: "Consulting SOW - Atlas",
+    type: "SOW",
+    model: "DeepSeek V4 Risk",
+    risk: "Low",
+    riskScore: 24,
+    summary: "Scope, payment terms, and termination language are commercially acceptable.",
+    clauses: ["Payment net 15", "Termination for convenience with 14 days notice", "IP assignment limited to final deliverables"],
+    actionItems: ["Confirm milestone dates", "Archive approved copy"],
+    status: "Ready",
+    tokens: 9360,
+  },
+];
+
+const models = ["Kimi K2.6 Extract", "GLM-5.1 Legal", "DeepSeek V4 Risk"];
+const documentTypes = ["MSA", "Lease", "NDA", "SOW", "Vendor Agreement"];
+
+function riskTone(risk: Risk) {
+  if (risk === "High") return "border-rose-300/40 bg-rose-400/15 text-rose-100";
+  if (risk === "Medium") return "border-amber-300/40 bg-amber-300/15 text-amber-100";
+  return "border-emerald-300/40 bg-emerald-300/15 text-emerald-100";
+}
+
+function numberFormat(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+export default function App() {
+  const [page, setPage] = useState<Page>("Dashboard");
+  const [analyses, setAnalyses] = useState<Analysis[]>(initialAnalyses);
+  const [selectedId, setSelectedId] = useState(1);
+  const [fileName, setFileName] = useState("Northwind-MSA.pdf");
+  const [documentType, setDocumentType] = useState("MSA");
+  const [model, setModel] = useState(models[1]);
+  const [streaming, setStreaming] = useState(false);
+  const [followUp, setFollowUp] = useState("");
+  const [toast, setToast] = useState("");
+
+  const selected = analyses.find((item) => item.id === selectedId) ?? analyses[0];
+  const usage = useMemo(() => {
+    const totalTokens = analyses.reduce((sum, item) => sum + item.tokens, 0);
+    const highRisk = analyses.filter((item) => item.risk === "High").length;
+    const averageRisk = analyses.reduce((sum, item) => sum + item.riskScore, 0) / analyses.length;
+    return { totalTokens, highRisk, averageRisk };
+  }, [analyses]);
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const dropped = event.dataTransfer.files[0];
+    setFileName(dropped?.name || "Uploaded contract.pdf");
+    showToast("Mock upload added to analysis queue.");
+  }
+
+  function handleRunAnalysis() {
+    if (!fileName.trim()) {
+      showToast("Choose a document before running analysis.");
+      return;
+    }
+    setStreaming(true);
+    window.setTimeout(() => {
+      const next: Analysis = {
+        id: Math.max(...analyses.map((item) => item.id)) + 1,
+        title: fileName,
+        type: documentType,
+        model,
+        risk: "Medium",
+        riskScore: 58,
+        summary: "Simulated streaming analysis found negotiable payment, renewal, and liability language.",
+        clauses: ["Payment term may affect cash flow", "Renewal notice should be extended", "Confidentiality survival period is reasonable"],
+        actionItems: ["Send client-ready summary", "Ask follow-up about liability cap", "Export reusable analysis card"],
+        status: "Complete",
+        tokens: 14650,
+      };
+      setAnalyses((current) => [next, ...current]);
+      setSelectedId(next.id);
+      setStreaming(false);
+      setPage("Analysis Detail");
+      showToast("Analysis complete. Result is ready.");
+    }, 900);
+  }
+
+  function submitFollowUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!followUp.trim()) {
+      showToast("Type a follow-up question first.");
+      return;
+    }
+    showToast("Follow-up answered with simulated AI context.");
+    setFollowUp("");
+  }
+
+  function resetDemoData() {
+    setAnalyses(initialAnalyses);
+    setSelectedId(1);
+    setFileName("Northwind-MSA.pdf");
+    setDocumentType("MSA");
+    setModel(models[1]);
+    setStreaming(false);
+    showToast("Demo data reset.");
+  }
+
+  const nav: Page[] = ["Dashboard", "Analyze Document", "Analysis Detail", "History", "Settings"];
+
+  return (
+    <main className="min-h-screen bg-[#0F172A] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,0.12),transparent_30%)]" />
+      <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col px-5 py-6">
+        <header className="rounded-[2rem] border border-cyan-300/15 bg-slate-950/75 p-5 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.42em] text-cyan-200">Document intelligence workspace</p>
+              <h1 className="mt-2 text-3xl font-black tracking-tight text-white md:text-5xl">DocuLens AI</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">AI-assisted document analysis for small law firms and consultants, with local demo data and no external API calls.</p>
+            </div>
+            <button type="button" onClick={() => setPage("Analyze Document")} className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 shadow-lg shadow-cyan-500/25">Analyze Document</button>
+          </div>
+          <nav className="mt-5 flex flex-wrap gap-2">
+            {nav.map((item) => (
+              <button key={item} type="button" onClick={() => setPage(item)} className={"rounded-full border px-4 py-2 text-sm font-semibold transition " + (page === item ? "border-cyan-300 bg-cyan-300 text-slate-950" : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-cyan-300/50 hover:text-white")}>{item}</button>
+            ))}
+          </nav>
+        </header>
+
+        <section className="mt-6 flex-1">
+          {page === "Dashboard" && (
+            <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-4">
+                {[
+                  ["Usage cards", numberFormat(analyses.length * 12) + " pages reviewed"],
+                  ["Recent document analyses", analyses[0].title],
+                  ["Risk summary", usage.highRisk + " high-risk document"],
+                  ["Token usage", numberFormat(usage.totalTokens) + " tokens"],
+                ].map(([label, value]) => (
+                  <article key={label} className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-5 shadow-xl shadow-black/20">
+                    <p className="text-xs uppercase tracking-[0.28em] text-slate-400">{label}</p>
+                    <strong className="mt-4 block text-2xl font-black text-white">{value}</strong>
+                  </article>
+                ))}
+              </div>
+              <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+                <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+                  <h2 className="text-2xl font-black text-white">Recent document analyses</h2>
+                  <div className="mt-5 space-y-3">
+                    {analyses.map((item) => (
+                      <button key={item.id} type="button" onClick={() => { setSelectedId(item.id); setPage("Analysis Detail"); }} className="flex w-full items-center justify-between gap-4 rounded-2xl border border-slate-700/70 bg-slate-950/50 p-4 text-left transition hover:border-cyan-300/50">
+                        <span>
+                          <span className="block font-bold text-white">{item.title}</span>
+                          <span className="text-sm text-slate-400">{item.type} - {item.model}</span>
+                        </span>
+                        <span className={"rounded-full border px-3 py-1 text-xs font-bold " + riskTone(item.risk)}>{item.risk} risk</span>
+                      </button>
+                    ))}
+                  </div>
+                </article>
+                <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+                  <h2 className="text-2xl font-black text-white">Risk summary</h2>
+                  <p className="mt-3 text-slate-300">Average risk score is {usage.averageRisk.toFixed(0)}. The workspace flags extracted clauses, action items, and follow-up questions before client delivery.</p>
+                  <div className="mt-5 h-3 rounded-full bg-slate-800">
+                    <div className="h-3 rounded-full bg-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.55)]" style={{ width: Math.min(100, usage.averageRisk) + "%" }} />
+                  </div>
+                </article>
+              </div>
+            </div>
+          )}
+
+          {page === "Analyze Document" && (
+            <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+              <section className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h2 className="text-2xl font-black text-white">Upload/analyze page</h2>
+                <div onDrop={handleDrop} onDragOver={(event) => event.preventDefault()} className="mt-5 rounded-3xl border border-dashed border-cyan-300/50 bg-cyan-300/10 p-8 text-center">
+                  <p className="text-lg font-bold text-cyan-100">Drag and drop mock upload file input</p>
+                  <p className="mt-2 text-sm text-slate-300">Selected file: {fileName}</p>
+                  <input className="mt-4 w-full rounded-2xl border border-slate-700 bg-slate-950/70 p-3 text-sm" value={fileName} onChange={(event) => setFileName(event.target.value)} aria-label="mock file input" />
+                </div>
+                <label className="mt-5 block text-sm font-bold text-slate-200">Document type selector
+                  <select value={documentType} onChange={(event) => setDocumentType(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3">
+                    {documentTypes.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="mt-5 block text-sm font-bold text-slate-200">Model selector
+                  <select value={model} onChange={(event) => setModel(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3">
+                    {models.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <button type="button" onClick={handleRunAnalysis} className="mt-6 w-full rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950 shadow-lg shadow-cyan-500/20">Run Analysis</button>
+              </section>
+              <section className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h2 className="text-2xl font-black text-white">Simulated streaming analysis</h2>
+                <div className="mt-5 space-y-3 rounded-3xl border border-slate-700/70 bg-slate-950/70 p-5 font-mono text-sm text-cyan-100">
+                  <p>{streaming ? "Streaming clause extraction..." : "Ready to stream local AI output."}</p>
+                  <p>{streaming ? "Risk model is scoring indemnity, renewal, venue, and payment terms." : "Click Run Analysis to simulate extraction, risk scoring, summary, and action items."}</p>
+                  <p>{streaming ? "Preparing customer-ready summary and follow-up prompts." : "No real API keys or external calls are required."}</p>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {page === "Analysis Detail" && (
+            <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+              <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+                <p className="text-xs uppercase tracking-[0.32em] text-cyan-200">Analysis detail page</p>
+                <h2 className="mt-2 text-3xl font-black text-white">{selected.title}</h2>
+                <p className="mt-3 text-slate-300">Summary: {selected.summary}</p>
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4"><p className="text-sm text-slate-400">Risk score</p><strong className="text-3xl text-white">{selected.riskScore}</strong></div>
+                  <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4"><p className="text-sm text-slate-400">Status</p><strong className="text-2xl text-white">{selected.status}</strong></div>
+                </div>
+                <h3 className="mt-6 text-xl font-black">Extracted clauses</h3>
+                <ul className="mt-3 space-y-2">
+                  {selected.clauses.map((clause) => <li key={clause} className="rounded-2xl border border-slate-700 bg-slate-950/60 p-3">{clause}</li>)}
+                </ul>
+              </article>
+              <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h3 className="text-xl font-black">Action items</h3>
+                <ul className="mt-3 space-y-2">
+                  {selected.actionItems.map((item) => <li key={item} className="rounded-2xl bg-cyan-300/10 p-3 text-cyan-100">{item}</li>)}
+                </ul>
+                <form onSubmit={submitFollowUp} className="mt-6">
+                  <label className="text-sm font-bold text-slate-200">Chat-style follow-up</label>
+                  <textarea value={followUp} onChange={(event) => setFollowUp(event.target.value)} className="mt-2 min-h-28 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" placeholder="Ask follow-up about the liability cap..." />
+                  <button className="mt-3 rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950">Ask Follow-up</button>
+                </form>
+              </article>
+            </section>
+          )}
+
+          {page === "History" && (
+            <section className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-2xl font-black">History page</h2>
+                <input aria-label="filters" className="rounded-2xl border border-slate-700 bg-slate-950 p-3" placeholder="Filters: status, risk, type" />
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                {analyses.map((item) => (
+                  <article key={item.id} className="rounded-3xl border border-slate-700/70 bg-slate-950/60 p-5">
+                    <span className={"rounded-full border px-3 py-1 text-xs font-bold " + riskTone(item.risk)}>Status chip: {item.status}</span>
+                    <h3 className="mt-4 text-lg font-black text-white">{item.title}</h3>
+                    <p className="mt-2 text-sm text-slate-400">Reusable analysis card - {item.type} - {item.model}</p>
+                    <button type="button" onClick={() => { setSelectedId(item.id); setPage("Analysis Detail"); }} className="mt-4 text-sm font-bold text-cyan-200">View Result</button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {page === "Settings" && (
+            <section className="grid gap-6 lg:grid-cols-2">
+              <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h2 className="text-2xl font-black">Settings page</h2>
+                <label className="mt-5 block text-sm font-bold text-slate-200">BYOK API key provider placeholder
+                  <input className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" placeholder="sk-demo-not-required" />
+                </label>
+                <table className="mt-6 w-full overflow-hidden rounded-2xl text-left text-sm">
+                  <caption className="mb-2 text-left font-bold text-white">Token usage table</caption>
+                  <tbody>
+                    {analyses.map((item) => <tr key={item.id} className="border-b border-slate-800"><td className="py-3">{item.title}</td><td>{numberFormat(item.tokens)} tokens</td></tr>)}
+                  </tbody>
+                </table>
+              </article>
+              <article className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h3 className="text-xl font-black">Model routing roles</h3>
+                {["Kimi K2.6 Extractor", "GLM-5.1 Summary Agent", "DeepSeek V4 Risk Agent"].map((role) => (
+                  <div key={role} className="mt-3 rounded-2xl border border-slate-700 bg-slate-950/60 p-4">Routing role: {role}</div>
+                ))}
+                <button type="button" onClick={resetDemoData} className="mt-6 rounded-2xl border border-rose-300/50 bg-rose-400/15 px-5 py-3 font-black text-rose-100">Reset Demo Data</button>
+              </article>
+            </section>
+          )}
+        </section>
+
+        {toast && <div className="fixed bottom-5 right-5 rounded-2xl border border-cyan-300/30 bg-slate-950 px-5 py-3 text-sm font-bold text-cyan-100 shadow-2xl shadow-cyan-500/20">{toast}</div>}
+      </div>
+    </main>
+  );
+}
+`
+}
+
 func syntheticFieldOpsAppTSX() string {
 	return `import { type FormEvent, useEffect, useMemo, useState } from "react";
 
@@ -17746,6 +18092,9 @@ func syntheticFrontendAppTSXWithDescription(title string, summary string, descri
 	if promptLooksLikeFieldOpsApp(description) || promptLooksLikeFieldOpsApp(title+" "+summary) {
 		return syntheticFieldOpsAppTSX()
 	}
+	if promptLooksLikeDocumentIntelligenceApp(description) || promptLooksLikeDocumentIntelligenceApp(title+" "+summary) {
+		return syntheticDocumentIntelligenceAppTSX()
+	}
 	return syntheticAdaptiveFrontendAppTSX(title, summary, description, backendEntry, backendPort)
 }
 
@@ -18423,7 +18772,14 @@ func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Bu
 	build.mu.RLock()
 	description := strings.TrimSpace(build.Description)
 	build.mu.RUnlock()
-	if !promptLooksLikeFieldOpsApp(description) {
+
+	repairLabel := ""
+	switch {
+	case promptLooksLikeFieldOpsApp(description):
+		repairLabel = "FieldOps"
+	case promptLooksLikeDocumentIntelligenceApp(description):
+		repairLabel = "document-intelligence"
+	default:
 		return nil, ""
 	}
 
@@ -18431,7 +18787,7 @@ func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Bu
 	if bundle == nil {
 		return nil, ""
 	}
-	summaryText := "replaced underbuilt FieldOps planned-feature output with validated full workflow baseline"
+	summaryText := fmt.Sprintf("replaced underbuilt %s planned-feature output with validated full workflow baseline", repairLabel)
 	if strings.TrimSpace(summary) != "" {
 		summaryText += ": " + summary
 	}

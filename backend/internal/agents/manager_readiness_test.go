@@ -1006,6 +1006,81 @@ func TestPlannedFeatureCoverageErrorsAcceptsDashboardWithoutChartRequirement(t *
 	}
 }
 
+func TestApplyDeterministicValidationRepairsUsesDocumentIntelligencePlannedFeatureRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := documentIntelligenceFeatureCoverageBuild()
+	build.ID = "build-document-intelligence-planned-feature-coverage-repair"
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `export default function App(){ return <main>Dashboard Analyze Document Analysis Detail History Settings</main>; }`},
+		GeneratedFile{Path: "src/components/UploadAnalyze.tsx", Language: "typescript", Content: `export default function UploadAnalyze(){ return <input type="file" />; }`},
+		GeneratedFile{Path: "src/components/Settings.tsx", Language: "typescript", Content: `export default function Settings(){ return <section>BYOK Token Usage Reset Demo Data</section>; }`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`planned feature coverage failed: "Upload/Analyze Page" is missing the upload/analyze flow, drag-and-drop file input, selectors, and simulated streaming analysis signals`,
+			`planned feature coverage failed: "Settings Page" is missing settings signals for BYOK/provider placeholders, token usage, model routing roles, and reset-demo controls`,
+		},
+		"planned feature coverage failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected document-intelligence planned-feature coverage failure to use deterministic workflow repair")
+	}
+	repairedFiles := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range repairedFiles {
+		if sanitizeFilePath(file.Path) == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if strings.TrimSpace(app) == "" {
+		t.Fatalf("expected repaired document-intelligence app file, got %+v", repairedFiles)
+	}
+	for _, expected := range []string{
+		"DocuLens AI",
+		"Drag and drop mock upload file input",
+		"Document type selector",
+		"Model selector",
+		"Simulated streaming analysis",
+		"Extracted clauses",
+		"Risk score",
+		"Chat-style follow-up",
+		"Token usage table",
+		"Model routing roles",
+		"Reset Demo Data",
+	} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired document-intelligence app to contain %q, got %q", expected, app)
+		}
+	}
+	if errs := plannedFeatureCoverageErrors(build, repairedFiles); len(errs) != 0 {
+		t.Fatalf("expected repaired document-intelligence app to pass planned-feature coverage, got %v", errs)
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		found := false
+		for _, bundle := range state.PatchBundles {
+			if strings.Contains(bundle.Justification, "planned_feature_coverage_repair") &&
+				strings.Contains(bundle.Justification, "document-intelligence") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected document-intelligence planned-feature repair patch bundle, got %+v", state.PatchBundles)
+		}
+	}
+}
+
 func TestApplyDeterministicValidationRepairsUsesFieldOpsPlannedFeatureRepair(t *testing.T) {
 	t.Parallel()
 
