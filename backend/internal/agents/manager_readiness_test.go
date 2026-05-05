@@ -925,21 +925,7 @@ func TestPlannedFeatureCoverageErrorsRejectsUnderbuiltDocumentIntelligenceSignal
 func TestPlannedFeatureCoverageErrorsAcceptsGenericCRMSignals(t *testing.T) {
 	t.Parallel()
 
-	build := &Build{
-		ID:          "build-crm-feature-coverage",
-		Mode:        ModeFull,
-		Description: "Build CloseForge CRM with dashboard follow-up metrics, draggable deals pipeline Kanban, deal details, new deal form, and settings.",
-		TechStack:   &TechStack{Frontend: "React"},
-		Plan: &BuildPlan{
-			AppType:   "frontend",
-			TechStack: TechStack{Frontend: "React"},
-			Features: []Feature{
-				{Name: "Dashboard", Description: "Dashboard with pipeline value, weighted forecast, win rate, open deals, and follow-up metrics.", Priority: 100},
-				{Name: "Deals Pipeline Kanban", Description: "Draggable cards across Prospecting, Qualified, Proposal, Negotiation, Won, and Lost.", Priority: 100},
-				{Name: "Settings Page", Description: "Settings page with stages, owners, default probability, and reset demo data.", Priority: 60},
-			},
-		},
-	}
+	build := crmFeatureCoverageBuild()
 	files := fieldOpsFeatureCoverageBaseFiles(
 		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const stages = ["Prospecting", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
 
@@ -1150,6 +1136,92 @@ func TestApplyDeterministicValidationRepairsUsesFieldOpsPlannedFeatureRepair(t *
 	}
 }
 
+func TestApplyDeterministicValidationRepairsUsesCRMPlannedFeatureRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := crmFeatureCoverageBuild()
+	build.ID = "build-crm-planned-feature-coverage-repair"
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const modules = ["Lead Inbox", "Pipeline Forecast", "Deal Desk", "Follow-up Queue"];
+
+export default function App() {
+  return <main>
+    <h1>Build a production-ready CRM</h1>
+    {modules.map((module) => <section key={module}>{module}</section>)}
+  </main>;
+}`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`planned feature coverage failed: "Deals Pipeline Kanban" is missing draggable Kanban/pipeline board signals with status columns`,
+			`planned feature coverage failed: "Settings Page" is missing settings configuration and reset-demo signals`,
+		},
+		"planned feature coverage failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected CRM planned-feature coverage failure to use deterministic workflow repair")
+	}
+	repairedFiles := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range repairedFiles {
+		if sanitizeFilePath(file.Path) == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if strings.TrimSpace(app) == "" {
+		t.Fatalf("expected repaired CRM app file, got %+v", repairedFiles)
+	}
+	for _, expected := range []string{
+		"CloseForge CRM",
+		"Dashboard",
+		"Pipeline value",
+		"Weighted forecast",
+		"Deals Pipeline Kanban",
+		"Prospecting",
+		"Qualified",
+		"Proposal",
+		"Negotiation",
+		"Won",
+		"Lost",
+		"draggable",
+		"Deal detail page",
+		"New deal form",
+		"live forecast calculation",
+		"Default probability",
+		"Reset Demo Data",
+	} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired CRM app to contain %q, got %q", expected, app)
+		}
+	}
+	if errs := plannedFeatureCoverageErrors(build, repairedFiles); len(errs) != 0 {
+		t.Fatalf("expected repaired CRM app to pass planned-feature coverage, got %v", errs)
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		found := false
+		for _, bundle := range state.PatchBundles {
+			if strings.Contains(bundle.Justification, "planned_feature_coverage_repair") &&
+				strings.Contains(bundle.Justification, "CRM") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected CRM planned-feature repair patch bundle, got %+v", state.PatchBundles)
+		}
+	}
+}
+
 func TestApplyDeterministicValidationRepairsSkipsGenericPreviewFallbackForNonFieldOpsPlannedFeatureCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -1226,6 +1298,31 @@ func documentIntelligenceFeatureCoverageBuild() *Build {
 				{Name: "Analysis Detail Page", Description: "Analysis detail page with extracted clauses, risk score, summary, action items, and chat-style follow-up.", Priority: 100},
 				{Name: "History Page", Description: "History page with filters, status chips, and reusable analysis cards.", Priority: 60},
 				{Name: "Settings Page", Description: "Settings page with BYOK placeholders, token usage table, routing roles, and reset demo data.", Priority: 60},
+			},
+		},
+	}
+}
+
+func crmFeatureCoverageBuild() *Build {
+	return &Build{
+		ID:          "build-crm-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build CloseForge CRM with dashboard pipeline value, weighted forecast, win rate, open deals, follow-up metrics, searchable leads, draggable deals pipeline Kanban, deal detail page, new deal form, settings stages, owners, default probability, and reset demo data.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "frontend",
+			TechStack: TechStack{
+				Frontend: "React",
+			},
+			Features: []Feature{
+				{Name: "Dashboard", Description: "Dashboard with pipeline value, weighted forecast, win rate, open deals, and follow-up metrics.", Priority: 100},
+				{Name: "Leads Page", Description: "Leads page with searchable table, lead score, owner, source, and quick actions.", Priority: 80},
+				{Name: "Deals Pipeline Kanban", Description: "Draggable cards across Prospecting, Qualified, Proposal, Negotiation, Won, and Lost.", Priority: 100},
+				{Name: "Deal Detail Page", Description: "Deal detail page with contact info, activity timeline, notes, tasks, next step, and value calculator.", Priority: 80},
+				{Name: "New Deal Form", Description: "New deal form with validation and live forecast calculation.", Priority: 80},
+				{Name: "Settings Page", Description: "Settings page with stages, owners, default probability, and reset demo data.", Priority: 60},
 			},
 		},
 	}

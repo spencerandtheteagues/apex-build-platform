@@ -16957,6 +16957,431 @@ func promptLooksLikeDocumentIntelligenceApp(description string) bool {
 		strings.Contains(normalized, "law firm")
 }
 
+func promptLooksLikeCRMApp(description string) bool {
+	normalized := strings.ToLower(description)
+	if strings.TrimSpace(normalized) == "" {
+		return false
+	}
+	if promptLooksLikeFieldOpsApp(normalized) || promptLooksLikeDocumentIntelligenceApp(normalized) {
+		return false
+	}
+	crmSignal := strings.Contains(normalized, "closeforge") ||
+		strings.Contains(normalized, "crm") ||
+		strings.Contains(normalized, "sales pipeline") ||
+		strings.Contains(normalized, "deal pipeline") ||
+		strings.Contains(normalized, "deals pipeline")
+	if !crmSignal {
+		return false
+	}
+	revenueSignals := 0
+	for _, token := range []string{"deal", "deals", "lead", "leads", "pipeline", "forecast", "win rate", "follow-up", "follow up", "probability"} {
+		if strings.Contains(normalized, token) {
+			revenueSignals++
+		}
+	}
+	return revenueSignals >= 2
+}
+
+func syntheticCRMAppTSX() string {
+	return `import { type DragEvent, type FormEvent, useMemo, useState } from "react";
+
+type Page = "Dashboard" | "Leads" | "Deals Pipeline Kanban" | "Deal Detail" | "New Deal" | "Settings";
+type Stage = "Prospecting" | "Qualified" | "Proposal" | "Negotiation" | "Won" | "Lost";
+
+type Deal = {
+  id: number;
+  company: string;
+  contact: string;
+  email: string;
+  phone: string;
+  owner: string;
+  stage: Stage;
+  source: string;
+  value: number;
+  probability: number;
+  lastTouch: string;
+  nextStep: string;
+  notes: string[];
+  tasks: string[];
+};
+
+type Lead = {
+  id: number;
+  company: string;
+  contact: string;
+  source: string;
+  score: number;
+  owner: string;
+  status: string;
+  value: number;
+};
+
+const stages: Stage[] = ["Prospecting", "Qualified", "Proposal", "Negotiation", "Won", "Lost"];
+const owners = ["Avery Cole", "Mina Ortiz", "Noah Reyes", "Jordan Lee"];
+
+const initialDeals: Deal[] = [
+  { id: 1, company: "Northstar Manufacturing", contact: "Evan Brooks", email: "evan@northstar.example", phone: "(214) 555-0142", owner: "Avery Cole", stage: "Proposal", source: "Partner referral", value: 86000, probability: 58, lastTouch: "2 hours ago", nextStep: "Send revised implementation timeline", notes: ["Economic buyer confirmed", "Needs security addendum"], tasks: ["Update proposal", "Schedule procurement call"] },
+  { id: 2, company: "Luma Health", contact: "Priya Shah", email: "priya@luma.example", phone: "(312) 555-0198", owner: "Mina Ortiz", stage: "Qualified", source: "Inbound demo", value: 42500, probability: 38, lastTouch: "Yesterday", nextStep: "Run discovery with operations lead", notes: ["Pain around no-show reporting", "Budget range approved"], tasks: ["Send ROI worksheet", "Book technical demo"] },
+  { id: 3, company: "Fieldstone Group", contact: "Marcus Hill", email: "marcus@fieldstone.example", phone: "(469) 555-0177", owner: "Noah Reyes", stage: "Negotiation", source: "Outbound", value: 118000, probability: 72, lastTouch: "Today", nextStep: "Resolve legal redlines", notes: ["Champion wants Q2 start", "Procurement asks for net 45"], tasks: ["Review redlines", "Confirm implementation discount"] },
+  { id: 4, company: "BrightPath Labs", contact: "Olivia Chen", email: "olivia@brightpath.example", phone: "(415) 555-0106", owner: "Jordan Lee", stage: "Prospecting", source: "Webinar", value: 63400, probability: 22, lastTouch: "4 days ago", nextStep: "Qualify budget and timeline", notes: ["High engagement in webinar", "No executive sponsor yet"], tasks: ["Send recap", "Ask qualification questions"] },
+  { id: 5, company: "Atlas Supply", contact: "Sam Patel", email: "sam@atlas.example", phone: "(817) 555-0188", owner: "Avery Cole", stage: "Won", source: "Customer expansion", value: 154000, probability: 100, lastTouch: "Last week", nextStep: "Handoff to customer success", notes: ["Signed annual plan", "Implementation starts Monday"], tasks: ["Create kickoff packet", "Confirm billing contact"] },
+  { id: 6, company: "Harbor Retail", contact: "Nora Singh", email: "nora@harbor.example", phone: "(206) 555-0139", owner: "Mina Ortiz", stage: "Lost", source: "Paid search", value: 39000, probability: 0, lastTouch: "9 days ago", nextStep: "Add to nurture sequence", notes: ["Chose incumbent vendor", "Revisit in six months"], tasks: ["Send polite close note", "Set nurture reminder"] },
+];
+
+const initialLeads: Lead[] = [
+  { id: 101, company: "Omni Fleet", contact: "Tessa Grant", source: "LinkedIn", score: 91, owner: "Avery Cole", status: "Hot", value: 72000 },
+  { id: 102, company: "Peak Dental", contact: "Andre Lyons", source: "Referral", score: 84, owner: "Mina Ortiz", status: "New", value: 48500 },
+  { id: 103, company: "Canyon Builders", contact: "Elena Ruiz", source: "Website", score: 73, owner: "Noah Reyes", status: "Working", value: 56000 },
+  { id: 104, company: "Urban Harvest", contact: "Kara Mills", source: "Event", score: 68, owner: "Jordan Lee", status: "Nurture", value: 31000 },
+];
+
+function currency(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function percent(value: number) {
+  return value.toFixed(0) + "%";
+}
+
+function stageTone(stage: Stage) {
+  if (stage === "Won") return "border-emerald-300/40 bg-emerald-300/15 text-emerald-100";
+  if (stage === "Lost") return "border-rose-300/40 bg-rose-400/15 text-rose-100";
+  if (stage === "Negotiation") return "border-amber-300/40 bg-amber-300/15 text-amber-100";
+  return "border-cyan-300/35 bg-cyan-300/10 text-cyan-100";
+}
+
+export default function App() {
+  const [page, setPage] = useState<Page>("Dashboard");
+  const [deals, setDeals] = useState<Deal[]>(initialDeals);
+  const [leads] = useState<Lead[]>(initialLeads);
+  const [selectedId, setSelectedId] = useState(1);
+  const [leadSearch, setLeadSearch] = useState("");
+  const [toast, setToast] = useState("");
+  const [settings, setSettings] = useState({ stageList: stages.join(", "), ownerList: owners.join(", "), defaultProbability: "35" });
+  const [newDeal, setNewDeal] = useState({
+    company: "Copperline Logistics",
+    contact: "Maya Bennett",
+    email: "maya@copperline.example",
+    phone: "(972) 555-0164",
+    owner: owners[0],
+    source: "Inbound demo",
+    value: "76000",
+    probability: "42",
+    nextStep: "Book discovery call",
+  });
+
+  const selectedDeal = deals.find((deal) => deal.id === selectedId) ?? deals[0];
+  const metrics = useMemo(() => {
+    const openDeals = deals.filter((deal) => deal.stage !== "Won" && deal.stage !== "Lost");
+    const pipelineValue = openDeals.reduce((sum, deal) => sum + deal.value, 0);
+    const weightedForecast = openDeals.reduce((sum, deal) => sum + deal.value * (deal.probability / 100), 0);
+    const wonDeals = deals.filter((deal) => deal.stage === "Won").length;
+    const lostDeals = deals.filter((deal) => deal.stage === "Lost").length;
+    const winRate = wonDeals + lostDeals === 0 ? 0 : (wonDeals / (wonDeals + lostDeals)) * 100;
+    const followUps = openDeals.filter((deal) => deal.nextStep.trim() !== "").length;
+    return { openDeals: openDeals.length, pipelineValue, weightedForecast, winRate, followUps };
+  }, [deals]);
+
+  const forecast = Number(newDeal.value || 0) * (Number(newDeal.probability || settings.defaultProbability || 0) / 100);
+  const filteredLeads = leads.filter((lead) => (lead.company + " " + lead.contact + " " + lead.source + " " + lead.status).toLowerCase().includes(leadSearch.toLowerCase()));
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function moveDeal(id: number, stage: Stage) {
+    setDeals((current) => current.map((deal) => deal.id === id ? { ...deal, stage, probability: stage === "Won" ? 100 : stage === "Lost" ? 0 : deal.probability, lastTouch: "Just now" } : deal));
+    showToast("Deal moved to " + stage + ".");
+  }
+
+  function handleDragStart(event: DragEvent<HTMLElement>, id: number) {
+    event.dataTransfer.setData("text/plain", String(id));
+    event.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleDrop(event: DragEvent<HTMLElement>, stage: Stage) {
+    event.preventDefault();
+    const id = Number(event.dataTransfer.getData("text/plain"));
+    if (id) {
+      moveDeal(id, stage);
+    }
+  }
+
+  function handleSaveDeal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newDeal.company.trim() || !newDeal.contact.trim() || Number(newDeal.value) <= 0) {
+      showToast("Complete company, contact, and deal value.");
+      return;
+    }
+    const id = Math.max(...deals.map((deal) => deal.id)) + 1;
+    const deal: Deal = {
+      id,
+      company: newDeal.company,
+      contact: newDeal.contact,
+      email: newDeal.email,
+      phone: newDeal.phone,
+      owner: newDeal.owner,
+      stage: "Prospecting",
+      source: newDeal.source,
+      value: Number(newDeal.value),
+      probability: Number(newDeal.probability || settings.defaultProbability),
+      lastTouch: "Just now",
+      nextStep: newDeal.nextStep || "Schedule discovery call",
+      notes: ["New deal form saved with live forecast calculation."],
+      tasks: ["Confirm business pain", "Send discovery agenda", "Update close date"],
+    };
+    setDeals((current) => [deal, ...current]);
+    setSelectedId(id);
+    setPage("Deal Detail");
+    showToast("Deal saved and detail page opened.");
+  }
+
+  function resetDemoData() {
+    setDeals(initialDeals);
+    setSelectedId(1);
+    setSettings({ stageList: stages.join(", "), ownerList: owners.join(", "), defaultProbability: "35" });
+    showToast("Reset Demo Data complete.");
+  }
+
+  const nav: Page[] = ["Dashboard", "Leads", "Deals Pipeline Kanban", "New Deal", "Deal Detail", "Settings"];
+
+  return (
+    <main className="min-h-screen bg-[#0F172A] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_18%_8%,rgba(34,211,238,0.22),transparent_28%),radial-gradient(circle_at_88%_18%,rgba(59,130,246,0.18),transparent_24%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,1))]" />
+      <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-5 py-6 md:px-8">
+        <header className="rounded-[2rem] border border-cyan-300/20 bg-slate-950/75 p-6 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.42em] text-cyan-200">Revenue command center</p>
+              <h1 className="mt-3 text-4xl font-black tracking-tight text-white md:text-6xl">CloseForge CRM</h1>
+              <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">A production-ready CRM with dashboard forecasting, searchable leads, draggable deal pipeline, deal detail workflow, new deal form, and settings.</p>
+            </div>
+            <button type="button" onClick={() => setPage("New Deal")} className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 shadow-xl shadow-cyan-500/25">New deal form</button>
+          </div>
+          <nav className="mt-6 flex flex-wrap gap-2">
+            {nav.map((item) => (
+              <button key={item} type="button" onClick={() => setPage(item)} className={"rounded-full border px-4 py-2 text-sm font-semibold transition " + (page === item ? "border-cyan-300 bg-cyan-300 text-slate-950" : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-cyan-300/50 hover:text-white")}>{item}</button>
+            ))}
+          </nav>
+        </header>
+
+        {page === "Dashboard" && (
+          <section className="space-y-6" aria-label="Dashboard">
+            <div className="grid gap-4 md:grid-cols-5">
+              {[
+                ["Pipeline value", currency(metrics.pipelineValue), "+18% this month"],
+                ["Weighted forecast", currency(metrics.weightedForecast), "live forecast"],
+                ["Win rate", percent(metrics.winRate), "+4 pts"],
+                ["Open deals", String(metrics.openDeals), "active pipeline"],
+                ["Follow-up metrics", String(metrics.followUps) + " due", "needs action"],
+              ].map(([label, value, trend]) => (
+                <article key={label} className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-5 shadow-xl shadow-black/20">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{label}</p>
+                  <strong className="mt-4 block text-3xl font-black text-white">{value}</strong>
+                  <div className="mt-4 h-10 rounded-2xl bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-100">
+                    <svg viewBox="0 0 120 24" className="h-4 w-full" aria-label="sparkline trend chart"><polyline fill="none" stroke="currentColor" strokeWidth="3" points="0,18 20,14 40,16 60,7 80,10 100,5 120,8" /></svg>
+                    {trend}
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+              <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h2 className="text-2xl font-black text-white">Priority pipeline</h2>
+                <div className="mt-5 space-y-3">
+                  {deals.filter((deal) => deal.stage !== "Won" && deal.stage !== "Lost").slice(0, 4).map((deal) => (
+                    <button key={deal.id} type="button" onClick={() => { setSelectedId(deal.id); setPage("Deal Detail"); }} className="flex w-full items-center justify-between gap-4 rounded-2xl border border-slate-700/70 bg-slate-950/55 p-4 text-left transition hover:border-cyan-300/50">
+                      <span>
+                        <span className="block font-bold text-white">{deal.company}</span>
+                        <span className="text-sm text-slate-400">{deal.contact} - {deal.owner} - {deal.nextStep}</span>
+                      </span>
+                      <span className="font-black text-emerald-200">{currency(deal.value * (deal.probability / 100))}</span>
+                    </button>
+                  ))}
+                </div>
+              </article>
+              <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h2 className="text-2xl font-black text-white">Forecast health</h2>
+                <p className="mt-3 leading-7 text-slate-300">Weighted forecast combines deal value and stage probability, then updates instantly when cards move across the CRM pipeline.</p>
+                <button type="button" onClick={() => setPage("Deals Pipeline Kanban")} className="mt-6 rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950">Open Deals Pipeline Kanban</button>
+              </article>
+            </div>
+          </section>
+        )}
+
+        {page === "Leads" && (
+          <section className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6" aria-label="Leads page">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-2xl font-black text-white">Leads page</h2>
+                <p className="mt-2 text-slate-300">Searchable table with lead score, owner, source, and quick actions.</p>
+              </div>
+              <input value={leadSearch} onChange={(event) => setLeadSearch(event.target.value)} placeholder="Search leads..." className="rounded-2xl border border-slate-700 bg-slate-950 p-3 outline-none focus:border-cyan-300" />
+            </div>
+            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-700/70">
+              <div className="grid bg-slate-950/70 px-4 py-3 text-xs font-bold uppercase tracking-[0.2em] text-slate-500 md:grid-cols-[1.1fr_0.8fr_0.6fr_0.6fr_0.5fr_0.8fr]">
+                <span>Company</span><span>Contact</span><span>Source</span><span>Owner</span><span>Score</span><span>Quick actions</span>
+              </div>
+              {filteredLeads.map((lead) => (
+                <div key={lead.id} className="grid gap-2 border-t border-slate-800 px-4 py-4 text-sm md:grid-cols-[1.1fr_0.8fr_0.6fr_0.6fr_0.5fr_0.8fr]">
+                  <strong className="text-white">{lead.company}</strong>
+                  <span>{lead.contact}</span>
+                  <span>{lead.source}</span>
+                  <span>{lead.owner}</span>
+                  <span className="font-black text-cyan-100">{lead.score}</span>
+                  <button type="button" onClick={() => { setNewDeal((current) => ({ ...current, company: lead.company, contact: lead.contact, owner: lead.owner, source: lead.source, value: String(lead.value) })); setPage("New Deal"); }} className="rounded-xl border border-cyan-300/40 px-3 py-2 text-xs font-bold text-cyan-100">Convert to deal</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === "Deals Pipeline Kanban" && (
+          <section aria-label="Deals Pipeline Kanban" className="space-y-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-3xl font-black text-white">Deals Pipeline Kanban</h2>
+                <p className="mt-2 text-slate-300">Draggable cards across Prospecting, Qualified, Proposal, Negotiation, Won, and Lost status columns.</p>
+              </div>
+              <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-bold text-cyan-100">drag and drop enabled</span>
+            </div>
+            <div className="grid gap-4 xl:grid-cols-6">
+              {stages.map((stage) => {
+                const stageDeals = deals.filter((deal) => deal.stage === stage);
+                return (
+                  <article key={stage} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDrop(event, stage)} className="min-h-80 rounded-[1.75rem] border border-cyan-300/10 bg-slate-900/75 p-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-black text-white">{stage}</h3>
+                      <span className="rounded-full bg-slate-950 px-2 py-1 text-xs text-slate-300">{stageDeals.length}</span>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {stageDeals.map((deal) => (
+                        <section key={deal.id} draggable onDragStart={(event) => handleDragStart(event, deal.id)} onClick={() => { setSelectedId(deal.id); setPage("Deal Detail"); }} className="cursor-grab rounded-2xl border border-slate-700/70 bg-slate-950/70 p-4 shadow-lg shadow-black/20 transition hover:border-cyan-300/50">
+                          <div className="flex items-start justify-between gap-3">
+                            <strong className="text-white">{deal.company}</strong>
+                            <span className={"rounded-full border px-2 py-1 text-[10px] font-bold " + stageTone(deal.stage)}>{deal.stage}</span>
+                          </div>
+                          <p className="mt-2 text-sm text-slate-400">{deal.contact} - {deal.owner}</p>
+                          <p className="mt-3 font-black text-emerald-200">{currency(deal.value)}</p>
+                          <p className="mt-2 text-xs text-slate-400">{percent(deal.probability)} probability - {deal.nextStep}</p>
+                        </section>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {page === "Deal Detail" && selectedDeal && (
+          <section className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]" aria-label="Deal detail page">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <p className="text-xs font-bold uppercase tracking-[0.32em] text-cyan-200">Deal detail page</p>
+              <h2 className="mt-2 text-3xl font-black text-white">{selectedDeal.company}</h2>
+              <p className="mt-3 text-slate-300">Contact info: {selectedDeal.contact}, {selectedDeal.email}, {selectedDeal.phone}</p>
+              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                <article className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4"><span className="text-sm text-slate-400">Deal value</span><strong className="block text-2xl text-white">{currency(selectedDeal.value)}</strong></article>
+                <article className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4"><span className="text-sm text-slate-400">Probability</span><strong className="block text-2xl text-white">{percent(selectedDeal.probability)}</strong></article>
+                <article className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4"><span className="text-sm text-slate-400">Weighted value calculator</span><strong className="block text-2xl text-emerald-200">{currency(selectedDeal.value * (selectedDeal.probability / 100))}</strong></article>
+              </div>
+              <div className="mt-6 flex flex-wrap gap-3">
+                {stages.map((stage) => (
+                  <button key={stage} type="button" onClick={() => moveDeal(selectedDeal.id, stage)} className={"rounded-full border px-3 py-2 text-xs font-bold " + (selectedDeal.stage === stage ? "border-cyan-300 bg-cyan-300 text-slate-950" : "border-slate-700 text-slate-300")}>{stage}</button>
+                ))}
+              </div>
+              <h3 className="mt-7 text-xl font-black text-white">Activity timeline</h3>
+              <ol className="mt-3 space-y-3">
+                <li className="rounded-2xl bg-cyan-300/10 p-3 text-cyan-100">Last touch: {selectedDeal.lastTouch}</li>
+                <li className="rounded-2xl bg-slate-950/60 p-3">Next step: {selectedDeal.nextStep}</li>
+                <li className="rounded-2xl bg-slate-950/60 p-3">Owner {selectedDeal.owner} updated status to {selectedDeal.stage}.</li>
+              </ol>
+            </article>
+            <aside className="space-y-5">
+              <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h3 className="text-xl font-black text-white">Notes</h3>
+                <div className="mt-3 space-y-2">{selectedDeal.notes.map((note) => <p key={note} className="rounded-2xl bg-slate-950/60 p-3 text-slate-300">{note}</p>)}</div>
+              </article>
+              <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h3 className="text-xl font-black text-white">Tasks</h3>
+                <div className="mt-3 space-y-2">{selectedDeal.tasks.map((task) => <label key={task} className="flex items-center gap-3 rounded-2xl bg-slate-950/60 p-3"><input type="checkbox" />{task}</label>)}</div>
+              </article>
+            </aside>
+          </section>
+        )}
+
+        {page === "New Deal" && (
+          <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]" aria-label="New deal form">
+            <form onSubmit={handleSaveDeal} className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">New deal form</h2>
+              <p className="mt-2 text-slate-300">Validation and live forecast calculation update as you type.</p>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                {[
+                  ["company", "Company"],
+                  ["contact", "Contact"],
+                  ["email", "Email"],
+                  ["phone", "Phone"],
+                  ["source", "Source"],
+                  ["nextStep", "Next step"],
+                  ["value", "Deal value"],
+                  ["probability", "Probability"],
+                ].map(([key, label]) => (
+                  <label key={key} className="text-sm font-bold text-slate-200">{label}
+                    <input value={newDeal[key as keyof typeof newDeal]} onChange={(event) => setNewDeal((current) => ({ ...current, [key]: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 outline-none focus:border-cyan-300" />
+                  </label>
+                ))}
+                <label className="text-sm font-bold text-slate-200">Owner
+                  <select value={newDeal.owner} onChange={(event) => setNewDeal((current) => ({ ...current, owner: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3">
+                    {owners.map((owner) => <option key={owner}>{owner}</option>)}
+                  </select>
+                </label>
+              </div>
+              <button className="mt-6 w-full rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950 shadow-xl shadow-cyan-500/20">Save deal</button>
+            </form>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Live forecast calculation</h3>
+              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                <article className="rounded-2xl bg-slate-950/60 p-4"><span className="text-sm text-slate-400">Deal value</span><strong className="block text-3xl text-white">{currency(Number(newDeal.value || 0))}</strong></article>
+                <article className="rounded-2xl bg-slate-950/60 p-4"><span className="text-sm text-slate-400">Probability</span><strong className="block text-3xl text-white">{percent(Number(newDeal.probability || 0))}</strong></article>
+                <article className="rounded-2xl bg-cyan-300/10 p-4"><span className="text-sm text-cyan-100">Weighted forecast</span><strong className="block text-3xl text-cyan-100">{currency(forecast)}</strong></article>
+              </div>
+            </article>
+          </section>
+        )}
+
+        {page === "Settings" && (
+          <section className="grid gap-6 lg:grid-cols-2" aria-label="Settings Page">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Settings Page</h2>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Stages
+                <input value={settings.stageList} onChange={(event) => setSettings((current) => ({ ...current, stageList: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Owners
+                <input value={settings.ownerList} onChange={(event) => setSettings((current) => ({ ...current, ownerList: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Default probability
+                <input value={settings.defaultProbability} onChange={(event) => setSettings((current) => ({ ...current, defaultProbability: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <button type="button" onClick={resetDemoData} className="mt-6 rounded-2xl border border-cyan-300/50 px-5 py-3 font-black text-cyan-100">Reset Demo Data</button>
+            </article>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Model and routing placeholders</h3>
+              {["Lead scoring agent", "Forecast risk agent", "Follow-up drafting agent"].map((role) => (
+                <div key={role} className="mt-3 rounded-2xl border border-slate-700 bg-slate-950/60 p-4">{role}</div>
+              ))}
+            </article>
+          </section>
+        )}
+
+        {toast && <div className="fixed bottom-5 right-5 rounded-2xl border border-cyan-300/30 bg-slate-950 px-5 py-3 text-sm font-bold text-cyan-100 shadow-2xl shadow-cyan-500/20">{toast}</div>}
+      </div>
+    </main>
+  );
+}
+`
+}
+
 func syntheticDocumentIntelligenceAppTSX() string {
 	return `import { type DragEvent, type FormEvent, useMemo, useState } from "react";
 
@@ -18095,6 +18520,9 @@ func syntheticFrontendAppTSXWithDescription(title string, summary string, descri
 	if promptLooksLikeDocumentIntelligenceApp(description) || promptLooksLikeDocumentIntelligenceApp(title+" "+summary) {
 		return syntheticDocumentIntelligenceAppTSX()
 	}
+	if promptLooksLikeCRMApp(description) || promptLooksLikeCRMApp(title+" "+summary) {
+		return syntheticCRMAppTSX()
+	}
 	return syntheticAdaptiveFrontendAppTSX(title, summary, description, backendEntry, backendPort)
 }
 
@@ -18779,6 +19207,8 @@ func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Bu
 		repairLabel = "FieldOps"
 	case promptLooksLikeDocumentIntelligenceApp(description):
 		repairLabel = "document-intelligence"
+	case promptLooksLikeCRMApp(description):
+		repairLabel = "CRM"
 	default:
 		return nil, ""
 	}
