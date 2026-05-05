@@ -844,7 +844,7 @@ export default function App() {
 	}
 }
 
-func TestApplyDeterministicValidationRepairsSkipsPreviewFallbackForPlannedFeatureCoverage(t *testing.T) {
+func TestApplyDeterministicValidationRepairsUsesFieldOpsPlannedFeatureRepair(t *testing.T) {
 	t.Parallel()
 
 	am := &AgentManager{}
@@ -866,8 +866,78 @@ func TestApplyDeterministicValidationRepairsSkipsPreviewFallbackForPlannedFeatur
 		"planned feature coverage failed",
 		time.Now(),
 	)
+	if !repaired {
+		t.Fatal("expected FieldOps planned-feature coverage failure to use deterministic workflow repair")
+	}
+	repairedFiles := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range repairedFiles {
+		if sanitizeFilePath(file.Path) == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if strings.TrimSpace(app) == "" {
+		t.Fatalf("expected repaired FieldOps app file, got %+v", repairedFiles)
+	}
+	for _, expected := range []string{
+		"New Job / Estimate Builder",
+		"Launch Estimate Swarm",
+		"Kimi K2.6 Orchestrator",
+		"GLM-5.1 Proposal Agent",
+		"DeepSeek V4 Risk Agent",
+		"Reset Demo Data",
+	} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired FieldOps app to contain %q, got %q", expected, app)
+		}
+	}
+	for _, forbidden := range []string{"Form Fields Placeholder", "Settings Fields Placeholder", "implementation here"} {
+		if strings.Contains(app, forbidden) {
+			t.Fatalf("expected planned-feature repair to remove stale placeholder %q, got %q", forbidden, app)
+		}
+	}
+	if errs := plannedFeatureCoverageErrors(build, repairedFiles); len(errs) != 0 {
+		t.Fatalf("expected repaired FieldOps app to pass planned-feature coverage, got %v", errs)
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		found := false
+		for _, bundle := range state.PatchBundles {
+			if strings.Contains(bundle.Justification, "planned_feature_coverage_repair") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected planned-feature repair patch bundle, got %+v", state.PatchBundles)
+		}
+	}
+}
+
+func TestApplyDeterministicValidationRepairsSkipsGenericPreviewFallbackForNonFieldOpsPlannedFeatureCoverage(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := fieldOpsFeatureCoverageBuild()
+	build.ID = "build-generic-planned-feature-coverage-repair"
+	build.Description = "Build a custom CRM with a dashboard and workflow automation."
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `export default function App(){ return <main>Dashboard Workflow</main>; }`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`planned feature coverage failed: "Workflow Automation" is missing required workflow signals`},
+		"planned feature coverage failed",
+		time.Now(),
+	)
 	if repaired {
-		t.Fatal("planned feature coverage failures must route to solver recovery instead of deterministic preview fallback")
+		t.Fatal("generic planned-feature coverage failures must not use deterministic preview fallback")
 	}
 	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
 		t.Fatalf("expected no fallback patch bundle, got %+v", state.PatchBundles)

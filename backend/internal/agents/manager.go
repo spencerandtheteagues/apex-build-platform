@@ -18415,6 +18415,30 @@ func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Buil
 	return am.bundleFromPatchPlan(build.ID, files, plan, "missing_frontend_shell_repair: "+summaryText), summaryText
 }
 
+func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || !readinessErrorsContainPlannedFeatureCoverageFailure(readinessErrors) {
+		return nil, ""
+	}
+
+	build.mu.RLock()
+	description := strings.TrimSpace(build.Description)
+	build.mu.RUnlock()
+	if !promptLooksLikeFieldOpsApp(description) {
+		return nil, ""
+	}
+
+	bundle, summary := am.applyDeterministicPreviewFallbackRepair(build, readinessErrors)
+	if bundle == nil {
+		return nil, ""
+	}
+	summaryText := "replaced underbuilt FieldOps planned-feature output with validated full workflow baseline"
+	if strings.TrimSpace(summary) != "" {
+		summaryText += ": " + summary
+	}
+	bundle.Justification = "planned_feature_coverage_repair: " + summaryText
+	return bundle, summaryText
+}
+
 func previewFallbackRemovableFrontendSourcePath(path string) bool {
 	path = sanitizeFilePath(strings.TrimSpace(path))
 	if path == "" || isCanonicalFrontendScaffoldPath(path) || pathLooksLikeGeneratedBackendCode(path) {
@@ -19538,6 +19562,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	}
 
 	repairs := []validationRepairSpec{
+		{
+			apply:       am.applyDeterministicPlannedFeatureCoverageRepair,
+			errorFormat: "Final output validation failed: %s (applied planned feature coverage repair: %s)",
+			message:     "Replaced an underbuilt planned-feature implementation with a validated prompt-specific workflow UI. Re-running final validation before solver recovery.",
+			summaryKey:  "planned_feature_coverage_repair",
+		},
 		{
 			apply:       am.applyDeterministicScaffoldPlaceholderReplacementRepair,
 			errorFormat: "Final output validation failed: %s (applied scaffold placeholder replacement: %s)",
