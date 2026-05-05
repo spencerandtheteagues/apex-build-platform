@@ -19,6 +19,7 @@ const previewStabilitySeconds = Number(process.env.PREVIEW_STABILITY_SECONDS || 
 const previewStabilityPollMS = Math.max(250, Number(process.env.PREVIEW_STABILITY_POLL_MS || 1000))
 const startupRetrySeconds = Math.max(0, Number(process.env.STARTUP_RETRY_SECONDS || 180))
 const autoRegister = process.env.AUTO_REGISTER === '1'
+const requireFieldOpsGolden = process.env.REQUIRE_FIELDOPS_GOLDEN !== '0' && /apex\s+fieldops\s+ai/i.test(prompt)
 let loginEmail = process.env.LOGIN_EMAIL || ''
 // Prefer explicit email-only login when LOGIN_EMAIL is supplied. Sending both a
 // stale default username and the intended email causes the production handler to
@@ -241,6 +242,183 @@ function writeArtifact(name, data) {
   return file
 }
 
+function normalizeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function compactText(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function hasAnySignal(normalized, compact, terms) {
+  return terms.some(term => {
+    const normalizedTerm = normalizeText(term)
+    if (normalizedTerm && ` ${normalized} `.includes(` ${normalizedTerm} `)) return true
+    const compactTerm = compactText(term)
+    return compactTerm.length >= 6 && compact.includes(compactTerm)
+  })
+}
+
+function hasSignalGroups(source, groups) {
+  const normalized = normalizeText(source)
+  const compact = compactText(source)
+  return groups.every(group => hasAnySignal(normalized, compact, group))
+}
+
+function getBuildFiles(detail) {
+  return Array.isArray(detail?.files) ? detail.files : []
+}
+
+function fieldOpsFileCoverage(detail) {
+  const files = getBuildFiles(detail)
+  const source = files
+    .filter(file => /\.(tsx?|jsx?)$/i.test(file?.path || '') && !/(\.test\.|\.spec\.|\/__tests__\/|\/tests\/)/i.test(file?.path || ''))
+    .map(file => `${file.path}\n${file.content || ''}`)
+    .join('\n\n')
+  const checks = [
+    {
+      id: 'dashboard_metrics_sparklines',
+      groups: [
+        ['open jobs'],
+        ['pending estimate'],
+        ['accepted job'],
+        ['gross margin'],
+        ['follow up', 'follow-up'],
+        ['sparkline', 'trend', 'chart', 'svg', 'polyline'],
+      ],
+    },
+    {
+      id: 'kanban_drag_drop',
+      groups: [
+        ['kanban', 'pipeline', 'board', 'column'],
+        ['drag', 'draggable', 'drop', 'onDragEnd', 'dnd', 'sortable', 'droppable'],
+        ['new lead'],
+        ['estimate needed'],
+        ['proposal sent'],
+        ['accepted'],
+        ['in progress'],
+        ['completed'],
+      ],
+    },
+    {
+      id: 'estimate_builder',
+      groups: [
+        ['form', 'onSubmit', 'useForm', 'input', 'select'],
+        ['customer'],
+        ['phone'],
+        ['email'],
+        ['address'],
+        ['labor'],
+        ['materials', 'material cost'],
+        ['markup'],
+        ['subtotal'],
+        ['profit', 'gross margin'],
+      ],
+    },
+    {
+      id: 'job_detail',
+      groups: [
+        ['job detail', 'selected job', 'customer info'],
+        ['status'],
+        ['assigned crew', 'crew dropdown'],
+        ['timeline', 'activity'],
+        ['proposal', 'breakdown'],
+      ],
+    },
+    {
+      id: 'estimate_swarm',
+      groups: [
+        ['launch estimate swarm', 'estimate swarm'],
+        ['modal', 'dialog', 'overlay', 'fullscreen', 'full screen'],
+        ['kimi'],
+        ['glm'],
+        ['deepseek'],
+        ['stream', 'streaming', 'typewriter', 'typing'],
+        ['recommended quote', 'recommended final quote', 'risk flags'],
+      ],
+    },
+    {
+      id: 'crew_management',
+      groups: [
+        ['crew', 'crews'],
+        ['member', 'members'],
+        ['availability', 'available'],
+        ['current job', 'current jobs', 'assigned'],
+      ],
+    },
+    {
+      id: 'settings',
+      groups: [
+        ['settings'],
+        ['company name', 'company'],
+        ['labor rate', 'default labor'],
+        ['markup', 'default markup'],
+        ['ai provider', 'provider'],
+        ['model routing', 'routing'],
+        ['reset demo', 'reset'],
+      ],
+    },
+  ]
+  const missing = checks.filter(check => !hasSignalGroups(source, check.groups)).map(check => check.id)
+  return { missing, checked_files: files.length, source_length: source.length }
+}
+
+function assertFieldOpsBuildCoverage(detail) {
+  if (!requireFieldOpsGolden) return
+  const coverage = fieldOpsFileCoverage(detail)
+  writeArtifact('fieldops-build-coverage.json', coverage)
+  if (coverage.missing.length > 0) {
+    throw new Error(`FieldOps golden build is underbuilt; missing file coverage: ${coverage.missing.join(', ')}`)
+  }
+}
+
+function fieldOpsPreviewCoverage(bodyText) {
+  const checks = [
+    {
+      id: 'dashboard_metrics',
+      groups: [
+        ['open jobs'],
+        ['pending estimate'],
+        ['accepted job'],
+        ['gross margin'],
+        ['follow up', 'follow-up'],
+      ],
+    },
+    {
+      id: 'workflow_pages',
+      groups: [
+        ['job pipeline'],
+        ['new job'],
+        ['crew management'],
+        ['settings'],
+      ],
+    },
+    {
+      id: 'estimate_flow',
+      groups: [
+        ['labor'],
+        ['materials', 'material cost'],
+        ['markup'],
+        ['profit', 'gross margin'],
+      ],
+    },
+    {
+      id: 'estimate_swarm',
+      groups: [
+        ['launch estimate swarm', 'estimate swarm'],
+        ['kimi'],
+        ['glm'],
+        ['deepseek'],
+      ],
+    },
+  ]
+  return checks.filter(check => !hasSignalGroups(bodyText, check.groups)).map(check => check.id)
+}
+
 function summarizeBuild(data) {
   return {
     id: data?.id || data?.build_id,
@@ -350,6 +528,7 @@ async function pollBuild(buildID) {
   if (detail?.error) throw new Error(`completed build has error: ${detail.error}`)
   if ((detail?.files?.length || detail?.files_count || 0) < 1) throw new Error('completed build has no files')
   if (detail?.quality_gate_passed !== true) throw new Error('completed build did not pass quality gate')
+  assertFieldOpsBuildCoverage(detail)
   return detail
 }
 
@@ -510,6 +689,17 @@ async function verifyPreview(url) {
       !/open jobs|pending estimate|launch estimate swarm|recommended final quote/i.test(bodyText)
     if (shellOnlyNav || /future patches|real ui screens will be routed here|routes will be added later/i.test(bodyText)) {
       throw new Error(`preview rendered only an app shell instead of working screen content: ${bodyText.slice(0, 500)}`)
+    }
+    if (requireFieldOpsGolden) {
+      const missingFieldOpsPreview = fieldOpsPreviewCoverage(bodyText)
+      writeArtifact('fieldops-preview-coverage.json', {
+        missing: missingFieldOpsPreview,
+        body_text_length: bodyText.length,
+        body_text_sample: bodyText.slice(0, 2000),
+      })
+      if (missingFieldOpsPreview.length > 0) {
+        throw new Error(`FieldOps golden preview is underbuilt; missing visible coverage: ${missingFieldOpsPreview.join(', ')}`)
+      }
     }
 
     const stabilitySamples = []
