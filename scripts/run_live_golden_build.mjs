@@ -407,26 +407,169 @@ function fieldOpsPreviewCoverage(bodyText) {
         ['settings'],
       ],
     },
-    {
-      id: 'estimate_flow',
-      groups: [
-        ['labor'],
-        ['materials', 'material cost'],
-        ['markup'],
-        ['profit', 'gross margin'],
-      ],
-    },
-    {
-      id: 'estimate_swarm',
-      groups: [
-        ['launch estimate swarm', 'estimate swarm'],
-        ['kimi'],
-        ['glm'],
-        ['deepseek'],
-      ],
-    },
   ]
   return checks.filter(check => !hasSignalGroups(bodyText, check.groups)).map(check => check.id)
+}
+
+async function clickFirst(page, locator, label, timeout = 10000) {
+  const target = locator.first()
+  await target.waitFor({ state: 'visible', timeout })
+  await target.click()
+}
+
+async function fillFirst(page, locator, value, label, timeout = 10000) {
+  const target = locator.first()
+  await target.waitFor({ state: 'visible', timeout })
+  await target.fill(value)
+}
+
+async function fillField(page, patterns, value, label) {
+  const errors = []
+  for (const pattern of patterns) {
+    try {
+      await fillFirst(page, page.getByLabel(pattern), value, label, 3000)
+      return
+    } catch (error) {
+      errors.push(String(error?.message || error))
+    }
+    try {
+      await fillFirst(page, page.getByPlaceholder(pattern), value, label, 3000)
+      return
+    } catch (error) {
+      errors.push(String(error?.message || error))
+    }
+  }
+  throw new Error(`FieldOps flow could not fill ${label}: ${errors.slice(0, 2).join(' | ')}`)
+}
+
+async function selectField(page, patterns, value, label) {
+  const errors = []
+  for (const pattern of patterns) {
+    try {
+      const target = page.getByLabel(pattern).first()
+      await target.waitFor({ state: 'visible', timeout: 3000 })
+      await target.selectOption(value)
+      return
+    } catch (error) {
+      errors.push(String(error?.message || error))
+    }
+  }
+  throw new Error(`FieldOps flow could not select ${label}: ${errors.slice(0, 2).join(' | ')}`)
+}
+
+async function visibleText(page) {
+  return page.locator('body').innerText({ timeout: 5000 })
+}
+
+async function assertVisibleSignals(page, label, groups) {
+  const bodyText = await visibleText(page)
+  const missing = groups.filter(group => !hasSignalGroups(bodyText, [group])).flat()
+  if (missing.length > 0) {
+    throw new Error(`FieldOps flow missing ${label} visible signals: ${missing.join(', ')}`)
+  }
+  return bodyText
+}
+
+async function verifyFieldOpsGoldenFlow(page) {
+  const evidence = {
+    steps: [],
+  }
+
+  let bodyText = await visibleText(page)
+  const initialMissing = fieldOpsPreviewCoverage(bodyText)
+  evidence.initial = {
+    missing: initialMissing,
+    body_text_length: bodyText.length,
+    body_text_sample: bodyText.slice(0, 2000),
+  }
+  writeArtifact('fieldops-preview-coverage.json', evidence.initial)
+  if (initialMissing.length > 0) {
+    throw new Error(`FieldOps golden preview is underbuilt; missing initial visible coverage: ${initialMissing.join(', ')}`)
+  }
+  evidence.steps.push('dashboard metrics visible')
+
+  await clickFirst(page, page.getByRole('button', { name: /new job/i }), 'New Job navigation')
+  await page.waitForFunction(() => /new job|estimate builder/i.test(document.body?.innerText || ''), null, { timeout: 10000 })
+  bodyText = await assertVisibleSignals(page, 'estimate builder', [
+    ['new job', 'estimate builder'],
+    ['labor'],
+    ['materials', 'material cost'],
+    ['markup'],
+    ['profit', 'gross margin'],
+  ])
+  evidence.steps.push('estimate builder visible')
+
+  await fillField(page, [/customer name/i], 'Parker Quinn', 'customer name')
+  await fillField(page, [/phone/i], '(512) 555-0139', 'phone')
+  await fillField(page, [/email/i], 'parker.quinn@example.com', 'email')
+  await fillField(page, [/address/i], '4100 Blue Mesa Court, Austin, TX', 'address')
+  await fillField(page, [/job title/i], 'Garage studio conversion', 'job title')
+  await fillField(page, [/job type/i], 'Remodeling', 'job type')
+  await fillField(page, [/project size|sq ft|square/i], '620', 'project size')
+  await fillField(page, [/labor hours/i], '72', 'labor hours')
+  await fillField(page, [/labor rate/i], '92', 'labor rate')
+  await fillField(page, [/materials cost|material cost/i], '14600', 'materials cost')
+  await fillField(page, [/markup/i], '34', 'markup percentage')
+  try {
+    await selectField(page, [/urgency/i], 'High', 'urgency')
+  } catch {
+    await fillField(page, [/urgency/i], 'High', 'urgency')
+  }
+  try {
+    await fillField(page, [/customer notes|notes/i], 'Client wants insulated walls, electrical, flooring, and a compact HVAC option.', 'customer notes')
+  } catch {
+    // Notes are required by the prompt but some valid UIs use optional notes; keep the critical flow moving.
+  }
+  evidence.steps.push('estimate form filled')
+
+  bodyText = await assertVisibleSignals(page, 'live estimate calculations', [
+    ['labor cost'],
+    ['material cost', 'materials cost'],
+    ['subtotal'],
+    ['markup amount'],
+    ['final customer price', 'final price', 'customer price'],
+    ['estimated profit', 'profit'],
+    ['gross margin'],
+  ])
+  evidence.steps.push('live calculations visible')
+
+  await clickFirst(page, page.getByRole('button', { name: /save/i }), 'save job')
+  await page.waitForFunction(() => /job detail|garage studio conversion/i.test(document.body?.innerText || ''), null, { timeout: 10000 })
+  bodyText = await assertVisibleSignals(page, 'job detail', [
+    ['job detail', 'garage studio conversion'],
+    ['status'],
+    ['assigned crew', 'crew'],
+    ['activity', 'timeline'],
+    ['proposal'],
+    ['estimate breakdown'],
+  ])
+  evidence.steps.push('job detail visible after save')
+
+  await clickFirst(page, page.getByRole('button', { name: /launch estimate swarm/i }), 'Launch Estimate Swarm')
+  await page.waitForFunction(() => /estimate swarm/i.test(document.body?.innerText || ''), null, { timeout: 10000 })
+  await page.waitForTimeout(4200)
+  bodyText = await assertVisibleSignals(page, 'Estimate Swarm modal', [
+    ['estimate swarm'],
+    ['kimi'],
+    ['glm'],
+    ['deepseek'],
+    ['recommended final quote', 'recommended quote'],
+    ['margin warning'],
+    ['risk flags'],
+    ['customer ready proposal', 'customer-ready proposal'],
+    ['internal crew instructions'],
+    ['next best action'],
+  ])
+  evidence.steps.push('estimate swarm modal visible')
+  evidence.final = {
+    body_text_length: bodyText.length,
+    body_text_sample: bodyText.slice(0, 2500),
+  }
+
+  const screenshotPath = path.join(artifactDir, 'fieldops-flow-proof.png')
+  await page.screenshot({ path: screenshotPath, fullPage: true })
+  evidence.screenshot = screenshotPath
+  writeArtifact('fieldops-flow-proof.json', evidence)
 }
 
 function summarizeBuild(data) {
@@ -701,15 +844,7 @@ async function verifyPreview(url) {
       throw new Error(`preview rendered only an app shell instead of working screen content: ${bodyText.slice(0, 500)}`)
     }
     if (requireFieldOpsGolden) {
-      const missingFieldOpsPreview = fieldOpsPreviewCoverage(bodyText)
-      writeArtifact('fieldops-preview-coverage.json', {
-        missing: missingFieldOpsPreview,
-        body_text_length: bodyText.length,
-        body_text_sample: bodyText.slice(0, 2000),
-      })
-      if (missingFieldOpsPreview.length > 0) {
-        throw new Error(`FieldOps golden preview is underbuilt; missing visible coverage: ${missingFieldOpsPreview.join(', ')}`)
-      }
+      await verifyFieldOpsGoldenFlow(page)
     }
 
     const stabilitySamples = []
