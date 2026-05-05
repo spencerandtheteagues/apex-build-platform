@@ -7136,6 +7136,19 @@ func TestApplyDeterministicPreValidationNormalizationAddsPostCSSConfigDependenci
 			t.Fatalf("expected %s in normalized package.json, got %s", needle, manifest)
 		}
 	}
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+	if strings.TrimSpace(byPath["postcss.config.js"]) != "" {
+		t.Fatalf("expected ambiguous postcss.config.js to be removed, got %s", byPath["postcss.config.js"])
+	}
+	if !strings.Contains(byPath["postcss.config.cjs"], "module.exports") {
+		t.Fatalf("expected canonical CommonJS PostCSS config, got %s", byPath["postcss.config.cjs"])
+	}
+	if !strings.Contains(byPath["tailwind.config.cjs"], "module.exports") {
+		t.Fatalf("expected canonical CommonJS Tailwind config, got %s", byPath["tailwind.config.cjs"])
+	}
 }
 
 func TestApplyDeterministicPreValidationNormalizationRewritesCommonJSTailwindAndPostCSSConfigs(t *testing.T) {
@@ -7211,14 +7224,17 @@ module.exports = {
 	for _, file := range files {
 		byPath[file.Path] = file.Content
 	}
-	if strings.Contains(byPath["tailwind.config.js"], "import animate") || strings.Contains(byPath["tailwind.config.js"], "export default") {
-		t.Fatalf("expected CommonJS tailwind config for package without type=module, got %s", byPath["tailwind.config.js"])
+	if strings.TrimSpace(byPath["tailwind.config.js"]) != "" {
+		t.Fatalf("expected ambiguous tailwind.config.js to be removed, got %s", byPath["tailwind.config.js"])
 	}
-	if !strings.Contains(byPath["tailwind.config.js"], `require("tailwindcss-animate")`) || !strings.Contains(byPath["tailwind.config.js"], "module.exports") {
-		t.Fatalf("expected CommonJS tailwind config, got %s", byPath["tailwind.config.js"])
+	if !strings.Contains(byPath["tailwind.config.cjs"], `require("tailwindcss-animate")`) || !strings.Contains(byPath["tailwind.config.cjs"], "module.exports") {
+		t.Fatalf("expected canonical CommonJS tailwind config, got %s", byPath["tailwind.config.cjs"])
 	}
-	if strings.Contains(byPath["postcss.config.js"], "export default") || !strings.Contains(byPath["postcss.config.js"], "module.exports") {
-		t.Fatalf("expected CommonJS postcss config for package without type=module, got %s", byPath["postcss.config.js"])
+	if strings.TrimSpace(byPath["postcss.config.js"]) != "" {
+		t.Fatalf("expected ambiguous postcss.config.js to be removed, got %s", byPath["postcss.config.js"])
+	}
+	if strings.Contains(byPath["postcss.config.cjs"], "export default") || !strings.Contains(byPath["postcss.config.cjs"], "module.exports") {
+		t.Fatalf("expected canonical CommonJS postcss config, got %s", byPath["postcss.config.cjs"])
 	}
 }
 

@@ -14525,29 +14525,32 @@ func ensureGeneratedTailwindConfig(plan *generatedFilePatchPlan, files []Generat
 	repaired := 0
 	var parts []string
 
-	// ── 1. tailwind.config.js ────────────────────────────────────────────────
-	twPath := ""
+	// ── 1. tailwind.config.cjs ───────────────────────────────────────────────
+	// The preview builder has hit both sides of Node's config-loader ambiguity:
+	// export default in .js files can be required as CJS, while module.exports in
+	// package type=module projects can be loaded as ESM. A .cjs config is valid
+	// in both package modes and avoids 95-97% compile loops.
+	const canonicalTailwindPath = canonicalPreviewTailwindConfigPath
+	twPaths := make([]string, 0, 4)
+	hasCanonicalTailwind := false
 	for _, f := range files {
 		p := filepath.ToSlash(strings.TrimSpace(f.Path))
-		if p == "tailwind.config.js" || p == "tailwind.config.ts" || p == "tailwind.config.cjs" {
-			twPath = p
-			break
+		if p == "tailwind.config.js" || p == "tailwind.config.ts" || p == "tailwind.config.cjs" || p == "tailwind.config.mjs" {
+			twPaths = append(twPaths, p)
+			if p == canonicalTailwindPath {
+				hasCanonicalTailwind = true
+			}
 		}
 	}
 
-	if twPath == "" {
-		// Missing entirely — create it.
-		packageUsesESM := generatedFrontendPackageUsesESModule(files, plan)
-		canonical := syntheticFrontendTailwindConfigForPath("tailwind.config.js", packageUsesESM)
-		if plan.createFile("tailwind.config.js", canonical, "javascript") {
+	canonicalTailwind := syntheticFrontendTailwindConfigForPath(canonicalTailwindPath, false)
+	if !hasCanonicalTailwind {
+		if plan.createFile(canonicalTailwindPath, canonicalTailwind, "javascript") {
 			repaired++
-			parts = append(parts, "created tailwind.config.js")
+			parts = append(parts, "created "+canonicalTailwindPath)
 		}
-		twPath = "tailwind.config.js"
 	} else {
-		packageUsesESM := generatedFrontendPackageUsesESModule(files, plan)
-		canonical := syntheticFrontendTailwindConfigForPath(twPath, packageUsesESM)
-		existing := plan.content(twPath)
+		existing := plan.content(canonicalTailwindPath)
 		// Fix empty content array or missing content field.
 		needsRewrite := false
 		if strings.Contains(existing, "content: []") || strings.Contains(existing, "content:[]") {
@@ -14560,41 +14563,65 @@ func ensureGeneratedTailwindConfig(plan *generatedFilePatchPlan, files []Generat
 		if strings.Contains(existing, "@tailwindcss/vite") || strings.Contains(existing, `@import "tailwindcss"`) || strings.Contains(existing, `@import 'tailwindcss'`) {
 			needsRewrite = true
 		}
-		if configSyntaxConflictsWithModuleMode(twPath, existing, packageUsesESM) {
+		if configSyntaxConflictsWithModuleMode(canonicalTailwindPath, existing, false) {
 			needsRewrite = true
 		}
 		if needsRewrite {
-			if plan.patchFile(twPath, canonical, "javascript") {
+			if plan.patchFile(canonicalTailwindPath, canonicalTailwind, "javascript") {
 				repaired++
-				parts = append(parts, "fixed tailwind.config.js content paths")
+				parts = append(parts, "fixed "+canonicalTailwindPath)
+			}
+		}
+	}
+	for _, p := range twPaths {
+		if p == canonicalTailwindPath {
+			continue
+		}
+		if plan.deleteFile(p) {
+			repaired++
+			parts = append(parts, "removed conflicting "+p)
+		}
+	}
+
+	// ── 2. postcss.config.cjs ────────────────────────────────────────────────
+	const canonicalPostCSSPath = canonicalPreviewPostCSSConfigPath
+	postCSSPaths := make([]string, 0, 4)
+	hasCanonicalPostCSS := false
+	for _, f := range files {
+		p := filepath.ToSlash(strings.TrimSpace(f.Path))
+		if p == "postcss.config.js" || p == "postcss.config.cjs" || p == "postcss.config.mjs" || p == "postcss.config.ts" {
+			postCSSPaths = append(postCSSPaths, p)
+			if p == canonicalPostCSSPath {
+				hasCanonicalPostCSS = true
 			}
 		}
 	}
 
-	// ── 2. postcss.config.js ─────────────────────────────────────────────────
-	hasPostCSS := false
-	packageUsesESM := generatedFrontendPackageUsesESModule(files, plan)
-	for _, f := range files {
-		p := filepath.ToSlash(strings.TrimSpace(f.Path))
-		if p == "postcss.config.js" || p == "postcss.config.cjs" || p == "postcss.config.mjs" {
-			hasPostCSS = true
-			content := plan.content(p)
-			// Check it actually has the Tailwind plugins and uses syntax Node can load for this package.
-			if !strings.Contains(content, "tailwindcss") ||
-				!strings.Contains(content, "autoprefixer") ||
-				configSyntaxConflictsWithModuleMode(p, content, packageUsesESM) {
-				if plan.patchFile(p, syntheticFrontendPostCSSConfigForPath(p, packageUsesESM), "javascript") {
-					repaired++
-					parts = append(parts, "fixed postcss.config.js plugins")
-				}
+	canonicalPostCSS := syntheticFrontendPostCSSConfigForPath(canonicalPostCSSPath, false)
+	if !hasCanonicalPostCSS {
+		if plan.createFile(canonicalPostCSSPath, canonicalPostCSS, "javascript") {
+			repaired++
+			parts = append(parts, "created "+canonicalPostCSSPath)
+		}
+	} else {
+		content := plan.content(canonicalPostCSSPath)
+		// Check it actually has the Tailwind plugins and uses syntax Node can load.
+		if !strings.Contains(content, "tailwindcss") ||
+			!strings.Contains(content, "autoprefixer") ||
+			configSyntaxConflictsWithModuleMode(canonicalPostCSSPath, content, false) {
+			if plan.patchFile(canonicalPostCSSPath, canonicalPostCSS, "javascript") {
+				repaired++
+				parts = append(parts, "fixed "+canonicalPostCSSPath)
 			}
-			break
 		}
 	}
-	if !hasPostCSS {
-		if plan.createFile("postcss.config.js", syntheticFrontendPostCSSConfigForPath("postcss.config.js", packageUsesESM), "javascript") {
+	for _, p := range postCSSPaths {
+		if p == canonicalPostCSSPath {
+			continue
+		}
+		if plan.deleteFile(p) {
 			repaired++
-			parts = append(parts, "created postcss.config.js")
+			parts = append(parts, "removed conflicting "+p)
 		}
 	}
 
