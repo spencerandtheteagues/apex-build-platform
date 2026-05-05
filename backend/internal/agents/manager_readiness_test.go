@@ -6912,13 +6912,14 @@ func TestParseMissingTypePackagesFromBuildErrors(t *testing.T) {
 			"src/api/server.ts(2,18): error TS7016: Could not find a declaration file for module 'cors'.\n" +
 			"src/App.tsx(1,19): error TS7016: Could not find a declaration file for module 'react'.\n" +
 			"src/main.tsx(2,22): error TS7016: Could not find a declaration file for module 'react-dom/client'.\n" +
+			"src/components/JobPipeline.tsx(2,55): error TS7016: Could not find a declaration file for module 'react-beautiful-dnd'.\n" +
 			"server/migrate.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'.\n" +
 			"node_modules/recharts/types/chart/generateCategoricalChart.d.ts(2,36): error TS7016: Could not find a declaration file for module 'lodash'.\n" +
 			"src/lib/x.ts(3,1): error TS7016: Could not find a declaration file for module '@scoped/pkg'.",
 	}
 
 	got := strings.Join(parseMissingTypePackagesFromBuildErrors(errs), ",")
-	want := "@types/cors,@types/express,@types/lodash,@types/pg,@types/react,@types/react-dom"
+	want := "@types/cors,@types/express,@types/lodash,@types/pg,@types/react,@types/react-beautiful-dnd,@types/react-dom"
 	if got != want {
 		t.Fatalf("unexpected parsed type packages: got %q want %q", got, want)
 	}
@@ -6985,6 +6986,91 @@ func TestApplyDeterministicTypeDeclarationRepairAddsPgTypes(t *testing.T) {
 	}
 	if !strings.Contains(manifest, `"@types/pg"`) {
 		t.Fatalf("expected package.json to include @types/pg, got %s", manifest)
+	}
+}
+
+func TestApplyDeterministicTypeDeclarationRepairFixesReactBeautifulDndTypes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-dnd-types-repair",
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "fieldops",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-beautiful-dnd": "^13.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}`,
+						},
+						{
+							Path: "src/components/JobPipeline.tsx",
+							Content: `import { DragDropContext, Droppable } from 'react-beautiful-dnd';
+
+export function JobPipeline() {
+  return <DragDropContext onDragEnd={() => {}}>
+    <Droppable droppableId="new-lead">
+      {(provided: string) => <div ref={provided.innerRef} {...provided.droppableProps}>{provided.placeholder}</div>}
+    </Droppable>
+  </DragDropContext>;
+}
+`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
+		"Preview verification build failed: src/components/JobPipeline.tsx(2,55): error TS7016: Could not find a declaration file for module 'react-beautiful-dnd'. '/tmp/node_modules/react-beautiful-dnd/dist/react-beautiful-dnd.cjs.js' implicitly has an 'any' type.",
+		"src/components/JobPipeline.tsx(38,36): error TS2339: Property 'innerRef' does not exist on type 'string'.",
+	})
+	if bundle == nil {
+		t.Fatalf("expected react-beautiful-dnd type repair to trigger")
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatalf("expected patch bundle to apply")
+	}
+	if !strings.Contains(summary, "@types/react-beautiful-dnd") {
+		t.Fatalf("expected summary to mention @types/react-beautiful-dnd, got %q", summary)
+	}
+	if !strings.Contains(summary, "react-beautiful-dnd string render-prop annotations") {
+		t.Fatalf("expected summary to mention dnd annotation repair, got %q", summary)
+	}
+
+	var manifest string
+	var pipeline string
+	for _, file := range am.collectGeneratedFiles(build) {
+		switch file.Path {
+		case "package.json":
+			manifest = file.Content
+		case "src/components/JobPipeline.tsx":
+			pipeline = file.Content
+		}
+	}
+	if !strings.Contains(manifest, `"@types/react-beautiful-dnd"`) {
+		t.Fatalf("expected package.json to include @types/react-beautiful-dnd, got %s", manifest)
+	}
+	if strings.Contains(pipeline, "provided: string") {
+		t.Fatalf("expected invalid provided:string annotation to be removed, got %q", pipeline)
+	}
+	if !strings.Contains(pipeline, "{(provided) =>") {
+		t.Fatalf("expected render prop parameter to remain, got %q", pipeline)
 	}
 }
 

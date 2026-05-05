@@ -8225,6 +8225,8 @@ func dependencyVersionHint(pkg string) string {
 		return "^29.5.14"
 	case "@types/lodash":
 		return "^4.17.13"
+	case "@types/react-beautiful-dnd":
+		return "^13.1.8"
 	case "jest-environment-jsdom":
 		return "^29.7.0"
 	case "ts-jest":
@@ -14346,7 +14348,7 @@ func typePackageForModule(module string) string {
 		return ""
 	}
 	switch module {
-	case "express", "cors", "jsonwebtoken", "body-parser", "bcrypt", "uuid", "pg", "lodash", "lodash-es":
+	case "express", "cors", "jsonwebtoken", "body-parser", "bcrypt", "uuid", "pg", "lodash", "lodash-es", "react-beautiful-dnd":
 		return "@types/" + module
 	case "react", "react/jsx-runtime":
 		return "@types/react"
@@ -14361,6 +14363,7 @@ func typePackageForModule(module string) string {
 }
 
 var generatedErrorEventCallbackPattern = regexp.MustCompile(`(\.on\(\s*['"]error['"]\s*,\s*\()([A-Za-z_][A-Za-z0-9_]*)(\)\s*=>)`)
+var beautifulDndStringProvidedPattern = regexp.MustCompile(`\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*string\s*\)\s*=>`)
 
 func annotateGeneratedErrorEventCallbackParameter(path, content string) (string, bool) {
 	if strings.TrimSpace(content) == "" {
@@ -14381,6 +14384,28 @@ func annotateGeneratedErrorEventCallbackParameter(path, content string) (string,
 		return content, false
 	}
 	return updated, true
+}
+
+func rewriteBeautifulDndStringProvidedAnnotations(path, content string, readinessErrors []string) (string, bool) {
+	if strings.TrimSpace(content) == "" {
+		return content, false
+	}
+	normalizedPath := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
+	if !strings.HasSuffix(normalizedPath, ".tsx") && !strings.HasSuffix(normalizedPath, ".jsx") &&
+		!strings.HasSuffix(normalizedPath, ".ts") && !strings.HasSuffix(normalizedPath, ".js") {
+		return content, false
+	}
+	if !strings.Contains(content, "react-beautiful-dnd") || !strings.Contains(content, "provided") {
+		return content, false
+	}
+	joinedErrors := strings.ToLower(strings.Join(readinessErrors, "\n"))
+	if !strings.Contains(joinedErrors, "react-beautiful-dnd") &&
+		!strings.Contains(joinedErrors, "property 'innerref' does not exist on type 'string'") &&
+		!strings.Contains(joinedErrors, `property "innerref" does not exist on type "string"`) {
+		return content, false
+	}
+	updated := beautifulDndStringProvidedPattern.ReplaceAllString(content, "($1) =>")
+	return updated, updated != content
 }
 
 func inferImplicitAnyParameterType(parameter string) string {
@@ -14929,6 +14954,23 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 		}
 		if plan.patchFile(target.Path, updated, am.detectLanguage(target.Path)) {
 			applied = append(applied, fmt.Sprintf("%s (typed %s callback parameter)", target.Path, target.Parameter))
+		}
+	}
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" {
+			continue
+		}
+		current := plan.content(path)
+		if strings.TrimSpace(current) == "" {
+			continue
+		}
+		updated, changed := rewriteBeautifulDndStringProvidedAnnotations(path, current, readinessErrors)
+		if !changed {
+			continue
+		}
+		if plan.patchFile(path, updated, am.detectLanguage(path)) {
+			applied = append(applied, fmt.Sprintf("%s (removed invalid react-beautiful-dnd string render-prop annotations)", path))
 		}
 	}
 
