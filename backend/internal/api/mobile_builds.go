@@ -136,6 +136,25 @@ func (s *Server) GetProjectMobileBuild(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"build": job})
 }
 
+func (s *Server) RefreshProjectMobileBuild(c *gin.Context) {
+	job, project, ok := s.requireProjectMobileBuildWithProject(c)
+	if !ok {
+		return
+	}
+	refreshed, err := s.mobile.RefreshBuild(c.Request.Context(), job.ID)
+	if refreshed.ID != "" {
+		if persistErr := s.persistMobileBuildProjectSummary(c, project, refreshed); persistErr != nil && err == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist mobile build status", "code": "MOBILE_BUILD_STATUS_PERSIST_FAILED"})
+			return
+		}
+	}
+	if err != nil {
+		s.writeMobileBuildError(c, err, &refreshed)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"build": refreshed})
+}
+
 func (s *Server) GetProjectMobileBuildLogs(c *gin.Context) {
 	job, ok := s.requireProjectMobileBuild(c)
 	if !ok {
@@ -163,24 +182,29 @@ func (s *Server) GetProjectMobileBuildArtifacts(c *gin.Context) {
 }
 
 func (s *Server) requireProjectMobileBuild(c *gin.Context) (mobile.MobileBuildJob, bool) {
+	job, _, ok := s.requireProjectMobileBuildWithProject(c)
+	return job, ok
+}
+
+func (s *Server) requireProjectMobileBuildWithProject(c *gin.Context) (mobile.MobileBuildJob, models.Project, bool) {
 	_, project, ok := s.requireOwnedMobileExpoProject(c)
 	if !ok {
-		return mobile.MobileBuildJob{}, false
+		return mobile.MobileBuildJob{}, models.Project{}, false
 	}
 	if s.mobile == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Mobile build service is not configured", "code": "MOBILE_BUILD_SERVICE_UNAVAILABLE"})
-		return mobile.MobileBuildJob{}, false
+		return mobile.MobileBuildJob{}, models.Project{}, false
 	}
 	job, exists, err := s.mobile.GetBuild(c.Request.Context(), c.Param("buildId"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch mobile build", "code": "MOBILE_BUILD_FETCH_FAILED"})
-		return mobile.MobileBuildJob{}, false
+		return mobile.MobileBuildJob{}, models.Project{}, false
 	}
 	if !exists || job.ProjectID != project.ID || job.UserID != project.OwnerID {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Mobile build not found", "code": "MOBILE_BUILD_NOT_FOUND"})
-		return mobile.MobileBuildJob{}, false
+		return mobile.MobileBuildJob{}, models.Project{}, false
 	}
-	return job, true
+	return job, project, true
 }
 
 func (s *Server) requireOwnedMobileExpoProject(c *gin.Context) (uint, models.Project, bool) {

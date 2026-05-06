@@ -125,6 +125,10 @@ type MobileBuildProviderRequestValidator interface {
 	ValidateBuildRequest(req MobileBuildRequest) error
 }
 
+type MobileBuildProviderRefresher interface {
+	RefreshBuild(ctx context.Context, job MobileBuildJob) (MobileBuildProviderResult, error)
+}
+
 type MobileBuildStore interface {
 	Save(ctx context.Context, job MobileBuildJob) error
 	Update(ctx context.Context, job MobileBuildJob) error
@@ -281,11 +285,87 @@ func (s *MobileBuildService) GetBuild(ctx context.Context, id string) (MobileBui
 	return s.store.Get(ctx, id)
 }
 
+func (s *MobileBuildService) RefreshBuild(ctx context.Context, id string) (MobileBuildJob, error) {
+	if s == nil {
+		return MobileBuildJob{}, fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)
+	}
+	if s.store == nil {
+		return MobileBuildJob{}, ErrMobileBuildJobNotFound
+	}
+	job, exists, err := s.store.Get(ctx, id)
+	if err != nil {
+		return MobileBuildJob{}, err
+	}
+	if !exists {
+		return MobileBuildJob{}, ErrMobileBuildJobNotFound
+	}
+	if err := s.ValidatePolicyRequest(MobileBuildRequest{
+		ProjectID:    job.ProjectID,
+		UserID:       job.UserID,
+		Platform:     job.Platform,
+		Profile:      job.Profile,
+		ReleaseLevel: job.ReleaseLevel,
+	}); err != nil {
+		return job, err
+	}
+	provider, ok := s.provider.(MobileBuildProviderRefresher)
+	if s.provider == nil || !ok {
+		return job, ErrMobileBuildProviderMissing
+	}
+	if strings.TrimSpace(job.ProviderBuildID) == "" {
+		return job, fmt.Errorf("%w: provider_build_id is required to refresh mobile build", ErrMobileBuildInvalidRequest)
+	}
+
+	result, err := provider.RefreshBuild(ctx, job)
+	now := s.now()
+	if err != nil {
+		job.Logs = append(job.Logs, MobileBuildLogLine{
+			Timestamp: now,
+			Level:     "error",
+			Message:   RedactMobileBuildSecrets(err.Error()),
+		})
+		job.UpdatedAt = now
+		if updateErr := s.store.Update(ctx, job); updateErr != nil {
+			return job, updateErr
+		}
+		return job, fmt.Errorf("%w: %s", ErrMobileBuildProviderFailed, RedactMobileBuildSecrets(err.Error()))
+	}
+
+	job = applyMobileBuildProviderResult(job, result, now)
+	if err := s.store.Update(ctx, job); err != nil {
+		return job, err
+	}
+	return job, nil
+}
+
 func (s *MobileBuildService) ListProjectBuilds(ctx context.Context, projectID uint) ([]MobileBuildJob, error) {
 	if s == nil || s.store == nil {
 		return nil, nil
 	}
 	return s.store.ListByProject(ctx, projectID)
+}
+
+func applyMobileBuildProviderResult(job MobileBuildJob, result MobileBuildProviderResult, now time.Time) MobileBuildJob {
+	if providerBuildID := strings.TrimSpace(result.ProviderBuildID); providerBuildID != "" {
+		job.ProviderBuildID = providerBuildID
+	}
+	if artifactURL := strings.TrimSpace(result.ArtifactURL); artifactURL != "" {
+		job.ArtifactURL = artifactURL
+	}
+	if result.Status != "" {
+		job.Status = normalizeMobileBuildStatus(result.Status, job.Status)
+	}
+	if job.Status == "" {
+		job.Status = MobileBuildQueued
+	}
+	job.FailureType = result.FailureType
+	job.FailureMessage = RedactMobileBuildSecrets(result.FailureMessage)
+	if job.Status == MobileBuildFailed && job.FailureType == "" {
+		job.FailureType = ClassifyMobileBuildFailure(job.FailureMessage)
+	}
+	job.Logs = append(job.Logs, redactMobileBuildLogLines(result.Logs, func() time.Time { return now })...)
+	job.UpdatedAt = now
+	return job
 }
 
 func NormalizeMobileBuildRequest(req MobileBuildRequest) MobileBuildRequest {

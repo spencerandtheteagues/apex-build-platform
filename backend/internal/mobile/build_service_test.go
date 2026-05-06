@@ -244,6 +244,115 @@ func TestMobileBuildServiceRecordsProviderFailure(t *testing.T) {
 	}
 }
 
+func TestMobileBuildServiceRefreshesProviderStatusAndArtifact(t *testing.T) {
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	store := NewInMemoryMobileBuildStore()
+	job := MobileBuildJob{
+		ID:              "mbld_refresh",
+		ProjectID:       71,
+		UserID:          9,
+		Platform:        MobilePlatformAndroid,
+		Profile:         MobileBuildProfilePreview,
+		ReleaseLevel:    ReleaseInternalAndroidAPK,
+		Status:          MobileBuildBuilding,
+		Provider:        "mock-eas",
+		ProviderBuildID: "eas-build-123",
+		Logs: []MobileBuildLogLine{{
+			Timestamp: now,
+			Level:     "info",
+			Message:   "queued",
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := store.Save(context.Background(), job); err != nil {
+		t.Fatalf("save refresh job: %v", err)
+	}
+	provider := &mockMobileBuildProvider{
+		name: "mock-eas",
+		refreshResult: MobileBuildProviderResult{
+			Status:      MobileBuildSucceeded,
+			ArtifactURL: "https://artifacts.example.com/app.apk",
+			Logs: []MobileBuildLogLine{{
+				Level:   "info",
+				Message: "finished with EXPO_TOKEN=refresh-secret",
+			}},
+		},
+	}
+	service := NewMobileBuildService(
+		mobileBuildTestFlags(),
+		provider,
+		store,
+		WithMobileBuildClock(func() time.Time { return now.Add(time.Minute) }),
+	)
+
+	refreshed, err := service.RefreshBuild(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("refresh build: %v", err)
+	}
+	if provider.refreshCalls != 1 || provider.lastRefreshJob.ID != job.ID {
+		t.Fatalf("expected provider refresh call, got provider=%+v", provider)
+	}
+	if refreshed.Status != MobileBuildSucceeded || refreshed.ArtifactURL == "" {
+		t.Fatalf("unexpected refreshed job %+v", refreshed)
+	}
+	if len(refreshed.Logs) != 2 || strings.Contains(refreshed.Logs[1].Message, "refresh-secret") {
+		t.Fatalf("expected appended redacted refresh log, got %+v", refreshed.Logs)
+	}
+	stored, ok, err := store.Get(context.Background(), job.ID)
+	if err != nil || !ok {
+		t.Fatalf("expected stored refreshed job, ok=%v err=%v", ok, err)
+	}
+	if stored.Status != MobileBuildSucceeded || stored.ArtifactURL == "" {
+		t.Fatalf("unexpected stored refreshed job %+v", stored)
+	}
+}
+
+func TestMobileBuildServiceRefreshProviderErrorDoesNotMarkBuildFailed(t *testing.T) {
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	store := NewInMemoryMobileBuildStore()
+	job := MobileBuildJob{
+		ID:              "mbld_refresh_error",
+		ProjectID:       71,
+		UserID:          9,
+		Platform:        MobilePlatformAndroid,
+		Profile:         MobileBuildProfilePreview,
+		ReleaseLevel:    ReleaseInternalAndroidAPK,
+		Status:          MobileBuildBuilding,
+		Provider:        "mock-eas",
+		ProviderBuildID: "eas-build-123",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := store.Save(context.Background(), job); err != nil {
+		t.Fatalf("save refresh error job: %v", err)
+	}
+	provider := &mockMobileBuildProvider{
+		name:       "mock-eas",
+		refreshErr: errors.New("temporary provider error with EAS_TOKEN=poll-secret"),
+	}
+	service := NewMobileBuildService(
+		mobileBuildTestFlags(),
+		provider,
+		store,
+		WithMobileBuildClock(func() time.Time { return now.Add(time.Minute) }),
+	)
+
+	refreshed, err := service.RefreshBuild(context.Background(), job.ID)
+	if !errors.Is(err, ErrMobileBuildProviderFailed) {
+		t.Fatalf("expected provider failed error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "poll-secret") {
+		t.Fatalf("expected redacted refresh error, got %v", err)
+	}
+	if refreshed.Status != MobileBuildBuilding {
+		t.Fatalf("refresh transport error should not mark native build failed, got %+v", refreshed)
+	}
+	if len(refreshed.Logs) != 1 || strings.Contains(refreshed.Logs[0].Message, "poll-secret") {
+		t.Fatalf("expected redacted appended error log, got %+v", refreshed.Logs)
+	}
+}
+
 func TestInMemoryMobileBuildStoreRoundTrip(t *testing.T) {
 	store := NewInMemoryMobileBuildStore()
 	job := MobileBuildJob{
@@ -320,11 +429,15 @@ func TestRedactMobileBuildSecrets(t *testing.T) {
 }
 
 type mockMobileBuildProvider struct {
-	name    string
-	result  MobileBuildProviderResult
-	err     error
-	calls   int
-	lastReq MobileBuildRequest
+	name           string
+	result         MobileBuildProviderResult
+	err            error
+	refreshResult  MobileBuildProviderResult
+	refreshErr     error
+	calls          int
+	refreshCalls   int
+	lastReq        MobileBuildRequest
+	lastRefreshJob MobileBuildJob
 }
 
 func (p *mockMobileBuildProvider) Name() string {
@@ -338,6 +451,15 @@ func (p *mockMobileBuildProvider) CreateBuild(_ context.Context, req MobileBuild
 		return MobileBuildProviderResult{}, p.err
 	}
 	return p.result, nil
+}
+
+func (p *mockMobileBuildProvider) RefreshBuild(_ context.Context, job MobileBuildJob) (MobileBuildProviderResult, error) {
+	p.refreshCalls++
+	p.lastRefreshJob = job
+	if p.refreshErr != nil {
+		return MobileBuildProviderResult{}, p.refreshErr
+	}
+	return p.refreshResult, nil
 }
 
 func mobileBuildTestFlags() FeatureFlags {

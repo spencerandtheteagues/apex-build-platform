@@ -156,6 +156,75 @@ func TestEASBuildProviderRedactsRunnerFailures(t *testing.T) {
 	}
 }
 
+func TestEASBuildProviderRefreshesBuildStatusWithArtifact(t *testing.T) {
+	resolver := &fakeMobileCredentialResolver{values: map[string]string{"token": "secret-eas-token"}}
+	runner := &fakeEASCommandRunner{
+		output: `warning before json {"id":"eas-build-123","status":"finished","artifacts":{"applicationArchiveUrl":"https://artifacts.example.com/app.aab"}} trailing text`,
+	}
+	provider := NewEASBuildProvider(EASBuildProviderConfig{
+		CLIPath:     "/usr/local/bin/eas",
+		Credentials: resolver,
+		Runner:      runner,
+	})
+
+	result, err := provider.RefreshBuild(context.Background(), MobileBuildJob{
+		ID:              "mbld_refresh",
+		ProjectID:       71,
+		UserID:          9,
+		Platform:        MobilePlatformAndroid,
+		Profile:         MobileBuildProfilePreview,
+		ReleaseLevel:    ReleaseInternalAndroidAPK,
+		ProviderBuildID: "eas-build-123",
+	})
+	if err != nil {
+		t.Fatalf("expected refresh result, got %v", err)
+	}
+	if resolver.calls != 1 || resolver.lastType != MobileCredentialEASToken {
+		t.Fatalf("expected EAS token resolution, resolver=%+v", resolver)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("expected one EAS refresh call, got %d", runner.calls)
+	}
+	for _, arg := range []string{"build:view", "eas-build-123", "--json"} {
+		if !slices.Contains(runner.lastCommand.Args, arg) {
+			t.Fatalf("expected refresh args to include %q, got %+v", arg, runner.lastCommand.Args)
+		}
+	}
+	if result.ProviderBuildID != "eas-build-123" || result.Status != MobileBuildSucceeded || result.ArtifactURL == "" {
+		t.Fatalf("unexpected refresh result %+v", result)
+	}
+	for _, line := range result.Logs {
+		if strings.Contains(line.Message, "secret-eas-token") {
+			t.Fatalf("refresh result leaked token in logs: %+v", result.Logs)
+		}
+	}
+}
+
+func TestEASBuildProviderRefreshRedactsRunnerFailures(t *testing.T) {
+	resolver := &fakeMobileCredentialResolver{values: map[string]string{"token": "secret-eas-token"}}
+	runner := &fakeEASCommandRunner{
+		output: "inspect failed with EXPO_TOKEN=secret-eas-token",
+		err:    errors.New("provider rejected EAS_TOKEN=secret-eas-token"),
+	}
+	provider := NewEASBuildProvider(EASBuildProviderConfig{
+		Credentials: resolver,
+		Runner:      runner,
+	})
+
+	_, err := provider.RefreshBuild(context.Background(), MobileBuildJob{
+		ID:              "mbld_refresh",
+		ProjectID:       71,
+		UserID:          9,
+		ProviderBuildID: "eas-build-123",
+	})
+	if !errors.Is(err, ErrMobileBuildProviderFailed) {
+		t.Fatalf("expected provider failure, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-eas-token") {
+		t.Fatalf("expected redacted refresh error, got %v", err)
+	}
+}
+
 func newEASProviderSourceDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
