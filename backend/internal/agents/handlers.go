@@ -3752,6 +3752,7 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		build.GET("/:id/tasks", h.GetTasks)
 		build.GET("/:id/files", h.GetGeneratedFiles)
 		build.GET("/:id/artifacts", h.GetBuildArtifacts)
+		build.GET("/:id/architecture-references", h.GetBuildArchitectureReferences)
 		build.POST("/:id/apply", h.ApplyBuildArtifacts)
 		build.POST("/:id/cancel", h.CancelBuild)
 		build.POST("/kill-all", h.KillAllBuilds)

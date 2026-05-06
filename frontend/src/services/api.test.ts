@@ -61,6 +61,58 @@ describe('reloadExpiredSession', () => {
   })
 })
 
+describe('architecture intelligence API', () => {
+  it('fetches the admin architecture map from the admin route', async () => {
+    const service = new ApiService('/api/v1')
+    const get = vi.spyOn(service.client, 'get').mockResolvedValue({
+      data: {
+        map: {
+          schema_version: '1.0.0',
+          generated_at: '2026-05-06T00:00:00Z',
+          source: 'deterministic_repo_scanner',
+          confidence: 0.74,
+          summary: {
+            node_count: 1,
+            edge_count: 0,
+            contract_count: 0,
+            file_count: 1,
+            test_file_count: 0,
+            high_risk_nodes: 1,
+            critical_nodes: 0,
+          },
+          nodes: [],
+          edges: [],
+          contracts: [],
+        },
+      },
+    } as any)
+
+    const map = await service.getAdminArchitectureMap()
+
+    expect(get).toHaveBeenCalledWith('/admin/architecture/map')
+    expect(map.source).toBe('deterministic_repo_scanner')
+  })
+
+  it('fetches build architecture reference telemetry without prompt text', async () => {
+    const service = new ApiService('/api/v1')
+    const get = vi.spyOn(service.client, 'get').mockResolvedValue({
+      data: {
+        references: {
+          total_references: 2,
+          by_node: { 'ai.orchestration': 1 },
+          by_structure: { BuildSnapshotState: 1 },
+        },
+      },
+    } as any)
+
+    const refs = await service.getBuildArchitectureReferences('build-123')
+
+    expect(get).toHaveBeenCalledWith('/build/build-123/architecture-references')
+    expect(refs.by_node?.['ai.orchestration']).toBe(1)
+    expect(JSON.stringify(refs)).not.toContain('Inspect backend/internal/agents')
+  })
+})
+
 describe('logout', () => {
   it('logs out via cookie auth and clears legacy token storage', async () => {
     const service = new ApiService('/api/v1')

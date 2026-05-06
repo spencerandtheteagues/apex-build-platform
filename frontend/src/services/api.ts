@@ -180,6 +180,103 @@ export interface FeatureReadinessSummary {
   services: FeatureReadinessService[]
 }
 
+export interface ArchitectureReferenceTelemetry {
+  total_references: number
+  by_node?: Record<string, number>
+  by_directory?: Record<string, number>
+  by_contract?: Record<string, number>
+  by_database?: Record<string, number>
+  by_structure?: Record<string, number>
+  by_agent_role?: Record<string, number>
+  by_task_type?: Record<string, number>
+  recent_events?: Array<{
+    build_id?: string
+    task_id?: string
+    task_type?: string
+    agent_role?: string
+    provider?: string
+    model?: string
+    timestamp: string
+    hits?: Array<{
+      node_id?: string
+      directory?: string
+      contract?: string
+      database?: string
+      structure?: string
+      count: number
+    }>
+  }>
+  last_updated_at?: string
+}
+
+export interface ArchitectureMapNode {
+  id: string
+  name: string
+  layer: string
+  type: string
+  description?: string
+  risk_level: 'low' | 'medium' | 'high' | 'critical' | string
+  risk_score: number
+  code_locations: Array<{ path: string }>
+  file_count: number
+  test_count: number
+  references?: number
+  tags?: string[]
+}
+
+export interface ArchitectureMapContract {
+  id: string
+  contract_type: string
+  producer: string
+  consumers: string[]
+  schema_location: string
+  references?: number
+  test_locations?: string[]
+}
+
+export interface ArchitectureIntelligenceMap {
+  schema_version: string
+  generated_at: string
+  repo_root?: string
+  repo_sha?: string
+  source: string
+  confidence: number
+  summary: {
+    node_count: number
+    edge_count: number
+    contract_count: number
+    file_count: number
+    test_file_count: number
+    reference_count?: number
+    high_risk_nodes: number
+    critical_nodes: number
+  }
+  nodes: ArchitectureMapNode[]
+  edges: Array<{
+    id: string
+    from_node: string
+    to_node: string
+    edge_type: string
+    criticality: string
+    description?: string
+  }>
+  contracts: ArchitectureMapContract[]
+  diagnostic_playbooks?: Array<{
+    id: string
+    symptom: string
+    entry_nodes: string[]
+    checks: string[]
+    safe_repair_plan: string[]
+  }>
+  quality_gates?: Array<{
+    id: string
+    description: string
+    required: boolean
+    checks: string[]
+  }>
+  reference_telemetry?: ArchitectureReferenceTelemetry
+}
+
 export class ApiService {
   public client: AxiosInstance
   private baseURL: string
@@ -318,6 +415,16 @@ export class ApiService {
       validateStatus: () => true,
     })
     return response.data
+  }
+
+  async getAdminArchitectureMap(): Promise<ArchitectureIntelligenceMap> {
+    const response = await this.client.get<{ map: ArchitectureIntelligenceMap }>('/admin/architecture/map')
+    return response.data.map
+  }
+
+  async getBuildArchitectureReferences(buildId: string): Promise<ArchitectureReferenceTelemetry> {
+    const response = await this.client.get<{ references: ArchitectureReferenceTelemetry }>(`/build/${buildId}/architecture-references`)
+    return response.data.references
   }
 
   // Authentication endpoints

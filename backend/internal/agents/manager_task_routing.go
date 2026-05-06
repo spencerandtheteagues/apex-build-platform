@@ -598,6 +598,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	// Lead, planner, and solver agents reuse the same large system prompt on every
 	// call — enabling caching cuts their token costs by 50-80%.
 	cacheSystemPrompt := agent.Role == RoleLead || agent.Role == RolePlanner || agent.Role == RoleSolver
+	am.recordArchitectureReferences(build, agent, task, provider, model, systemPrompt, prompt)
 
 	response, err := am.aiRouter.Generate(attemptCtx, provider, prompt, GenerateOptions{
 		UserID:                  build.UserID,

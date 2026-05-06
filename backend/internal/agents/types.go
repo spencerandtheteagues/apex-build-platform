@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/architecture"
 )
 
 // AgentRole defines the specialized role of an AI agent
@@ -439,18 +440,19 @@ type BuildApproval struct {
 }
 
 type BuildSnapshotState struct {
-	CurrentPhase        string                   `json:"current_phase,omitempty"`
-	QualityGateRequired *bool                    `json:"quality_gate_required,omitempty"`
-	QualityGateStatus   string                   `json:"quality_gate_status,omitempty"`
-	QualityGateStage    string                   `json:"quality_gate_stage,omitempty"`
-	FailureTaxonomy     *BuildFailureTaxonomy    `json:"failure_taxonomy,omitempty"`
-	AvailableProviders  []string                 `json:"available_providers,omitempty"`
-	CapabilityState     *BuildCapabilityState    `json:"capability_state,omitempty"`
-	PolicyState         *BuildPolicyState        `json:"policy_state,omitempty"`
-	Blockers            []BuildBlocker           `json:"blockers,omitempty"`
-	Approvals           []BuildApproval          `json:"approvals,omitempty"`
-	RestoreContext      *BuildRestoreContext     `json:"restore_context,omitempty"`
-	Orchestration       *BuildOrchestrationState `json:"orchestration,omitempty"`
+	CurrentPhase           string                           `json:"current_phase,omitempty"`
+	QualityGateRequired    *bool                            `json:"quality_gate_required,omitempty"`
+	QualityGateStatus      string                           `json:"quality_gate_status,omitempty"`
+	QualityGateStage       string                           `json:"quality_gate_stage,omitempty"`
+	FailureTaxonomy        *BuildFailureTaxonomy            `json:"failure_taxonomy,omitempty"`
+	AvailableProviders     []string                         `json:"available_providers,omitempty"`
+	CapabilityState        *BuildCapabilityState            `json:"capability_state,omitempty"`
+	PolicyState            *BuildPolicyState                `json:"policy_state,omitempty"`
+	Blockers               []BuildBlocker                   `json:"blockers,omitempty"`
+	Approvals              []BuildApproval                  `json:"approvals,omitempty"`
+	RestoreContext         *BuildRestoreContext             `json:"restore_context,omitempty"`
+	Orchestration          *BuildOrchestrationState         `json:"orchestration,omitempty"`
+	ArchitectureReferences *architecture.ReferenceTelemetry `json:"architecture_references,omitempty"`
 }
 
 type BuildRestoreContext struct {

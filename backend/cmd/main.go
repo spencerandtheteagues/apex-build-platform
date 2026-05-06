@@ -1883,6 +1883,7 @@ func setupRoutes(
 				admin.GET("/stats", server.AdminGetSystemStats)
 				admin.POST("/rotate-secrets", rotationHandler.RotateSecrets)
 				admin.GET("/validate-secrets", rotationHandler.ValidateSecrets)
+				buildHandler.RegisterArchitectureAdminRoutes(admin)
 			}
 		}
 	}

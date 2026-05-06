@@ -26,3 +26,6 @@ Never commit real API keys or populated `.env` files. Start from `.env.example`,
 
 ## Architecture Intelligence Map
 Use `docs/architecture-intelligence/AGENT_REFERENCE.md` as an advisory AI reference before broad or high-risk Apex Build changes. The imported map can help identify likely nodes, contracts, tests, blast radius, and rollback considerations, but repository code, tests, runtime logs, and current contracts remain the source of truth. Do not assume the example map is current without verifying referenced files and behavior.
+
+## Future Pathways
+Use `FUTURE.md` as the shared pathway file for next-feature direction, reliability priorities, evidence gates, and cross-session continuity. Read it before non-trivial Apex Build work and update it when a pathway materially changes, completes, gets blocked, or a better next action is discovered. Keep it evidence-based and never store secrets, customer data, full prompts, or provider transcripts there.

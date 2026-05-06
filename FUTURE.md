@@ -1,0 +1,37 @@
+# Future Pathways
+
+This file is the shared planning surface for Apex Build feature pathways. Read it before non-trivial work on APEX-BUILD.DEV, especially build reliability, preview stability, orchestration, provider routing, architecture intelligence, billing, or release readiness.
+
+## Operating Rules
+
+- Treat this file as guidance, not runtime truth. Repository code, tests, logs, production telemetry, and current contracts remain authoritative.
+- Keep entries concise, evidence-based, and actionable. Each pathway should name the next concrete step and the proof needed before claiming completion.
+- Do not store secrets, API keys, customer data, full prompts, provider transcripts, or private production payloads here.
+- Update this file when a pathway materially changes, completes, gets blocked, or when a better next step is discovered.
+- Prefer low-risk reliability work before speculative feature expansion.
+
+## North Star
+
+APEX-BUILD.DEV should reliably turn a user prompt into a complete project, reach 100% build completion, and open a stable running preview with evidence the user can trust.
+
+## Active Pathways
+
+| ID | Status | Area | Pathway | Next Action | Evidence Gate |
+| --- | --- | --- | --- | --- | --- |
+| FT-001 | Active | Architecture Intelligence | Count which directories, databases, structures, and contracts AI agents reference during builds, then improve the most-used knowledge pockets. | Finish admin map telemetry, privacy-safe reference counts, and build-level reference APIs before using the data for model context. | Backend tests, frontend typecheck/build, admin UI rendering, and no stored prompt text. |
+| FT-002 | Active | First-Pass Reliability | Reduce stalls near 95% and make failed validation/preview states produce deterministic repair actions instead of credit-burning loops. | Expand failure taxonomy around final validation, solver retries, preview startup, and terminal build states. | Repeated prompt matrix runs with completed builds, stable preview screenshots, and logged failure classification. |
+| FT-003 | Active | Preview Stability | Make generated app previews start consistently and stop white-screen restart loops. | Add preview boot watchdog evidence, clearer runtime error capture, and stability checks for generated Vite apps. | Preview canary reaches ready state, stays loaded, and captures screenshot evidence after refresh. |
+| FT-004 | Queued | Knowledge Pockets | Use reference-count telemetry to identify high-value docs, schemas, and templates that agents actually consult. | Rank top referenced pockets and add targeted, source-of-truth guidance only where telemetry proves repeated use. | Admin report shows counts by node, directory, database, and structure before enrichment work begins. |
+| FT-005 | Queued | Mobile Output | Clarify whether Apex Build should support Android through PWA, Capacitor, Expo/React Native, or generated native project exports. | Create a feasibility note and one small scaffold proof before advertising Android app support. | Local build artifact exists and install/run path is documented. |
+
+## Pathway Template
+
+Use this template for new entries:
+
+```md
+| FT-000 | Proposed | Area | One-sentence pathway. | Smallest useful next action. | Concrete proof required before marking complete. |
+```
+
+## Completion Standard
+
+A pathway is not complete because code was written. It is complete only when the relevant tests pass, contract edges are covered, user-facing behavior is verified when applicable, and any remaining risk is explicitly documented.

@@ -11,6 +11,7 @@ import {
   Loading,
   Input
 } from '@/components/ui'
+import { ArchitectureIntelligencePanel } from './ArchitectureIntelligencePanel'
 import {
   Users,
   DollarSign,
@@ -397,6 +398,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
           </div>
         </Card>
       )}
+
+      <ArchitectureIntelligencePanel />
 
       {/* System Stats */}
       <Card variant="cyberpunk" padding="lg" className="mb-8">

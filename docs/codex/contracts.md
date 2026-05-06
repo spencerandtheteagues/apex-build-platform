@@ -1,5 +1,33 @@
 # Contracts
 
+## Architecture Intelligence Map Telemetry API
+- Source of truth: `backend/internal/architecture/types.go`, `backend/internal/architecture/scanner.go`, `backend/internal/agents/architecture_handlers.go`, and `backend/internal/agents/architecture_references.go`.
+- Producers:
+  - Deterministic architecture scanner derives nodes, contracts, playbooks, gates, file counts, and test counts from the current repo.
+  - `AgentManager.recordArchitectureReferences` records metadata counts from outgoing task/system prompts before provider calls.
+  - Build snapshots may persist `BuildSnapshotState.ArchitectureReferences`.
+- Transport:
+  - Admin-only `GET /api/v1/admin/architecture/map` returns `{ map }`.
+  - Owner-protected `GET /api/v1/build/:id/architecture-references` returns `{ references }`.
+  - Snapshot field `snapshot_state.architecture_references` is additive and optional.
+- Consumers:
+  - `frontend/src/services/api.ts` typed API methods.
+  - `frontend/src/components/admin/ArchitectureIntelligencePanel.tsx`.
+  - Future knowledge-pocket enrichment work after telemetry proves which pockets are referenced.
+- Defaults / zero-value behavior:
+  - Missing telemetry returns an empty `ReferenceTelemetry` object for build-level reads.
+  - Admin map generation still works without live telemetry.
+  - Reference telemetry stores counts and metadata only; no prompt text, generated code, secrets, or provider transcripts.
+  - Build-level reference reads use live read or completed snapshot read without restoring/resuming old builds.
+- Backward compatibility risk:
+  - Low; new routes and an optional snapshot field are additive.
+  - Current runtime orchestration does not depend on the generated map or reference counts.
+- Required tests / validations:
+  - `cd backend && go test ./internal/architecture -count=1`
+  - `cd backend && go test ./internal/agents -run 'TestRecordArchitectureReferencesStoresMetadataCountsOnly|TestGetAdminArchitectureMapMergesLiveReferenceTelemetry' -count=1`
+  - `cd frontend && npm run test -- --run src/services/api.test.ts`
+  - Frontend typecheck/build/lint before commit.
+
 ## Build Poll Status Token
 - Source of truth: `backend/internal/agents/types.go` `BuildResponse.PollToken`, `Build.PollTokenHash`, and `BuildRestoreContext.PollTokenHash`.
 - Producers:
