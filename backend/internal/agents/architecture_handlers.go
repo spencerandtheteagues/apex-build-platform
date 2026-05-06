@@ -5,9 +5,12 @@ import (
 
 	"apex-build/internal/architecture"
 	appmiddleware "apex-build/internal/middleware"
+	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
 )
+
+const maxArchitectureTelemetrySnapshots = 250
 
 func (h *BuildHandler) RegisterArchitectureAdminRoutes(rg *gin.RouterGroup) {
 	arch := rg.Group("/architecture")
@@ -17,16 +20,54 @@ func (h *BuildHandler) RegisterArchitectureAdminRoutes(rg *gin.RouterGroup) {
 }
 
 func (h *BuildHandler) GetAdminArchitectureMap(c *gin.Context) {
-	var telemetry *architecture.ReferenceTelemetry
-	if h != nil && h.manager != nil {
-		telemetry = h.manager.ArchitectureReferenceTelemetrySnapshot()
-	}
+	telemetry := h.architectureReferenceTelemetrySnapshot()
 	m, err := architecture.GenerateMap("", telemetry)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate architecture map", "details": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"map": m})
+}
+
+func (h *BuildHandler) architectureReferenceTelemetrySnapshot() *architecture.ReferenceTelemetry {
+	var telemetry *architecture.ReferenceTelemetry
+	if h != nil && h.manager != nil {
+		telemetry = h.manager.ArchitectureReferenceTelemetrySnapshot()
+	}
+	if historical := h.completedBuildArchitectureReferenceTelemetry(maxArchitectureTelemetrySnapshots); historical != nil {
+		telemetry = architecture.MergeTelemetry(telemetry, historical)
+	}
+	return telemetry
+}
+
+func (h *BuildHandler) completedBuildArchitectureReferenceTelemetry(limit int) *architecture.ReferenceTelemetry {
+	if h == nil || h.db == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = maxArchitectureTelemetrySnapshots
+	}
+
+	type snapshotRow struct {
+		StateJSON string `gorm:"column:state_json"`
+	}
+	var rows []snapshotRow
+	if err := h.db.Model(&models.CompletedBuild{}).
+		Select("state_json").
+		Where("state_json <> ''").
+		Where("status IN ?", []string{string(BuildCompleted), string(BuildFailed), string(BuildCancelled)}).
+		Order("updated_at DESC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil
+	}
+
+	var telemetry *architecture.ReferenceTelemetry
+	for _, row := range rows {
+		state := parseBuildSnapshotState(row.StateJSON)
+		telemetry = architecture.MergeTelemetry(telemetry, state.ArchitectureReferences)
+	}
+	return telemetry
 }
 
 func (h *BuildHandler) GetBuildArchitectureReferences(c *gin.Context) {

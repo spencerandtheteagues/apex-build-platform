@@ -9,6 +9,7 @@ import (
 
 	"apex-build/internal/ai"
 	"apex-build/internal/architecture"
+	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -135,5 +136,98 @@ func TestGetAdminArchitectureMapMergesLiveReferenceTelemetry(t *testing.T) {
 	}
 	if !foundNodeReference {
 		t.Fatalf("expected ai.orchestration node to include reference count, got %+v", response.Map.Nodes)
+	}
+}
+
+func TestGetAdminArchitectureMapMergesCompletedSnapshotReferenceTelemetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := openBuildTestDB(t)
+
+	terminalRefs := architecture.MergeReferenceTelemetry(nil, architecture.ReferenceEvent{
+		BuildID:   "completed-refs",
+		TaskID:    "task-2",
+		TaskType:  string(TaskReview),
+		AgentRole: string(RoleReviewer),
+		Provider:  string(ai.ProviderGrok),
+		Model:     "grok-test",
+		Timestamp: time.Date(2026, 5, 5, 13, 0, 0, 0, time.UTC),
+		Hits: []architecture.ReferenceHit{
+			{NodeID: "runtime.preview", Directory: "backend/internal/preview", Count: 4},
+			{Contract: "contract.preview.runtime", Count: 1},
+		},
+	})
+	terminalState, err := json.Marshal(BuildSnapshotState{ArchitectureReferences: terminalRefs})
+	if err != nil {
+		t.Fatalf("marshal terminal state: %v", err)
+	}
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "completed-refs",
+		UserID:      1,
+		ProjectName: "Completed telemetry",
+		Description: "completed architecture telemetry",
+		Status:      string(BuildCompleted),
+		StateJSON:   string(terminalState),
+	}).Error; err != nil {
+		t.Fatalf("create completed snapshot: %v", err)
+	}
+
+	inProgressRefs := architecture.MergeReferenceTelemetry(nil, architecture.ReferenceEvent{
+		BuildID:   "active-refs",
+		Timestamp: time.Date(2026, 5, 5, 14, 0, 0, 0, time.UTC),
+		Hits: []architecture.ReferenceHit{
+			{NodeID: "billing.spend", Directory: "backend/internal/billing", Count: 99},
+		},
+	})
+	inProgressState, err := json.Marshal(BuildSnapshotState{ArchitectureReferences: inProgressRefs})
+	if err != nil {
+		t.Fatalf("marshal in-progress state: %v", err)
+	}
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-refs",
+		UserID:      1,
+		ProjectName: "Active telemetry",
+		Description: "active architecture telemetry",
+		Status:      string(BuildInProgress),
+		StateJSON:   string(inProgressState),
+	}).Error; err != nil {
+		t.Fatalf("create in-progress snapshot: %v", err)
+	}
+
+	handler := &BuildHandler{db: db}
+	router := gin.New()
+	router.GET("/admin/architecture/map", handler.GetAdminArchitectureMap)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/admin/architecture/map", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		Map architecture.Map `json:"map"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	refs := response.Map.ReferenceTelemetry
+	if refs == nil {
+		t.Fatal("expected reference telemetry from completed snapshot")
+	}
+	if refs.TotalReferences != 5 {
+		t.Fatalf("expected terminal snapshot references only, got %d", refs.TotalReferences)
+	}
+	if refs.ByNode["runtime.preview"] != 4 {
+		t.Fatalf("expected completed preview node references, got %+v", refs.ByNode)
+	}
+	if refs.ByContract["contract.preview.runtime"] != 1 {
+		t.Fatalf("expected completed preview contract references, got %+v", refs.ByContract)
+	}
+	if refs.ByNode["billing.spend"] != 0 {
+		t.Fatalf("did not expect in-progress snapshot references in admin aggregate, got %+v", refs.ByNode)
+	}
+	if response.Map.Summary.ReferenceCount != 5 {
+		t.Fatalf("expected summary reference count from completed snapshots, got %d", response.Map.Summary.ReferenceCount)
 	}
 }

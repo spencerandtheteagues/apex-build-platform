@@ -6,6 +6,7 @@
   - Deterministic architecture scanner derives nodes, contracts, playbooks, gates, file counts, and test counts from the current repo.
   - `AgentManager.recordArchitectureReferences` records metadata counts from outgoing task/system prompts before provider calls.
   - Build snapshots may persist `BuildSnapshotState.ArchitectureReferences`.
+  - Admin map aggregation merges live build telemetry with the latest bounded set of terminal completed-build snapshots.
 - Transport:
   - Admin-only `GET /api/v1/admin/architecture/map` returns `{ map }`.
   - Owner-protected `GET /api/v1/build/:id/architecture-references` returns `{ references }`.
@@ -17,6 +18,7 @@
 - Defaults / zero-value behavior:
   - Missing telemetry returns an empty `ReferenceTelemetry` object for build-level reads.
   - Admin map generation still works without live telemetry.
+  - Admin map historical aggregation reads only terminal snapshots (`completed`, `failed`, `cancelled`) and is capped at 250 latest rows.
   - Reference telemetry stores counts and metadata only; no prompt text, generated code, secrets, or provider transcripts.
   - Build-level reference reads use live read or completed snapshot read without restoring/resuming old builds.
 - Backward compatibility risk:
@@ -24,7 +26,7 @@
   - Current runtime orchestration does not depend on the generated map or reference counts.
 - Required tests / validations:
   - `cd backend && go test ./internal/architecture -count=1`
-  - `cd backend && go test ./internal/agents -run 'TestRecordArchitectureReferencesStoresMetadataCountsOnly|TestGetAdminArchitectureMapMergesLiveReferenceTelemetry' -count=1`
+  - `cd backend && go test ./internal/agents -run 'TestRecordArchitectureReferencesStoresMetadataCountsOnly|TestGetAdminArchitectureMapMergesLiveReferenceTelemetry|TestGetAdminArchitectureMapMergesCompletedSnapshotReferenceTelemetry' -count=1`
   - `cd frontend && npm run test -- --run src/services/api.test.ts`
   - Frontend typecheck/build/lint before commit.
 
