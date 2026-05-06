@@ -24,6 +24,35 @@ export interface User {
   updated_at: string
 }
 
+export type TargetPlatform = 'web' | 'fullstack_web' | 'mobile_expo' | 'mobile_capacitor' | 'api_only'
+export type MobilePlatform = 'android' | 'ios'
+export type MobileFramework = 'expo-react-native' | 'capacitor'
+export type MobileReleaseLevel =
+  | 'source_only'
+  | 'web_preview'
+  | 'dev_build'
+  | 'internal_android_apk'
+  | 'android_aab'
+  | 'ios_simulator'
+  | 'ios_internal'
+  | 'testflight_ready'
+  | 'store_submission_ready'
+export type MobileCapability =
+  | 'camera'
+  | 'photoLibrary'
+  | 'pushNotifications'
+  | 'location'
+  | 'maps'
+  | 'fileUploads'
+  | 'offlineMode'
+  | 'localNotifications'
+  | 'backgroundTasks'
+  | 'payments'
+  | 'inAppPurchases'
+  | 'biometrics'
+  | 'deepLinks'
+  | 'universalLinks'
+
 export interface Project {
   id: number
   name: string
@@ -41,6 +70,26 @@ export interface Project {
   build_config?: Record<string, any>
   environment_config?: string // JSON-encoded EnvironmentConfig (Nix-like - Replit parity)
   provisioned_database_id?: number // Auto-provisioned PostgreSQL database ID (Replit parity)
+  target_platform?: TargetPlatform
+  mobile_platforms?: MobilePlatform[]
+  mobile_framework?: MobileFramework
+  mobile_release_level?: MobileReleaseLevel
+  mobile_capabilities?: MobileCapability[]
+  mobile_dependency_policy?: string
+  mobile_preview_status?: string
+  mobile_build_status?: string
+  mobile_store_readiness_status?: string
+  generated_backend_url?: string
+  generated_mobile_client_path?: string
+  eas_project_id?: string
+  android_package?: string
+  ios_bundle_identifier?: string
+  app_display_name?: string
+  app_version?: string
+  build_number?: string
+  version_code?: number
+  permission_manifest?: Record<string, any>
+  store_metadata_draft?: Record<string, any>
   collab_room_id?: number
   created_at: string
   updated_at: string
