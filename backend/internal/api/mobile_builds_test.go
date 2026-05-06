@@ -314,6 +314,94 @@ func TestCancelProjectMobileBuildUpdatesProviderStatus(t *testing.T) {
 	require.Equal(t, 1, provider.cancelCalls)
 }
 
+func TestRetryProjectMobileBuildQueuesNewProviderJob(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	store := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, store.Save(context.Background(), mobile.MobileBuildJob{
+		ID:           "mbld_api_failed",
+		ProjectID:    project.ID,
+		UserID:       userID,
+		Platform:     mobile.MobilePlatformAndroid,
+		Profile:      mobile.MobileBuildProfilePreview,
+		ReleaseLevel: mobile.ReleaseInternalAndroidAPK,
+		Status:       mobile.MobileBuildFailed,
+		AppVersion:   "1.2.3",
+		VersionCode:  12,
+	}))
+	provider := &mockAPIMobileBuildProvider{
+		result: mobile.MobileBuildProviderResult{
+			ProviderBuildID: "eas-build-android-retry",
+			Status:          mobile.MobileBuildQueued,
+			Logs: []mobile.MobileBuildLogLine{{
+				Level:   "info",
+				Message: "retry queued with EAS_TOKEN=retry-secret",
+			}},
+		},
+	}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(
+		mobileBuildAPITestFlags(),
+		provider,
+		store,
+		mobile.WithMobileBuildIDGenerator(func() string { return "mbld_api_retry" }),
+	))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_failed/retry", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_failed"}}
+	context.Set("user_id", userID)
+
+	server.RetryProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "retry-secret")
+	require.Contains(t, recorder.Body.String(), "mbld_api_retry")
+	require.Equal(t, 1, provider.calls)
+	require.Equal(t, mobile.MobilePlatformAndroid, provider.lastReq.Platform)
+	require.Equal(t, mobile.MobileBuildProfilePreview, provider.lastReq.Profile)
+	require.Equal(t, mobile.ReleaseInternalAndroidAPK, provider.lastReq.ReleaseLevel)
+	require.NotEmpty(t, provider.lastReq.SourcePath)
+	require.True(t, provider.sourcePackageExists)
+
+	var updated models.Project
+	require.NoError(t, gormDB.First(&updated, project.ID).Error)
+	require.Equal(t, string(mobile.MobileBuildQueued), updated.MobileBuildStatus)
+	require.Equal(t, "mbld_api_retry", mobileMetadataStringForAPITest(updated.MobileMetadata, "last_mobile_build_id"))
+}
+
+func TestRetryProjectMobileBuildRejectsActiveJob(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	store := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, store.Save(context.Background(), mobile.MobileBuildJob{
+		ID:              "mbld_api_active_retry",
+		ProjectID:       project.ID,
+		UserID:          userID,
+		Platform:        mobile.MobilePlatformAndroid,
+		Profile:         mobile.MobileBuildProfilePreview,
+		ReleaseLevel:    mobile.ReleaseInternalAndroidAPK,
+		Status:          mobile.MobileBuildBuilding,
+		ProviderBuildID: "eas-build-active",
+	}))
+	provider := &mockAPIMobileBuildProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(mobileBuildAPITestFlags(), provider, store))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_active_retry/retry", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_active_retry"}}
+	context.Set("user_id", userID)
+
+	server.RetryProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "cannot be retried")
+	require.Equal(t, 0, provider.calls)
+}
+
 func createMobileBuildAPIProject(t *testing.T, gormDB *gorm.DB, userID uint, platforms []string) models.Project {
 	t.Helper()
 	project := models.Project{

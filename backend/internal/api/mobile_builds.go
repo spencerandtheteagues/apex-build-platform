@@ -174,6 +174,69 @@ func (s *Server) CancelProjectMobileBuild(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"build": canceled})
 }
 
+func (s *Server) RetryProjectMobileBuild(c *gin.Context) {
+	job, project, ok := s.requireProjectMobileBuildWithProject(c)
+	if !ok {
+		return
+	}
+	if !mobile.IsRetryableMobileBuildStatus(job.Status) {
+		s.writeMobileBuildError(c, fmt.Errorf("%w: build status %q cannot be retried", mobile.ErrMobileBuildInvalidRequest, job.Status), &job)
+		return
+	}
+
+	if err := s.mobile.ValidatePolicyRequest(mobile.MobileBuildRequest{
+		ProjectID:    job.ProjectID,
+		UserID:       job.UserID,
+		Platform:     job.Platform,
+		Profile:      job.Profile,
+		ReleaseLevel: job.ReleaseLevel,
+	}); err != nil {
+		s.writeMobileBuildError(c, err, &job)
+		return
+	}
+	if !mobile.ProjectAllowsMobileBuildPlatform(project, job.Platform) {
+		s.writeMobileBuildError(c, fmt.Errorf("%w: platform %q is not enabled for this project", mobile.ErrMobileBuildInvalidRequest, job.Platform), &job)
+		return
+	}
+
+	credentials, err := mobile.NewMobileCredentialVault(s.db.DB, nil).BuildStatus(c.Request.Context(), job.UserID, project, job.Platform, job.ReleaseLevel)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify mobile credentials", "code": "MOBILE_CREDENTIAL_STATUS_FAILED"})
+		return
+	}
+	if !credentials.Complete {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "Required mobile build credentials are missing",
+			"code":        "MOBILE_CREDENTIALS_REQUIRED",
+			"credentials": credentials,
+		})
+		return
+	}
+
+	materialized, err := mobile.MaterializeProjectMobileSource(c.Request.Context(), s.db.DB, project)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "MOBILE_SOURCE_MATERIALIZATION_FAILED"})
+		return
+	}
+	if materialized.Cleanup != nil {
+		defer materialized.Cleanup()
+	}
+
+	retry, err := s.mobile.RetryBuild(c.Request.Context(), job.ID, materialized.MobileDir)
+	if retry.ID != "" {
+		if persistErr := s.persistMobileBuildProjectSummary(c, project, retry); persistErr != nil && err == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist mobile build status", "code": "MOBILE_BUILD_STATUS_PERSIST_FAILED"})
+			return
+		}
+	}
+	if err != nil {
+		s.writeMobileBuildError(c, err, &retry)
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"build": retry, "credentials": credentials, "retried_from": job.ID})
+}
+
 func (s *Server) GetProjectMobileBuildLogs(c *gin.Context) {
 	job, ok := s.requireProjectMobileBuild(c)
 	if !ok {

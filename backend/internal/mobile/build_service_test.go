@@ -569,6 +569,89 @@ func TestMobileBuildServiceRejectsCancelForTerminalBuild(t *testing.T) {
 	}
 }
 
+func TestMobileBuildServiceRetriesFailedBuildWithSameTarget(t *testing.T) {
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	store := NewInMemoryMobileBuildStore()
+	previous := MobileBuildJob{
+		ID:           "mbld_failed",
+		ProjectID:    71,
+		UserID:       9,
+		Platform:     MobilePlatformAndroid,
+		Profile:      MobileBuildProfilePreview,
+		ReleaseLevel: ReleaseInternalAndroidAPK,
+		Status:       MobileBuildFailed,
+		AppVersion:   "1.2.3",
+		BuildNumber:  "7",
+		VersionCode:  7,
+		CommitRef:    "main",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := store.Save(context.Background(), previous); err != nil {
+		t.Fatalf("save previous build: %v", err)
+	}
+	provider := &mockMobileBuildProvider{
+		name: "mock-eas",
+		result: MobileBuildProviderResult{
+			ProviderBuildID: "eas-build-retry",
+			Status:          MobileBuildQueued,
+		},
+	}
+	service := NewMobileBuildService(
+		mobileBuildTestFlags(),
+		provider,
+		store,
+		WithMobileBuildClock(func() time.Time { return now.Add(time.Minute) }),
+		WithMobileBuildIDGenerator(func() string { return "mbld_retry" }),
+	)
+
+	retry, err := service.RetryBuild(context.Background(), previous.ID, "/tmp/apex-mobile-source")
+	if err != nil {
+		t.Fatalf("retry build: %v", err)
+	}
+	if retry.ID != "mbld_retry" || retry.Status != MobileBuildQueued {
+		t.Fatalf("unexpected retry job %+v", retry)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("expected provider create call, got %d", provider.calls)
+	}
+	if provider.lastReq.Platform != previous.Platform ||
+		provider.lastReq.Profile != previous.Profile ||
+		provider.lastReq.ReleaseLevel != previous.ReleaseLevel ||
+		provider.lastReq.VersionCode != previous.VersionCode {
+		t.Fatalf("retry should preserve target metadata, got %+v", provider.lastReq)
+	}
+}
+
+func TestMobileBuildServiceRejectsRetryForActiveBuild(t *testing.T) {
+	store := NewInMemoryMobileBuildStore()
+	active := MobileBuildJob{
+		ID:              "mbld_active_retry",
+		ProjectID:       71,
+		UserID:          9,
+		Platform:        MobilePlatformAndroid,
+		Profile:         MobileBuildProfilePreview,
+		ReleaseLevel:    ReleaseInternalAndroidAPK,
+		Status:          MobileBuildBuilding,
+		ProviderBuildID: "eas-build-active",
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	if err := store.Save(context.Background(), active); err != nil {
+		t.Fatalf("save active build: %v", err)
+	}
+	provider := &mockMobileBuildProvider{name: "mock-eas"}
+	service := NewMobileBuildService(mobileBuildTestFlags(), provider, store)
+
+	_, err := service.RetryBuild(context.Background(), active.ID, "/tmp/apex-mobile-source")
+	if !errors.Is(err, ErrMobileBuildInvalidRequest) {
+		t.Fatalf("expected invalid request for active retry, got %v", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider should not be called for active retry, got %d", provider.calls)
+	}
+}
+
 func TestInMemoryMobileBuildStoreRoundTrip(t *testing.T) {
 	store := NewInMemoryMobileBuildStore()
 	job := MobileBuildJob{

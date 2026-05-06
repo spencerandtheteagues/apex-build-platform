@@ -1628,6 +1628,7 @@ func setupRoutes(
 				projects.GET("/:id/mobile/builds/:buildId", server.GetProjectMobileBuild)
 				projects.POST("/:id/mobile/builds/:buildId/refresh", server.RefreshProjectMobileBuild)
 				projects.POST("/:id/mobile/builds/:buildId/cancel", server.CancelProjectMobileBuild)
+				projects.POST("/:id/mobile/builds/:buildId/retry", server.RetryProjectMobileBuild)
 				projects.GET("/:id/mobile/builds/:buildId/logs", server.GetProjectMobileBuildLogs)
 				projects.GET("/:id/mobile/builds/:buildId/artifacts", server.GetProjectMobileBuildArtifacts)
 

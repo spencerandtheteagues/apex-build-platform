@@ -9,6 +9,7 @@
   - `EASBuildProvider` resolves a project-scoped EAS token from `MobileCredentialVault` and invokes `eas build --non-interactive --no-wait --json` only when configured behind feature flags.
   - `MobileBuildService.RefreshBuild` and `EASBuildProvider.RefreshBuild` refresh an existing job from `eas build:view --json` by provider build ID.
   - `MobileBuildService.CancelBuild` and `EASBuildProvider.CancelBuild` cancel a non-terminal provider build through `eas build:cancel`.
+  - `MobileBuildService.RetryBuild` creates a new provider job from a failed/canceled/repair-pending build after the API revalidates credentials, platform eligibility, and materialized source.
   - `MobileBuildPoller` refreshes active provider-backed jobs in the background only when `MOBILE_EAS_POLLING_ENABLED=true`.
   - `GormMobileBuildStore` persists restart-safe `mobile_build_jobs` rows and redacted logs/failure messages.
   - `ApplyMobileBuildJobToProject` updates project mobile summary fields and artifact metadata after job creation, explicit refresh, cancel, and background poll results.
@@ -18,11 +19,12 @@
   - `GET /api/v1/projects/:id/mobile/builds/:buildId` returns `{ build }`.
   - `POST /api/v1/projects/:id/mobile/builds/:buildId/refresh` returns `{ build }` after provider refresh.
   - `POST /api/v1/projects/:id/mobile/builds/:buildId/cancel` returns `{ build }` after provider cancellation.
+  - `POST /api/v1/projects/:id/mobile/builds/:buildId/retry` returns `{ build, credentials, retried_from }` after queueing a new build attempt.
   - `GET /api/v1/projects/:id/mobile/builds/:buildId/logs` returns `{ build_id, logs }`.
   - `GET /api/v1/projects/:id/mobile/builds/:buildId/artifacts` returns artifact metadata only when an artifact URL exists.
 - Consumers:
   - `frontend/src/services/api.ts` exposes typed mobile build-job methods.
-  - `frontend/src/components/project/MobileBuildOperationsPanel.tsx` lists mobile jobs, starts gated native builds, refreshes/cancels jobs, and opens artifact URLs.
+  - `frontend/src/components/project/MobileBuildOperationsPanel.tsx` lists mobile jobs, starts gated native builds, refreshes/cancels/retries jobs, and opens artifact URLs.
   - `Project.MobileBuildStatus` and `Project.MobileMetadata` feed the mobile readiness scorecard's native artifact category.
   - `ProjectDashboard` renders the build operations panel only for mobile projects.
 - Defaults / zero-value behavior:
@@ -34,8 +36,9 @@
   - Startup wires `EASBuildProvider` only when `MOBILE_EAS_BUILD_ENABLED=true`; otherwise provider execution fails closed with `503 MOBILE_BUILD_PROVIDER_MISSING`.
   - `EAS_CLI_PATH` defaults to `eas`; `MOBILE_EAS_BUILD_TIMEOUT` defaults to `30m`.
   - EAS builds are queued with `--no-wait`; explicit owner-scoped refresh and cancel actions are available.
+  - Retry is allowed only for `failed`, `canceled`, `repair_pending`, and `repaired_retry_pending` jobs. Active/succeeded jobs return `400 INVALID_MOBILE_BUILD_REQUEST`.
   - Background EAS status polling is separately gated by `MOBILE_EAS_POLLING_ENABLED`, defaults off, uses `MOBILE_EAS_POLL_INTERVAL` default `1m`, `MOBILE_EAS_POLL_MIN_AGE` default `30s`, and `MOBILE_EAS_POLL_BATCH_SIZE` default `10`.
-  - Retry, repair, and store submission remain separate future contracts.
+  - Automated repair and store submission remain separate future contracts.
   - Provider refresh transport failures append a redacted error log but do not mark the native build itself failed.
   - Logs and failure messages are redacted before persistence and responses.
 - Backward compatibility risk:
