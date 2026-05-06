@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"apex-build/internal/mobile"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -50,6 +51,43 @@ func TestCreateProjectRejectsPublicProjectOnFreePlan(t *testing.T) {
 
 	require.Equal(t, http.StatusPaymentRequired, recorder.Code)
 	require.Contains(t, recorder.Body.String(), backendSubscriptionRequiredCode)
+}
+
+func TestCreateProjectPersistsMobileMetadata(t *testing.T) {
+	handler, userID, db := newProjectHandlerTestFixture(t, "pro")
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(`{
+		"name":"Legacy Mobile Metadata",
+		"language":"typescript",
+		"target_platform":"mobile_expo",
+		"mobile_platforms":["android","ios"],
+		"mobile_framework":"expo-react-native",
+		"mobile_release_level":"source_only",
+		"mobile_capabilities":["offlineMode","fileUploads"],
+		"mobile_dependency_policy":"expo-allowlist"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set("user_id", userID)
+	context.Set("subscription_type", "pro")
+
+	handler.CreateProject(context)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+
+	var project models.Project
+	require.NoError(t, db.Where("owner_id = ? AND name = ?", userID, "Legacy Mobile Metadata").First(&project).Error)
+	require.Equal(t, string(mobile.TargetPlatformMobileExpo), project.TargetPlatform)
+	require.Equal(t, []string{"android", "ios"}, project.MobilePlatforms)
+	require.Equal(t, string(mobile.MobileFrameworkExpoReactNative), project.MobileFramework)
+	require.Equal(t, string(mobile.ReleaseSourceOnly), project.MobileReleaseLevel)
+	require.Equal(t, []string{"offlineMode", "fileUploads"}, project.MobileCapabilities)
+	require.Equal(t, "expo-allowlist", project.MobileDependencyPolicy)
+	require.Equal(t, "mobile/", project.GeneratedMobileClientPath)
+	require.Equal(t, "source_only", project.MobilePreviewStatus)
+	require.Equal(t, "not_requested", project.MobileBuildStatus)
+	require.Equal(t, "not_requested", project.MobileStoreReadinessStatus)
 }
 
 func TestUpdateProjectRejectsPublishingOnFreePlan(t *testing.T) {

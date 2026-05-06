@@ -3436,7 +3436,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     return 'Full-stack Web: browser app plus backend/API when required'
   }
 
-  const buildTargetRequestFields = (): BuildTargetRequestFields => {
+  const buildTargetRequestFields = useCallback((): BuildTargetRequestFields => {
     if (!targetPathExplicit && targetPlatform === 'fullstack_web') {
       return {}
     }
@@ -3453,7 +3453,38 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       mobile_capabilities: mobileCapabilities,
       mobile_dependency_policy: 'expo-allowlist',
     }
-  }
+  }, [
+    mobileCapabilities,
+    mobilePlatforms,
+    mobileReleaseLevel,
+    targetPathExplicit,
+    targetPlatform,
+  ])
+
+  const projectTargetMetadataFields = useCallback((): BuildTargetRequestFields => {
+    const explicitFields = buildTargetRequestFields()
+    if (explicitFields.target_platform) {
+      return explicitFields
+    }
+
+    const inferred = buildState?.buildContract || buildState?.intentBrief
+    if (inferred?.target_platform !== 'mobile_expo' && inferred?.target_platform !== 'mobile_capacitor') {
+      return explicitFields
+    }
+
+    return {
+      target_platform: inferred.target_platform,
+      mobile_platforms: inferred.mobile_platforms,
+      mobile_framework: inferred.mobile_framework,
+      mobile_release_level: inferred.mobile_release_level || 'source_only',
+      mobile_capabilities: inferred.mobile_capabilities,
+      mobile_dependency_policy: inferred.target_platform === 'mobile_expo' ? 'expo-allowlist' : undefined,
+    }
+  }, [
+    buildState?.buildContract,
+    buildState?.intentBrief,
+    buildTargetRequestFields,
+  ])
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -5514,11 +5545,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       else if (extensions.some(e => ['go'].includes(e))) language = 'go'
       else if (extensions.some(e => ['rs'].includes(e))) language = 'rust'
 
+      const projectMobileFields = projectTargetMetadataFields()
       const project = await createProject({
         name: projectName,
         description: projectDescription,
         language,
+        framework: projectMobileFields.target_platform === 'mobile_expo' ? 'Expo React Native' : undefined,
         is_public: false,
+        ...projectMobileFields,
       })
 
       const filesToSave = files.filter(f => f.path && f.content)
@@ -5554,6 +5588,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     currentProject,
     createdProjectId,
     deriveProjectName,
+    projectTargetMetadataFields,
     resolveGeneratedFiles,
     setCurrentProject,
   ])

@@ -81,6 +81,43 @@ func TestDownloadProjectPreparesMobileExpoFilesForOwnerZip(t *testing.T) {
 	require.True(t, zipHasPath(zipReader, "mobile/app.config.ts"))
 }
 
+func TestCreateProjectPersistsMobileMetadata(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{
+		"name":"Mobile Metadata",
+		"language":"typescript",
+		"target_platform":"mobile_expo",
+		"mobile_platforms":["android","ios","android"],
+		"mobile_framework":"expo-react-native",
+		"mobile_release_level":"source_only",
+		"mobile_capabilities":["offlineMode","fileUploads","offlineMode"],
+		"mobile_dependency_policy":"expo-allowlist"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set("user_id", userID)
+	context.Set("subscription_type", "pro")
+
+	server.CreateProject(context)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+
+	var project models.Project
+	require.NoError(t, gormDB.Where("owner_id = ? AND name = ?", userID, "Mobile Metadata").First(&project).Error)
+	require.Equal(t, string(mobile.TargetPlatformMobileExpo), project.TargetPlatform)
+	require.Equal(t, []string{"android", "ios"}, project.MobilePlatforms)
+	require.Equal(t, string(mobile.MobileFrameworkExpoReactNative), project.MobileFramework)
+	require.Equal(t, string(mobile.ReleaseSourceOnly), project.MobileReleaseLevel)
+	require.Equal(t, []string{"offlineMode", "fileUploads"}, project.MobileCapabilities)
+	require.Equal(t, "expo-allowlist", project.MobileDependencyPolicy)
+	require.Equal(t, "mobile/", project.GeneratedMobileClientPath)
+	require.Equal(t, "source_only", project.MobilePreviewStatus)
+	require.Equal(t, "not_requested", project.MobileBuildStatus)
+	require.Equal(t, "not_requested", project.MobileStoreReadinessStatus)
+}
+
 func TestCreateProjectRejectsPublicProjectOnFreePlan(t *testing.T) {
 	server, userID, gormDB := newProjectAPITestServer(t, "free")
 

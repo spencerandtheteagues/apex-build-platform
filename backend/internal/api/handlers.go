@@ -790,6 +790,7 @@ func (s *Server) CreateProject(c *gin.Context) {
 		Framework   string                 `json:"framework"`
 		IsPublic    bool                   `json:"is_public"`
 		Environment map[string]interface{} `json:"environment"`
+		mobile.ProjectMetadataFields
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -815,6 +816,7 @@ func (s *Server) CreateProject(c *gin.Context) {
 		IsPublic:    req.IsPublic,
 		Environment: req.Environment,
 	}
+	mobile.ApplyProjectMetadata(project, req.ProjectMetadataFields)
 
 	if err := s.db.DB.Create(project).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create project"})

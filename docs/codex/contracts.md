@@ -575,6 +575,7 @@
   - `backend/internal/mobile/export_files.go` mobile export source preparation.
 - Producers:
   - Builder start/create flows can set `target_platform`, `mobile_platforms`, `mobile_framework`, `mobile_release_level`, and `mobile_capabilities`.
+  - Project creation handlers apply the same additive metadata defaults for fallback project creation.
   - Project fetch/list APIs serialize the optional project metadata.
   - ZIP and GitHub export handlers prepare Expo source files when mobile metadata is present.
 - Transport:
@@ -591,6 +592,7 @@
   - Additive optional frontend fields only; old project payloads continue rendering as web projects.
   - Export request payloads are not widened in this slice, so existing ZIP/GitHub actions keep their current API contract.
 - Required tests / validations:
+  - Backend project-create tests for both project handlers persisting mobile metadata.
   - Frontend ProjectDashboard test for mobile source-export messaging.
   - Frontend ProjectDashboard test proving web projects do not show mobile messaging.
   - Frontend typecheck.

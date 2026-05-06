@@ -524,6 +524,12 @@ export class ApiService {
     framework?: string
     is_public?: boolean
     environment?: Record<string, any>
+    target_platform?: TargetPlatform
+    mobile_platforms?: MobilePlatform[]
+    mobile_framework?: MobileFramework
+    mobile_release_level?: MobileReleaseLevel
+    mobile_capabilities?: MobileCapability[]
+    mobile_dependency_policy?: string
   }): Promise<Project> {
     const response = await this.client.post<{ message?: string; project: Project }>('/projects', data)
     // Backend returns { message, project } directly, not wrapped in { data: { project } }
