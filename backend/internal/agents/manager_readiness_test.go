@@ -1059,6 +1059,50 @@ export default function App() {
 	}
 }
 
+func TestPlannedFeatureCoverageErrorsAcceptsInventorySignals(t *testing.T) {
+	t.Parallel()
+
+	build := inventoryFeatureCoverageBuild()
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const products = ["HVAC-COMP-24", "ROOF-SHINGLE-GR"];
+const purchaseOrders = ["PO-1048", "PO-1051"];
+
+export default function App() {
+  return <main>
+    <section aria-label="Dashboard">
+      <article>Dashboard stock health, inventory value, SKU count, low stock, purchase order queue, receiving, reorder, inventory movement chart, fulfillment rate, cycle count accuracy.</article>
+    </section>
+    <section aria-label="Inventory Table">
+      <input aria-label="SKU search" />
+      <select aria-label="category filters"><option>HVAC</option></select>
+      {products.map((sku) => <article key={sku}>Inventory table list SKU {sku} category location stock level reorder point status badge</article>)}
+    </section>
+    <section aria-label="Product Detail Page">
+      <h2>Product detail page</h2>
+      <article>Selected product stock ledger movement adjustment history supplier info vendor data reorder calculator reorder point quantity_on_hand</article>
+    </section>
+    <section aria-label="Purchase Orders Page">
+      <form>Create PO form vendor selector supplier line items totals cost status transitions approved ordered received</form>
+      {purchaseOrders.map((po) => <article key={po}>purchase order {po} line item totals status transitions</article>)}
+    </section>
+    <section aria-label="Receiving Workflow">
+      <article>Receiving workflow with scan simulation barcode scan quantity validation received success toast put away dock workflow</article>
+    </section>
+    <section aria-label="Settings Page">
+      <label>Warehouse<input /></label>
+      <label>Suppliers<textarea /></label>
+      <label>Reorder rules<textarea /></label>
+      <button>Reset Demo Data</button>
+    </section>
+  </main>;
+}`},
+	)
+
+	if errs := plannedFeatureCoverageErrors(build, files); len(errs) != 0 {
+		t.Fatalf("expected inventory feature signals to pass planned coverage, got %v", errs)
+	}
+}
+
 func TestPlannedFeatureCoverageErrorsAcceptsDashboardWithoutChartRequirement(t *testing.T) {
 	t.Parallel()
 
@@ -1511,6 +1555,88 @@ export default BookingDashboard;`},
 	}
 }
 
+func TestApplyDeterministicValidationRepairsUsesInventoryPlannedFeatureRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := inventoryFeatureCoverageBuild()
+	build.ID = "build-inventory-planned-feature-coverage-repair"
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `export default function App(){ return <main>Dashboard Inventory Product Purchase Receiving Settings</main>; }`},
+		GeneratedFile{Path: "src/components/InventoryTable.tsx", Language: "typescript", Content: `export default function InventoryTable(){ return <section>SKU table</section>; }`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`planned feature coverage failed: "Inventory Table" is missing inventory-table signals for SKU search, filters, category/location fields, reorder points, and status`,
+			`planned feature coverage failed: "Receiving Workflow" is missing receiving-workflow signals for scan simulation, quantity validation, success toast, and put-away handling`,
+		},
+		"planned feature coverage failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected inventory planned-feature coverage failure to use deterministic workflow repair")
+	}
+	repairedFiles := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range repairedFiles {
+		if sanitizeFilePath(file.Path) == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if strings.TrimSpace(app) == "" {
+		t.Fatalf("expected repaired inventory app file, got %+v", repairedFiles)
+	}
+	for _, expected := range []string{
+		"StockPilot",
+		"Inventory Table",
+		"SKU search",
+		"category filters",
+		"Product detail page",
+		"Stock ledger and adjustment history",
+		"Reorder calculator",
+		"Purchase Orders Page",
+		"Create PO form",
+		"line items",
+		"status transitions",
+		"Receiving Workflow",
+		"Scan simulation",
+		"Quantity validation",
+		"Success toast",
+		"Warehouse",
+		"Suppliers",
+		"Reorder rules",
+		"Reset Demo Data",
+	} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired inventory app to contain %q, got %q", expected, app)
+		}
+	}
+	if errs := plannedFeatureCoverageErrors(build, repairedFiles); len(errs) != 0 {
+		t.Fatalf("expected repaired inventory app to pass planned-feature coverage, got %v", errs)
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		found := false
+		for _, bundle := range state.PatchBundles {
+			if strings.Contains(bundle.Justification, "planned_feature_coverage_repair") &&
+				strings.Contains(bundle.Justification, "inventory") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected inventory planned-feature repair patch bundle, got %+v", state.PatchBundles)
+		}
+	}
+}
+
 func TestApplyDeterministicValidationRepairsSkipsGenericPreviewFallbackForNonFieldOpsPlannedFeatureCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -1662,6 +1788,31 @@ func bookingFeatureCoverageBuild() *Build {
 				{Name: "Staff Page", Description: "Staff page with stylists, services, schedules, availability, and current bookings.", Priority: 80},
 				{Name: "Customer Profile Detail", Description: "Customer profile detail with history, notes, preferences, and upcoming appointment.", Priority: 80},
 				{Name: "Settings Page", Description: "Settings page with business hours, default deposit, service catalog, and reset demo data.", Priority: 60},
+			},
+		},
+	}
+}
+
+func inventoryFeatureCoverageBuild() *Build {
+	return &Build{
+		ID:          "build-inventory-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build StockPilot, a production-ready inventory management app with dashboard stock health, inventory table, product detail page, purchase orders page, receiving workflow, settings, warehouse controls, suppliers, reorder rules, and reset demo data.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "frontend",
+			TechStack: TechStack{
+				Frontend: "React",
+			},
+			Features: []Feature{
+				{Name: "Dashboard", Description: "Dashboard with stock health, inventory value, low-stock SKUs, purchase orders, receiving lines, movement chart, fulfillment rate, and cycle count accuracy.", Priority: 100},
+				{Name: "Inventory Table", Description: "Inventory table with SKU search, category filters, location, stock level, reorder point, and status badges.", Priority: 100},
+				{Name: "Product Detail Page", Description: "Product detail page with stock ledger, supplier info, reorder calculator, and adjustment history.", Priority: 100},
+				{Name: "Purchase Orders Page", Description: "Purchase orders page with create PO form, vendor selector, line items, totals, and status transitions.", Priority: 100},
+				{Name: "Receiving Workflow", Description: "Receiving workflow with scan simulation, quantity validation, success toast, and put-away handling.", Priority: 100},
+				{Name: "Settings Page", Description: "Settings page with warehouse defaults, suppliers, reorder rules, and reset demo data.", Priority: 60},
 			},
 		},
 	}
@@ -8522,6 +8673,74 @@ func TestClearStaleDependencyValidationClearsSatisfiedPostCSSConfigFailure(t *te
 	})
 	if !strings.Contains(summary, "stale dependency validation") {
 		t.Fatalf("expected stale PostCSS validation reset summary, got %q", summary)
+	}
+}
+
+func TestClearStaleDependencyValidationIgnoresDeletedAmbiguousPostCSSConfigs(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-postcss-cjs-validation",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "stockpilot",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc && vite build", "dev": "vite" },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "tailwindcss": "^3.4.3",
+    "postcss": "^8.4.38",
+    "autoprefixer": "^10.4.19"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path:    "postcss.config.js",
+				Content: "",
+				IsNew:   true,
+			},
+			{
+				Path: "postcss.config.cjs",
+				Content: `module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {}
+  }
+};`,
+				IsNew: true,
+			},
+			{
+				Path:    "tailwind.config.js",
+				Content: "",
+				IsNew:   true,
+			},
+			{
+				Path:    "tailwind.config.cjs",
+				Content: `module.exports = { content: ["./index.html", "./src/**/*.{ts,tsx}"], theme: { extend: {} }, plugins: [] };`,
+				IsNew:   true,
+			},
+		},
+	}
+
+	summary := am.clearStaleDependencyValidationError(build, []string{
+		`[Failed to load PostCSS config: Failed to load PostCSS config (searchPath: /tmp/apex-preview): [SyntaxError] Unexpected token 'export']`,
+	})
+	if !strings.Contains(summary, "compatible PostCSS/Tailwind config") {
+		t.Fatalf("expected stale PostCSS validation reset to use canonical .cjs configs, got %q", summary)
 	}
 }
 
