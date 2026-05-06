@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Project } from '@/types'
@@ -102,6 +102,33 @@ describe('ProjectDashboard mobile export visibility', () => {
             updated_at: '2026-05-01T00:00:00.000Z',
           },
         ],
+      }),
+      createProjectMobileCredential: vi.fn().mockResolvedValue({
+        status: 'validated',
+        complete: true,
+        required: ['eas_token'],
+        present: ['eas_token'],
+        missing: [],
+        metadata: [
+          {
+            type: 'eas_token',
+            secret_id: 92,
+            project_id: 42,
+            status: 'stored',
+            label: 'EAS token',
+            created_at: '2026-05-01T00:00:00.000Z',
+            updated_at: '2026-05-01T00:20:00.000Z',
+          },
+        ],
+      }),
+      deleteProjectMobileCredential: vi.fn().mockResolvedValue({
+        status: 'missing',
+        complete: false,
+        required: ['eas_token'],
+        present: [],
+        missing: ['eas_token'],
+        metadata: [],
+        blockers: ['Add EAS token.'],
       }),
       listProjectMobileBuilds: vi.fn().mockResolvedValue([
         {
@@ -230,6 +257,74 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
       type: 'success',
       title: 'Native build queued',
+    }))
+  })
+
+  it('stores an EAS token from the mobile credential panel without echoing the secret', async () => {
+    mockApiService.getProjectMobileCredentials.mockResolvedValueOnce({
+      status: 'missing',
+      complete: false,
+      required: ['eas_token'],
+      present: [],
+      missing: ['eas_token'],
+      metadata: [],
+      blockers: ['Add EAS token.'],
+    })
+    mockApiService.listProjectMobileBuilds.mockResolvedValueOnce([])
+    mockCurrentProject = {
+      ...baseProject,
+      target_platform: 'mobile_expo',
+      mobile_framework: 'expo-react-native',
+      mobile_platforms: ['android'],
+      mobile_release_level: 'source_only',
+      mobile_capabilities: ['offlineMode'],
+    }
+
+    render(<ProjectDashboard />)
+
+    const easCard = await screen.findByTestId('mobile-credential-eas_token')
+    fireEvent.click(within(easCard).getByRole('button', { name: /Add/i }))
+    fireEvent.change(within(easCard).getByLabelText('EAS access token'), {
+      target: { value: 'eas-secret-token' },
+    })
+    fireEvent.click(within(easCard).getByRole('button', { name: /Save encrypted credential/i }))
+
+    await waitFor(() => {
+      expect(mockApiService.createProjectMobileCredential).toHaveBeenCalledWith(42, {
+        type: 'eas_token',
+        values: { token: 'eas-secret-token' },
+      })
+    })
+    expect(screen.queryByDisplayValue('eas-secret-token')).toBeNull()
+    expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'success',
+      title: 'Mobile credential stored',
+      message: expect.not.stringContaining('eas-secret-token'),
+    }))
+  })
+
+  it('deletes a stored mobile credential from the credential panel', async () => {
+    mockApiService.listProjectMobileBuilds.mockResolvedValueOnce([])
+    mockCurrentProject = {
+      ...baseProject,
+      target_platform: 'mobile_expo',
+      mobile_framework: 'expo-react-native',
+      mobile_platforms: ['android'],
+      mobile_release_level: 'source_only',
+      mobile_capabilities: ['offlineMode'],
+    }
+
+    render(<ProjectDashboard />)
+
+    const easCard = await screen.findByTestId('mobile-credential-eas_token')
+    fireEvent.click(within(easCard).getByRole('button', { name: /Delete/i }))
+
+    await waitFor(() => {
+      expect(mockApiService.deleteProjectMobileCredential).toHaveBeenCalledWith(42, 'eas_token')
+    })
+    expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'success',
+      title: 'Mobile credential deleted',
     }))
   })
 

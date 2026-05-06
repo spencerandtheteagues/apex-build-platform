@@ -89,6 +89,7 @@ Implemented now:
 
 - `frontend/src/services/api.ts` accepts and reads optional mobile target metadata.
 - `frontend/src/services/api.ts` exposes mobile credential status/create/delete methods with metadata-only response types.
+- `MobileCredentialPanel` lets project owners add, replace, or delete EAS, Apple App Store Connect, Google Play, and Android signing credentials from the mobile dashboard. It never pre-fills stored secret values and clears transient form values after save/cancel/delete.
 - `frontend/src/services/api.ts` exposes project-scoped mobile build-job methods for request, status, refresh, logs, and artifact metadata.
 - `ProjectDashboard` includes a mobile build operations panel for mobile projects. It lists native build jobs, checks EAS credential status, starts Android APK/AAB or iOS internal builds through the gated backend API, refreshes/cancels jobs, and opens artifact links when available.
 
@@ -97,7 +98,7 @@ Next frontend work:
 - new-project target selector.
 - mobile setup step with Android/iOS/capability/build-level controls.
 - mobile preview frame with honest Expo Web labeling.
-- credentials panel.
+- provider credential testing beyond payload-shape validation.
 - store-readiness checklist.
 - mobile export options in `GitHubExportModal`.
 
