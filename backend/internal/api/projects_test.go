@@ -118,6 +118,48 @@ func TestCreateProjectPersistsMobileMetadata(t *testing.T) {
 	require.Equal(t, "not_requested", project.MobileStoreReadinessStatus)
 }
 
+func TestGetProjectMobileValidationPreparesAndReportsSourceStatus(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+
+	project := models.Project{
+		Name:           "Mobile Validation",
+		Language:       "typescript",
+		OwnerID:        userID,
+		TargetPlatform: string(mobile.TargetPlatformMobileExpo),
+	}
+	require.NoError(t, gormDB.Create(&project).Error)
+
+	spec := mobile.FieldServiceContractorQuoteSpec()
+	spec.App.Slug = "mobile-validation-spec"
+	specJSON, err := json.Marshal(spec)
+	require.NoError(t, err)
+	require.NoError(t, gormDB.Create(&models.CompletedBuild{
+		BuildID:        "mobile-validation-build",
+		UserID:         userID,
+		ProjectID:      &project.ID,
+		Status:         "completed",
+		TargetPlatform: string(mobile.TargetPlatformMobileExpo),
+		MobileSpecJSON: string(specJSON),
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/mobile/validation", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.GetProjectMobileValidation(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Validation mobile.MobileValidationReport `json:"validation"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, mobile.MobileValidationPassed, response.Validation.Status)
+	require.Equal(t, "draft_ready_needs_manual_store_assets", response.Validation.StoreReadinessState)
+	require.True(t, hasValidationCheck(response.Validation, "release_truth", mobile.MobileValidationPassed))
+}
+
 func TestCreateProjectRejectsPublicProjectOnFreePlan(t *testing.T) {
 	server, userID, gormDB := newProjectAPITestServer(t, "free")
 
@@ -161,6 +203,15 @@ func TestCreateProjectRejectsInvalidUserContext(t *testing.T) {
 func zipHasPath(reader *zip.Reader, path string) bool {
 	for _, file := range reader.File {
 		if file.Name == path {
+			return true
+		}
+	}
+	return false
+}
+
+func hasValidationCheck(report mobile.MobileValidationReport, id string, status mobile.MobileValidationStatus) bool {
+	for _, check := range report.Checks {
+		if check.ID == id && check.Status == status {
 			return true
 		}
 	}

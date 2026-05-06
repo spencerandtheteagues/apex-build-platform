@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"apex-build/pkg/models"
 )
 
 func TestGenerateExpoProjectCreatesFieldServiceSource(t *testing.T) {
@@ -48,6 +50,55 @@ func TestGenerateStoreReadinessPackageLabelsDraftsAndManualPrerequisites(t *test
 	}
 	if errs := ValidateStoreReadinessPackage(pkg); len(errs) > 0 {
 		t.Fatalf("expected store readiness package to validate, got %+v", errs)
+	}
+}
+
+func TestValidateProjectSourcePackagePassesGeneratedExpoSource(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseSourceOnly), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationPassed {
+		t.Fatalf("expected validation passed, got %+v", report)
+	}
+	if !hasMobileValidationCheck(report, "store_readiness", MobileValidationPassed) {
+		t.Fatalf("expected store readiness check to pass, got %+v", report.Checks)
+	}
+}
+
+func TestValidateProjectSourcePackageFailsMissingRequiredFiles(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+	files = removeSourceFile(files, "mobile/eas.json")
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseSourceOnly), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationFailed {
+		t.Fatalf("expected validation failed, got %+v", report)
+	}
+	if !stringSliceContains(report.MissingFiles, "mobile/eas.json") {
+		t.Fatalf("expected missing eas.json, got %+v", report.MissingFiles)
+	}
+}
+
+func TestValidateProjectSourcePackageRejectsNativeClaimWithoutBuildSuccess(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseAndroidAAB), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationFailed {
+		t.Fatalf("expected native release claim to fail without build success, got %+v", report)
+	}
+	if !hasMobileValidationCheck(report, "release_truth", MobileValidationFailed) {
+		t.Fatalf("expected release truth check failure, got %+v", report.Checks)
 	}
 }
 
@@ -176,6 +227,51 @@ func hasScreenshotTarget(targets []StoreScreenshotTarget, platform string) bool 
 		}
 	}
 	return false
+}
+
+func hasMobileValidationCheck(report MobileValidationReport, id string, status MobileValidationStatus) bool {
+	for _, check := range report.Checks {
+		if check.ID == id && check.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func removeSourceFile(files []SourceFile, path string) []SourceFile {
+	filtered := make([]SourceFile, 0, len(files))
+	for _, file := range files {
+		if file.Path != path {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
+}
+
+func modelFilesFromSource(files []SourceFile) []models.File {
+	modelFiles := make([]models.File, 0, len(files))
+	for _, file := range files {
+		modelFiles = append(modelFiles, models.File{
+			Path:    file.Path,
+			Name:    filepath.Base(file.Path),
+			Type:    "file",
+			Content: file.Content,
+			Size:    file.Size,
+		})
+	}
+	return modelFiles
+}
+
+func modelsProjectForSpec(spec MobileAppSpec, releaseLevel string, buildStatus string) models.Project {
+	return models.Project{
+		Name:                spec.App.Name,
+		Language:            "typescript",
+		TargetPlatform:      string(TargetPlatformMobileExpo),
+		MobileReleaseLevel:  releaseLevel,
+		MobileBuildStatus:   buildStatus,
+		AndroidPackage:      spec.Identity.AndroidPackage,
+		IOSBundleIdentifier: spec.Identity.IOSBundleID,
+	}
 }
 
 func sourceFilePaths(files []SourceFile) []string {

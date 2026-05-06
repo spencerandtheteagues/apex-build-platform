@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { cn, formatFileSize, formatRelativeTime, getFileIcon } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { AIUsage, Execution, File } from '@/types'
+import type { MobileValidationReport, MobileValidationStatus } from '@/services/api'
 import { Badge, Button, Loading } from '@/components/ui'
 import {
   Activity,
@@ -72,6 +73,20 @@ const releaseLevelLabels: Record<string, string> = {
 const formatMobilePlatform = (platform: string) =>
   platform === 'ios' ? 'iOS' : platform.charAt(0).toUpperCase() + platform.slice(1)
 
+const validationStatusLabels: Record<MobileValidationStatus, string> = {
+  passed: 'Validation passed',
+  warning: 'Passed with warnings',
+  failed: 'Validation failed',
+  not_mobile: 'Not a mobile project',
+}
+
+const validationStatusClasses: Record<MobileValidationStatus, string> = {
+  passed: 'border-emerald-300/20 bg-emerald-300/10 text-emerald-100',
+  warning: 'border-amber-300/20 bg-amber-300/10 text-amber-100',
+  failed: 'border-red-300/20 bg-red-300/10 text-red-100',
+  not_mobile: 'border-white/10 bg-white/[0.03] text-gray-300',
+}
+
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   className,
   projectId,
@@ -84,6 +99,8 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const [recentExecutions, setRecentExecutions] = useState<Execution[]>([])
   const [aiUsage, setAIUsage] = useState<AIUsage | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [mobileValidation, setMobileValidation] = useState<MobileValidationReport | null>(null)
+  const [isMobileValidationLoading, setIsMobileValidationLoading] = useState(false)
 
   const {
     currentProject,
@@ -94,11 +111,58 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     addNotification,
   } = useStore()
 
+  const isMobileProject = useMemo(() => {
+    if (!currentProject) return false
+    return (
+      currentProject.target_platform === 'mobile_expo' ||
+      currentProject.mobile_framework === 'expo-react-native' ||
+      Boolean(currentProject.mobile_platforms?.length) ||
+      Boolean(currentProject.mobile_capabilities?.length)
+    )
+  }, [currentProject])
+  const currentProjectId = currentProject?.id
+
   useEffect(() => {
     if (projectId && projectId !== currentProject?.id) {
       void loadProject(projectId)
     }
   }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!currentProjectId || !isMobileProject) {
+      setMobileValidation(null)
+      setIsMobileValidationLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setIsMobileValidationLoading(true)
+    void apiService.getProjectMobileValidation(currentProjectId)
+      .then((validation) => {
+        if (!cancelled) {
+          setMobileValidation(validation)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMobileValidation({
+            status: 'failed',
+            summary: 'Unable to load mobile validation status.',
+            checks: [],
+            errors: ['Unable to load mobile validation status.'],
+          })
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsMobileValidationLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [apiService, currentProjectId, isMobileProject])
 
   const loadProject = async (id: number) => {
     setIsLoading(true)
@@ -267,11 +331,6 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
 
   const languageLabel = currentProject.language || 'workspace'
   const frameworkLabel = currentProject.framework || 'custom'
-  const isMobileExpoProject =
-    currentProject.target_platform === 'mobile_expo' ||
-    currentProject.mobile_framework === 'expo-react-native' ||
-    Boolean(currentProject.mobile_platforms?.length) ||
-    Boolean(currentProject.mobile_capabilities?.length)
   const mobilePlatforms = currentProject.mobile_platforms?.length
     ? currentProject.mobile_platforms
     : (['android', 'ios'] as const)
@@ -395,7 +454,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
         </div>
       </section>
 
-      {isMobileExpoProject ? (
+      {isMobileProject ? (
         <section
           className={cn(panelClass, 'overflow-hidden border-cyan-300/18')}
           data-testid="mobile-export-readiness"
@@ -453,6 +512,33 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                   <div className="mt-2 text-sm font-medium text-white">
                     {releaseLevelLabels[mobileReleaseLevel] || mobileReleaseLevel}
                   </div>
+                </div>
+                <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4" data-testid="mobile-validation-status">
+                  <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Validation</div>
+                  {isMobileValidationLoading ? (
+                    <div className="mt-3 text-sm font-medium text-cyan-100">Checking mobile source package...</div>
+                  ) : mobileValidation ? (
+                    <>
+                      <span className={cn('mt-3 inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', validationStatusClasses[mobileValidation.status])}>
+                        {validationStatusLabels[mobileValidation.status]}
+                      </span>
+                      <p className="mt-3 text-xs leading-5 text-gray-300">{mobileValidation.summary}</p>
+                      {mobileValidation.checks.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          {mobileValidation.checks.slice(0, 4).map((check) => (
+                            <div key={check.id} className="flex items-start justify-between gap-3 text-xs">
+                              <span className="text-gray-300">{check.label}</span>
+                              <span className={cn('shrink-0 rounded-full px-2 py-0.5 font-medium', validationStatusClasses[check.status])}>
+                                {check.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="mt-3 text-sm font-medium text-gray-300">Validation not loaded yet.</div>
+                  )}
                 </div>
                 <div className="rounded-2xl border border-amber-300/16 bg-amber-300/8 px-4 py-4">
                   <div className="flex items-start gap-3">

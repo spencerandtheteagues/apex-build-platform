@@ -1577,6 +1577,7 @@ func setupRoutes(
 				projects.PUT("/:id", optimizedHandler.UpdateProjectOptimized)    // Optimized: cache invalidation
 				projects.DELETE("/:id", optimizedHandler.DeleteProjectOptimized) // Optimized: cache invalidation
 				projects.GET("/:id/download", server.DownloadProject)
+				projects.GET("/:id/mobile/validation", server.GetProjectMobileValidation)
 
 				// File endpoints under projects - using optimized handler
 				// Storage quota checked on file creation
