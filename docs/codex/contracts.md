@@ -9,8 +9,9 @@
   - `EASBuildProvider` resolves a project-scoped EAS token from `MobileCredentialVault` and invokes `eas build --non-interactive --no-wait --json` only when configured behind feature flags.
   - `MobileBuildService.RefreshBuild` and `EASBuildProvider.RefreshBuild` refresh an existing job from `eas build:view --json` by provider build ID.
   - `MobileBuildService.CancelBuild` and `EASBuildProvider.CancelBuild` cancel a non-terminal provider build through `eas build:cancel`.
+  - `MobileBuildPoller` refreshes active provider-backed jobs in the background only when `MOBILE_EAS_POLLING_ENABLED=true`.
   - `GormMobileBuildStore` persists restart-safe `mobile_build_jobs` rows and redacted logs/failure messages.
-  - `ApplyMobileBuildJobToProject` updates project mobile summary fields and artifact metadata after job creation and refresh results.
+  - `ApplyMobileBuildJobToProject` updates project mobile summary fields and artifact metadata after job creation, explicit refresh, cancel, and background poll results.
 - Transport:
   - `GET /api/v1/projects/:id/mobile/builds` returns `{ builds }`.
   - `POST /api/v1/projects/:id/mobile/builds` returns `{ build, credentials }` on success.
@@ -31,7 +32,9 @@
   - Store-readiness credential status is broader and still tracks Apple/App Store Connect and Google Play credentials separately from EAS queueing.
   - Startup wires `EASBuildProvider` only when `MOBILE_EAS_BUILD_ENABLED=true`; otherwise provider execution fails closed with `503 MOBILE_BUILD_PROVIDER_MISSING`.
   - `EAS_CLI_PATH` defaults to `eas`; `MOBILE_EAS_BUILD_TIMEOUT` defaults to `30m`.
-  - EAS builds are queued with `--no-wait`; explicit owner-scoped refresh and cancel actions are available, but background polling, retry, repair, and store submission remain separate future contracts.
+  - EAS builds are queued with `--no-wait`; explicit owner-scoped refresh and cancel actions are available.
+  - Background EAS status polling is separately gated by `MOBILE_EAS_POLLING_ENABLED`, defaults off, uses `MOBILE_EAS_POLL_INTERVAL` default `1m`, `MOBILE_EAS_POLL_MIN_AGE` default `30s`, and `MOBILE_EAS_POLL_BATCH_SIZE` default `10`.
+  - Retry, repair, and store submission remain separate future contracts.
   - Provider refresh transport failures append a redacted error log but do not mark the native build itself failed.
   - Logs and failure messages are redacted before persistence and responses.
 - Backward compatibility risk:

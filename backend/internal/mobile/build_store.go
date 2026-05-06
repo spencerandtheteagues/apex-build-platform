@@ -111,6 +111,41 @@ func (s *GormMobileBuildStore) ListByProject(ctx context.Context, projectID uint
 	return jobs, nil
 }
 
+func (s *GormMobileBuildStore) ListPollable(ctx context.Context, statuses []MobileBuildStatus, updatedBefore time.Time, limit int) ([]MobileBuildJob, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("%w: store is unavailable", ErrMobileBuildInvalidRequest)
+	}
+	statusValues := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		if strings.TrimSpace(string(status)) != "" {
+			statusValues = append(statusValues, string(status))
+		}
+	}
+	if len(statusValues) == 0 {
+		return nil, nil
+	}
+
+	query := s.db.WithContext(ctx).
+		Where("status IN ?", statusValues).
+		Where("provider_build_id <> ?", "")
+	if !updatedBefore.IsZero() {
+		query = query.Where("updated_at <= ?", updatedBefore)
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	var records []MobileBuildRecord
+	if err := query.Order("updated_at ASC").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	jobs := make([]MobileBuildJob, 0, len(records))
+	for _, record := range records {
+		jobs = append(jobs, mobileBuildRecordToJob(record))
+	}
+	return jobs, nil
+}
+
 func mobileBuildJobToRecord(job MobileBuildJob) *MobileBuildRecord {
 	return &MobileBuildRecord{
 		ID:              strings.TrimSpace(job.ID),

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -138,6 +139,7 @@ type MobileBuildStore interface {
 	Update(ctx context.Context, job MobileBuildJob) error
 	Get(ctx context.Context, id string) (MobileBuildJob, bool, error)
 	ListByProject(ctx context.Context, projectID uint) ([]MobileBuildJob, error)
+	ListPollable(ctx context.Context, statuses []MobileBuildStatus, updatedBefore time.Time, limit int) ([]MobileBuildJob, error)
 }
 
 type MobileBuildService struct {
@@ -408,12 +410,56 @@ func (s *MobileBuildService) ListProjectBuilds(ctx context.Context, projectID ui
 	return s.store.ListByProject(ctx, projectID)
 }
 
+func (s *MobileBuildService) RefreshPollableBuilds(ctx context.Context, limit int, minAge time.Duration) ([]MobileBuildJob, []error) {
+	if s == nil {
+		return nil, []error{fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)}
+	}
+	if s.store == nil {
+		return nil, []error{ErrMobileBuildJobNotFound}
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if minAge < 0 {
+		minAge = 0
+	}
+
+	jobs, err := s.store.ListPollable(ctx, pollableMobileBuildStatuses(), s.now().Add(-minAge), limit)
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	refreshed := make([]MobileBuildJob, 0, len(jobs))
+	errs := make([]error, 0)
+	for _, job := range jobs {
+		next, refreshErr := s.RefreshBuild(ctx, job.ID)
+		if strings.TrimSpace(next.ID) != "" {
+			refreshed = append(refreshed, next)
+		}
+		if refreshErr != nil {
+			errs = append(errs, refreshErr)
+		}
+	}
+	return refreshed, errs
+}
+
 func isCancelableMobileBuildStatus(status MobileBuildStatus) bool {
 	switch status {
 	case MobileBuildQueued, MobileBuildPreparing, MobileBuildValidating, MobileBuildUploading, MobileBuildBuilding, MobileBuildSigning:
 		return true
 	default:
 		return false
+	}
+}
+
+func pollableMobileBuildStatuses() []MobileBuildStatus {
+	return []MobileBuildStatus{
+		MobileBuildQueued,
+		MobileBuildPreparing,
+		MobileBuildValidating,
+		MobileBuildUploading,
+		MobileBuildBuilding,
+		MobileBuildSigning,
 	}
 }
 
@@ -675,6 +721,43 @@ func (s *InMemoryMobileBuildStore) ListByProject(ctx context.Context, projectID 
 		if job, ok := s.jobs[id]; ok {
 			jobs = append(jobs, job)
 		}
+	}
+	return jobs, nil
+}
+
+func (s *InMemoryMobileBuildStore) ListPollable(ctx context.Context, statuses []MobileBuildStatus, updatedBefore time.Time, limit int) ([]MobileBuildJob, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	statusSet := map[MobileBuildStatus]bool{}
+	for _, status := range statuses {
+		statusSet[status] = true
+	}
+	if len(statusSet) == 0 {
+		return nil, nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	jobs := make([]MobileBuildJob, 0)
+	for _, job := range s.jobs {
+		if !statusSet[job.Status] {
+			continue
+		}
+		if strings.TrimSpace(job.ProviderBuildID) == "" {
+			continue
+		}
+		if !updatedBefore.IsZero() && job.UpdatedAt.After(updatedBefore) {
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].UpdatedAt.Before(jobs[j].UpdatedAt)
+	})
+	if limit > 0 && len(jobs) > limit {
+		jobs = jobs[:limit]
 	}
 	return jobs, nil
 }

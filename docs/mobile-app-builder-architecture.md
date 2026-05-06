@@ -73,12 +73,13 @@ Implemented now:
 - encrypted, project-scoped mobile credential vault for EAS, Apple App Store Connect, Google Play service accounts, and Android signing.
 - authenticated mobile credential status API that returns metadata only and updates the mobile readiness scorecard.
 - `EASBuildProvider` seam behind `MOBILE_EAS_BUILD_ENABLED`; it materializes stored project `mobile/` files into a temporary source directory, resolves the project-scoped EAS token from the encrypted vault, invokes `eas build --non-interactive --no-wait --json`, refreshes status/artifacts through `eas build:view --json`, and requests cancellation through `eas build:cancel` with redacted logs.
+- default-off `MobileBuildPoller` behind `MOBILE_EAS_POLLING_ENABLED`; it periodically refreshes active provider-backed EAS build jobs, updates stored job/project summary metadata, and preserves transport errors as redacted logs without falsely marking builds failed.
 
 Next backend services:
 
 - generated mobile API client generator.
 - Expo Web preview provider.
-- automated polling workers, retry endpoints, and repair-loop integration.
+- retry endpoints and repair-loop integration.
 - store metadata/readiness generators.
 
 ## Frontend UI Components
@@ -136,7 +137,7 @@ The current branch stores mobile credentials through `backend/internal/mobile.Mo
 
 The current branch also exposes native mobile build-job endpoints under `/api/v1/projects/:id/mobile/builds`. These endpoints fail closed unless mobile build feature flags are enabled, the requested platform is enabled for the project, the build credential requirement is complete, and a provider is configured. Build queueing currently requires the project-scoped EAS token. Store-readiness credential status remains broader: Android store release still tracks Google Play credentials and iOS store release tracks Apple/App Store Connect credentials. Public requests cannot choose arbitrary server source paths; the API materializes the project-owned stored `mobile/` files into a temporary build directory before provider execution.
 
-When `MOBILE_EAS_BUILD_ENABLED=true`, startup wires `EASBuildProvider` with `EAS_CLI_PATH` (default `eas`), `MOBILE_EAS_BUILD_TIMEOUT` (default `30m`), and the encrypted mobile credential vault. The provider queues no-wait EAS builds and records the initial provider build ID/status/artifact URL when the CLI returns it. Project owners can explicitly refresh a stored build job; refresh calls `eas build:view --json`, updates status/artifact metadata, appends redacted logs, and updates project readiness metadata. Project owners can also cancel non-terminal jobs; cancel calls `eas build:cancel` and updates the stored job to `canceled` when accepted. The current branch does not yet run background polling, retry provider jobs, or submit to stores.
+When `MOBILE_EAS_BUILD_ENABLED=true`, startup wires `EASBuildProvider` with `EAS_CLI_PATH` (default `eas`), `MOBILE_EAS_BUILD_TIMEOUT` (default `30m`), and the encrypted mobile credential vault. The provider queues no-wait EAS builds and records the initial provider build ID/status/artifact URL when the CLI returns it. Project owners can explicitly refresh a stored build job; refresh calls `eas build:view --json`, updates status/artifact metadata, appends redacted logs, and updates project readiness metadata. Project owners can also cancel non-terminal jobs; cancel calls `eas build:cancel` and updates the stored job to `canceled` when accepted. When `MOBILE_EAS_POLLING_ENABLED=true`, startup runs a background EAS status poller with `MOBILE_EAS_POLL_INTERVAL` (default `1m`), `MOBILE_EAS_POLL_MIN_AGE` (default `30s`), and `MOBILE_EAS_POLL_BATCH_SIZE` (default `10`). The poller refreshes only active jobs with a provider build ID and keeps provider/network refresh errors non-terminal. The current branch does not yet retry provider jobs, run repair loops, or submit to stores.
 
 The current branch still does not enable store submission. All EAS/build/submit/store feature flags default to off so production cannot accidentally claim or run mobile binary workflows before credentials, provider execution, and submission workflows are configured and validated.
 
@@ -169,6 +170,7 @@ Feature flags:
 - `MOBILE_EXPO_ENABLED`
 - `MOBILE_CAPACITOR_ENABLED`
 - `MOBILE_EAS_BUILD_ENABLED`
+- `MOBILE_EAS_POLLING_ENABLED`
 - `MOBILE_EAS_SUBMIT_ENABLED`
 - `MOBILE_STORE_METADATA_ENABLED`
 - `MOBILE_IOS_BUILDS_ENABLED`
@@ -200,6 +202,7 @@ Required next:
 
 - This branch generates Expo source files through `backend/internal/mobile.GenerateExpoProject` and prepares them for GitHub export and owner ZIP download.
 - This branch has an internal mobile build-service abstraction, restart-safe build-job persistence, project-scoped build API, credential-gated EAS provider queue/refresh seam, and mocked provider tests.
+- This branch has a default-off EAS polling worker that refreshes active provider-backed build jobs and updates project artifact metadata when enabled.
 - This branch does not yet run Expo Web preview.
 - This branch can invoke EAS Build only when `MOBILE_EAS_BUILD_ENABLED` and the relevant platform flags are enabled and an EAS token is stored; this has not been live-validated against EAS in this session.
 - This branch does not yet call EAS Submit.
