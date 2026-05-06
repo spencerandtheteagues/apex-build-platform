@@ -94,6 +94,12 @@ func snapshotStateForPersistenceLocked(build *Build) BuildSnapshotState {
 		ProviderModelOverrides:      normalizeProviderModelOverridesMap(build.ProviderModelOverrides),
 		TechStack:                   cloneTechStack(build.TechStack),
 		Plan:                        cloneBuildPlan(build.Plan),
+		TargetPlatform:              build.TargetPlatform,
+		MobilePlatforms:             normalizeMobilePlatforms(build.MobilePlatforms),
+		MobileFramework:             build.MobileFramework,
+		MobileReleaseLevel:          build.MobileReleaseLevel,
+		MobileCapabilities:          effectiveMobileCapabilities(build.MobileCapabilities, nil),
+		MobileAppSpec:               build.MobileAppSpec,
 	}
 	return state
 }

@@ -12,6 +12,7 @@ import (
 
 	"apex-build/internal/ai"
 	"apex-build/internal/metrics"
+	"apex-build/internal/mobile"
 
 	"github.com/google/uuid"
 )
@@ -164,18 +165,25 @@ type BuildOrchestrationFlags struct {
 }
 
 type IntentBrief struct {
-	ID                    string                  `json:"id"`
-	NormalizedRequest     string                  `json:"normalized_request"`
-	AppType               string                  `json:"app_type"`
-	RequiredFeatures      []string                `json:"required_features,omitempty"`
-	NonGoals              []string                `json:"non_goals,omitempty"`
-	ComplexityClass       BuildComplexityClass    `json:"complexity_class"`
-	RequiredCapabilities  []CapabilityRequirement `json:"required_capabilities,omitempty"`
-	DeploymentTarget      string                  `json:"deployment_target,omitempty"`
-	RiskFlags             []string                `json:"risk_flags,omitempty"`
-	CostSensitivity       CostSensitivity         `json:"cost_sensitivity"`
-	AcceptanceSummarySeed []string                `json:"acceptance_summary_seed,omitempty"`
-	CreatedAt             time.Time               `json:"created_at"`
+	ID                    string                               `json:"id"`
+	NormalizedRequest     string                               `json:"normalized_request"`
+	AppType               string                               `json:"app_type"`
+	TargetPlatform        mobile.TargetPlatform                `json:"target_platform,omitempty"`
+	MobilePlatforms       []mobile.MobilePlatform              `json:"mobile_platforms,omitempty"`
+	MobileFramework       mobile.MobileFramework               `json:"mobile_framework,omitempty"`
+	MobileReleaseLevel    mobile.MobileReleaseLevel            `json:"mobile_release_level,omitempty"`
+	MobileCapabilities    []mobile.MobileCapability            `json:"mobile_capabilities,omitempty"`
+	MobileClassification  *mobile.TargetPlatformClassification `json:"mobile_classification,omitempty"`
+	MobileAppSpec         *mobile.MobileAppSpec                `json:"mobile_app_spec,omitempty"`
+	RequiredFeatures      []string                             `json:"required_features,omitempty"`
+	NonGoals              []string                             `json:"non_goals,omitempty"`
+	ComplexityClass       BuildComplexityClass                 `json:"complexity_class"`
+	RequiredCapabilities  []CapabilityRequirement              `json:"required_capabilities,omitempty"`
+	DeploymentTarget      string                               `json:"deployment_target,omitempty"`
+	RiskFlags             []string                             `json:"risk_flags,omitempty"`
+	CostSensitivity       CostSensitivity                      `json:"cost_sensitivity"`
+	AcceptanceSummarySeed []string                             `json:"acceptance_summary_seed,omitempty"`
+	CreatedAt             time.Time                            `json:"created_at"`
 }
 
 type ContractRoute struct {
@@ -231,6 +239,12 @@ type BuildContract struct {
 	SpecHash             string                      `json:"spec_hash,omitempty"`
 	AppType              string                      `json:"app_type"`
 	DeliveryMode         string                      `json:"delivery_mode,omitempty"`
+	TargetPlatform       mobile.TargetPlatform       `json:"target_platform,omitempty"`
+	MobilePlatforms      []mobile.MobilePlatform     `json:"mobile_platforms,omitempty"`
+	MobileFramework      mobile.MobileFramework      `json:"mobile_framework,omitempty"`
+	MobileReleaseLevel   mobile.MobileReleaseLevel   `json:"mobile_release_level,omitempty"`
+	MobileCapabilities   []mobile.MobileCapability   `json:"mobile_capabilities,omitempty"`
+	MobileAppSpec        *mobile.MobileAppSpec       `json:"mobile_app_spec,omitempty"`
 	RoutePageMap         []ContractRoute             `json:"route_page_map,omitempty"`
 	BackendResourceMap   []ContractBackendResource   `json:"backend_resource_map,omitempty"`
 	APIContract          *BuildAPIContract           `json:"api_contract,omitempty"`
@@ -705,12 +719,25 @@ func compileIntentBriefFromRequest(req *BuildRequest, providerMode string) *Inte
 	}
 	appType := inferIntentAppType(normalized, req.TechStack)
 	capabilities := detectRequiredCapabilities(normalized, req.TechStack)
+	mobileClassification := mobile.ClassifyTargetPlatform(normalized)
+	targetPlatform := effectiveTargetPlatform(req.TargetPlatform, mobileClassification.TargetPlatform)
+	mobilePlatforms := effectiveMobilePlatforms(req.MobilePlatforms, mobileClassification.MobilePlatforms, targetPlatform)
+	mobileCapabilities := effectiveMobileCapabilities(req.MobileCapabilities, mobileClassification.RequiredCapabilities)
+	mobileFramework := effectiveMobileFramework(req.MobileFramework, targetPlatform)
+	mobileReleaseLevel := effectiveMobileReleaseLevel(req.MobileReleaseLevel, targetPlatform)
 	riskFlags := deriveIntentRiskFlags(capabilities, normalized)
 	acceptance := deriveAcceptanceSeed(appType, capabilities, req.RequirePreviewReady)
 	return &IntentBrief{
 		ID:                    uuid.New().String(),
 		NormalizedRequest:     normalized,
 		AppType:               appType,
+		TargetPlatform:        targetPlatform,
+		MobilePlatforms:       mobilePlatforms,
+		MobileFramework:       mobileFramework,
+		MobileReleaseLevel:    mobileReleaseLevel,
+		MobileCapabilities:    mobileCapabilities,
+		MobileClassification:  &mobileClassification,
+		MobileAppSpec:         req.MobileAppSpec,
 		RequiredFeatures:      capabilityStrings(capabilities),
 		NonGoals:              deriveIntentNonGoals(normalized),
 		ComplexityClass:       classifyIntentComplexity(capabilities, appType),
@@ -753,6 +780,12 @@ func compileBuildContractFromPlan(buildID string, intent *IntentBrief, plan *Bui
 		SpecHash:            plan.SpecHash,
 		AppType:             firstNonEmpty(plan.AppType, intentAppType(intent)),
 		DeliveryMode:        strings.TrimSpace(plan.DeliveryMode),
+		TargetPlatform:      effectivePlanTargetPlatform(plan, intent),
+		MobilePlatforms:     effectivePlanMobilePlatforms(plan, intent),
+		MobileFramework:     effectivePlanMobileFramework(plan, intent),
+		MobileReleaseLevel:  effectivePlanMobileReleaseLevel(plan, intent),
+		MobileCapabilities:  effectivePlanMobileCapabilities(plan, intent),
+		MobileAppSpec:       effectivePlanMobileAppSpec(plan, intent),
 		RoutePageMap:        deriveContractRoutes(plan),
 		BackendResourceMap:  deriveBackendResources(&normalizedPlan),
 		APIContract:         apiContract,
@@ -767,6 +800,196 @@ func compileBuildContractFromPlan(buildID string, intent *IntentBrief, plan *Bui
 		TruthBySurface:      deriveInitialTruthBySurface(plan, intent),
 	}
 	return contract
+}
+
+func effectiveTargetPlatform(requested, classified mobile.TargetPlatform) mobile.TargetPlatform {
+	switch requested {
+	case mobile.TargetPlatformWeb, mobile.TargetPlatformFullstackWeb, mobile.TargetPlatformMobileExpo, mobile.TargetPlatformMobileCapacitor, mobile.TargetPlatformAPIOnly:
+		return requested
+	}
+	switch classified {
+	case mobile.TargetPlatformWeb, mobile.TargetPlatformFullstackWeb, mobile.TargetPlatformMobileExpo, mobile.TargetPlatformMobileCapacitor, mobile.TargetPlatformAPIOnly:
+		return classified
+	default:
+		return mobile.TargetPlatformWeb
+	}
+}
+
+func effectiveMobilePlatforms(requested, classified []mobile.MobilePlatform, target mobile.TargetPlatform) []mobile.MobilePlatform {
+	platforms := normalizeMobilePlatforms(requested)
+	if len(platforms) == 0 {
+		platforms = normalizeMobilePlatforms(classified)
+	}
+	if len(platforms) == 0 && (target == mobile.TargetPlatformMobileExpo || target == mobile.TargetPlatformMobileCapacitor) {
+		platforms = []mobile.MobilePlatform{mobile.MobilePlatformAndroid, mobile.MobilePlatformIOS}
+	}
+	return platforms
+}
+
+func normalizeMobilePlatforms(platforms []mobile.MobilePlatform) []mobile.MobilePlatform {
+	if len(platforms) == 0 {
+		return nil
+	}
+	out := make([]mobile.MobilePlatform, 0, len(platforms))
+	seen := map[mobile.MobilePlatform]bool{}
+	for _, platform := range platforms {
+		switch platform {
+		case mobile.MobilePlatformAndroid, mobile.MobilePlatformIOS:
+			if !seen[platform] {
+				seen[platform] = true
+				out = append(out, platform)
+			}
+		}
+	}
+	return out
+}
+
+func effectiveMobileCapabilities(requested, classified []mobile.MobileCapability) []mobile.MobileCapability {
+	out := make([]mobile.MobileCapability, 0, len(requested)+len(classified))
+	seen := map[mobile.MobileCapability]bool{}
+	for _, capability := range append(append([]mobile.MobileCapability(nil), requested...), classified...) {
+		if capability == "" || seen[capability] {
+			continue
+		}
+		seen[capability] = true
+		out = append(out, capability)
+	}
+	return out
+}
+
+func effectiveMobileFramework(requested mobile.MobileFramework, target mobile.TargetPlatform) mobile.MobileFramework {
+	switch requested {
+	case mobile.MobileFrameworkExpoReactNative, mobile.MobileFrameworkCapacitor:
+		return requested
+	}
+	switch target {
+	case mobile.TargetPlatformMobileExpo:
+		return mobile.MobileFrameworkExpoReactNative
+	case mobile.TargetPlatformMobileCapacitor:
+		return mobile.MobileFrameworkCapacitor
+	default:
+		return ""
+	}
+}
+
+func effectiveMobileReleaseLevel(requested mobile.MobileReleaseLevel, target mobile.TargetPlatform) mobile.MobileReleaseLevel {
+	if requested != "" {
+		return requested
+	}
+	switch target {
+	case mobile.TargetPlatformMobileExpo, mobile.TargetPlatformMobileCapacitor:
+		return mobile.ReleaseSourceOnly
+	default:
+		return ""
+	}
+}
+
+func effectivePlanTargetPlatform(plan *BuildPlan, intent *IntentBrief) mobile.TargetPlatform {
+	if plan != nil && plan.TargetPlatform != "" {
+		return effectiveTargetPlatform(plan.TargetPlatform, "")
+	}
+	if intent != nil {
+		return effectiveTargetPlatform(intent.TargetPlatform, "")
+	}
+	return ""
+}
+
+func effectivePlanMobilePlatforms(plan *BuildPlan, intent *IntentBrief) []mobile.MobilePlatform {
+	if plan != nil && len(plan.MobilePlatforms) > 0 {
+		return normalizeMobilePlatforms(plan.MobilePlatforms)
+	}
+	if intent != nil {
+		return normalizeMobilePlatforms(intent.MobilePlatforms)
+	}
+	return nil
+}
+
+func effectivePlanMobileFramework(plan *BuildPlan, intent *IntentBrief) mobile.MobileFramework {
+	if plan != nil && plan.MobileFramework != "" {
+		return effectiveMobileFramework(plan.MobileFramework, effectivePlanTargetPlatform(plan, intent))
+	}
+	if intent != nil && intent.MobileFramework != "" {
+		return effectiveMobileFramework(intent.MobileFramework, effectivePlanTargetPlatform(plan, intent))
+	}
+	return effectiveMobileFramework("", effectivePlanTargetPlatform(plan, intent))
+}
+
+func effectivePlanMobileReleaseLevel(plan *BuildPlan, intent *IntentBrief) mobile.MobileReleaseLevel {
+	if plan != nil && plan.MobileReleaseLevel != "" {
+		return plan.MobileReleaseLevel
+	}
+	if intent != nil && intent.MobileReleaseLevel != "" {
+		return intent.MobileReleaseLevel
+	}
+	return effectiveMobileReleaseLevel("", effectivePlanTargetPlatform(plan, intent))
+}
+
+func effectivePlanMobileCapabilities(plan *BuildPlan, intent *IntentBrief) []mobile.MobileCapability {
+	if plan != nil && len(plan.MobileCapabilities) > 0 {
+		return effectiveMobileCapabilities(plan.MobileCapabilities, nil)
+	}
+	if intent != nil {
+		return effectiveMobileCapabilities(intent.MobileCapabilities, nil)
+	}
+	return nil
+}
+
+func effectivePlanMobileAppSpec(plan *BuildPlan, intent *IntentBrief) *mobile.MobileAppSpec {
+	if plan != nil && plan.MobileAppSpec != nil {
+		return plan.MobileAppSpec
+	}
+	if intent != nil {
+		return intent.MobileAppSpec
+	}
+	return nil
+}
+
+func enrichBuildPlanWithMobileIntent(plan *BuildPlan, intent *IntentBrief, build *Build) {
+	if plan == nil {
+		return
+	}
+	if plan.TargetPlatform == "" {
+		if intent != nil && intent.TargetPlatform != "" {
+			plan.TargetPlatform = intent.TargetPlatform
+		} else if build != nil {
+			plan.TargetPlatform = build.TargetPlatform
+		}
+	}
+	if len(plan.MobilePlatforms) == 0 {
+		if intent != nil && len(intent.MobilePlatforms) > 0 {
+			plan.MobilePlatforms = normalizeMobilePlatforms(intent.MobilePlatforms)
+		} else if build != nil && len(build.MobilePlatforms) > 0 {
+			plan.MobilePlatforms = normalizeMobilePlatforms(build.MobilePlatforms)
+		}
+	}
+	if plan.MobileFramework == "" {
+		if intent != nil && intent.MobileFramework != "" {
+			plan.MobileFramework = intent.MobileFramework
+		} else if build != nil {
+			plan.MobileFramework = build.MobileFramework
+		}
+	}
+	if plan.MobileReleaseLevel == "" {
+		if intent != nil && intent.MobileReleaseLevel != "" {
+			plan.MobileReleaseLevel = intent.MobileReleaseLevel
+		} else if build != nil {
+			plan.MobileReleaseLevel = build.MobileReleaseLevel
+		}
+	}
+	if len(plan.MobileCapabilities) == 0 {
+		if intent != nil && len(intent.MobileCapabilities) > 0 {
+			plan.MobileCapabilities = effectiveMobileCapabilities(intent.MobileCapabilities, nil)
+		} else if build != nil && len(build.MobileCapabilities) > 0 {
+			plan.MobileCapabilities = effectiveMobileCapabilities(build.MobileCapabilities, nil)
+		}
+	}
+	if plan.MobileAppSpec == nil {
+		if intent != nil && intent.MobileAppSpec != nil {
+			plan.MobileAppSpec = intent.MobileAppSpec
+		} else if build != nil {
+			plan.MobileAppSpec = build.MobileAppSpec
+		}
+	}
 }
 
 func seedIntentAPIContract(contract *BuildAPIContract, intent *IntentBrief) *BuildAPIContract {

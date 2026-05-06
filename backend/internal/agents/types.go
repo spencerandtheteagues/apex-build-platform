@@ -9,6 +9,7 @@ import (
 
 	"apex-build/internal/ai"
 	"apex-build/internal/architecture"
+	"apex-build/internal/mobile"
 )
 
 // AgentRole defines the specialized role of an AI agent
@@ -456,51 +457,63 @@ type BuildSnapshotState struct {
 }
 
 type BuildRestoreContext struct {
-	SubscriptionPlan            string            `json:"subscription_plan,omitempty"`
-	ProviderMode                string            `json:"provider_mode,omitempty"`
-	PollTokenHash               string            `json:"poll_token_hash,omitempty"`
-	ActiveOwnerInstanceID       string            `json:"active_owner_instance_id,omitempty"`
-	ActiveOwnerHeartbeatAt      *time.Time        `json:"active_owner_heartbeat_at,omitempty"`
-	RequirePreviewReady         bool              `json:"require_preview_ready,omitempty"`
-	RequestsUsed                int               `json:"requests_used,omitempty"`
-	ReadinessRecoveryAttempts   int               `json:"readiness_recovery_attempts,omitempty"`
-	PreviewVerificationAttempts int               `json:"preview_verification_attempts,omitempty"`
-	CompileValidationPassed     bool              `json:"compile_validation_passed,omitempty"`
-	CompileValidationAttempts   int               `json:"compile_validation_attempts,omitempty"`
-	CompileValidationRepairs    int               `json:"compile_validation_repairs,omitempty"`
-	CompileValidationStartedAt  *time.Time        `json:"compile_validation_started_at,omitempty"`
-	MaxAgents                   int               `json:"max_agents,omitempty"`
-	MaxRetries                  int               `json:"max_retries,omitempty"`
-	MaxRequests                 int               `json:"max_requests,omitempty"`
-	MaxTokensPerRequest         int               `json:"max_tokens_per_request,omitempty"`
-	PhasedPipelineComplete      bool              `json:"phased_pipeline_complete,omitempty"`
-	DiffMode                    bool              `json:"diff_mode,omitempty"`
-	RoleAssignments             map[string]string `json:"role_assignments,omitempty"`
-	ProviderModelOverrides      map[string]string `json:"provider_model_overrides,omitempty"`
-	TechStack                   *TechStack        `json:"tech_stack,omitempty"`
-	Plan                        *BuildPlan        `json:"plan,omitempty"`
+	SubscriptionPlan            string                    `json:"subscription_plan,omitempty"`
+	ProviderMode                string                    `json:"provider_mode,omitempty"`
+	PollTokenHash               string                    `json:"poll_token_hash,omitempty"`
+	ActiveOwnerInstanceID       string                    `json:"active_owner_instance_id,omitempty"`
+	ActiveOwnerHeartbeatAt      *time.Time                `json:"active_owner_heartbeat_at,omitempty"`
+	RequirePreviewReady         bool                      `json:"require_preview_ready,omitempty"`
+	RequestsUsed                int                       `json:"requests_used,omitempty"`
+	ReadinessRecoveryAttempts   int                       `json:"readiness_recovery_attempts,omitempty"`
+	PreviewVerificationAttempts int                       `json:"preview_verification_attempts,omitempty"`
+	CompileValidationPassed     bool                      `json:"compile_validation_passed,omitempty"`
+	CompileValidationAttempts   int                       `json:"compile_validation_attempts,omitempty"`
+	CompileValidationRepairs    int                       `json:"compile_validation_repairs,omitempty"`
+	CompileValidationStartedAt  *time.Time                `json:"compile_validation_started_at,omitempty"`
+	MaxAgents                   int                       `json:"max_agents,omitempty"`
+	MaxRetries                  int                       `json:"max_retries,omitempty"`
+	MaxRequests                 int                       `json:"max_requests,omitempty"`
+	MaxTokensPerRequest         int                       `json:"max_tokens_per_request,omitempty"`
+	PhasedPipelineComplete      bool                      `json:"phased_pipeline_complete,omitempty"`
+	DiffMode                    bool                      `json:"diff_mode,omitempty"`
+	RoleAssignments             map[string]string         `json:"role_assignments,omitempty"`
+	ProviderModelOverrides      map[string]string         `json:"provider_model_overrides,omitempty"`
+	TechStack                   *TechStack                `json:"tech_stack,omitempty"`
+	Plan                        *BuildPlan                `json:"plan,omitempty"`
+	TargetPlatform              mobile.TargetPlatform     `json:"target_platform,omitempty"`
+	MobilePlatforms             []mobile.MobilePlatform   `json:"mobile_platforms,omitempty"`
+	MobileFramework             mobile.MobileFramework    `json:"mobile_framework,omitempty"`
+	MobileReleaseLevel          mobile.MobileReleaseLevel `json:"mobile_release_level,omitempty"`
+	MobileCapabilities          []mobile.MobileCapability `json:"mobile_capabilities,omitempty"`
+	MobileAppSpec               *mobile.MobileAppSpec     `json:"mobile_app_spec,omitempty"`
 }
 
 // Build represents an entire app-building session
 type Build struct {
-	ID                  string            `json:"id"`
-	UserID              uint              `json:"user_id"`
-	ProjectID           *uint             `json:"project_id,omitempty"`
-	Status              BuildStatus       `json:"status"`
-	Mode                BuildMode         `json:"mode"`
-	PowerMode           PowerMode         `json:"power_mode"`
-	SubscriptionPlan    string            `json:"subscription_plan,omitempty"`
-	ProviderMode        string            `json:"provider_mode,omitempty"` // platform or byok
-	PollToken           string            `json:"-"`
-	PollTokenHash       string            `json:"-"`
-	RequirePreviewReady bool              `json:"require_preview_ready,omitempty"`
-	Description         string            `json:"description"` // User's app description
-	TechStack           *TechStack        `json:"tech_stack,omitempty"`
-	Plan                *BuildPlan        `json:"plan,omitempty"`
-	Agents              map[string]*Agent `json:"agents"`
-	Tasks               []*Task           `json:"tasks"`
-	Checkpoints         []*Checkpoint     `json:"checkpoints"`
-	Progress            int               `json:"progress"` // 0-100
+	ID                  string                    `json:"id"`
+	UserID              uint                      `json:"user_id"`
+	ProjectID           *uint                     `json:"project_id,omitempty"`
+	Status              BuildStatus               `json:"status"`
+	Mode                BuildMode                 `json:"mode"`
+	PowerMode           PowerMode                 `json:"power_mode"`
+	SubscriptionPlan    string                    `json:"subscription_plan,omitempty"`
+	ProviderMode        string                    `json:"provider_mode,omitempty"` // platform or byok
+	PollToken           string                    `json:"-"`
+	PollTokenHash       string                    `json:"-"`
+	RequirePreviewReady bool                      `json:"require_preview_ready,omitempty"`
+	Description         string                    `json:"description"` // User's app description
+	TechStack           *TechStack                `json:"tech_stack,omitempty"`
+	TargetPlatform      mobile.TargetPlatform     `json:"target_platform,omitempty"`
+	MobilePlatforms     []mobile.MobilePlatform   `json:"mobile_platforms,omitempty"`
+	MobileFramework     mobile.MobileFramework    `json:"mobile_framework,omitempty"`
+	MobileReleaseLevel  mobile.MobileReleaseLevel `json:"mobile_release_level,omitempty"`
+	MobileCapabilities  []mobile.MobileCapability `json:"mobile_capabilities,omitempty"`
+	MobileAppSpec       *mobile.MobileAppSpec     `json:"mobile_app_spec,omitempty"`
+	Plan                *BuildPlan                `json:"plan,omitempty"`
+	Agents              map[string]*Agent         `json:"agents"`
+	Tasks               []*Task                   `json:"tasks"`
+	Checkpoints         []*Checkpoint             `json:"checkpoints"`
+	Progress            int                       `json:"progress"` // 0-100
 	// Guardrails
 	MaxAgents                   int                   `json:"max_agents,omitempty"`
 	MaxRetries                  int                   `json:"max_retries,omitempty"`
@@ -576,20 +589,26 @@ func (pm PowerMode) CreditMultiplier() float64 {
 
 // BuildPlan contains the structured plan for building an app
 type BuildPlan struct {
-	ID            string          `json:"id"`
-	BuildID       string          `json:"build_id"`
-	AppType       string          `json:"app_type"` // web, api, fullstack, etc.
-	DeliveryMode  string          `json:"delivery_mode,omitempty"`
-	TechStack     TechStack       `json:"tech_stack"`
-	Features      []Feature       `json:"features"`
-	DataModels    []DataModel     `json:"data_models"`
-	APIEndpoints  []APIEndpoint   `json:"api_endpoints"`
-	Components    []UIComponent   `json:"components"`
-	Files         []PlannedFile   `json:"files"`
-	ScaffoldFiles []GeneratedFile `json:"scaffold_files,omitempty"`
-	SpecHash      string          `json:"spec_hash,omitempty"`
-	ScaffoldID    string          `json:"scaffold_id,omitempty"`
-	TemplateID    string          `json:"template_id,omitempty"` // detected app blueprint (e.g. "ai-saas", "crm")
+	ID                 string                    `json:"id"`
+	BuildID            string                    `json:"build_id"`
+	AppType            string                    `json:"app_type"` // web, api, fullstack, etc.
+	DeliveryMode       string                    `json:"delivery_mode,omitempty"`
+	TargetPlatform     mobile.TargetPlatform     `json:"target_platform,omitempty"`
+	MobilePlatforms    []mobile.MobilePlatform   `json:"mobile_platforms,omitempty"`
+	MobileFramework    mobile.MobileFramework    `json:"mobile_framework,omitempty"`
+	MobileReleaseLevel mobile.MobileReleaseLevel `json:"mobile_release_level,omitempty"`
+	MobileCapabilities []mobile.MobileCapability `json:"mobile_capabilities,omitempty"`
+	MobileAppSpec      *mobile.MobileAppSpec     `json:"mobile_app_spec,omitempty"`
+	TechStack          TechStack                 `json:"tech_stack"`
+	Features           []Feature                 `json:"features"`
+	DataModels         []DataModel               `json:"data_models"`
+	APIEndpoints       []APIEndpoint             `json:"api_endpoints"`
+	Components         []UIComponent             `json:"components"`
+	Files              []PlannedFile             `json:"files"`
+	ScaffoldFiles      []GeneratedFile           `json:"scaffold_files,omitempty"`
+	SpecHash           string                    `json:"spec_hash,omitempty"`
+	ScaffoldID         string                    `json:"scaffold_id,omitempty"`
+	TemplateID         string                    `json:"template_id,omitempty"` // detected app blueprint (e.g. "ai-saas", "crm")
 	// SecondaryTemplateIDs are optional supporting blueprints, such as AI SaaS + Landing Page.
 	SecondaryTemplateIDs []string               `json:"secondary_template_ids,omitempty"`
 	Source               string                 `json:"source,omitempty"`
@@ -843,19 +862,26 @@ type WSMessage struct {
 
 // BuildRequest is the input for starting a new build
 type BuildRequest struct {
-	Description            string            `json:"description"`
-	Prompt                 string            `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
-	WireframeImage         string            `json:"wireframe_image,omitempty"`
-	WireframeDescription   string            `json:"wireframe_description,omitempty"`
-	Mode                   BuildMode         `json:"mode"`
-	PowerMode              PowerMode         `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
-	ProviderMode           string            `json:"provider_mode,omitempty"` // platform or byok
-	RequirePreviewReady    bool              `json:"require_preview_ready,omitempty"`
-	ProjectName            string            `json:"project_name,omitempty"`
-	TechStack              *TechStack        `json:"tech_stack,omitempty"`       // Optional override
-	DiffMode               bool              `json:"diff_mode,omitempty"`        // When true, proposed changes require user approval
-	RoleAssignments        map[string]string `json:"role_assignments,omitempty"` // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
-	ProviderModelOverrides map[string]string `json:"provider_model_overrides,omitempty"`
+	Description            string                    `json:"description"`
+	Prompt                 string                    `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
+	WireframeImage         string                    `json:"wireframe_image,omitempty"`
+	WireframeDescription   string                    `json:"wireframe_description,omitempty"`
+	Mode                   BuildMode                 `json:"mode"`
+	PowerMode              PowerMode                 `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
+	ProviderMode           string                    `json:"provider_mode,omitempty"` // platform or byok
+	RequirePreviewReady    bool                      `json:"require_preview_ready,omitempty"`
+	ProjectName            string                    `json:"project_name,omitempty"`
+	TechStack              *TechStack                `json:"tech_stack,omitempty"` // Optional override
+	TargetPlatform         mobile.TargetPlatform     `json:"target_platform,omitempty"`
+	MobilePlatforms        []mobile.MobilePlatform   `json:"mobile_platforms,omitempty"`
+	MobileFramework        mobile.MobileFramework    `json:"mobile_framework,omitempty"`
+	MobileReleaseLevel     mobile.MobileReleaseLevel `json:"mobile_release_level,omitempty"`
+	MobileCapabilities     []mobile.MobileCapability `json:"mobile_capabilities,omitempty"`
+	MobileDependencyPolicy string                    `json:"mobile_dependency_policy,omitempty"`
+	MobileAppSpec          *mobile.MobileAppSpec     `json:"mobile_app_spec,omitempty"`
+	DiffMode               bool                      `json:"diff_mode,omitempty"`        // When true, proposed changes require user approval
+	RoleAssignments        map[string]string         `json:"role_assignments,omitempty"` // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
+	ProviderModelOverrides map[string]string         `json:"provider_model_overrides,omitempty"`
 }
 
 // BuildResponse is returned when a build is created

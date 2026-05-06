@@ -29,6 +29,7 @@ import (
 	"apex-build/internal/ai"
 	"apex-build/internal/budget"
 	"apex-build/internal/metrics"
+	"apex-build/internal/mobile"
 	"apex-build/internal/spend"
 	"apex-build/pkg/models"
 
@@ -752,6 +753,12 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 	if effectiveDescription == "" {
 		effectiveDescription = strings.TrimSpace(req.Description)
 	}
+	mobileClassification := mobile.ClassifyTargetPlatform(effectiveDescription)
+	targetPlatform := effectiveTargetPlatform(req.TargetPlatform, mobileClassification.TargetPlatform)
+	mobilePlatforms := effectiveMobilePlatforms(req.MobilePlatforms, mobileClassification.MobilePlatforms, targetPlatform)
+	mobileCapabilities := effectiveMobileCapabilities(req.MobileCapabilities, mobileClassification.RequiredCapabilities)
+	mobileFramework := effectiveMobileFramework(req.MobileFramework, targetPlatform)
+	mobileReleaseLevel := effectiveMobileReleaseLevel(req.MobileReleaseLevel, targetPlatform)
 	pollToken, pollTokenHash := newBuildPollToken()
 
 	build := &Build{
@@ -767,6 +774,12 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		RequirePreviewReady:    req.RequirePreviewReady,
 		Description:            effectiveDescription,
 		TechStack:              req.TechStack,
+		TargetPlatform:         targetPlatform,
+		MobilePlatforms:        mobilePlatforms,
+		MobileFramework:        mobileFramework,
+		MobileReleaseLevel:     mobileReleaseLevel,
+		MobileCapabilities:     mobileCapabilities,
+		MobileAppSpec:          req.MobileAppSpec,
 		RoleAssignments:        req.RoleAssignments,
 		ProviderModelOverrides: normalizeProviderModelOverridesForPowerMode(req.ProviderModelOverrides, powerMode),
 		Agents:                 make(map[string]*Agent),
@@ -6491,6 +6504,9 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 		var warRoomSpec *ValidatedBuildSpec
 		var warRoomContract *BuildContract
 		build.mu.Lock()
+		if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil {
+			enrichBuildPlanWithMobileIntent(output.Plan, orchestration.IntentBrief, build)
+		}
 		build.Plan = output.Plan
 		build.TechStack = &output.Plan.TechStack
 		if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil {
@@ -21761,31 +21777,90 @@ func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []Gene
 	if build.Plan != nil {
 		projectName = build.Plan.AppType
 	}
+	targetPlatform := build.TargetPlatform
+	mobilePlatforms := normalizeMobilePlatforms(build.MobilePlatforms)
+	mobileFramework := build.MobileFramework
+	mobileReleaseLevel := build.MobileReleaseLevel
+	mobileCapabilities := effectiveMobileCapabilities(build.MobileCapabilities, nil)
+	mobileSpec := build.MobileAppSpec
+	if build.Plan != nil {
+		if build.Plan.TargetPlatform != "" {
+			targetPlatform = build.Plan.TargetPlatform
+		}
+		if len(build.Plan.MobilePlatforms) > 0 {
+			mobilePlatforms = normalizeMobilePlatforms(build.Plan.MobilePlatforms)
+		}
+		if build.Plan.MobileFramework != "" {
+			mobileFramework = build.Plan.MobileFramework
+		}
+		if build.Plan.MobileReleaseLevel != "" {
+			mobileReleaseLevel = build.Plan.MobileReleaseLevel
+		}
+		if len(build.Plan.MobileCapabilities) > 0 {
+			mobileCapabilities = effectiveMobileCapabilities(build.Plan.MobileCapabilities, nil)
+		}
+		if build.Plan.MobileAppSpec != nil {
+			mobileSpec = build.Plan.MobileAppSpec
+		}
+	}
+	if targetPlatform == "" {
+		targetPlatform = mobile.TargetPlatformWeb
+	}
+	mobileSpecJSON := ""
+	androidPackage := ""
+	iosBundleIdentifier := ""
+	appDisplayName := ""
+	appVersion := ""
+	buildNumber := ""
+	versionCode := 0
+	if mobileSpec != nil {
+		if b, err := json.Marshal(mobileSpec); err == nil {
+			mobileSpecJSON = string(b)
+		}
+		androidPackage = strings.TrimSpace(mobileSpec.Identity.AndroidPackage)
+		iosBundleIdentifier = strings.TrimSpace(mobileSpec.Identity.IOSBundleID)
+		appDisplayName = strings.TrimSpace(mobileSpec.Identity.DisplayName)
+		appVersion = strings.TrimSpace(mobileSpec.Identity.Version)
+		buildNumber = strings.TrimSpace(mobileSpec.Identity.BuildNumber)
+		versionCode = mobileSpec.Identity.VersionCode
+	}
 
 	snapshot := &models.CompletedBuild{
-		BuildID:         build.ID,
-		UserID:          build.UserID,
-		ProjectID:       build.ProjectID,
-		ProjectName:     projectName,
-		Description:     build.Description,
-		Status:          string(build.Status),
-		Mode:            string(build.Mode),
-		PowerMode:       string(build.PowerMode),
-		TechStack:       techStackJSON,
-		FilesJSON:       filesJSON,
-		AgentsJSON:      agentsJSON,
-		TasksJSON:       tasksJSON,
-		CheckpointsJSON: checkpointsJSON,
-		StateJSON:       stateJSON,
-		ActivityJSON:    activityJSON,
-		InteractionJSON: interactionJSON,
-		FilesCount:      len(files),
-		Progress:        build.Progress,
-		DurationMs:      durationMs,
-		Error:           build.Error,
-		CompletedAt:     build.CompletedAt,
-		UpdatedAt:       build.UpdatedAt,
-		CreatedAt:       build.CreatedAt,
+		BuildID:             build.ID,
+		UserID:              build.UserID,
+		ProjectID:           build.ProjectID,
+		ProjectName:         projectName,
+		Description:         build.Description,
+		Status:              string(build.Status),
+		Mode:                string(build.Mode),
+		PowerMode:           string(build.PowerMode),
+		TechStack:           techStackJSON,
+		TargetPlatform:      string(targetPlatform),
+		MobilePlatforms:     mobilePlatformsToStrings(mobilePlatforms),
+		MobileFramework:     string(mobileFramework),
+		MobileReleaseLevel:  string(mobileReleaseLevel),
+		MobileCapabilities:  mobileCapabilitiesToStrings(mobileCapabilities),
+		AndroidPackage:      androidPackage,
+		IOSBundleIdentifier: iosBundleIdentifier,
+		AppDisplayName:      appDisplayName,
+		AppVersion:          appVersion,
+		BuildNumber:         buildNumber,
+		VersionCode:         versionCode,
+		MobileSpecJSON:      mobileSpecJSON,
+		FilesJSON:           filesJSON,
+		AgentsJSON:          agentsJSON,
+		TasksJSON:           tasksJSON,
+		CheckpointsJSON:     checkpointsJSON,
+		StateJSON:           stateJSON,
+		ActivityJSON:        activityJSON,
+		InteractionJSON:     interactionJSON,
+		FilesCount:          len(files),
+		Progress:            build.Progress,
+		DurationMs:          durationMs,
+		Error:               build.Error,
+		CompletedAt:         build.CompletedAt,
+		UpdatedAt:           build.UpdatedAt,
+		CreatedAt:           build.CreatedAt,
 	}
 	build.mu.RUnlock()
 
@@ -21794,28 +21869,40 @@ func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []Gene
 	}
 
 	assignments := map[string]any{
-		"user_id":          snapshot.UserID,
-		"project_id":       snapshot.ProjectID,
-		"project_name":     snapshot.ProjectName,
-		"description":      snapshot.Description,
-		"status":           snapshot.Status,
-		"mode":             snapshot.Mode,
-		"power_mode":       snapshot.PowerMode,
-		"tech_stack":       snapshot.TechStack,
-		"files_json":       snapshot.FilesJSON,
-		"agents_json":      snapshot.AgentsJSON,
-		"tasks_json":       snapshot.TasksJSON,
-		"checkpoints_json": snapshot.CheckpointsJSON,
-		"state_json":       snapshot.StateJSON,
-		"activity_json":    snapshot.ActivityJSON,
-		"interaction_json": snapshot.InteractionJSON,
-		"files_count":      snapshot.FilesCount,
-		"total_cost":       snapshot.TotalCost,
-		"progress":         snapshot.Progress,
-		"duration_ms":      snapshot.DurationMs,
-		"error":            snapshot.Error,
-		"completed_at":     snapshot.CompletedAt,
-		"updated_at":       snapshot.UpdatedAt,
+		"user_id":               snapshot.UserID,
+		"project_id":            snapshot.ProjectID,
+		"project_name":          snapshot.ProjectName,
+		"description":           snapshot.Description,
+		"status":                snapshot.Status,
+		"mode":                  snapshot.Mode,
+		"power_mode":            snapshot.PowerMode,
+		"tech_stack":            snapshot.TechStack,
+		"target_platform":       snapshot.TargetPlatform,
+		"mobile_platforms":      gorm.Expr("excluded.mobile_platforms"),
+		"mobile_framework":      snapshot.MobileFramework,
+		"mobile_release_level":  snapshot.MobileReleaseLevel,
+		"mobile_capabilities":   gorm.Expr("excluded.mobile_capabilities"),
+		"android_package":       snapshot.AndroidPackage,
+		"ios_bundle_identifier": snapshot.IOSBundleIdentifier,
+		"app_display_name":      snapshot.AppDisplayName,
+		"app_version":           snapshot.AppVersion,
+		"build_number":          snapshot.BuildNumber,
+		"version_code":          snapshot.VersionCode,
+		"mobile_spec_json":      snapshot.MobileSpecJSON,
+		"files_json":            snapshot.FilesJSON,
+		"agents_json":           snapshot.AgentsJSON,
+		"tasks_json":            snapshot.TasksJSON,
+		"checkpoints_json":      snapshot.CheckpointsJSON,
+		"state_json":            snapshot.StateJSON,
+		"activity_json":         snapshot.ActivityJSON,
+		"interaction_json":      snapshot.InteractionJSON,
+		"files_count":           snapshot.FilesCount,
+		"total_cost":            snapshot.TotalCost,
+		"progress":              snapshot.Progress,
+		"duration_ms":           snapshot.DurationMs,
+		"error":                 snapshot.Error,
+		"completed_at":          snapshot.CompletedAt,
+		"updated_at":            snapshot.UpdatedAt,
 	}
 
 	excludedSuccessSQL := "(excluded.completed_at IS NOT NULL AND COALESCE(TRIM(excluded.error), '') = '' AND excluded.status <> 'cancelled')"
@@ -22020,6 +22107,7 @@ func (am *AgentManager) ensureProjectLinkedForCompletedBuild(build *Build, files
 				"auto_linked":     true,
 			},
 		}
+		applyMobileMetadataToProject(&project, build)
 
 		if err := tx.Create(&project).Error; err != nil {
 			return err
@@ -22048,6 +22136,99 @@ func (am *AgentManager) ensureProjectLinkedForCompletedBuild(build *Build, files
 
 		return nil
 	})
+}
+
+func applyMobileMetadataToProject(project *models.Project, build *Build) {
+	if project == nil || build == nil {
+		return
+	}
+	targetPlatform := build.TargetPlatform
+	mobilePlatforms := normalizeMobilePlatforms(build.MobilePlatforms)
+	mobileFramework := build.MobileFramework
+	mobileReleaseLevel := build.MobileReleaseLevel
+	mobileCapabilities := effectiveMobileCapabilities(build.MobileCapabilities, nil)
+	mobileSpec := build.MobileAppSpec
+	if build.Plan != nil {
+		if build.Plan.TargetPlatform != "" {
+			targetPlatform = build.Plan.TargetPlatform
+		}
+		if len(build.Plan.MobilePlatforms) > 0 {
+			mobilePlatforms = normalizeMobilePlatforms(build.Plan.MobilePlatforms)
+		}
+		if build.Plan.MobileFramework != "" {
+			mobileFramework = build.Plan.MobileFramework
+		}
+		if build.Plan.MobileReleaseLevel != "" {
+			mobileReleaseLevel = build.Plan.MobileReleaseLevel
+		}
+		if len(build.Plan.MobileCapabilities) > 0 {
+			mobileCapabilities = effectiveMobileCapabilities(build.Plan.MobileCapabilities, nil)
+		}
+		if build.Plan.MobileAppSpec != nil {
+			mobileSpec = build.Plan.MobileAppSpec
+		}
+	}
+	if targetPlatform == "" {
+		targetPlatform = mobile.TargetPlatformWeb
+	}
+	project.TargetPlatform = string(targetPlatform)
+	project.MobilePlatforms = mobilePlatformsToStrings(mobilePlatforms)
+	project.MobileFramework = string(mobileFramework)
+	project.MobileReleaseLevel = string(mobileReleaseLevel)
+	project.MobileCapabilities = mobileCapabilitiesToStrings(mobileCapabilities)
+	project.MobilePreviewStatus = "not_requested"
+	project.MobileBuildStatus = "not_requested"
+	project.MobileStoreReadinessStatus = "not_requested"
+	if targetPlatform == mobile.TargetPlatformMobileExpo || targetPlatform == mobile.TargetPlatformMobileCapacitor {
+		project.GeneratedMobileClientPath = "mobile/"
+		project.MobilePreviewStatus = "source_only"
+	}
+	if mobileSpec != nil {
+		project.AndroidPackage = strings.TrimSpace(mobileSpec.Identity.AndroidPackage)
+		project.IOSBundleIdentifier = strings.TrimSpace(mobileSpec.Identity.IOSBundleID)
+		project.AppDisplayName = strings.TrimSpace(mobileSpec.Identity.DisplayName)
+		project.AppVersion = strings.TrimSpace(mobileSpec.Identity.Version)
+		project.BuildNumber = strings.TrimSpace(mobileSpec.Identity.BuildNumber)
+		project.VersionCode = mobileSpec.Identity.VersionCode
+		project.IconAssetRef = strings.TrimSpace(mobileSpec.Identity.IconAssetPath)
+		project.SplashAssetRef = strings.TrimSpace(mobileSpec.Identity.SplashAssetPath)
+		project.PermissionManifest = map[string]interface{}{
+			"ios_usage_descriptions": mobileSpec.Permissions.IOSUsageDescriptions,
+			"android_permissions":    mobileSpec.Permissions.AndroidPermissions,
+		}
+	}
+	project.MobileMetadata = map[string]interface{}{
+		"source":          "build_completion",
+		"source_build_id": build.ID,
+		"framework":       project.MobileFramework,
+		"release_level":   project.MobileReleaseLevel,
+	}
+}
+
+func mobilePlatformsToStrings(platforms []mobile.MobilePlatform) []string {
+	if len(platforms) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(platforms))
+	for _, platform := range platforms {
+		if platform != "" {
+			out = append(out, string(platform))
+		}
+	}
+	return out
+}
+
+func mobileCapabilitiesToStrings(capabilities []mobile.MobileCapability) []string {
+	if len(capabilities) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if capability != "" {
+			out = append(out, string(capability))
+		}
+	}
+	return out
 }
 
 func detectGeneratedProjectLanguage(files []GeneratedFile) string {
@@ -24395,6 +24576,12 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 	diffMode := false
 	var techStack *TechStack
 	var plan *BuildPlan
+	var targetPlatform mobile.TargetPlatform
+	var mobilePlatforms []mobile.MobilePlatform
+	var mobileFramework mobile.MobileFramework
+	var mobileReleaseLevel mobile.MobileReleaseLevel
+	var mobileCapabilities []mobile.MobileCapability
+	var mobileAppSpec *mobile.MobileAppSpec
 	if restoreContext != nil {
 		if planType := strings.TrimSpace(strings.ToLower(restoreContext.SubscriptionPlan)); planType != "" {
 			subscriptionPlan = planType
@@ -24426,6 +24613,12 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		diffMode = restoreContext.DiffMode
 		techStack = cloneTechStack(restoreContext.TechStack)
 		plan = cloneBuildPlan(restoreContext.Plan)
+		targetPlatform = restoreContext.TargetPlatform
+		mobilePlatforms = normalizeMobilePlatforms(restoreContext.MobilePlatforms)
+		mobileFramework = restoreContext.MobileFramework
+		mobileReleaseLevel = restoreContext.MobileReleaseLevel
+		mobileCapabilities = effectiveMobileCapabilities(restoreContext.MobileCapabilities, nil)
+		mobileAppSpec = restoreContext.MobileAppSpec
 	}
 	if techStack == nil && strings.TrimSpace(snapshot.TechStack) != "" {
 		var restoredStack TechStack
@@ -24449,6 +24642,12 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		Description:                 snapshot.Description,
 		TechStack:                   techStack,
 		Plan:                        plan,
+		TargetPlatform:              targetPlatform,
+		MobilePlatforms:             mobilePlatforms,
+		MobileFramework:             mobileFramework,
+		MobileReleaseLevel:          mobileReleaseLevel,
+		MobileCapabilities:          mobileCapabilities,
+		MobileAppSpec:               mobileAppSpec,
 		Agents:                      parseBuildAgents(snapshot.AgentsJSON),
 		Tasks:                       parseBuildTasks(snapshot.TasksJSON),
 		Checkpoints:                 parseBuildCheckpoints(snapshot.CheckpointsJSON),

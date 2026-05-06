@@ -8,6 +8,7 @@ import (
 
 	"apex-build/internal/git"
 	"apex-build/internal/handlers/export_templates"
+	"apex-build/internal/mobile"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
@@ -125,6 +126,13 @@ func (h *ExportHandler) ExportToGitHub(c *gin.Context) {
 			Path:    "README.md",
 			Content: export_templates.ReadmeForProject(project.Name, description, stack),
 		})
+	}
+	if err := mobile.PrepareExpoProjectFiles(c.Request.Context(), h.db, project); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to prepare mobile export files: " + err.Error(),
+		})
+		return
 	}
 
 	// Export the project
