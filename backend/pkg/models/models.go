@@ -80,6 +80,32 @@ type Project struct {
 	Language    string `json:"language" gorm:"not null"` // javascript, python, go, rust, etc.
 	Framework   string `json:"framework"`                // react, next, django, gin, etc.
 
+	// Mobile build metadata is additive and optional. Web projects keep the
+	// default target and ignore the mobile-specific fields.
+	TargetPlatform             string                 `json:"target_platform,omitempty" gorm:"size:32;default:'web';index"`
+	MobilePlatforms            []string               `json:"mobile_platforms,omitempty" gorm:"serializer:json"`
+	MobileFramework            string                 `json:"mobile_framework,omitempty" gorm:"size:64"`
+	MobileReleaseLevel         string                 `json:"mobile_release_level,omitempty" gorm:"size:64"`
+	MobileCapabilities         []string               `json:"mobile_capabilities,omitempty" gorm:"serializer:json"`
+	MobileDependencyPolicy     string                 `json:"mobile_dependency_policy,omitempty" gorm:"size:64"`
+	MobilePreviewStatus        string                 `json:"mobile_preview_status,omitempty" gorm:"size:64"`
+	MobileBuildStatus          string                 `json:"mobile_build_status,omitempty" gorm:"size:64"`
+	MobileStoreReadinessStatus string                 `json:"mobile_store_readiness_status,omitempty" gorm:"size:64"`
+	GeneratedBackendURL        string                 `json:"generated_backend_url,omitempty" gorm:"size:512"`
+	GeneratedMobileClientPath  string                 `json:"generated_mobile_client_path,omitempty" gorm:"size:512"`
+	EASProjectID               string                 `json:"eas_project_id,omitempty" gorm:"size:128"`
+	AndroidPackage             string                 `json:"android_package,omitempty" gorm:"size:255;index"`
+	IOSBundleIdentifier        string                 `json:"ios_bundle_identifier,omitempty" gorm:"size:255;index"`
+	AppDisplayName             string                 `json:"app_display_name,omitempty" gorm:"size:255"`
+	AppVersion                 string                 `json:"app_version,omitempty" gorm:"size:64"`
+	BuildNumber                string                 `json:"build_number,omitempty" gorm:"size:64"`
+	VersionCode                int                    `json:"version_code,omitempty"`
+	IconAssetRef               string                 `json:"icon_asset_ref,omitempty" gorm:"size:512"`
+	SplashAssetRef             string                 `json:"splash_asset_ref,omitempty" gorm:"size:512"`
+	PermissionManifest         map[string]interface{} `json:"permission_manifest,omitempty" gorm:"serializer:json"`
+	StoreMetadataDraftRef      string                 `json:"store_metadata_draft_ref,omitempty" gorm:"size:512"`
+	MobileMetadata             map[string]interface{} `json:"mobile_metadata,omitempty" gorm:"serializer:json"`
+
 	// Project ownership and access
 	OwnerID    uint `json:"owner_id" gorm:"not null"`
 	Owner      User `json:"owner" gorm:"foreignKey:OwnerID"`
@@ -538,28 +564,41 @@ type CompletedBuild struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
-	BuildID         string     `json:"build_id" gorm:"uniqueIndex;not null;size:64"` // UUID from agent system
-	UserID          uint       `json:"user_id" gorm:"not null;index"`
-	ProjectID       *uint      `json:"project_id,omitempty" gorm:"index"`
-	ProjectName     string     `json:"project_name" gorm:"size:255"`
-	Description     string     `json:"description" gorm:"type:text"`
-	Status          string     `json:"status" gorm:"size:20;index"`          // completed, failed, cancelled
-	Mode            string     `json:"mode" gorm:"size:10"`                  // fast, full
-	PowerMode       string     `json:"power_mode" gorm:"size:10"`            // fast, balanced, max
-	TechStack       string     `json:"tech_stack" gorm:"type:text"`          // JSON blob of tech stack
-	FilesJSON       string     `json:"-" gorm:"column:files_json;type:text"` // JSON array of generated files
-	AgentsJSON      string     `json:"-" gorm:"column:agents_json;type:text"`
-	TasksJSON       string     `json:"-" gorm:"column:tasks_json;type:text"`
-	CheckpointsJSON string     `json:"-" gorm:"column:checkpoints_json;type:text"`
-	StateJSON       string     `json:"-" gorm:"column:state_json;type:text"`
-	ActivityJSON    string     `json:"-" gorm:"column:activity_json;type:text"`
-	InteractionJSON string     `json:"-" gorm:"column:interaction_json;type:text"`
-	FilesCount      int        `json:"files_count" gorm:"default:0"`
-	TotalCost       float64    `json:"total_cost" gorm:"default:0.0"` // Total AI cost in USD
-	Progress        int        `json:"progress" gorm:"default:100"`
-	DurationMs      int64      `json:"duration_ms" gorm:"default:0"` // Build duration in milliseconds
-	Error           string     `json:"error,omitempty" gorm:"type:text"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	BuildID             string                 `json:"build_id" gorm:"uniqueIndex;not null;size:64"` // UUID from agent system
+	UserID              uint                   `json:"user_id" gorm:"not null;index"`
+	ProjectID           *uint                  `json:"project_id,omitempty" gorm:"index"`
+	ProjectName         string                 `json:"project_name" gorm:"size:255"`
+	Description         string                 `json:"description" gorm:"type:text"`
+	Status              string                 `json:"status" gorm:"size:20;index"` // completed, failed, cancelled
+	Mode                string                 `json:"mode" gorm:"size:10"`         // fast, full
+	PowerMode           string                 `json:"power_mode" gorm:"size:10"`   // fast, balanced, max
+	TechStack           string                 `json:"tech_stack" gorm:"type:text"` // JSON blob of tech stack
+	TargetPlatform      string                 `json:"target_platform,omitempty" gorm:"size:32;default:'web';index"`
+	MobilePlatforms     []string               `json:"mobile_platforms,omitempty" gorm:"serializer:json"`
+	MobileFramework     string                 `json:"mobile_framework,omitempty" gorm:"size:64"`
+	MobileReleaseLevel  string                 `json:"mobile_release_level,omitempty" gorm:"size:64"`
+	MobileCapabilities  []string               `json:"mobile_capabilities,omitempty" gorm:"serializer:json"`
+	AndroidPackage      string                 `json:"android_package,omitempty" gorm:"size:255"`
+	IOSBundleIdentifier string                 `json:"ios_bundle_identifier,omitempty" gorm:"size:255"`
+	AppDisplayName      string                 `json:"app_display_name,omitempty" gorm:"size:255"`
+	AppVersion          string                 `json:"app_version,omitempty" gorm:"size:64"`
+	BuildNumber         string                 `json:"build_number,omitempty" gorm:"size:64"`
+	VersionCode         int                    `json:"version_code,omitempty"`
+	MobileSpecJSON      string                 `json:"-" gorm:"column:mobile_spec_json;type:text"`
+	MobileMetadata      map[string]interface{} `json:"mobile_metadata,omitempty" gorm:"serializer:json"`
+	FilesJSON           string                 `json:"-" gorm:"column:files_json;type:text"` // JSON array of generated files
+	AgentsJSON          string                 `json:"-" gorm:"column:agents_json;type:text"`
+	TasksJSON           string                 `json:"-" gorm:"column:tasks_json;type:text"`
+	CheckpointsJSON     string                 `json:"-" gorm:"column:checkpoints_json;type:text"`
+	StateJSON           string                 `json:"-" gorm:"column:state_json;type:text"`
+	ActivityJSON        string                 `json:"-" gorm:"column:activity_json;type:text"`
+	InteractionJSON     string                 `json:"-" gorm:"column:interaction_json;type:text"`
+	FilesCount          int                    `json:"files_count" gorm:"default:0"`
+	TotalCost           float64                `json:"total_cost" gorm:"default:0.0"` // Total AI cost in USD
+	Progress            int                    `json:"progress" gorm:"default:100"`
+	DurationMs          int64                  `json:"duration_ms" gorm:"default:0"` // Build duration in milliseconds
+	Error               string                 `json:"error,omitempty" gorm:"type:text"`
+	CompletedAt         *time.Time             `json:"completed_at,omitempty"`
 }
 
 // PromptPackActivationRequest stores admin-gated prompt-pack activation intent

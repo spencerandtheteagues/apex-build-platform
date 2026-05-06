@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/mobile"
 )
 
 func TestCompileIntentBriefFromRequestDetectsCapabilities(t *testing.T) {
@@ -125,6 +126,72 @@ func TestCompileIntentBriefFromRequestDoesNotTreatCleanFileStructureAsUploadStor
 	}
 }
 
+func TestCompileIntentBriefFromRequestRoutesNativeMobilePath(t *testing.T) {
+	req := &BuildRequest{
+		Description: "Build a contractor quote builder mobile app for iOS and Android with login, customers, jobs, camera photo uploads, offline drafts, push reminders, and a backend dashboard.",
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+	}
+
+	brief := compileIntentBriefFromRequest(req, "platform")
+	if brief == nil {
+		t.Fatal("expected intent brief")
+	}
+	if brief.TargetPlatform != mobile.TargetPlatformMobileExpo {
+		t.Fatalf("target platform = %q, want %q", brief.TargetPlatform, mobile.TargetPlatformMobileExpo)
+	}
+	if brief.MobileFramework != mobile.MobileFrameworkExpoReactNative {
+		t.Fatalf("mobile framework = %q, want Expo React Native", brief.MobileFramework)
+	}
+	if brief.MobileReleaseLevel != mobile.ReleaseSourceOnly {
+		t.Fatalf("release level = %q, want source_only while EAS is gated", brief.MobileReleaseLevel)
+	}
+	if !hasMobilePlatform(brief.MobilePlatforms, mobile.MobilePlatformAndroid) || !hasMobilePlatform(brief.MobilePlatforms, mobile.MobilePlatformIOS) {
+		t.Fatalf("expected Android and iOS platforms, got %+v", brief.MobilePlatforms)
+	}
+	if !hasMobileCapability(brief.MobileCapabilities, mobile.CapabilityCamera) || !hasMobileCapability(brief.MobileCapabilities, mobile.CapabilityOfflineMode) || !hasMobileCapability(brief.MobileCapabilities, mobile.CapabilityPushNotifications) {
+		t.Fatalf("expected camera/offline/push capabilities, got %+v", brief.MobileCapabilities)
+	}
+	if brief.MobileClassification == nil || !brief.MobileClassification.BackendNeeded {
+		t.Fatalf("expected backend-needed mobile classification, got %+v", brief.MobileClassification)
+	}
+}
+
+func TestCompileBuildContractFromPlanCarriesMobileMetadata(t *testing.T) {
+	intent := &IntentBrief{
+		AppType:              "fullstack",
+		TargetPlatform:       mobile.TargetPlatformMobileExpo,
+		MobilePlatforms:      []mobile.MobilePlatform{mobile.MobilePlatformAndroid, mobile.MobilePlatformIOS},
+		MobileFramework:      mobile.MobileFrameworkExpoReactNative,
+		MobileReleaseLevel:   mobile.ReleaseSourceOnly,
+		MobileCapabilities:   []mobile.MobileCapability{mobile.CapabilityCamera, mobile.CapabilityOfflineMode},
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAuth, CapabilityAPI},
+	}
+	plan := &BuildPlan{
+		BuildID:      "build-mobile-contract",
+		AppType:      "fullstack",
+		DeliveryMode: "mobile_source_only",
+		TechStack:    TechStack{Frontend: "Expo React Native", Backend: "Go", Database: "PostgreSQL"},
+	}
+
+	contract := compileBuildContractFromPlan("build-mobile-contract", intent, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if contract.TargetPlatform != mobile.TargetPlatformMobileExpo {
+		t.Fatalf("target platform = %q", contract.TargetPlatform)
+	}
+	if contract.MobileFramework != mobile.MobileFrameworkExpoReactNative {
+		t.Fatalf("mobile framework = %q", contract.MobileFramework)
+	}
+	if !hasMobilePlatform(contract.MobilePlatforms, mobile.MobilePlatformAndroid) || !hasMobilePlatform(contract.MobilePlatforms, mobile.MobilePlatformIOS) {
+		t.Fatalf("expected Android and iOS contract platforms, got %+v", contract.MobilePlatforms)
+	}
+	if !hasMobileCapability(contract.MobileCapabilities, mobile.CapabilityCamera) {
+		t.Fatalf("expected camera capability in contract, got %+v", contract.MobileCapabilities)
+	}
+}
+
 func TestCompileIntentBriefFromRequestIncludesWireframeDescription(t *testing.T) {
 	req := &BuildRequest{
 		Description:          "Build a dashboard app",
@@ -143,6 +210,24 @@ func TestCompileIntentBriefFromRequestIncludesWireframeDescription(t *testing.T)
 	if brief.AppType == "" {
 		t.Fatalf("expected app type inference to remain populated, got %+v", brief)
 	}
+}
+
+func hasMobilePlatform(platforms []mobile.MobilePlatform, want mobile.MobilePlatform) bool {
+	for _, platform := range platforms {
+		if platform == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMobileCapability(capabilities []mobile.MobileCapability, want mobile.MobileCapability) bool {
+	for _, capability := range capabilities {
+		if capability == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {

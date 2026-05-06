@@ -3,6 +3,8 @@ package agents
 import (
 	"strings"
 	"testing"
+
+	"apex-build/internal/mobile"
 )
 
 func TestCompilePrecomputedValidatedBuildSpecIncludesAdvisories(t *testing.T) {
@@ -131,6 +133,50 @@ func TestFinalizeValidatedBuildSpecLocksPlanDetails(t *testing.T) {
 	}
 }
 
+func TestValidatedBuildSpecCarriesMobileTargetMetadata(t *testing.T) {
+	t.Parallel()
+
+	prompt := "Build an Android and iOS field-service mobile app with camera uploads, offline drafts, login, and push reminders."
+	intent := compileIntentBriefFromRequest(&BuildRequest{Prompt: prompt}, "platform")
+	spec := compilePrecomputedValidatedBuildSpec(&BuildRequest{Prompt: prompt}, intent)
+	if spec == nil {
+		t.Fatal("expected precomputed spec")
+	}
+	if spec.TargetPlatform != mobile.TargetPlatformMobileExpo {
+		t.Fatalf("target platform = %q, want mobile_expo", spec.TargetPlatform)
+	}
+	if spec.MobileFramework != mobile.MobileFrameworkExpoReactNative {
+		t.Fatalf("mobile framework = %q, want Expo React Native", spec.MobileFramework)
+	}
+	if !hasValidatedMobilePlatform(spec.MobilePlatforms, mobile.MobilePlatformAndroid) || !hasValidatedMobilePlatform(spec.MobilePlatforms, mobile.MobilePlatformIOS) {
+		t.Fatalf("expected Android and iOS platforms, got %+v", spec.MobilePlatforms)
+	}
+	if !hasValidatedMobileCapability(spec.MobileCapabilities, mobile.CapabilityCamera) || !hasValidatedMobileCapability(spec.MobileCapabilities, mobile.CapabilityOfflineMode) {
+		t.Fatalf("expected camera and offline capabilities, got %+v", spec.MobileCapabilities)
+	}
+
+	plan := &BuildPlan{
+		AppType:            "fullstack",
+		DeliveryMode:       "mobile_source_only",
+		TargetPlatform:     mobile.TargetPlatformMobileExpo,
+		MobilePlatforms:    []mobile.MobilePlatform{mobile.MobilePlatformAndroid},
+		MobileFramework:    mobile.MobileFrameworkExpoReactNative,
+		MobileReleaseLevel: mobile.ReleaseSourceOnly,
+		MobileCapabilities: []mobile.MobileCapability{mobile.CapabilityFileUploads},
+	}
+	contract := compileBuildContractFromPlan("build-mobile-validated", intent, plan)
+	locked := finalizeValidatedBuildSpec("build-mobile-validated", spec, plan, contract)
+	if locked == nil || !locked.Locked {
+		t.Fatalf("expected locked validated spec, got %+v", locked)
+	}
+	if !hasValidatedMobilePlatform(locked.MobilePlatforms, mobile.MobilePlatformAndroid) {
+		t.Fatalf("expected locked mobile platform metadata, got %+v", locked.MobilePlatforms)
+	}
+	if !hasValidatedMobileCapability(locked.MobileCapabilities, mobile.CapabilityFileUploads) {
+		t.Fatalf("expected locked mobile capability override, got %+v", locked.MobileCapabilities)
+	}
+}
+
 func TestBuildTaskPromptIncludesValidatedBuildSpecContext(t *testing.T) {
 	t.Parallel()
 
@@ -161,6 +207,24 @@ func TestBuildTaskPromptIncludesValidatedBuildSpecContext(t *testing.T) {
 	if !strings.Contains(prompt, "This spec is locked for generation") {
 		t.Fatalf("expected lock language in task prompt, got %q", prompt)
 	}
+}
+
+func hasValidatedMobilePlatform(platforms []mobile.MobilePlatform, want mobile.MobilePlatform) bool {
+	for _, platform := range platforms {
+		if platform == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasValidatedMobileCapability(capabilities []mobile.MobileCapability, want mobile.MobileCapability) bool {
+	for _, capability := range capabilities {
+		if capability == want {
+			return true
+		}
+	}
+	return false
 }
 
 func hasBuildSpecAdvisoryCode(values []BuildSpecAdvisory, code string) bool {

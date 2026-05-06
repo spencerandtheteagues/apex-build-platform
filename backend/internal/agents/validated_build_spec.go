@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"apex-build/internal/mobile"
+
 	"github.com/google/uuid"
 )
 
@@ -26,21 +28,26 @@ type BuildSpecAdvisory struct {
 }
 
 type ValidatedBuildSpec struct {
-	ID                    string              `json:"id"`
-	BuildID               string              `json:"build_id,omitempty"`
-	Source                string              `json:"source"`
-	NormalizedRequest     string              `json:"normalized_request,omitempty"`
-	AppType               string              `json:"app_type,omitempty"`
-	DeliveryMode          string              `json:"delivery_mode,omitempty"`
-	PrimaryUserFlows      []string            `json:"primary_user_flows,omitempty"`
-	RoutePlan             []string            `json:"route_plan,omitempty"`
-	StateDomains          []string            `json:"state_domains,omitempty"`
-	APIPaths              []string            `json:"api_paths,omitempty"`
-	SecurityAdvisories    []BuildSpecAdvisory `json:"security_advisories,omitempty"`
-	PerformanceAdvisories []BuildSpecAdvisory `json:"performance_advisories,omitempty"`
-	AcceptanceSurfaces    []string            `json:"acceptance_surfaces,omitempty"`
-	Locked                bool                `json:"locked"`
-	CreatedAt             time.Time           `json:"created_at"`
+	ID                    string                    `json:"id"`
+	BuildID               string                    `json:"build_id,omitempty"`
+	Source                string                    `json:"source"`
+	NormalizedRequest     string                    `json:"normalized_request,omitempty"`
+	AppType               string                    `json:"app_type,omitempty"`
+	DeliveryMode          string                    `json:"delivery_mode,omitempty"`
+	TargetPlatform        mobile.TargetPlatform     `json:"target_platform,omitempty"`
+	MobilePlatforms       []mobile.MobilePlatform   `json:"mobile_platforms,omitempty"`
+	MobileFramework       mobile.MobileFramework    `json:"mobile_framework,omitempty"`
+	MobileReleaseLevel    mobile.MobileReleaseLevel `json:"mobile_release_level,omitempty"`
+	MobileCapabilities    []mobile.MobileCapability `json:"mobile_capabilities,omitempty"`
+	PrimaryUserFlows      []string                  `json:"primary_user_flows,omitempty"`
+	RoutePlan             []string                  `json:"route_plan,omitempty"`
+	StateDomains          []string                  `json:"state_domains,omitempty"`
+	APIPaths              []string                  `json:"api_paths,omitempty"`
+	SecurityAdvisories    []BuildSpecAdvisory       `json:"security_advisories,omitempty"`
+	PerformanceAdvisories []BuildSpecAdvisory       `json:"performance_advisories,omitempty"`
+	AcceptanceSurfaces    []string                  `json:"acceptance_surfaces,omitempty"`
+	Locked                bool                      `json:"locked"`
+	CreatedAt             time.Time                 `json:"created_at"`
 }
 
 func compilePrecomputedValidatedBuildSpec(req *BuildRequest, intent *IntentBrief) *ValidatedBuildSpec {
@@ -77,6 +84,11 @@ func compilePrecomputedValidatedBuildSpec(req *BuildRequest, intent *IntentBrief
 		NormalizedRequest:     normalized,
 		AppType:               appType,
 		DeliveryMode:          defaultDeliveryModeForAppType(appType),
+		TargetPlatform:        precomputedTargetPlatform(req, intent, normalized),
+		MobilePlatforms:       precomputedMobilePlatforms(req, intent, normalized),
+		MobileFramework:       precomputedMobileFramework(req, intent, normalized),
+		MobileReleaseLevel:    precomputedMobileReleaseLevel(req, intent, normalized),
+		MobileCapabilities:    precomputedMobileCapabilities(req, intent, normalized),
 		PrimaryUserFlows:      deriveValidatedUserFlows(normalized, capabilities),
 		StateDomains:          deriveValidatedStateDomains(capabilities, normalized),
 		SecurityAdvisories:    deriveValidatedSecurityAdvisories(capabilities, normalized),
@@ -85,6 +97,63 @@ func compilePrecomputedValidatedBuildSpec(req *BuildRequest, intent *IntentBrief
 	}
 	spec.AcceptanceSurfaces = deriveValidatedAcceptanceSurfaces(nil, spec.DeliveryMode)
 	return spec
+}
+
+func precomputedTargetPlatform(req *BuildRequest, intent *IntentBrief, normalized string) mobile.TargetPlatform {
+	if req != nil && req.TargetPlatform != "" {
+		return effectiveTargetPlatform(req.TargetPlatform, "")
+	}
+	if intent != nil && intent.TargetPlatform != "" {
+		return effectiveTargetPlatform(intent.TargetPlatform, "")
+	}
+	classification := mobile.ClassifyTargetPlatform(normalized)
+	return effectiveTargetPlatform("", classification.TargetPlatform)
+}
+
+func precomputedMobilePlatforms(req *BuildRequest, intent *IntentBrief, normalized string) []mobile.MobilePlatform {
+	target := precomputedTargetPlatform(req, intent, normalized)
+	if req != nil && len(req.MobilePlatforms) > 0 {
+		return effectiveMobilePlatforms(req.MobilePlatforms, nil, target)
+	}
+	if intent != nil && len(intent.MobilePlatforms) > 0 {
+		return effectiveMobilePlatforms(intent.MobilePlatforms, nil, target)
+	}
+	classification := mobile.ClassifyTargetPlatform(normalized)
+	return effectiveMobilePlatforms(nil, classification.MobilePlatforms, target)
+}
+
+func precomputedMobileFramework(req *BuildRequest, intent *IntentBrief, normalized string) mobile.MobileFramework {
+	target := precomputedTargetPlatform(req, intent, normalized)
+	if req != nil && req.MobileFramework != "" {
+		return effectiveMobileFramework(req.MobileFramework, target)
+	}
+	if intent != nil && intent.MobileFramework != "" {
+		return effectiveMobileFramework(intent.MobileFramework, target)
+	}
+	return effectiveMobileFramework("", target)
+}
+
+func precomputedMobileReleaseLevel(req *BuildRequest, intent *IntentBrief, normalized string) mobile.MobileReleaseLevel {
+	target := precomputedTargetPlatform(req, intent, normalized)
+	if req != nil && req.MobileReleaseLevel != "" {
+		return effectiveMobileReleaseLevel(req.MobileReleaseLevel, target)
+	}
+	if intent != nil && intent.MobileReleaseLevel != "" {
+		return effectiveMobileReleaseLevel(intent.MobileReleaseLevel, target)
+	}
+	return effectiveMobileReleaseLevel("", target)
+}
+
+func precomputedMobileCapabilities(req *BuildRequest, intent *IntentBrief, normalized string) []mobile.MobileCapability {
+	var requested []mobile.MobileCapability
+	if req != nil {
+		requested = req.MobileCapabilities
+	}
+	if len(requested) == 0 && intent != nil {
+		requested = intent.MobileCapabilities
+	}
+	classification := mobile.ClassifyTargetPlatform(normalized)
+	return effectiveMobileCapabilities(requested, classification.RequiredCapabilities)
 }
 
 func finalizeValidatedBuildSpec(buildID string, existing *ValidatedBuildSpec, plan *BuildPlan, contract *BuildContract) *ValidatedBuildSpec {
@@ -116,6 +185,21 @@ func finalizeValidatedBuildSpec(buildID string, existing *ValidatedBuildSpec, pl
 		if strings.TrimSpace(plan.DeliveryMode) != "" {
 			spec.DeliveryMode = strings.TrimSpace(plan.DeliveryMode)
 		}
+		if plan.TargetPlatform != "" {
+			spec.TargetPlatform = plan.TargetPlatform
+		}
+		if len(plan.MobilePlatforms) > 0 {
+			spec.MobilePlatforms = normalizeMobilePlatforms(plan.MobilePlatforms)
+		}
+		if plan.MobileFramework != "" {
+			spec.MobileFramework = plan.MobileFramework
+		}
+		if plan.MobileReleaseLevel != "" {
+			spec.MobileReleaseLevel = plan.MobileReleaseLevel
+		}
+		if len(plan.MobileCapabilities) > 0 {
+			spec.MobileCapabilities = effectiveMobileCapabilities(plan.MobileCapabilities, nil)
+		}
 		spec.PrimaryUserFlows = dedupeStrings(append(spec.PrimaryUserFlows, derivePlanUserFlows(plan)...))
 		spec.StateDomains = dedupeStrings(append(spec.StateDomains, derivePlanStateDomains(plan)...))
 		spec.RoutePlan = dedupeStrings(append(spec.RoutePlan, derivePlanRoutePlan(plan)...))
@@ -127,6 +211,21 @@ func finalizeValidatedBuildSpec(buildID string, existing *ValidatedBuildSpec, pl
 		}
 		if strings.TrimSpace(contract.DeliveryMode) != "" {
 			spec.DeliveryMode = strings.TrimSpace(contract.DeliveryMode)
+		}
+		if contract.TargetPlatform != "" {
+			spec.TargetPlatform = contract.TargetPlatform
+		}
+		if len(contract.MobilePlatforms) > 0 {
+			spec.MobilePlatforms = normalizeMobilePlatforms(contract.MobilePlatforms)
+		}
+		if contract.MobileFramework != "" {
+			spec.MobileFramework = contract.MobileFramework
+		}
+		if contract.MobileReleaseLevel != "" {
+			spec.MobileReleaseLevel = contract.MobileReleaseLevel
+		}
+		if len(contract.MobileCapabilities) > 0 {
+			spec.MobileCapabilities = effectiveMobileCapabilities(contract.MobileCapabilities, nil)
 		}
 		spec.RoutePlan = dedupeStrings(append(spec.RoutePlan, deriveContractRoutePlan(contract)...))
 		spec.APIPaths = dedupeStrings(append(spec.APIPaths, deriveContractAPIPaths(contract)...))

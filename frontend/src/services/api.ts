@@ -677,6 +677,13 @@ export class ApiService {
       styling?: string
       extras?: string[]
     }
+    target_platform?: TargetPlatform
+    mobile_platforms?: MobilePlatform[]
+    mobile_framework?: MobileFramework
+    mobile_release_level?: MobileReleaseLevel
+    mobile_capabilities?: MobileCapability[]
+    mobile_dependency_policy?: string
+    mobile_app_spec?: unknown
     diff_mode?: boolean
     role_assignments?: Record<string, string>
     provider_model_overrides?: Record<string, string>
@@ -3608,6 +3615,11 @@ export interface CompletedBuildSummary {
   mode: string
   power_mode: string
   tech_stack: { frontend?: string; backend?: string; database?: string } | null
+  target_platform?: TargetPlatform
+  mobile_platforms?: MobilePlatform[]
+  mobile_framework?: MobileFramework
+  mobile_release_level?: MobileReleaseLevel
+  mobile_capabilities?: MobileCapability[]
   files_count: number
   total_cost: number
   progress: number
@@ -3617,6 +3629,35 @@ export interface CompletedBuildSummary {
   live?: boolean
   resumable?: boolean
 }
+
+export type TargetPlatform = 'web' | 'fullstack_web' | 'mobile_expo' | 'mobile_capacitor' | 'api_only'
+export type MobilePlatform = 'android' | 'ios'
+export type MobileFramework = 'expo-react-native' | 'capacitor'
+export type MobileReleaseLevel =
+  | 'source_only'
+  | 'web_preview'
+  | 'dev_build'
+  | 'internal_android_apk'
+  | 'android_aab'
+  | 'ios_simulator'
+  | 'ios_internal'
+  | 'testflight_ready'
+  | 'store_submission_ready'
+export type MobileCapability =
+  | 'camera'
+  | 'photoLibrary'
+  | 'pushNotifications'
+  | 'location'
+  | 'maps'
+  | 'fileUploads'
+  | 'offlineMode'
+  | 'localNotifications'
+  | 'backgroundTasks'
+  | 'payments'
+  | 'inAppPurchases'
+  | 'biometrics'
+  | 'deepLinks'
+  | 'universalLinks'
 
 export type BuildMessageTargetMode = 'lead' | 'agent' | 'role' | 'all_agents'
 
@@ -3812,6 +3853,11 @@ export interface BuildIntentBrief {
   id: string
   normalized_request: string
   app_type: string
+  target_platform?: TargetPlatform
+  mobile_platforms?: MobilePlatform[]
+  mobile_framework?: MobileFramework
+  mobile_release_level?: MobileReleaseLevel
+  mobile_capabilities?: MobileCapability[]
   required_features?: string[]
   non_goals?: string[]
   complexity_class?: string
@@ -3828,6 +3874,11 @@ export interface BuildContractSummary {
   build_id: string
   app_type?: string
   delivery_mode?: string
+  target_platform?: TargetPlatform
+  mobile_platforms?: MobilePlatform[]
+  mobile_framework?: MobileFramework
+  mobile_release_level?: MobileReleaseLevel
+  mobile_capabilities?: MobileCapability[]
   verified?: boolean
   auth_contract?: {
     required?: boolean

@@ -1,12 +1,17 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"apex-build/internal/db"
+	"apex-build/internal/mobile"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -23,7 +28,7 @@ func newProjectAPITestServer(t *testing.T, subscriptionType string) (*Server, ui
 	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
 	gormDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, gormDB.AutoMigrate(&models.User{}, &models.Project{}))
+	require.NoError(t, gormDB.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}, &models.CompletedBuild{}))
 
 	user := models.User{
 		Username:         strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),
@@ -35,6 +40,45 @@ func newProjectAPITestServer(t *testing.T, subscriptionType string) (*Server, ui
 
 	server := NewServer(&db.Database{DB: gormDB}, nil, nil, nil)
 	return server, user.ID, gormDB
+}
+
+func TestDownloadProjectPreparesMobileExpoFilesForOwnerZip(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+
+	project := models.Project{
+		Name:           "Mobile ZIP",
+		Language:       "typescript",
+		OwnerID:        userID,
+		TargetPlatform: string(mobile.TargetPlatformMobileExpo),
+	}
+	require.NoError(t, gormDB.Create(&project).Error)
+
+	spec := mobile.FieldServiceContractorQuoteSpec()
+	spec.App.Slug = "mobile-zip-spec"
+	specJSON, err := json.Marshal(spec)
+	require.NoError(t, err)
+	require.NoError(t, gormDB.Create(&models.CompletedBuild{
+		BuildID:        "mobile-zip-build",
+		UserID:         userID,
+		ProjectID:      &project.ID,
+		Status:         "completed",
+		TargetPlatform: string(mobile.TargetPlatformMobileExpo),
+		MobileSpecJSON: string(specJSON),
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/download", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.DownloadProject(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	zipReader, err := zip.NewReader(bytes.NewReader(recorder.Body.Bytes()), int64(recorder.Body.Len()))
+	require.NoError(t, err)
+	require.True(t, zipHasPath(zipReader, "mobile/package.json"))
+	require.True(t, zipHasPath(zipReader, "mobile/app.config.ts"))
 }
 
 func TestCreateProjectRejectsPublicProjectOnFreePlan(t *testing.T) {
@@ -75,4 +119,13 @@ func TestCreateProjectRejectsInvalidUserContext(t *testing.T) {
 	var projectCount int64
 	require.NoError(t, gormDB.Model(&models.Project{}).Count(&projectCount).Error)
 	require.Zero(t, projectCount)
+}
+
+func zipHasPath(reader *zip.Reader, path string) bool {
+	for _, file := range reader.File {
+		if file.Name == path {
+			return true
+		}
+	}
+	return false
 }

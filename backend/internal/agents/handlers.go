@@ -1494,6 +1494,12 @@ func (h *BuildHandler) readLiveBuildDetailsPayload(build *Build, userPlan string
 			"provider_mode":            build.ProviderMode,
 			"require_preview_ready":    build.RequirePreviewReady,
 			"description":              build.Description,
+			"target_platform":          build.TargetPlatform,
+			"mobile_platforms":         build.MobilePlatforms,
+			"mobile_framework":         build.MobileFramework,
+			"mobile_release_level":     build.MobileReleaseLevel,
+			"mobile_capabilities":      build.MobileCapabilities,
+			"mobile_app_spec":          build.MobileAppSpec,
 			"provider_model_overrides": cloneStringMap(build.ProviderModelOverrides),
 			"plan":                     build.Plan,
 			"agents":                   agents,
@@ -2510,23 +2516,28 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 
 	// Convert to response format (exclude raw files JSON, include file count)
 	type BuildSummary struct {
-		ID          uint    `json:"id"`
-		BuildID     string  `json:"build_id"`
-		ProjectID   *uint   `json:"project_id,omitempty"`
-		ProjectName string  `json:"project_name"`
-		Description string  `json:"description"`
-		Status      string  `json:"status"`
-		Mode        string  `json:"mode"`
-		PowerMode   string  `json:"power_mode"`
-		TechStack   any     `json:"tech_stack"`
-		FilesCount  int     `json:"files_count"`
-		TotalCost   float64 `json:"total_cost"`
-		Progress    int     `json:"progress"`
-		DurationMs  int64   `json:"duration_ms"`
-		CreatedAt   string  `json:"created_at"`
-		CompletedAt *string `json:"completed_at,omitempty"`
-		Live        bool    `json:"live"`
-		Resumable   bool    `json:"resumable"`
+		ID                 uint     `json:"id"`
+		BuildID            string   `json:"build_id"`
+		ProjectID          *uint    `json:"project_id,omitempty"`
+		ProjectName        string   `json:"project_name"`
+		Description        string   `json:"description"`
+		Status             string   `json:"status"`
+		Mode               string   `json:"mode"`
+		PowerMode          string   `json:"power_mode"`
+		TechStack          any      `json:"tech_stack"`
+		TargetPlatform     string   `json:"target_platform,omitempty"`
+		MobilePlatforms    []string `json:"mobile_platforms,omitempty"`
+		MobileFramework    string   `json:"mobile_framework,omitempty"`
+		MobileReleaseLevel string   `json:"mobile_release_level,omitempty"`
+		MobileCapabilities []string `json:"mobile_capabilities,omitempty"`
+		FilesCount         int      `json:"files_count"`
+		TotalCost          float64  `json:"total_cost"`
+		Progress           int      `json:"progress"`
+		DurationMs         int64    `json:"duration_ms"`
+		CreatedAt          string   `json:"created_at"`
+		CompletedAt        *string  `json:"completed_at,omitempty"`
+		Live               bool     `json:"live"`
+		Resumable          bool     `json:"resumable"`
 	}
 
 	summaries := make([]BuildSummary, 0, len(builds))
@@ -2538,22 +2549,27 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 		displayStatus := presentedSnapshotStatus(&b)
 		snapshotState := parseBuildSnapshotState(b.StateJSON)
 		s := BuildSummary{
-			ID:          b.ID,
-			BuildID:     b.BuildID,
-			ProjectID:   b.ProjectID,
-			ProjectName: b.ProjectName,
-			Description: b.Description,
-			Status:      string(displayStatus),
-			Mode:        b.Mode,
-			PowerMode:   b.PowerMode,
-			TechStack:   techStack,
-			FilesCount:  b.FilesCount,
-			TotalCost:   b.TotalCost,
-			Progress:    presentedSnapshotProgress(&b, displayStatus, snapshotState),
-			DurationMs:  b.DurationMs,
-			CreatedAt:   b.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			Live:        false,
-			Resumable:   isActiveBuildStatus(string(displayStatus)),
+			ID:                 b.ID,
+			BuildID:            b.BuildID,
+			ProjectID:          b.ProjectID,
+			ProjectName:        b.ProjectName,
+			Description:        b.Description,
+			Status:             string(displayStatus),
+			Mode:               b.Mode,
+			PowerMode:          b.PowerMode,
+			TechStack:          techStack,
+			TargetPlatform:     b.TargetPlatform,
+			MobilePlatforms:    append([]string(nil), b.MobilePlatforms...),
+			MobileFramework:    b.MobileFramework,
+			MobileReleaseLevel: b.MobileReleaseLevel,
+			MobileCapabilities: append([]string(nil), b.MobileCapabilities...),
+			FilesCount:         b.FilesCount,
+			TotalCost:          b.TotalCost,
+			Progress:           presentedSnapshotProgress(&b, displayStatus, snapshotState),
+			DurationMs:         b.DurationMs,
+			CreatedAt:          b.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			Live:               false,
+			Resumable:          isActiveBuildStatus(string(displayStatus)),
 		}
 		if _, liveErr := h.manager.GetBuild(b.BuildID); liveErr == nil {
 			s.Live = true
@@ -2635,31 +2651,42 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 	displayProgress := presentedSnapshotProgress(&build, displayStatus, snapshotState)
 
 	response := gin.H{
-		"id":                build.ID,
-		"build_id":          build.BuildID,
-		"project_id":        build.ProjectID,
-		"project_name":      build.ProjectName,
-		"description":       build.Description,
-		"status":            string(displayStatus),
-		"mode":              build.Mode,
-		"power_mode":        build.PowerMode,
-		"tech_stack":        techStack,
-		"agents":            agents,
-		"tasks":             tasks,
-		"checkpoints":       checkpoints,
-		"files":             files,
-		"messages":          interaction.Messages,
-		"interaction":       interaction,
-		"activity_timeline": activityTimeline,
-		"files_count":       build.FilesCount,
-		"total_cost":        build.TotalCost,
-		"progress":          displayProgress,
-		"duration_ms":       build.DurationMs,
-		"error":             presentedBuildError(displayStatus, build.Error),
-		"created_at":        build.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"completed_at":      build.CompletedAt,
-		"live":              live,
-		"resumable":         isActiveBuildStatus(string(displayStatus)),
+		"id":                    build.ID,
+		"build_id":              build.BuildID,
+		"project_id":            build.ProjectID,
+		"project_name":          build.ProjectName,
+		"description":           build.Description,
+		"status":                string(displayStatus),
+		"mode":                  build.Mode,
+		"power_mode":            build.PowerMode,
+		"tech_stack":            techStack,
+		"target_platform":       build.TargetPlatform,
+		"mobile_platforms":      build.MobilePlatforms,
+		"mobile_framework":      build.MobileFramework,
+		"mobile_release_level":  build.MobileReleaseLevel,
+		"mobile_capabilities":   build.MobileCapabilities,
+		"android_package":       build.AndroidPackage,
+		"ios_bundle_identifier": build.IOSBundleIdentifier,
+		"app_display_name":      build.AppDisplayName,
+		"app_version":           build.AppVersion,
+		"build_number":          build.BuildNumber,
+		"version_code":          build.VersionCode,
+		"agents":                agents,
+		"tasks":                 tasks,
+		"checkpoints":           checkpoints,
+		"files":                 files,
+		"messages":              interaction.Messages,
+		"interaction":           interaction,
+		"activity_timeline":     activityTimeline,
+		"files_count":           build.FilesCount,
+		"total_cost":            build.TotalCost,
+		"progress":              displayProgress,
+		"duration_ms":           build.DurationMs,
+		"error":                 presentedBuildError(displayStatus, build.Error),
+		"created_at":            build.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"completed_at":          build.CompletedAt,
+		"live":                  live,
+		"resumable":             isActiveBuildStatus(string(displayStatus)),
 	}
 	for key, value := range buildSnapshotStateResponseFields(snapshotState, string(displayStatus), userPlan) {
 		response[key] = value
@@ -2782,6 +2809,19 @@ func (h *BuildHandler) readLiveCompletedBuildPayload(build *Build, snapshot *mod
 	response["project_id"] = projectID
 	response["project_name"] = projectName
 	response["tech_stack"] = techStack
+	if snapshot != nil {
+		response["target_platform"] = snapshot.TargetPlatform
+		response["mobile_platforms"] = append([]string(nil), snapshot.MobilePlatforms...)
+		response["mobile_framework"] = snapshot.MobileFramework
+		response["mobile_release_level"] = snapshot.MobileReleaseLevel
+		response["mobile_capabilities"] = append([]string(nil), snapshot.MobileCapabilities...)
+		response["android_package"] = snapshot.AndroidPackage
+		response["ios_bundle_identifier"] = snapshot.IOSBundleIdentifier
+		response["app_display_name"] = snapshot.AppDisplayName
+		response["app_version"] = snapshot.AppVersion
+		response["build_number"] = snapshot.BuildNumber
+		response["version_code"] = snapshot.VersionCode
+	}
 	response["files_count"] = len(files)
 	response["total_cost"] = 0.0
 	if snapshot != nil {

@@ -17,6 +17,7 @@ import (
 	"apex-build/internal/db"
 	"apex-build/internal/email"
 	appmiddleware "apex-build/internal/middleware"
+	"apex-build/internal/mobile"
 	"apex-build/internal/origins"
 	"apex-build/internal/payments"
 	"apex-build/internal/pricing"
@@ -991,6 +992,13 @@ func (s *Server) DownloadProject(c *gin.Context) {
 	if err := query.First(&project).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
 		return
+	}
+
+	if project.OwnerID == uid {
+		if err := mobile.PrepareExpoProjectFiles(c.Request.Context(), s.db.DB, project); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare mobile export files"})
+			return
+		}
 	}
 
 	// Get all files for the project
