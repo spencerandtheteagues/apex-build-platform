@@ -24,7 +24,7 @@ func newProjectHandlerTestFixture(t *testing.T, subscriptionType string) (*Handl
 	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Project{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}, &models.CompletedBuild{}))
 
 	user := models.User{
 		Username:         strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),
