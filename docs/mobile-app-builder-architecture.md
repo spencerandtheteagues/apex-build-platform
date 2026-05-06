@@ -89,13 +89,13 @@ Implemented now:
 - `frontend/src/services/api.ts` accepts and reads optional mobile target metadata.
 - `frontend/src/services/api.ts` exposes mobile credential status/create/delete methods with metadata-only response types.
 - `frontend/src/services/api.ts` exposes project-scoped mobile build-job methods for request, status, refresh, logs, and artifact metadata.
+- `ProjectDashboard` includes a mobile build operations panel for mobile projects. It lists native build jobs, checks EAS credential status, starts Android APK/AAB or iOS internal builds through the gated backend API, refreshes/cancels jobs, and opens artifact links when available.
 
 Next frontend work:
 
 - new-project target selector.
 - mobile setup step with Android/iOS/capability/build-level controls.
 - mobile preview frame with honest Expo Web labeling.
-- build logs/artifacts panel.
 - credentials panel.
 - store-readiness checklist.
 - mobile export options in `GitHubExportModal`.

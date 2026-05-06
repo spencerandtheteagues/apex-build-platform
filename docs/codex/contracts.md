@@ -22,8 +22,9 @@
   - `GET /api/v1/projects/:id/mobile/builds/:buildId/artifacts` returns artifact metadata only when an artifact URL exists.
 - Consumers:
   - `frontend/src/services/api.ts` exposes typed mobile build-job methods.
+  - `frontend/src/components/project/MobileBuildOperationsPanel.tsx` lists mobile jobs, starts gated native builds, refreshes/cancels jobs, and opens artifact URLs.
   - `Project.MobileBuildStatus` and `Project.MobileMetadata` feed the mobile readiness scorecard's native artifact category.
-  - Future Project Dashboard build panel should consume this project-scoped API.
+  - `ProjectDashboard` renders the build operations panel only for mobile projects.
 - Defaults / zero-value behavior:
   - Routes require authenticated project ownership and `target_platform=mobile_expo`.
   - Feature flags still default off; disabled native builds return `503 MOBILE_BUILD_DISABLED`.
