@@ -68,12 +68,13 @@ Implemented now:
 - Expo/React Native source generator for a field-service quote-builder starter under `mobile/`.
 - generated mobile source validation for dependency allowlist and browser-only runtime API usage.
 - mobile source preparation for GitHub export and owner ZIP download.
+- internal `MobileBuildService` abstraction with feature-flag/platform gating, mocked provider seam, build-state records, artifact/log metadata, failure classification, and secret redaction.
 
 Next backend services:
 
 - generated mobile API client generator.
 - Expo Web preview provider.
-- `MobileBuildService`, `EASBuildProvider`, build job queue, log/artifact store.
+- persistent build job queue/store and real `EASBuildProvider` integration.
 - credential vault integrations for EAS, Apple, Google Play, and Android signing.
 - store metadata/readiness generators.
 
@@ -179,15 +180,16 @@ Required next:
 - exported generated Expo template install/typecheck.
 - generated mobile export clone/install.
 - frontend mobile wizard tests.
-- mocked EAS provider build-state tests.
+- mocked mobile build-provider state tests.
 - credential redaction/encryption tests.
 - store-readiness generator tests.
 
 ## Known Limitations
 
 - This branch generates Expo source files through `backend/internal/mobile.GenerateExpoProject` and prepares them for GitHub export and owner ZIP download.
+- This branch has an internal mobile build-service abstraction and mocked provider tests, but no live provider execution.
 - This branch does not yet run Expo Web preview.
-- This branch does not yet call EAS Build or EAS Submit.
+- This branch does not yet call real EAS Build or EAS Submit.
 - This branch does not yet collect or store mobile credentials.
 - This branch does not yet automate App Store Connect or Google Play metadata.
 - Public product copy must not claim native mobile binary generation until the EAS path is implemented, credential-gated, and validated.
