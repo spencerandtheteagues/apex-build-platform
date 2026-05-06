@@ -42,6 +42,7 @@ type Server struct {
 	storage   storage.Provider
 	cache     func() cache.Status
 	email     *email.Service
+	mobile    *mobile.MobileBuildService
 }
 
 // NewServer creates a new API server
@@ -69,6 +70,10 @@ func (s *Server) SetUsageTracker(tracker *usage.Tracker) {
 
 func (s *Server) SetCacheStatusProvider(provider func() cache.Status) {
 	s.cache = provider
+}
+
+func (s *Server) SetMobileBuildService(service *mobile.MobileBuildService) {
+	s.mobile = service
 }
 
 // Health endpoint - Returns quickly for load balancer health checks

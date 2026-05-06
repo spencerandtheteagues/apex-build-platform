@@ -214,6 +214,47 @@ describe('mobile validation API', () => {
     expect(stored.present).toContain('eas_token')
     expect(deleted.missing).toContain('eas_token')
   })
+
+  it('manages project mobile build jobs through project-scoped routes', async () => {
+    const service = new ApiService('/api/v1')
+    const build = {
+      id: 'mbld_123',
+      project_id: 42,
+      user_id: 7,
+      platform: 'android',
+      profile: 'preview',
+      release_level: 'internal_android_apk',
+      status: 'succeeded',
+      provider: 'mock-eas',
+      artifact_url: 'https://artifacts.example.com/app.apk',
+      logs: [{ timestamp: '2026-05-06T00:00:00Z', level: 'info', message: 'queued' }],
+      created_at: '2026-05-06T00:00:00Z',
+      updated_at: '2026-05-06T00:00:00Z',
+    }
+    const get = vi.spyOn(service.client, 'get')
+      .mockResolvedValueOnce({ data: { builds: [build] } } as any)
+      .mockResolvedValueOnce({ data: { build } } as any)
+      .mockResolvedValueOnce({ data: { build_id: build.id, logs: build.logs } } as any)
+      .mockResolvedValueOnce({ data: { build_id: build.id, artifact_url: build.artifact_url, platform: 'android', profile: 'preview', release_level: 'internal_android_apk' } } as any)
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({ data: { build } } as any)
+
+    const listed = await service.listProjectMobileBuilds(42)
+    const created = await service.createProjectMobileBuild(42, { platform: 'android', profile: 'preview', release_level: 'internal_android_apk' })
+    const fetched = await service.getProjectMobileBuild(42, build.id)
+    const logs = await service.getProjectMobileBuildLogs(42, build.id)
+    const artifact = await service.getProjectMobileBuildArtifacts(42, build.id)
+
+    expect(get).toHaveBeenNthCalledWith(1, '/projects/42/mobile/builds')
+    expect(post).toHaveBeenCalledWith('/projects/42/mobile/builds', { platform: 'android', profile: 'preview', release_level: 'internal_android_apk' })
+    expect(get).toHaveBeenNthCalledWith(2, '/projects/42/mobile/builds/mbld_123')
+    expect(get).toHaveBeenNthCalledWith(3, '/projects/42/mobile/builds/mbld_123/logs')
+    expect(get).toHaveBeenNthCalledWith(4, '/projects/42/mobile/builds/mbld_123/artifacts')
+    expect(listed[0].id).toBe('mbld_123')
+    expect(created.build.status).toBe('succeeded')
+    expect(fetched.artifact_url).toContain('app.apk')
+    expect(logs[0].message).toBe('queued')
+    expect(artifact.artifact_url).toContain('app.apk')
+  })
 })
 
 describe('logout', () => {

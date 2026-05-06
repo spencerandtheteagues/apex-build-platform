@@ -12,6 +12,7 @@ import (
 
 	"apex-build/internal/db"
 	"apex-build/internal/mobile"
+	secretstore "apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -28,7 +29,7 @@ func newProjectAPITestServer(t *testing.T, subscriptionType string) (*Server, ui
 	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
 	gormDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, gormDB.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}, &models.CompletedBuild{}))
+	require.NoError(t, gormDB.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}, &models.CompletedBuild{}, &mobile.MobileBuildRecord{}, &secretstore.Secret{}, &secretstore.SecretAuditLog{}))
 
 	user := models.User{
 		Username:         strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),

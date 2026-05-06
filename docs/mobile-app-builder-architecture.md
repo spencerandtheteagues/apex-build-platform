@@ -68,7 +68,8 @@ Implemented now:
 - Expo/React Native source generator for a field-service quote-builder starter under `mobile/`.
 - generated mobile source validation for dependency allowlist and browser-only runtime API usage.
 - mobile source preparation for GitHub export and owner ZIP download.
-- internal `MobileBuildService` abstraction with feature-flag/platform gating, mocked provider seam, build-state records, artifact/log metadata, failure classification, and secret redaction.
+- internal `MobileBuildService` abstraction with feature-flag/platform gating, mocked provider seam, restart-safe build-state records, artifact/log metadata, failure classification, and secret redaction.
+- project-scoped mobile build-job API for request/status/log/artifact reads, gated by project ownership, mobile target type, feature flags, credentials, and provider availability.
 - encrypted, project-scoped mobile credential vault for EAS, Apple App Store Connect, Google Play service accounts, and Android signing.
 - authenticated mobile credential status API that returns metadata only and updates the mobile readiness scorecard.
 
@@ -76,7 +77,7 @@ Next backend services:
 
 - generated mobile API client generator.
 - Expo Web preview provider.
-- persistent build job queue/store and real `EASBuildProvider` integration.
+- queued/asynchronous mobile build workers and real `EASBuildProvider` integration.
 - store metadata/readiness generators.
 
 ## Frontend UI Components
@@ -85,6 +86,7 @@ Implemented now:
 
 - `frontend/src/services/api.ts` accepts and reads optional mobile target metadata.
 - `frontend/src/services/api.ts` exposes mobile credential status/create/delete methods with metadata-only response types.
+- `frontend/src/services/api.ts` exposes project-scoped mobile build-job methods for request, status, logs, and artifact metadata.
 
 Next frontend work:
 
@@ -131,7 +133,9 @@ EAS Build, EAS Submit, Apple, Google Play, and Android signing credentials must 
 
 The current branch stores mobile credentials through `backend/internal/mobile.MobileCredentialVault` and exposes safe project-owner routes under `/api/v1/projects/:id/mobile/credentials`. Raw values are accepted only on create/update, stored through the encrypted secrets subsystem, and never returned in status responses. The readiness scorecard can now distinguish missing, partial, and validated mobile credential states.
 
-The current branch still does not enable live EAS Build or store submission. The feature flags default to off so production cannot accidentally claim or run mobile binary workflows before provider execution, artifact persistence, and submission workflows are complete.
+The current branch also exposes native mobile build-job endpoints under `/api/v1/projects/:id/mobile/builds`. These endpoints fail closed unless mobile build feature flags are enabled, required credentials are complete, and a provider is configured. The production wiring intentionally has no live provider yet, so the API can report `MOBILE_BUILD_PROVIDER_MISSING` without pretending an APK/AAB/iOS artifact can be produced.
+
+The current branch still does not enable live EAS Build or store submission. The feature flags default to off so production cannot accidentally claim or run mobile binary workflows before provider execution and submission workflows are complete.
 
 ## Store Readiness Workflow
 
@@ -184,7 +188,7 @@ Required next:
 - exported generated Expo template install/typecheck.
 - generated mobile export clone/install.
 - frontend mobile wizard tests.
-- mocked mobile build-provider state tests.
+- mocked mobile build-provider state and project-scoped API tests.
 - credential redaction/encryption tests.
 - project-owner mobile credential route tests.
 - store-readiness generator tests.
@@ -192,7 +196,7 @@ Required next:
 ## Known Limitations
 
 - This branch generates Expo source files through `backend/internal/mobile.GenerateExpoProject` and prepares them for GitHub export and owner ZIP download.
-- This branch has an internal mobile build-service abstraction and mocked provider tests, but no live provider execution.
+- This branch has an internal mobile build-service abstraction, restart-safe build-job persistence, project-scoped build API, and mocked provider tests, but no live provider execution.
 - This branch does not yet run Expo Web preview.
 - This branch does not yet call real EAS Build or EAS Submit.
 - This branch stores mobile credentials and reports readiness status, but does not yet use those credentials to run EAS Build or EAS Submit.
