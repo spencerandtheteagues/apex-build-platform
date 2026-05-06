@@ -568,3 +568,29 @@
   - Backend preflight tests for platform-vs-BYOK behavior.
   - Backend start-build tests for BYOK unavailable behavior.
   - Browser launch smoke verifying platform payload and no provider-unavailable UI.
+
+## Mobile project metadata export visibility
+- Source of truth:
+  - `backend/internal/models/models.go` `Project` mobile metadata fields.
+  - `backend/internal/mobile/export_files.go` mobile export source preparation.
+- Producers:
+  - Builder start/create flows can set `target_platform`, `mobile_platforms`, `mobile_framework`, `mobile_release_level`, and `mobile_capabilities`.
+  - Project fetch/list APIs serialize the optional project metadata.
+  - ZIP and GitHub export handlers prepare Expo source files when mobile metadata is present.
+- Transport:
+  - Project JSON responses consumed by the frontend store.
+  - ZIP/GitHub export requests remain unchanged and infer mobile export behavior from persisted project/build metadata.
+- Consumers:
+  - `frontend/src/types/index.ts` `Project` optional mobile metadata fields.
+  - `frontend/src/components/project/ProjectDashboard.tsx` mobile export readiness panel.
+- Defaults / zero-value behavior:
+  - Missing mobile fields mean a normal web/API project; no mobile export panel is shown.
+  - `mobile_expo`, `expo-react-native`, mobile platforms, or mobile capabilities mark the project as a mobile Expo source-export candidate.
+  - Missing release level is displayed as source-only because native builds and store submission are separate gated workflows.
+- Backward compatibility risk:
+  - Additive optional frontend fields only; old project payloads continue rendering as web projects.
+  - Export request payloads are not widened in this slice, so existing ZIP/GitHub actions keep their current API contract.
+- Required tests / validations:
+  - Frontend ProjectDashboard test for mobile source-export messaging.
+  - Frontend ProjectDashboard test proving web projects do not show mobile messaging.
+  - Frontend typecheck.

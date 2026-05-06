@@ -18,7 +18,9 @@ import {
   Play,
   Settings,
   Share2,
+  ShieldCheck,
   Sparkles,
+  Smartphone,
   Terminal,
   Users,
 } from 'lucide-react'
@@ -37,6 +39,38 @@ const panelClass =
 
 const statCardClass =
   'rounded-[24px] border border-white/8 bg-black/24 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]'
+
+const mobileCapabilityLabels: Record<string, string> = {
+  camera: 'Camera',
+  photoLibrary: 'Photo library',
+  pushNotifications: 'Push reminders',
+  location: 'Location',
+  maps: 'Maps',
+  fileUploads: 'File uploads',
+  offlineMode: 'Offline drafts',
+  localNotifications: 'Local notifications',
+  backgroundTasks: 'Background tasks',
+  payments: 'Payments',
+  inAppPurchases: 'In-app purchases',
+  biometrics: 'Biometrics',
+  deepLinks: 'Deep links',
+  universalLinks: 'Universal links',
+}
+
+const releaseLevelLabels: Record<string, string> = {
+  source_only: 'Source only',
+  web_preview: 'Browser preview',
+  dev_build: 'Development build',
+  internal_android_apk: 'Internal Android APK',
+  android_aab: 'Android AAB',
+  ios_simulator: 'iOS simulator',
+  ios_internal: 'iOS internal',
+  testflight_ready: 'TestFlight-ready',
+  store_submission_ready: 'Store submission-ready',
+}
+
+const formatMobilePlatform = (platform: string) =>
+  platform === 'ios' ? 'iOS' : platform.charAt(0).toUpperCase() + platform.slice(1)
 
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   className,
@@ -233,6 +267,16 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
 
   const languageLabel = currentProject.language || 'workspace'
   const frameworkLabel = currentProject.framework || 'custom'
+  const isMobileExpoProject =
+    currentProject.target_platform === 'mobile_expo' ||
+    currentProject.mobile_framework === 'expo-react-native' ||
+    Boolean(currentProject.mobile_platforms?.length) ||
+    Boolean(currentProject.mobile_capabilities?.length)
+  const mobilePlatforms = currentProject.mobile_platforms?.length
+    ? currentProject.mobile_platforms
+    : (['android', 'ios'] as const)
+  const mobileCapabilities = currentProject.mobile_capabilities ?? []
+  const mobileReleaseLevel = currentProject.mobile_release_level || 'source_only'
 
   return (
     <div className={cn('mx-auto flex w-full max-w-[1500px] flex-col gap-6 p-4 md:p-6 xl:p-8', className)}>
@@ -350,6 +394,79 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
           </div>
         </div>
       </section>
+
+      {isMobileExpoProject ? (
+        <section
+          className={cn(panelClass, 'overflow-hidden border-cyan-300/18')}
+          data-testid="mobile-export-readiness"
+        >
+          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="relative overflow-hidden px-6 py-6 md:px-8">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_34%)]" />
+              <div className="relative">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100">
+                    <Smartphone className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/75">
+                      Mobile Source Path
+                    </div>
+                    <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-white">
+                      Expo/React Native export is source-ready
+                    </h2>
+                  </div>
+                </div>
+                <p className="mt-5 max-w-3xl text-sm leading-7 text-gray-300 md:text-base">
+                  ZIP and GitHub export will include a <span className="font-medium text-cyan-100">mobile/</span> Expo project
+                  with app config, EAS config, generated assets, build notes, and store-release guidance when this project is exported.
+                </p>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {mobileCapabilities.length > 0 ? (
+                    mobileCapabilities.slice(0, 6).map((capability) => (
+                      <span
+                        key={capability}
+                        className="rounded-full border border-cyan-300/14 bg-cyan-300/8 px-3 py-1.5 text-[11px] font-medium text-cyan-100"
+                      >
+                        {mobileCapabilityLabels[capability] || capability}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-medium text-gray-300">
+                      Capability manifest pending
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-white/6 bg-black/20 p-6 lg:border-l lg:border-t-0">
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4">
+                  <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Platforms</div>
+                  <div className="mt-2 text-sm font-medium text-white">
+                    {mobilePlatforms.map(formatMobilePlatform).join(' + ')}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4">
+                  <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Release Level</div>
+                  <div className="mt-2 text-sm font-medium text-white">
+                    {releaseLevelLabels[mobileReleaseLevel] || mobileReleaseLevel}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-amber-300/16 bg-amber-300/8 px-4 py-4">
+                  <div className="flex items-start gap-3">
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />
+                    <p className="text-xs leading-5 text-amber-50/90">
+                      Native APK/AAB, iOS builds, TestFlight, and store submission are separate gated workflows and are not claimed by this export panel.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {projectStats ? (
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
