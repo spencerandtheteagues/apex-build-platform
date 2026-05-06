@@ -1,0 +1,4002 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-05-06T00:17:43Z",
+  "app": {
+    "id": "apex-build",
+    "name": "Apex-Build Architecture Intelligence Map Example",
+    "environment": "production",
+    "repo": {
+      "provider": "github",
+      "url": "https://github.com/spencerandtheteagues/apex-build-platform",
+      "default_branch": "main",
+      "commit_sha": "example-sha"
+    },
+    "primary_runtime": "full-stack web app with AI-agent build pipeline",
+    "tenancy_model": "multi_tenant_shared_db",
+    "data_classification": "confidential"
+  },
+  "layers": [
+    {
+      "id": "user_device",
+      "name": "User / Device Layer",
+      "order": 1,
+      "description": "Entry points and untrusted client devices.",
+      "trust_zone": "untrusted_client",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "presentation",
+      "name": "Presentation Layer",
+      "order": 2,
+      "description": "Visible UI composition, routes, component tree, forms, accessibility, error boundaries.",
+      "trust_zone": "untrusted_client",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "client_runtime",
+      "name": "Client Runtime Layer",
+      "order": 3,
+      "description": "API clients, client auth, local cache, offline queue, analytics, flags.",
+      "trust_zone": "untrusted_client",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "edge_api",
+      "name": "Edge / API Entry Layer",
+      "order": 4,
+      "description": "CDN, WAF, API ingress, load balancing, rate limiting, request validation.",
+      "trust_zone": "edge",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "auth_security",
+      "name": "Auth / Security Layer",
+      "order": 5,
+      "description": "Authentication, authorization, tenant isolation, session validation, audit boundaries.",
+      "trust_zone": "trusted_backend",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "application_services",
+      "name": "Application Service Layer",
+      "order": 6,
+      "description": "Handlers, services, domain logic, validation, transactions, background dispatch.",
+      "trust_zone": "trusted_backend",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "ai_agent",
+      "name": "AI / Agent Layer",
+      "order": 7,
+      "description": "Prompt/model routing, context selection, tool execution, code generation, repair planning, cost control.",
+      "trust_zone": "privileged_backend",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "data_access",
+      "name": "Data Access Layer",
+      "order": 8,
+      "description": "Repositories, ORM/query builder, migration rules, transaction scope, schema ownership.",
+      "trust_zone": "trusted_backend",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "persistence",
+      "name": "Persistence Layer",
+      "order": 9,
+      "description": "SQL DB, cache, object storage, vector store, search index, queue storage, backups.",
+      "trust_zone": "data",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "eventing",
+      "name": "Eventing / Async Layer",
+      "order": 10,
+      "description": "Queues, workers, schedulers, pubsub, retry, DLQ, idempotency.",
+      "trust_zone": "trusted_backend",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "observability",
+      "name": "Observability Layer",
+      "order": 11,
+      "description": "Logs, metrics, traces, alerts, SLOs, incident annotations.",
+      "trust_zone": "observability",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "devops_runtime",
+      "name": "DevOps / Runtime Platform Layer",
+      "order": 12,
+      "description": "CI/CD, containers, environment config, deployments, rollbacks, health checks.",
+      "trust_zone": "delivery",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    },
+    {
+      "id": "external_integrations",
+      "name": "External Integrations Layer",
+      "order": 13,
+      "description": "Payments, email, OAuth, AI providers, Git, third-party APIs.",
+      "trust_zone": "external",
+      "allowed_inbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "dependency",
+        "observability_signal",
+        "feature_flag_gate"
+      ],
+      "allowed_outbound_edge_types": [
+        "sync_call",
+        "async_event",
+        "data_read",
+        "data_write",
+        "dependency",
+        "auth_check",
+        "observability_signal",
+        "cost_flow"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "web.frontend",
+      "name": "Web Frontend Shell",
+      "layer": "presentation",
+      "type": "page",
+      "description": "Top-level browser app shell and routing frame.",
+      "code_locations": [
+        {
+          "path": "frontend/src/App.tsx"
+        },
+        {
+          "path": "frontend/src/routes/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ui_api.build_sessions"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "presentation",
+        "authn_required": false,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "web.frontend.logs"
+        ],
+        "metrics": [
+          "web.frontend.latency",
+          "web.frontend.errors"
+        ],
+        "traces": [
+          "web.frontend.span"
+        ],
+        "alerts": [
+          "web.frontend.slo_breach"
+        ],
+        "dashboards": [
+          "web.frontend.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/web.frontend.test.ts"
+        ],
+        "integration": [
+          "tests/integration/web.frontend.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 70,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Web Frontend Shell, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "frontend/src/App.tsx",
+          "frontend/src/routes/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "web.app_builder_ui",
+      "name": "App Builder UI",
+      "layer": "presentation",
+      "type": "component",
+      "description": "Prompt input, build controls, session timeline, model/power controls.",
+      "code_locations": [
+        {
+          "path": "frontend/src/components/AppBuilder/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ui_api.build_sessions"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "presentation",
+        "authn_required": false,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "web.app_builder_ui.logs"
+        ],
+        "metrics": [
+          "web.app_builder_ui.latency",
+          "web.app_builder_ui.errors"
+        ],
+        "traces": [
+          "web.app_builder_ui.span"
+        ],
+        "alerts": [
+          "web.app_builder_ui.slo_breach"
+        ],
+        "dashboards": [
+          "web.app_builder_ui.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/web.app_builder_ui.test.ts"
+        ],
+        "integration": [
+          "tests/integration/web.app_builder_ui.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 78,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing App Builder UI, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "frontend/src/components/AppBuilder/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "web.ide_editor",
+      "name": "IDE / Code Editor",
+      "layer": "presentation",
+      "type": "component",
+      "description": "Code editor, file tree, diffs, diagnostics, preview tabs.",
+      "code_locations": [
+        {
+          "path": "frontend/src/components/IDE/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ui_api.files",
+          "contract.ui_api.diagnostics"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "presentation",
+        "authn_required": false,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "web.ide_editor.logs"
+        ],
+        "metrics": [
+          "web.ide_editor.latency",
+          "web.ide_editor.errors"
+        ],
+        "traces": [
+          "web.ide_editor.span"
+        ],
+        "alerts": [
+          "web.ide_editor.slo_breach"
+        ],
+        "dashboards": [
+          "web.ide_editor.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/web.ide_editor.test.ts"
+        ],
+        "integration": [
+          "tests/integration/web.ide_editor.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 88,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing IDE / Code Editor, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "frontend/src/components/IDE/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "client.api_client",
+      "name": "Client API Client",
+      "layer": "client_runtime",
+      "type": "client_runtime",
+      "description": "Typed frontend client for backend calls, auth header injection, retries, and request IDs.",
+      "code_locations": [
+        {
+          "path": "frontend/src/lib/apiClient.ts"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ui_api.*"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "client_runtime",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "client.api_client.logs"
+        ],
+        "metrics": [
+          "client.api_client.latency",
+          "client.api_client.errors"
+        ],
+        "traces": [
+          "client.api_client.span"
+        ],
+        "alerts": [
+          "client.api_client.slo_breach"
+        ],
+        "dashboards": [
+          "client.api_client.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/client.api_client.test.ts"
+        ],
+        "integration": [
+          "tests/integration/client.api_client.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 76,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Client API Client, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "frontend/src/lib/apiClient.ts"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "edge.api_gateway",
+      "name": "API Gateway",
+      "layer": "edge_api",
+      "type": "api_route",
+      "description": "Request ingress, validation, CORS, rate limits, routing.",
+      "code_locations": [
+        {
+          "path": "backend/cmd/api/**"
+        },
+        {
+          "path": "backend/internal/http/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.gateway_routes"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "edge_api",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "edge.api_gateway.logs"
+        ],
+        "metrics": [
+          "edge.api_gateway.latency",
+          "edge.api_gateway.errors"
+        ],
+        "traces": [
+          "edge.api_gateway.span"
+        ],
+        "alerts": [
+          "edge.api_gateway.slo_breach"
+        ],
+        "dashboards": [
+          "edge.api_gateway.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/edge.api_gateway.test.ts"
+        ],
+        "integration": [
+          "tests/integration/edge.api_gateway.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 90,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing API Gateway, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/cmd/api/**",
+          "backend/internal/http/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "auth.session",
+      "name": "Session + Tenant Auth",
+      "layer": "auth_security",
+      "type": "security_policy",
+      "description": "Validates identity, tenant, project access, and role permissions.",
+      "code_locations": [
+        {
+          "path": "backend/internal/auth/**"
+        },
+        {
+          "path": "backend/internal/middleware/auth.go"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.auth.tenant_access"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "auth_security",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "auth.session.logs"
+        ],
+        "metrics": [
+          "auth.session.latency",
+          "auth.session.errors"
+        ],
+        "traces": [
+          "auth.session.span"
+        ],
+        "alerts": [
+          "auth.session.slo_breach"
+        ],
+        "dashboards": [
+          "auth.session.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/auth.session.test.ts"
+        ],
+        "integration": [
+          "tests/integration/auth.session.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 96,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Session + Tenant Auth, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/auth/**",
+          "backend/internal/middleware/auth.go"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "svc.build_sessions",
+      "name": "Build Session Service",
+      "layer": "application_services",
+      "type": "service",
+      "description": "Owns build sessions, state transitions, session history, and coordination.",
+      "code_locations": [
+        {
+          "path": "backend/internal/services/build_sessions/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ui_api.build_sessions"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [
+          "db.build_sessions"
+        ],
+        "writes": [
+          "db.build_sessions"
+        ],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "application_services",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "svc.build_sessions.logs"
+        ],
+        "metrics": [
+          "svc.build_sessions.latency",
+          "svc.build_sessions.errors"
+        ],
+        "traces": [
+          "svc.build_sessions.span"
+        ],
+        "alerts": [
+          "svc.build_sessions.slo_breach"
+        ],
+        "dashboards": [
+          "svc.build_sessions.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/svc.build_sessions.test.ts"
+        ],
+        "integration": [
+          "tests/integration/svc.build_sessions.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 92,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Build Session Service, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/services/build_sessions/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "svc.billing_cost",
+      "name": "Billing + Cost Tracker",
+      "layer": "application_services",
+      "type": "service",
+      "description": "Tracks subscriptions, model spend, BYOK usage, and dollar ticker costs.",
+      "code_locations": [
+        {
+          "path": "backend/internal/services/billing/**"
+        },
+        {
+          "path": "backend/internal/services/cost/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.billing",
+          "contract.cost_events"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [
+          "db.usage_events"
+        ],
+        "writes": [
+          "db.usage_events"
+        ],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "application_services",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "svc.billing_cost.logs"
+        ],
+        "metrics": [
+          "svc.billing_cost.latency",
+          "svc.billing_cost.errors"
+        ],
+        "traces": [
+          "svc.billing_cost.span"
+        ],
+        "alerts": [
+          "svc.billing_cost.slo_breach"
+        ],
+        "dashboards": [
+          "svc.billing_cost.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/svc.billing_cost.test.ts"
+        ],
+        "integration": [
+          "tests/integration/svc.billing_cost.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 91,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Billing + Cost Tracker, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/services/billing/**",
+          "backend/internal/services/cost/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "ai.prompt_router",
+      "name": "Prompt Router",
+      "layer": "ai_agent",
+      "type": "ai_agent",
+      "description": "Classifies user build intent and selects build strategy.",
+      "code_locations": [
+        {
+          "path": "backend/internal/agents/prompt_router.go"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ai.build_request"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "ai_agent",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "ai.prompt_router.logs"
+        ],
+        "metrics": [
+          "ai.prompt_router.latency",
+          "ai.prompt_router.errors"
+        ],
+        "traces": [
+          "ai.prompt_router.span"
+        ],
+        "alerts": [
+          "ai.prompt_router.slo_breach"
+        ],
+        "dashboards": [
+          "ai.prompt_router.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/ai.prompt_router.test.ts"
+        ],
+        "integration": [
+          "tests/integration/ai.prompt_router.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 81,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Prompt Router, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/agents/prompt_router.go"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "ai.context_selector",
+      "name": "Context Selector",
+      "layer": "ai_agent",
+      "type": "ai_agent",
+      "description": "Selects minimal sufficient repo context for AI calls.",
+      "code_locations": [
+        {
+          "path": "backend/internal/agents/context_selector.go"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ai.context_bundle"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "ai_agent",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "ai.context_selector.logs"
+        ],
+        "metrics": [
+          "ai.context_selector.latency",
+          "ai.context_selector.errors"
+        ],
+        "traces": [
+          "ai.context_selector.span"
+        ],
+        "alerts": [
+          "ai.context_selector.slo_breach"
+        ],
+        "dashboards": [
+          "ai.context_selector.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/ai.context_selector.test.ts"
+        ],
+        "integration": [
+          "tests/integration/ai.context_selector.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 94,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Context Selector, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/agents/context_selector.go"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "ai.model_router",
+      "name": "Model Router",
+      "layer": "ai_agent",
+      "type": "ai_agent",
+      "description": "Routes work to models by task, power mode, cost, BYOK availability, and fallback rules.",
+      "code_locations": [
+        {
+          "path": "backend/internal/ai/router/**"
+        },
+        {
+          "path": "backend/internal/agents/model_router.go"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ai.model_call"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "ai_agent",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "ai.model_router.logs"
+        ],
+        "metrics": [
+          "ai.model_router.latency",
+          "ai.model_router.errors"
+        ],
+        "traces": [
+          "ai.model_router.span"
+        ],
+        "alerts": [
+          "ai.model_router.slo_breach"
+        ],
+        "dashboards": [
+          "ai.model_router.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/ai.model_router.test.ts"
+        ],
+        "integration": [
+          "tests/integration/ai.model_router.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 95,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Model Router, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/ai/router/**",
+          "backend/internal/agents/model_router.go"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "ai.tool_executor",
+      "name": "Tool Execution Layer",
+      "layer": "ai_agent",
+      "type": "tool",
+      "description": "Executes file ops, shell commands, git commands, scanners, tests, and deploy commands with policy checks.",
+      "code_locations": [
+        {
+          "path": "backend/internal/tools/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.ai.tool_call"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "ai_agent",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "ai.tool_executor.logs"
+        ],
+        "metrics": [
+          "ai.tool_executor.latency",
+          "ai.tool_executor.errors"
+        ],
+        "traces": [
+          "ai.tool_executor.span"
+        ],
+        "alerts": [
+          "ai.tool_executor.slo_breach"
+        ],
+        "dashboards": [
+          "ai.tool_executor.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/ai.tool_executor.test.ts"
+        ],
+        "integration": [
+          "tests/integration/ai.tool_executor.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 98,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Tool Execution Layer, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/tools/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "worker.code_generation",
+      "name": "Code Generation Worker",
+      "layer": "eventing",
+      "type": "worker",
+      "description": "Async worker that applies AI-generated file changes, test loops, and repair cycles.",
+      "code_locations": [
+        {
+          "path": "backend/internal/workers/code_generation/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.queue.code_generation"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "eventing",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "worker.code_generation.logs"
+        ],
+        "metrics": [
+          "worker.code_generation.latency",
+          "worker.code_generation.errors"
+        ],
+        "traces": [
+          "worker.code_generation.span"
+        ],
+        "alerts": [
+          "worker.code_generation.slo_breach"
+        ],
+        "dashboards": [
+          "worker.code_generation.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/worker.code_generation.test.ts"
+        ],
+        "integration": [
+          "tests/integration/worker.code_generation.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 93,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Code Generation Worker, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/workers/code_generation/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "svc.git_integration",
+      "name": "Git Integration",
+      "layer": "external_integrations",
+      "type": "external_provider",
+      "description": "Creates commits, branches, diffs, PRs, and retrieves repo state.",
+      "code_locations": [
+        {
+          "path": "backend/internal/integrations/git/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.external.github"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "external_integrations",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "svc.git_integration.logs"
+        ],
+        "metrics": [
+          "svc.git_integration.latency",
+          "svc.git_integration.errors"
+        ],
+        "traces": [
+          "svc.git_integration.span"
+        ],
+        "alerts": [
+          "svc.git_integration.slo_breach"
+        ],
+        "dashboards": [
+          "svc.git_integration.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/svc.git_integration.test.ts"
+        ],
+        "integration": [
+          "tests/integration/svc.git_integration.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 84,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Git Integration, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/integrations/git/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "svc.build_runner",
+      "name": "Build Runner",
+      "layer": "devops_runtime",
+      "type": "infra",
+      "description": "Runs install/build/test/lint/package commands in isolated environment.",
+      "code_locations": [
+        {
+          "path": "backend/internal/build_runner/**"
+        },
+        {
+          "path": "infra/build-runner/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.build_runner"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "devops_runtime",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "svc.build_runner.logs"
+        ],
+        "metrics": [
+          "svc.build_runner.latency",
+          "svc.build_runner.errors"
+        ],
+        "traces": [
+          "svc.build_runner.span"
+        ],
+        "alerts": [
+          "svc.build_runner.slo_breach"
+        ],
+        "dashboards": [
+          "svc.build_runner.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/svc.build_runner.test.ts"
+        ],
+        "integration": [
+          "tests/integration/svc.build_runner.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 97,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Build Runner, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/build_runner/**",
+          "infra/build-runner/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "svc.preview_deploy",
+      "name": "Preview Deployment",
+      "layer": "devops_runtime",
+      "type": "infra",
+      "description": "Deploys generated apps to preview URLs and reports health.",
+      "code_locations": [
+        {
+          "path": "backend/internal/deploy/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.preview_deploy"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "devops_runtime",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "svc.preview_deploy.logs"
+        ],
+        "metrics": [
+          "svc.preview_deploy.latency",
+          "svc.preview_deploy.errors"
+        ],
+        "traces": [
+          "svc.preview_deploy.span"
+        ],
+        "alerts": [
+          "svc.preview_deploy.slo_breach"
+        ],
+        "dashboards": [
+          "svc.preview_deploy.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/svc.preview_deploy.test.ts"
+        ],
+        "integration": [
+          "tests/integration/svc.preview_deploy.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 83,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Preview Deployment, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/deploy/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "db.postgres",
+      "name": "PostgreSQL",
+      "layer": "persistence",
+      "type": "database",
+      "description": "Primary relational database for users, projects, sessions, billing, usage, and map metadata.",
+      "code_locations": [
+        {
+          "path": "migrations/**"
+        },
+        {
+          "path": "backend/internal/db/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "persistence",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "db.postgres.logs"
+        ],
+        "metrics": [
+          "db.postgres.latency",
+          "db.postgres.errors"
+        ],
+        "traces": [
+          "db.postgres.span"
+        ],
+        "alerts": [
+          "db.postgres.slo_breach"
+        ],
+        "dashboards": [
+          "db.postgres.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/db.postgres.test.ts"
+        ],
+        "integration": [
+          "tests/integration/db.postgres.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 99,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing PostgreSQL, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "migrations/**",
+          "backend/internal/db/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "db.redis",
+      "name": "Redis Cache",
+      "layer": "persistence",
+      "type": "cache",
+      "description": "Session cache, rate limit state, transient build status, queue coordination.",
+      "code_locations": [
+        {
+          "path": "backend/internal/cache/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "persistence",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "db.redis.logs"
+        ],
+        "metrics": [
+          "db.redis.latency",
+          "db.redis.errors"
+        ],
+        "traces": [
+          "db.redis.span"
+        ],
+        "alerts": [
+          "db.redis.slo_breach"
+        ],
+        "dashboards": [
+          "db.redis.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/db.redis.test.ts"
+        ],
+        "integration": [
+          "tests/integration/db.redis.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 82,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Redis Cache, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/cache/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "db.object_storage",
+      "name": "Object Storage",
+      "layer": "persistence",
+      "type": "database",
+      "description": "Stores artifacts, logs, build outputs, images, and generated bundles.",
+      "code_locations": [
+        {
+          "path": "backend/internal/storage/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "persistence",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "db.object_storage.logs"
+        ],
+        "metrics": [
+          "db.object_storage.latency",
+          "db.object_storage.errors"
+        ],
+        "traces": [
+          "db.object_storage.span"
+        ],
+        "alerts": [
+          "db.object_storage.slo_breach"
+        ],
+        "dashboards": [
+          "db.object_storage.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/db.object_storage.test.ts"
+        ],
+        "integration": [
+          "tests/integration/db.object_storage.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 79,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Object Storage, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/storage/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "queue.build",
+      "name": "Build Queue",
+      "layer": "eventing",
+      "type": "queue",
+      "description": "Async queue for build, scan, repair, deploy, and telemetry import jobs.",
+      "code_locations": [
+        {
+          "path": "backend/internal/queue/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.queue.build"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "eventing",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "queue.build.logs"
+        ],
+        "metrics": [
+          "queue.build.latency",
+          "queue.build.errors"
+        ],
+        "traces": [
+          "queue.build.span"
+        ],
+        "alerts": [
+          "queue.build.slo_breach"
+        ],
+        "dashboards": [
+          "queue.build.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/queue.build.test.ts"
+        ],
+        "integration": [
+          "tests/integration/queue.build.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 89,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Build Queue, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/queue/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "obs.stack",
+      "name": "Observability Stack",
+      "layer": "observability",
+      "type": "observability",
+      "description": "Logs, metrics, traces, dashboards, alerts, incident annotations, replay data.",
+      "code_locations": [
+        {
+          "path": "backend/internal/observability/**"
+        },
+        {
+          "path": "infra/observability/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "observability",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "obs.stack.logs"
+        ],
+        "metrics": [
+          "obs.stack.latency",
+          "obs.stack.errors"
+        ],
+        "traces": [
+          "obs.stack.span"
+        ],
+        "alerts": [
+          "obs.stack.slo_breach"
+        ],
+        "dashboards": [
+          "obs.stack.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/obs.stack.test.ts"
+        ],
+        "integration": [
+          "tests/integration/obs.stack.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "high",
+        "score": 85,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing Observability Stack, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/observability/**",
+          "infra/observability/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "ext.ai_providers",
+      "name": "External AI Providers",
+      "layer": "external_integrations",
+      "type": "external_provider",
+      "description": "OpenAI, Anthropic, Google, xAI, DeepSeek, Ollama Cloud, and BYOK provider endpoints.",
+      "code_locations": [
+        {
+          "path": "backend/internal/providers/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.external.ai_provider"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "external_integrations",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "ext.ai_providers.logs"
+        ],
+        "metrics": [
+          "ext.ai_providers.latency",
+          "ext.ai_providers.errors"
+        ],
+        "traces": [
+          "ext.ai_providers.span"
+        ],
+        "alerts": [
+          "ext.ai_providers.slo_breach"
+        ],
+        "dashboards": [
+          "ext.ai_providers.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/ext.ai_providers.test.ts"
+        ],
+        "integration": [
+          "tests/integration/ext.ai_providers.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 90,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing External AI Providers, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/providers/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    },
+    {
+      "id": "sec.byok",
+      "name": "BYOK Provider Keys",
+      "layer": "auth_security",
+      "type": "secret",
+      "description": "Encrypted user-supplied model provider keys and provider routing permissions.",
+      "code_locations": [
+        {
+          "path": "backend/internal/secrets/**"
+        },
+        {
+          "path": "backend/internal/providers/byok/**"
+        }
+      ],
+      "runtime": {
+        "language": "TypeScript/Go",
+        "framework": "React + backend services",
+        "process": "app/runtime",
+        "deployment_unit": "web/backend"
+      },
+      "ownership": {
+        "owner": "platform",
+        "pager": "platform-oncall",
+        "reviewers": [
+          "frontend",
+          "backend",
+          "ai-platform"
+        ]
+      },
+      "interfaces": {
+        "inputs": [],
+        "outputs": [],
+        "contracts": [
+          "contract.security.byok"
+        ],
+        "events_published": [],
+        "events_consumed": []
+      },
+      "data_access": {
+        "reads": [],
+        "writes": [],
+        "transaction_scope": "request/job scoped",
+        "tenant_filter_required": true
+      },
+      "security": {
+        "trust_boundary": "auth_security",
+        "authn_required": true,
+        "authz_policies": [
+          "tenant_access_required"
+        ],
+        "secrets_used": [],
+        "pii_access": false,
+        "tenant_isolation_rule": "All tenant-scoped queries must include tenant_id/project_id filters."
+      },
+      "telemetry": {
+        "logs": [
+          "sec.byok.logs"
+        ],
+        "metrics": [
+          "sec.byok.latency",
+          "sec.byok.errors"
+        ],
+        "traces": [
+          "sec.byok.span"
+        ],
+        "alerts": [
+          "sec.byok.slo_breach"
+        ],
+        "dashboards": [
+          "sec.byok.dashboard"
+        ]
+      },
+      "slo": {
+        "availability": 99.9,
+        "p95_latency_ms": 500,
+        "error_rate_max": 0.01
+      },
+      "tests": {
+        "unit": [
+          "tests/unit/sec.byok.test.ts"
+        ],
+        "integration": [
+          "tests/integration/sec.byok.test.ts"
+        ],
+        "e2e": [],
+        "contract": [],
+        "load": [],
+        "security": []
+      },
+      "risk": {
+        "level": "critical",
+        "score": 99,
+        "reasons": [
+          "central path",
+          "cross-layer dependency"
+        ],
+        "blast_radius_node_ids": [],
+        "rollback_strategy": "feature flag off, revert commit, restore previous deployment"
+      },
+      "failure_modes": [],
+      "change_guidance": "Before changing BYOK Provider Keys, inspect inbound/outbound edges, contracts, tests, recent deploy diff, telemetry, and tenant constraints.",
+      "ai_usage": {
+        "inspect_first": [
+          "backend/internal/secrets/**",
+          "backend/internal/providers/byok/**"
+        ],
+        "never_modify_without": [
+          "contract tests",
+          "blast-radius report"
+        ],
+        "safe_repair_pattern": "Make minimal change, add/update tests, validate contracts, run focused build/test, generate rollback note."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e.web_builder.api",
+      "from": "web.app_builder_ui",
+      "to": "client.api_client",
+      "edge_type": "sync_call",
+      "protocol": "InternalFunction",
+      "criticality": "critical",
+      "description": "Builder UI invokes typed API client.",
+      "failure_behavior": "UI cannot start/update sessions.",
+      "latency_budget_ms": 50,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.web_builder.api.logs"
+        ],
+        "metrics": [
+          "e.web_builder.api.latency",
+          "e.web_builder.api.errors"
+        ],
+        "traces": [
+          "e.web_builder.api.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.ide.api",
+      "from": "web.ide_editor",
+      "to": "client.api_client",
+      "edge_type": "sync_call",
+      "protocol": "InternalFunction",
+      "criticality": "critical",
+      "description": "IDE requests files, diffs, diagnostics, and preview state.",
+      "failure_behavior": "Editor stale or unable to save.",
+      "latency_budget_ms": 50,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.ide.api.logs"
+        ],
+        "metrics": [
+          "e.ide.api.latency",
+          "e.ide.api.errors"
+        ],
+        "traces": [
+          "e.ide.api.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.client.gateway",
+      "from": "client.api_client",
+      "to": "edge.api_gateway",
+      "edge_type": "sync_call",
+      "protocol": "HTTP",
+      "criticality": "critical",
+      "description": "Frontend sends authenticated request with request ID and tenant context.",
+      "failure_behavior": "User-facing API failure.",
+      "latency_budget_ms": 300,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.client.gateway.logs"
+        ],
+        "metrics": [
+          "e.client.gateway.latency",
+          "e.client.gateway.errors"
+        ],
+        "traces": [
+          "e.client.gateway.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.gateway.auth",
+      "from": "edge.api_gateway",
+      "to": "auth.session",
+      "edge_type": "auth_check",
+      "protocol": "InternalFunction",
+      "criticality": "critical",
+      "description": "Gateway validates session and tenant access.",
+      "failure_behavior": "401/403 or tenant leak risk.",
+      "latency_budget_ms": 50,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.gateway.auth.logs"
+        ],
+        "metrics": [
+          "e.gateway.auth.latency",
+          "e.gateway.auth.errors"
+        ],
+        "traces": [
+          "e.gateway.auth.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.gateway.sessions",
+      "from": "edge.api_gateway",
+      "to": "svc.build_sessions",
+      "edge_type": "sync_call",
+      "protocol": "HTTP",
+      "criticality": "critical",
+      "description": "Routes build session operations.",
+      "failure_behavior": "Build sessions fail.",
+      "latency_budget_ms": 400,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.gateway.sessions.logs"
+        ],
+        "metrics": [
+          "e.gateway.sessions.latency",
+          "e.gateway.sessions.errors"
+        ],
+        "traces": [
+          "e.gateway.sessions.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.sessions.prompt_router",
+      "from": "svc.build_sessions",
+      "to": "ai.prompt_router",
+      "edge_type": "sync_call",
+      "protocol": "InternalFunction",
+      "criticality": "high",
+      "description": "Session service starts AI build plan routing.",
+      "failure_behavior": "Wrong build strategy or no AI plan.",
+      "latency_budget_ms": 250,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.sessions.prompt_router.logs"
+        ],
+        "metrics": [
+          "e.sessions.prompt_router.latency",
+          "e.sessions.prompt_router.errors"
+        ],
+        "traces": [
+          "e.sessions.prompt_router.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.prompt.context",
+      "from": "ai.prompt_router",
+      "to": "ai.context_selector",
+      "edge_type": "dependency",
+      "protocol": "InternalFunction",
+      "criticality": "critical",
+      "description": "Prompt router requires repo context bundle.",
+      "failure_behavior": "AI edits wrong files or misses needed files.",
+      "latency_budget_ms": 300,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.prompt.context.logs"
+        ],
+        "metrics": [
+          "e.prompt.context.latency",
+          "e.prompt.context.errors"
+        ],
+        "traces": [
+          "e.prompt.context.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.context.git",
+      "from": "ai.context_selector",
+      "to": "svc.git_integration",
+      "edge_type": "sync_call",
+      "protocol": "SDK",
+      "criticality": "high",
+      "description": "Context selector inspects current repo tree and diffs.",
+      "failure_behavior": "Context stale or incomplete.",
+      "latency_budget_ms": 700,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.context.git.logs"
+        ],
+        "metrics": [
+          "e.context.git.latency",
+          "e.context.git.errors"
+        ],
+        "traces": [
+          "e.context.git.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.context.model",
+      "from": "ai.context_selector",
+      "to": "ai.model_router",
+      "edge_type": "sync_call",
+      "protocol": "InternalFunction",
+      "criticality": "critical",
+      "description": "Context bundle sent through model router.",
+      "failure_behavior": "Over-cost, underpowered model, bad output.",
+      "latency_budget_ms": 100,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.context.model.logs"
+        ],
+        "metrics": [
+          "e.context.model.latency",
+          "e.context.model.errors"
+        ],
+        "traces": [
+          "e.context.model.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.model.providers",
+      "from": "ai.model_router",
+      "to": "ext.ai_providers",
+      "edge_type": "sync_call",
+      "protocol": "HTTP",
+      "criticality": "critical",
+      "description": "Model router calls provider or BYOK endpoint.",
+      "failure_behavior": "Rate limit, provider error, cost spike.",
+      "latency_budget_ms": 30000,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.model.providers.logs"
+        ],
+        "metrics": [
+          "e.model.providers.latency",
+          "e.model.providers.errors"
+        ],
+        "traces": [
+          "e.model.providers.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.model.cost",
+      "from": "ai.model_router",
+      "to": "svc.billing_cost",
+      "edge_type": "cost_flow",
+      "protocol": "InternalFunction",
+      "criticality": "critical",
+      "description": "Every model call records estimated and actual usage cost.",
+      "failure_behavior": "Dollar ticker wrong, margin risk.",
+      "latency_budget_ms": 100,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.model.cost.logs"
+        ],
+        "metrics": [
+          "e.model.cost.latency",
+          "e.model.cost.errors"
+        ],
+        "traces": [
+          "e.model.cost.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.byok.model",
+      "from": "sec.byok",
+      "to": "ai.model_router",
+      "edge_type": "secret_dependency",
+      "protocol": "InternalFunction",
+      "criticality": "critical",
+      "description": "Model router reads allowed encrypted BYOK credentials via secrets layer.",
+      "failure_behavior": "Provider auth failure or secret leakage risk.",
+      "latency_budget_ms": 100,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.byok.model.logs"
+        ],
+        "metrics": [
+          "e.byok.model.latency",
+          "e.byok.model.errors"
+        ],
+        "traces": [
+          "e.byok.model.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.sessions.queue",
+      "from": "svc.build_sessions",
+      "to": "queue.build",
+      "edge_type": "async_event",
+      "protocol": "Queue",
+      "criticality": "critical",
+      "description": "Build session enqueues generation/repair/deploy job.",
+      "failure_behavior": "Queued builds stuck.",
+      "latency_budget_ms": 100,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": true,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.sessions.queue.logs"
+        ],
+        "metrics": [
+          "e.sessions.queue.latency",
+          "e.sessions.queue.errors"
+        ],
+        "traces": [
+          "e.sessions.queue.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.queue.worker",
+      "from": "queue.build",
+      "to": "worker.code_generation",
+      "edge_type": "async_event",
+      "protocol": "Queue",
+      "criticality": "critical",
+      "description": "Worker consumes build jobs.",
+      "failure_behavior": "Backlog or duplicate execution.",
+      "latency_budget_ms": 1000,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": true,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.queue.worker.logs"
+        ],
+        "metrics": [
+          "e.queue.worker.latency",
+          "e.queue.worker.errors"
+        ],
+        "traces": [
+          "e.queue.worker.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.worker.tools",
+      "from": "worker.code_generation",
+      "to": "ai.tool_executor",
+      "edge_type": "sync_call",
+      "protocol": "InternalFunction",
+      "criticality": "critical",
+      "description": "Worker invokes safe tool execution layer.",
+      "failure_behavior": "Unsafe or failed file/build operations.",
+      "latency_budget_ms": 200,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.worker.tools.logs"
+        ],
+        "metrics": [
+          "e.worker.tools.latency",
+          "e.worker.tools.errors"
+        ],
+        "traces": [
+          "e.worker.tools.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.tools.build_runner",
+      "from": "ai.tool_executor",
+      "to": "svc.build_runner",
+      "edge_type": "sync_call",
+      "protocol": "SDK",
+      "criticality": "critical",
+      "description": "Tool executor runs isolated build/test commands.",
+      "failure_behavior": "Generated app cannot validate.",
+      "latency_budget_ms": 120000,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.tools.build_runner.logs"
+        ],
+        "metrics": [
+          "e.tools.build_runner.latency",
+          "e.tools.build_runner.errors"
+        ],
+        "traces": [
+          "e.tools.build_runner.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.tools.git",
+      "from": "ai.tool_executor",
+      "to": "svc.git_integration",
+      "edge_type": "sync_call",
+      "protocol": "SDK",
+      "criticality": "high",
+      "description": "Tool executor applies diffs/commits/branches.",
+      "failure_behavior": "Changes not persisted.",
+      "latency_budget_ms": 5000,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.tools.git.logs"
+        ],
+        "metrics": [
+          "e.tools.git.latency",
+          "e.tools.git.errors"
+        ],
+        "traces": [
+          "e.tools.git.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.runner.preview",
+      "from": "svc.build_runner",
+      "to": "svc.preview_deploy",
+      "edge_type": "deployment_dependency",
+      "protocol": "SDK",
+      "criticality": "high",
+      "description": "Successful build can deploy preview.",
+      "failure_behavior": "No live preview.",
+      "latency_budget_ms": 120000,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.runner.preview.logs"
+        ],
+        "metrics": [
+          "e.runner.preview.latency",
+          "e.runner.preview.errors"
+        ],
+        "traces": [
+          "e.runner.preview.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.sessions.db",
+      "from": "svc.build_sessions",
+      "to": "db.postgres",
+      "edge_type": "data_write",
+      "protocol": "SQL",
+      "criticality": "critical",
+      "description": "Persists session state and transitions.",
+      "failure_behavior": "Lost or corrupt build state.",
+      "latency_budget_ms": 200,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": true,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.sessions.db.logs"
+        ],
+        "metrics": [
+          "e.sessions.db.latency",
+          "e.sessions.db.errors"
+        ],
+        "traces": [
+          "e.sessions.db.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.cost.db",
+      "from": "svc.billing_cost",
+      "to": "db.postgres",
+      "edge_type": "data_write",
+      "protocol": "SQL",
+      "criticality": "critical",
+      "description": "Persists usage and billing events.",
+      "failure_behavior": "Billing/cost inaccuracies.",
+      "latency_budget_ms": 200,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": true,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.cost.db.logs"
+        ],
+        "metrics": [
+          "e.cost.db.latency",
+          "e.cost.db.errors"
+        ],
+        "traces": [
+          "e.cost.db.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.cache.sessions",
+      "from": "svc.build_sessions",
+      "to": "db.redis",
+      "edge_type": "data_write",
+      "protocol": "Redis",
+      "criticality": "high",
+      "description": "Caches hot build status.",
+      "failure_behavior": "Stale UI or excessive DB load.",
+      "latency_budget_ms": 50,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": true,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.cache.sessions.logs"
+        ],
+        "metrics": [
+          "e.cache.sessions.latency",
+          "e.cache.sessions.errors"
+        ],
+        "traces": [
+          "e.cache.sessions.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.artifacts.storage",
+      "from": "svc.build_runner",
+      "to": "db.object_storage",
+      "edge_type": "data_write",
+      "protocol": "SDK",
+      "criticality": "high",
+      "description": "Stores build logs/artifacts.",
+      "failure_behavior": "No artifact replay/debug.",
+      "latency_budget_ms": 2000,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": true,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.artifacts.storage.logs"
+        ],
+        "metrics": [
+          "e.artifacts.storage.latency",
+          "e.artifacts.storage.errors"
+        ],
+        "traces": [
+          "e.artifacts.storage.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.all.obs",
+      "from": "svc.build_sessions",
+      "to": "obs.stack",
+      "edge_type": "observability_signal",
+      "protocol": "OpenTelemetry",
+      "criticality": "high",
+      "description": "Emits logs/metrics/traces for session operations.",
+      "failure_behavior": "Debugging blind spot.",
+      "latency_budget_ms": 100,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.all.obs.logs"
+        ],
+        "metrics": [
+          "e.all.obs.latency",
+          "e.all.obs.errors"
+        ],
+        "traces": [
+          "e.all.obs.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    },
+    {
+      "id": "e.ai.obs",
+      "from": "worker.code_generation",
+      "to": "obs.stack",
+      "edge_type": "observability_signal",
+      "protocol": "OpenTelemetry",
+      "criticality": "critical",
+      "description": "Emits AI repair loop traces, changed files, tool calls, model costs.",
+      "failure_behavior": "Cannot explain AI actions.",
+      "latency_budget_ms": 100,
+      "retry_policy": "bounded exponential backoff where safe",
+      "idempotency_required": false,
+      "auth_context_forwarded": true,
+      "tenant_context_forwarded": true,
+      "observability": {
+        "logs": [
+          "e.ai.obs.logs"
+        ],
+        "metrics": [
+          "e.ai.obs.latency",
+          "e.ai.obs.errors"
+        ],
+        "traces": [
+          "e.ai.obs.span"
+        ],
+        "alerts": [],
+        "dashboards": []
+      }
+    }
+  ],
+  "contracts": [
+    {
+      "id": "contract.ui_api.build_sessions",
+      "name": "Build Session UI/API Contract",
+      "contract_type": "ui_api",
+      "producer": "svc.build_sessions",
+      "consumers": [
+        "web.app_builder_ui",
+        "client.api_client"
+      ],
+      "schema_location": "shared/contracts/build-session.schema.ts",
+      "runtime_validation": true,
+      "validation_strategy": "Zod/OpenAPI validation on request and response; contract tests run in CI.",
+      "breaking_change_rules": [
+        "Do not remove fields consumed by UI without migration.",
+        "All status enum changes require UI handling and e2e test."
+      ],
+      "test_locations": [
+        "tests/contract/build-session.contract.test.ts"
+      ]
+    },
+    {
+      "id": "contract.ai.context_bundle",
+      "name": "AI Context Bundle Contract",
+      "contract_type": "ai_tool",
+      "producer": "ai.context_selector",
+      "consumers": [
+        "ai.model_router",
+        "worker.code_generation"
+      ],
+      "schema_location": "shared/contracts/ai-context-bundle.schema.ts",
+      "runtime_validation": true,
+      "validation_strategy": "Validate required files, symbol graph, token estimate, omitted-critical-file risk.",
+      "breaking_change_rules": [
+        "Context bundles must include changed files, owning contracts, and failing tests when available."
+      ],
+      "test_locations": [
+        "tests/contract/context-bundle.contract.test.ts"
+      ]
+    },
+    {
+      "id": "contract.ai.tool_call",
+      "name": "AI Tool Call Contract",
+      "contract_type": "ai_tool",
+      "producer": "ai.model_router",
+      "consumers": [
+        "ai.tool_executor"
+      ],
+      "schema_location": "shared/contracts/tool-call.schema.ts",
+      "runtime_validation": true,
+      "validation_strategy": "Allowlisted commands, typed args, sandbox policy, approval policy, timeout, output capture.",
+      "breaking_change_rules": [
+        "No new mutating tool without policy and audit telemetry."
+      ],
+      "test_locations": [
+        "tests/security/tool-executor.policy.test.ts"
+      ]
+    },
+    {
+      "id": "contract.external.ai_provider",
+      "name": "External AI Provider Contract",
+      "contract_type": "external_api",
+      "producer": "ext.ai_providers",
+      "consumers": [
+        "ai.model_router"
+      ],
+      "schema_location": "backend/internal/providers/contracts/*.ts",
+      "runtime_validation": true,
+      "validation_strategy": "Normalize provider request/response, usage tokens, errors, rate limits, retries.",
+      "breaking_change_rules": [
+        "Provider error taxonomy must stay stable for fallback logic."
+      ],
+      "test_locations": [
+        "tests/integration/providers/*.test.ts"
+      ]
+    },
+    {
+      "id": "contract.security.byok",
+      "name": "BYOK Secret Access Contract",
+      "contract_type": "auth_policy",
+      "producer": "sec.byok",
+      "consumers": [
+        "ai.model_router",
+        "svc.billing_cost"
+      ],
+      "schema_location": "backend/internal/security/byok-policy.md",
+      "runtime_validation": true,
+      "validation_strategy": "Envelope encryption, scoped provider permission, no plaintext logging, access audit.",
+      "breaking_change_rules": [
+        "Any secret access path requires audit event and tenant authorization."
+      ],
+      "test_locations": [
+        "tests/security/byok.test.ts"
+      ]
+    }
+  ],
+  "overlays": {
+    "blast_radius": {
+      "id": "blast_radius",
+      "name": "Blast-Radius Overlay",
+      "description": "Highlights all nodes, contracts, tests, and deployments affected by a proposed change.",
+      "data_sources": [
+        "static dependency graph",
+        "runtime traces",
+        "contract graph",
+        "git diff"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "change_risk": {
+      "id": "change_risk",
+      "name": "Change-Risk Overlay",
+      "description": "Scores changes by criticality, coverage, churn, ownership, runtime traffic, SLO history, and tenant/data sensitivity.",
+      "data_sources": [
+        "git history",
+        "coverage",
+        "SLOs",
+        "security metadata"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "security": {
+      "id": "security",
+      "name": "Security Trust-Boundary Overlay",
+      "description": "Shows trust transitions, auth checks, secret dependencies, tenant boundaries, PII access, and policy enforcement gaps.",
+      "data_sources": [
+        "auth middleware",
+        "policy files",
+        "data model",
+        "secret manager"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "cost_flow": {
+      "id": "cost_flow",
+      "name": "AI/Infra Cost-Flow Overlay",
+      "description": "Traces model calls, token usage, BYOK usage, build runner minutes, storage, and margin risk.",
+      "data_sources": [
+        "usage events",
+        "provider responses",
+        "billing tables",
+        "queue/job metadata"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "latency_waterfall": {
+      "id": "latency_waterfall",
+      "name": "Latency Waterfall Overlay",
+      "description": "Shows request/job latency by edge and node with P50/P95/P99 and timeout/retry markers.",
+      "data_sources": [
+        "OpenTelemetry traces",
+        "metrics",
+        "logs"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "test_coverage": {
+      "id": "test_coverage",
+      "name": "Test Coverage Overlay",
+      "description": "Maps unit/integration/e2e/contract/security/load tests onto nodes and edges.",
+      "data_sources": [
+        "coverage reports",
+        "test manifests",
+        "CI results"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "deployment_diff": {
+      "id": "deployment_diff",
+      "name": "Deployment Diff Overlay",
+      "description": "Highlights what changed between the last healthy deploy and current deploy.",
+      "data_sources": [
+        "git diff",
+        "deployment metadata",
+        "migration history"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "feature_flags": {
+      "id": "feature_flags",
+      "name": "Feature Flag Impact Overlay",
+      "description": "Shows which nodes/edges are gated by flags and which users/tenants are exposed.",
+      "data_sources": [
+        "flag provider",
+        "config",
+        "runtime eval logs"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "migration_risk": {
+      "id": "migration_risk",
+      "name": "Migration-Risk Overlay",
+      "description": "Finds DB/schema changes, affected queries, data backfill status, rollback risk, and contract breakage.",
+      "data_sources": [
+        "migrations",
+        "ORM models",
+        "SQL traces",
+        "DB schema"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    },
+    "tenant_boundaries": {
+      "id": "tenant_boundaries",
+      "name": "Tenant Boundary Overlay",
+      "description": "Verifies tenant_id/project_id propagation through UI, API, services, DB, cache, queue, and AI tools.",
+      "data_sources": [
+        "auth context",
+        "query AST",
+        "cache keys",
+        "queue payloads"
+      ],
+      "node_annotations": [],
+      "edge_annotations": []
+    }
+  },
+  "diagnostic_playbooks": [
+    {
+      "id": "playbook.stale_ui_data",
+      "symptom": "UI shows stale or wrong build/session data",
+      "entry_nodes": [
+        "web.app_builder_ui",
+        "web.ide_editor",
+        "client.api_client"
+      ],
+      "likely_causes": [
+        "Client state/cache not invalidated",
+        "API response stale",
+        "Redis stale cache",
+        "DB write failed or wrong tenant filter",
+        "Queue backlog delayed worker update",
+        "Feature flag served old path",
+        "AI repair wrote state to wrong location"
+      ],
+      "checks": [
+        "Compare UI state with API response",
+        "Inspect request trace ID end-to-end",
+        "Check Redis key TTL and tenant-scoped key",
+        "Query DB row updated_at/status/version",
+        "Check queue lag and worker logs",
+        "Check last deploy diff and feature flag exposure",
+        "Check contract build_session status enum"
+      ],
+      "decision_tree": [
+        {
+          "if": "API response correct but UI wrong",
+          "then": "Inspect state management, cache invalidation, component props, stale closure, optimistic update rollback."
+        },
+        {
+          "if": "API response stale and Redis hit",
+          "then": "Invalidate cache path and fix write-through/cache-key tenant/version issue."
+        },
+        {
+          "if": "DB correct but API stale",
+          "then": "Inspect service query/cache path and serialization contract."
+        },
+        {
+          "if": "worker lag high",
+          "then": "Scale worker or fix stuck job/retry/DLQ issue."
+        }
+      ],
+      "safe_repair_plan": [
+        "Reproduce with one tenant/project/session ID.",
+        "Trace from UI request ID to DB/queue/worker.",
+        "Patch smallest stale state/cache boundary.",
+        "Add contract/e2e regression test for status update visibility.",
+        "Run focused tests and validate telemetry."
+      ],
+      "rollback_plan": [
+        "Disable affected feature flag.",
+        "Revert cache behavior change.",
+        "Restore previous deployment if session visibility remains degraded."
+      ]
+    },
+    {
+      "id": "playbook.ai_generated_broken_code",
+      "symptom": "AI generated broken or incomplete code",
+      "entry_nodes": [
+        "ai.context_selector",
+        "ai.model_router",
+        "ai.tool_executor",
+        "worker.code_generation"
+      ],
+      "likely_causes": [
+        "Context selector omitted required files",
+        "Model router selected underpowered/wrong provider",
+        "Tool executor applied diff to wrong file",
+        "Missing contract/test coverage",
+        "Build runner did not run correct command",
+        "Generated code violated API/DB/event contract",
+        "Repair loop ignored runtime error"
+      ],
+      "checks": [
+        "Inspect context bundle contents and omitted-file risk",
+        "Review changed files and dependency graph",
+        "Run build/test/lint command from Build Runner",
+        "Check contract violations",
+        "Compare generated code against schema/API contracts",
+        "Review AI decision trace: why each file was touched",
+        "Inspect provider/model/cost/fallback logs"
+      ],
+      "decision_tree": [
+        {
+          "if": "failing symbol imports",
+          "then": "Expand context around dependency owners and regenerate minimal patch."
+        },
+        {
+          "if": "contract test fails",
+          "then": "Repair producer/consumer mismatch, not just UI symptoms."
+        },
+        {
+          "if": "wrong file touched",
+          "then": "Fix repo map/code-location index and require owner-match before write."
+        }
+      ],
+      "safe_repair_plan": [
+        "Freeze current diff.",
+        "Generate blast-radius report.",
+        "Run focused tests.",
+        "Repair against contracts before aesthetics.",
+        "Record why files were touched and rollback diff."
+      ],
+      "rollback_plan": [
+        "Revert AI-generated diff.",
+        "Restore previous build artifact.",
+        "Mark context-selector rule as unsafe until fixed."
+      ]
+    },
+    {
+      "id": "playbook.cost_spike",
+      "symptom": "Model/provider cost spike or dollar ticker mismatch",
+      "entry_nodes": [
+        "ai.model_router",
+        "svc.billing_cost",
+        "sec.byok",
+        "ext.ai_providers"
+      ],
+      "likely_causes": [
+        "Model router selected max-power unnecessarily",
+        "Token estimate wrong",
+        "Retry loop duplicated calls",
+        "Provider usage normalization wrong",
+        "BYOK vs platform-paid accounting mismatch",
+        "Streaming usage not captured"
+      ],
+      "checks": [
+        "Compare estimated vs actual provider usage",
+        "Inspect retry/fallback count",
+        "Check model routing decision",
+        "Check context bundle token size",
+        "Check usage_events DB rows",
+        "Check BYOK credential path and provider account used"
+      ],
+      "decision_tree": [
+        {
+          "if": "actual tokens far above estimate",
+          "then": "Fix token estimator and context pruning."
+        },
+        {
+          "if": "duplicate usage events",
+          "then": "Fix idempotency key for model_call_id."
+        },
+        {
+          "if": "wrong provider account",
+          "then": "Fix BYOK route authorization and billing attribution."
+        }
+      ],
+      "safe_repair_plan": [
+        "Add usage idempotency key.",
+        "Patch provider normalizer.",
+        "Add budget guardrail in model router.",
+        "Add regression test for cost attribution."
+      ],
+      "rollback_plan": [
+        "Disable expensive provider route.",
+        "Cap max tokens.",
+        "Revert model router config."
+      ]
+    }
+  ],
+  "quality_gates": [
+    {
+      "id": "gate.contracts.required",
+      "name": "Contracts Required for Cross-Layer Edges",
+      "rule": "Every UI->API, API->DB, event, external API, or AI tool edge must reference a contract.",
+      "severity": "blocker",
+      "automated_check": "architecture-map validate --contracts"
+    },
+    {
+      "id": "gate.tenant.context",
+      "name": "Tenant Context Propagation",
+      "rule": "Every authenticated edge that reaches data/cache/queue/AI tools must preserve tenant/project context.",
+      "severity": "blocker",
+      "automated_check": "architecture-map validate --tenant-boundaries"
+    },
+    {
+      "id": "gate.ai.explainability",
+      "name": "AI File Touch Explanation",
+      "rule": "Every AI-generated diff must explain why each file was inspected and why each file was modified.",
+      "severity": "error",
+      "automated_check": "architecture-map validate --ai-diff-explanations"
+    },
+    {
+      "id": "gate.cost.accounting",
+      "name": "Model Cost Accounting",
+      "rule": "Every model call must emit model_call_id, provider, model, tokens, estimated_cost, actual_cost, and billing attribution.",
+      "severity": "blocker",
+      "automated_check": "architecture-map validate --cost-flow"
+    },
+    {
+      "id": "gate.safe.rollback",
+      "name": "Rollback Plan Required",
+      "rule": "Any high/critical node change requires rollback steps and affected tests before merge/deploy.",
+      "severity": "error",
+      "automated_check": "architecture-map validate --rollback"
+    }
+  ]
+}

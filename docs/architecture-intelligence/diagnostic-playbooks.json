@@ -1,0 +1,167 @@
+{
+  "schema_version": "1.0.0",
+  "diagnostic_playbooks": [
+    {
+      "id": "playbook.stale_ui_data",
+      "symptom": "UI shows stale or wrong build/session data",
+      "entry_nodes": [
+        "web.app_builder_ui",
+        "web.ide_editor",
+        "client.api_client"
+      ],
+      "likely_causes": [
+        "Client state/cache not invalidated",
+        "API response stale",
+        "Redis stale cache",
+        "DB write failed or wrong tenant filter",
+        "Queue backlog delayed worker update",
+        "Feature flag served old path",
+        "AI repair wrote state to wrong location"
+      ],
+      "checks": [
+        "Compare UI state with API response",
+        "Inspect request trace ID end-to-end",
+        "Check Redis key TTL and tenant-scoped key",
+        "Query DB row updated_at/status/version",
+        "Check queue lag and worker logs",
+        "Check last deploy diff and feature flag exposure",
+        "Check contract build_session status enum"
+      ],
+      "decision_tree": [
+        {
+          "if": "API response correct but UI wrong",
+          "then": "Inspect state management, cache invalidation, component props, stale closure, optimistic update rollback."
+        },
+        {
+          "if": "API response stale and Redis hit",
+          "then": "Invalidate cache path and fix write-through/cache-key tenant/version issue."
+        },
+        {
+          "if": "DB correct but API stale",
+          "then": "Inspect service query/cache path and serialization contract."
+        },
+        {
+          "if": "worker lag high",
+          "then": "Scale worker or fix stuck job/retry/DLQ issue."
+        }
+      ],
+      "safe_repair_plan": [
+        "Reproduce with one tenant/project/session ID.",
+        "Trace from UI request ID to DB/queue/worker.",
+        "Patch smallest stale state/cache boundary.",
+        "Add contract/e2e regression test for status update visibility.",
+        "Run focused tests and validate telemetry."
+      ],
+      "rollback_plan": [
+        "Disable affected feature flag.",
+        "Revert cache behavior change.",
+        "Restore previous deployment if session visibility remains degraded."
+      ]
+    },
+    {
+      "id": "playbook.ai_generated_broken_code",
+      "symptom": "AI generated broken or incomplete code",
+      "entry_nodes": [
+        "ai.context_selector",
+        "ai.model_router",
+        "ai.tool_executor",
+        "worker.code_generation"
+      ],
+      "likely_causes": [
+        "Context selector omitted required files",
+        "Model router selected underpowered/wrong provider",
+        "Tool executor applied diff to wrong file",
+        "Missing contract/test coverage",
+        "Build runner did not run correct command",
+        "Generated code violated API/DB/event contract",
+        "Repair loop ignored runtime error"
+      ],
+      "checks": [
+        "Inspect context bundle contents and omitted-file risk",
+        "Review changed files and dependency graph",
+        "Run build/test/lint command from Build Runner",
+        "Check contract violations",
+        "Compare generated code against schema/API contracts",
+        "Review AI decision trace: why each file was touched",
+        "Inspect provider/model/cost/fallback logs"
+      ],
+      "decision_tree": [
+        {
+          "if": "failing symbol imports",
+          "then": "Expand context around dependency owners and regenerate minimal patch."
+        },
+        {
+          "if": "contract test fails",
+          "then": "Repair producer/consumer mismatch, not just UI symptoms."
+        },
+        {
+          "if": "wrong file touched",
+          "then": "Fix repo map/code-location index and require owner-match before write."
+        }
+      ],
+      "safe_repair_plan": [
+        "Freeze current diff.",
+        "Generate blast-radius report.",
+        "Run focused tests.",
+        "Repair against contracts before aesthetics.",
+        "Record why files were touched and rollback diff."
+      ],
+      "rollback_plan": [
+        "Revert AI-generated diff.",
+        "Restore previous build artifact.",
+        "Mark context-selector rule as unsafe until fixed."
+      ]
+    },
+    {
+      "id": "playbook.cost_spike",
+      "symptom": "Model/provider cost spike or dollar ticker mismatch",
+      "entry_nodes": [
+        "ai.model_router",
+        "svc.billing_cost",
+        "sec.byok",
+        "ext.ai_providers"
+      ],
+      "likely_causes": [
+        "Model router selected max-power unnecessarily",
+        "Token estimate wrong",
+        "Retry loop duplicated calls",
+        "Provider usage normalization wrong",
+        "BYOK vs platform-paid accounting mismatch",
+        "Streaming usage not captured"
+      ],
+      "checks": [
+        "Compare estimated vs actual provider usage",
+        "Inspect retry/fallback count",
+        "Check model routing decision",
+        "Check context bundle token size",
+        "Check usage_events DB rows",
+        "Check BYOK credential path and provider account used"
+      ],
+      "decision_tree": [
+        {
+          "if": "actual tokens far above estimate",
+          "then": "Fix token estimator and context pruning."
+        },
+        {
+          "if": "duplicate usage events",
+          "then": "Fix idempotency key for model_call_id."
+        },
+        {
+          "if": "wrong provider account",
+          "then": "Fix BYOK route authorization and billing attribution."
+        }
+      ],
+      "safe_repair_plan": [
+        "Add usage idempotency key.",
+        "Patch provider normalizer.",
+        "Add budget guardrail in model router.",
+        "Add regression test for cost attribution."
+      ],
+      "rollback_plan": [
+        "Disable expensive provider route.",
+        "Cap max tokens.",
+        "Revert model router config."
+      ]
+    }
+  ]
+}

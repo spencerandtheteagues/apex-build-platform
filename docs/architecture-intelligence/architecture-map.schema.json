@@ -1,0 +1,931 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-build.dev/schemas/architecture-map.schema.json",
+  "title": "Apex Architecture Intelligence Map",
+  "description": "Engineering-grade, machine-readable architecture graph used by AI agents for planning, debugging, blast-radius analysis, code navigation, runtime reasoning, contract validation, cost tracing, and safe repair generation.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "app",
+    "layers",
+    "nodes",
+    "edges",
+    "contracts",
+    "overlays",
+    "diagnostic_playbooks",
+    "quality_gates"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "app": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "environment",
+        "repo",
+        "primary_runtime"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "local",
+            "preview",
+            "staging",
+            "production"
+          ]
+        },
+        "repo": {
+          "type": "object",
+          "required": [
+            "provider",
+            "url",
+            "default_branch"
+          ],
+          "properties": {
+            "provider": {
+              "enum": [
+                "github",
+                "gitlab",
+                "bitbucket",
+                "local",
+                "other"
+              ]
+            },
+            "url": {
+              "type": "string"
+            },
+            "default_branch": {
+              "type": "string"
+            },
+            "commit_sha": {
+              "type": "string"
+            }
+          }
+        },
+        "primary_runtime": {
+          "type": "string"
+        },
+        "tenancy_model": {
+          "enum": [
+            "single_tenant",
+            "multi_tenant_shared_db",
+            "multi_tenant_isolated_db",
+            "hybrid"
+          ]
+        },
+        "data_classification": {
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ]
+        }
+      }
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/layer"
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
+    "contracts": {
+      "type": "array",
+      "description": "Explicit contracts connecting UI forms, API routes, DB schemas, event payloads, AI tools, external providers, and auth policies.",
+      "items": {
+        "$ref": "#/$defs/contract"
+      }
+    },
+    "overlays": {
+      "type": "object",
+      "required": [
+        "blast_radius",
+        "change_risk",
+        "security",
+        "cost_flow",
+        "latency_waterfall",
+        "test_coverage",
+        "deployment_diff",
+        "feature_flags",
+        "migration_risk",
+        "tenant_boundaries"
+      ],
+      "properties": {
+        "blast_radius": {
+          "$ref": "#/$defs/overlay"
+        },
+        "change_risk": {
+          "$ref": "#/$defs/overlay"
+        },
+        "security": {
+          "$ref": "#/$defs/overlay"
+        },
+        "cost_flow": {
+          "$ref": "#/$defs/overlay"
+        },
+        "latency_waterfall": {
+          "$ref": "#/$defs/overlay"
+        },
+        "test_coverage": {
+          "$ref": "#/$defs/overlay"
+        },
+        "deployment_diff": {
+          "$ref": "#/$defs/overlay"
+        },
+        "feature_flags": {
+          "$ref": "#/$defs/overlay"
+        },
+        "migration_risk": {
+          "$ref": "#/$defs/overlay"
+        },
+        "tenant_boundaries": {
+          "$ref": "#/$defs/overlay"
+        }
+      }
+    },
+    "diagnostic_playbooks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic_playbook"
+      }
+    },
+    "quality_gates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/quality_gate"
+      }
+    }
+  },
+  "$defs": {
+    "layer": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "order",
+        "description",
+        "trust_zone"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "description": {
+          "type": "string"
+        },
+        "trust_zone": {
+          "enum": [
+            "untrusted_client",
+            "edge",
+            "trusted_backend",
+            "privileged_backend",
+            "data",
+            "external",
+            "observability",
+            "delivery"
+          ]
+        },
+        "allowed_inbound_edge_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_outbound_edge_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "layer",
+        "type",
+        "description",
+        "code_locations",
+        "risk",
+        "ownership",
+        "interfaces",
+        "telemetry",
+        "tests",
+        "change_guidance"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]+$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "layer": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "page",
+            "component",
+            "client_runtime",
+            "api_route",
+            "service",
+            "domain_module",
+            "ai_agent",
+            "tool",
+            "database",
+            "table",
+            "cache",
+            "queue",
+            "worker",
+            "external_provider",
+            "config",
+            "secret",
+            "observability",
+            "infra",
+            "security_policy",
+            "test_suite"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "code_locations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/code_location"
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "language": {
+              "type": "string"
+            },
+            "framework": {
+              "type": "string"
+            },
+            "process": {
+              "type": "string"
+            },
+            "deployment_unit": {
+              "type": "string"
+            }
+          }
+        },
+        "ownership": {
+          "type": "object",
+          "required": [
+            "owner",
+            "pager",
+            "reviewers"
+          ],
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "pager": {
+              "type": "string"
+            },
+            "reviewers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "interfaces": {
+          "type": "object",
+          "properties": {
+            "inputs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "contracts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "events_published": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "events_consumed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "data_access": {
+          "type": "object",
+          "properties": {
+            "reads": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "transaction_scope": {
+              "type": "string"
+            },
+            "tenant_filter_required": {
+              "type": "boolean"
+            }
+          }
+        },
+        "security": {
+          "type": "object",
+          "properties": {
+            "trust_boundary": {
+              "type": "string"
+            },
+            "authn_required": {
+              "type": "boolean"
+            },
+            "authz_policies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "secrets_used": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pii_access": {
+              "type": "boolean"
+            },
+            "tenant_isolation_rule": {
+              "type": "string"
+            }
+          }
+        },
+        "telemetry": {
+          "$ref": "#/$defs/telemetry"
+        },
+        "slo": {
+          "type": "object",
+          "properties": {
+            "availability": {
+              "type": "number"
+            },
+            "p95_latency_ms": {
+              "type": "number"
+            },
+            "error_rate_max": {
+              "type": "number"
+            }
+          }
+        },
+        "tests": {
+          "$ref": "#/$defs/tests"
+        },
+        "risk": {
+          "$ref": "#/$defs/risk"
+        },
+        "failure_modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/failure_mode"
+          }
+        },
+        "change_guidance": {
+          "type": "string"
+        },
+        "ai_usage": {
+          "type": "object",
+          "properties": {
+            "inspect_first": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "never_modify_without": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "safe_repair_pattern": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "code_location": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "git_sha": {
+          "type": "string"
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "from",
+        "to",
+        "edge_type",
+        "protocol",
+        "criticality",
+        "description",
+        "failure_behavior"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "edge_type": {
+          "enum": [
+            "sync_call",
+            "async_event",
+            "data_read",
+            "data_write",
+            "dependency",
+            "auth_check",
+            "config_dependency",
+            "secret_dependency",
+            "observability_signal",
+            "ai_diagnostic_path",
+            "contract_binding",
+            "deployment_dependency",
+            "cost_flow",
+            "feature_flag_gate",
+            "tenant_boundary"
+          ]
+        },
+        "protocol": {
+          "enum": [
+            "HTTP",
+            "WebSocket",
+            "SSE",
+            "SQL",
+            "Redis",
+            "Queue",
+            "SDK",
+            "File",
+            "InternalFunction",
+            "gRPC",
+            "OpenTelemetry",
+            "Other"
+          ]
+        },
+        "criticality": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "failure_behavior": {
+          "type": "string"
+        },
+        "latency_budget_ms": {
+          "type": "number"
+        },
+        "retry_policy": {
+          "type": "string"
+        },
+        "idempotency_required": {
+          "type": "boolean"
+        },
+        "auth_context_forwarded": {
+          "type": "boolean"
+        },
+        "tenant_context_forwarded": {
+          "type": "boolean"
+        },
+        "observability": {
+          "$ref": "#/$defs/telemetry"
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "contract_type",
+        "producer",
+        "consumers",
+        "schema_location",
+        "validation_strategy",
+        "breaking_change_rules"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "contract_type": {
+          "enum": [
+            "ui_api",
+            "api_db",
+            "event_payload",
+            "ai_tool",
+            "external_api",
+            "auth_policy",
+            "config",
+            "migration"
+          ]
+        },
+        "producer": {
+          "type": "string"
+        },
+        "consumers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "schema_location": {
+          "type": "string"
+        },
+        "runtime_validation": {
+          "type": "boolean"
+        },
+        "validation_strategy": {
+          "type": "string"
+        },
+        "breaking_change_rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "test_locations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "logs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "traces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "alerts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dashboards": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "integration": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "e2e": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "contract": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "load": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "security": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "required": [
+        "level",
+        "score",
+        "reasons"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blast_radius_node_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rollback_strategy": {
+          "type": "string"
+        }
+      }
+    },
+    "failure_mode": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "symptoms",
+        "detection",
+        "first_checks",
+        "safe_fix_pattern"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "symptoms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "detection": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "first_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "safe_fix_pattern": {
+          "type": "string"
+        }
+      }
+    },
+    "overlay": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "description",
+        "data_sources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "data_sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "node_annotations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "edge_annotations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "diagnostic_playbook": {
+      "type": "object",
+      "required": [
+        "id",
+        "symptom",
+        "entry_nodes",
+        "likely_causes",
+        "checks",
+        "decision_tree",
+        "safe_repair_plan",
+        "rollback_plan"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "symptom": {
+          "type": "string"
+        },
+        "entry_nodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "likely_causes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "decision_tree": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "safe_repair_plan": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rollback_plan": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "quality_gate": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "rule",
+        "severity"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error",
+            "blocker"
+          ]
+        },
+        "automated_check": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

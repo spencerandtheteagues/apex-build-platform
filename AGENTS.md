@@ -23,3 +23,6 @@ Recent history favors short, imperative subjects such as `fix: tighten recovery 
 
 ## Security & Configuration Tips
 Never commit real API keys or populated `.env` files. Start from `.env.example`, keep provider keys local, and verify CORS, JWT, and Stripe settings before running shared environments. Treat billing, auth, and deployment code as high-risk surfaces and mention config changes explicitly in reviews.
+
+## Architecture Intelligence Map
+Use `docs/architecture-intelligence/AGENT_REFERENCE.md` as an advisory AI reference before broad or high-risk Apex Build changes. The imported map can help identify likely nodes, contracts, tests, blast radius, and rollback considerations, but repository code, tests, runtime logs, and current contracts remain the source of truth. Do not assume the example map is current without verifying referenced files and behavior.
