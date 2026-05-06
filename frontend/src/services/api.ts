@@ -553,6 +553,11 @@ export class ApiService {
     return response.data.validation
   }
 
+  async getProjectMobileScorecard(projectId: number): Promise<MobileReadinessScorecard> {
+    const response = await this.client.get<{ scorecard: MobileReadinessScorecard }>(`/projects/${projectId}/mobile/scorecard`)
+    return response.data.scorecard
+  }
+
   async updateProject(id: number, data: Partial<Project>): Promise<Project> {
     const response = await this.client.put<{ project?: Project; data?: { project?: Project } }>(`/projects/${id}`, data)
     return response.data.project || response.data.data?.project || (response.data as unknown as Project)
@@ -3698,6 +3703,29 @@ export interface MobileValidationReport {
   missing_files?: string[]
   warnings?: string[]
   errors?: string[]
+}
+
+export type MobileReadinessCategoryStatus = 'complete' | 'partial' | 'blocked' | 'not_applicable'
+
+export interface MobileReadinessCategory {
+  id: string
+  label: string
+  score: number
+  target: number
+  status: MobileReadinessCategoryStatus
+  summary: string
+  evidence?: string[]
+  blockers?: string[]
+}
+
+export interface MobileReadinessScorecard {
+  overall_score: number
+  target_score: number
+  is_ready: boolean
+  summary: string
+  categories: MobileReadinessCategory[]
+  blockers?: string[]
+  next_actions?: string[]
 }
 
 export type BuildMessageTargetMode = 'lead' | 'agent' | 'role' | 'all_agents'

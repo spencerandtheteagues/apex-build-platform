@@ -131,6 +131,38 @@ describe('mobile validation API', () => {
     expect(get).toHaveBeenCalledWith('/projects/42/mobile/validation')
     expect(validation.status).toBe('passed')
   })
+
+  it('fetches project mobile readiness scorecard from the project route', async () => {
+    const service = new ApiService('/api/v1')
+    const get = vi.spyOn(service.client, 'get').mockResolvedValue({
+      data: {
+        scorecard: {
+          overall_score: 61,
+          target_score: 95,
+          is_ready: false,
+          summary: 'Mobile readiness is 61% toward the 95% launch-readiness target.',
+          categories: [
+            {
+              id: 'credentials_signing',
+              label: 'Credentials and signing',
+              score: 0,
+              target: 95,
+              status: 'blocked',
+              summary: 'No validated credentials are recorded.',
+              blockers: ['Add encrypted mobile credentials.'],
+            },
+          ],
+          blockers: ['Add encrypted mobile credentials.'],
+        },
+      },
+    } as any)
+
+    const scorecard = await service.getProjectMobileScorecard(42)
+
+    expect(get).toHaveBeenCalledWith('/projects/42/mobile/scorecard')
+    expect(scorecard.overall_score).toBe(61)
+    expect(scorecard.categories[0].id).toBe('credentials_signing')
+  })
 })
 
 describe('logout', () => {
