@@ -15,6 +15,7 @@ import type {
   MobilePlatform,
   MobileReleaseLevel,
 } from '@/services/api'
+import MobileCredentialPanel from './MobileCredentialPanel'
 
 type Notify = (notification: Omit<Notification, 'id' | 'timestamp'>) => void
 
@@ -30,6 +31,8 @@ interface MobileBuildOperationsPanelProps {
     | 'cancelProjectMobileBuild'
     | 'retryProjectMobileBuild'
     | 'getProjectMobileCredentials'
+    | 'createProjectMobileCredential'
+    | 'deleteProjectMobileCredential'
   >
   addNotification: Notify
 }
@@ -386,6 +389,14 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
                 </div>
               </div>
             ) : null}
+
+            <MobileCredentialPanel
+              projectId={projectId}
+              credentials={credentials}
+              apiService={apiService}
+              addNotification={addNotification}
+              onCredentialsChange={setCredentials}
+            />
 
             <div className="mt-5 grid gap-3 md:grid-cols-3">
               {buildTargets.map((target) => (

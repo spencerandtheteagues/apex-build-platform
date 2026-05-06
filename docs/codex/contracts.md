@@ -66,12 +66,14 @@
   - Response `credentials` is `MobileCredentialStatus`: `status`, `complete`, `required`, `present`, `missing`, safe `metadata`, and optional `blockers`.
 - Consumers:
   - `frontend/src/services/api.ts` exposes `getProjectMobileCredentials`, `createProjectMobileCredential`, and `deleteProjectMobileCredential`.
+  - `frontend/src/components/project/MobileCredentialPanel.tsx` renders required/present/missing states, submits transient form values to the project credential API, deletes stored credentials, and clears raw inputs after save/cancel/delete.
+  - `frontend/src/components/project/MobileBuildOperationsPanel.tsx` consumes credential status to gate native build/retry buttons and passes credential updates from the credential panel back into build controls.
   - `BuildMobileReadinessScorecard` reads `project.MobileMetadata.credential_status`, `credentials_validated`, and missing credential lists.
-  - Future mobile build panels and EAS provider integration should use this status before enabling binary build actions.
 - Defaults / zero-value behavior:
   - Mobile projects require an EAS token plus Apple credentials for iOS and Google Play service-account credentials for Android.
   - Missing credentials report `missing`; partial storage reports `partial`; all required credentials report `validated`.
   - Raw credential values are accepted only on POST and are never returned by GET/POST/DELETE responses.
+  - Frontend credential forms must not prefill or display existing secret values. Stored credentials are represented only by safe metadata labels/timestamps.
   - Stored secret values must remain encrypted and redacted from logs, prompts, generated mobile source, and frontend state.
 - Backward compatibility risk:
   - Low; this is additive to existing secrets routes and project mobile metadata.
