@@ -69,13 +69,14 @@ Implemented now:
 - generated mobile source validation for dependency allowlist and browser-only runtime API usage.
 - mobile source preparation for GitHub export and owner ZIP download.
 - internal `MobileBuildService` abstraction with feature-flag/platform gating, mocked provider seam, build-state records, artifact/log metadata, failure classification, and secret redaction.
+- encrypted, project-scoped mobile credential vault for EAS, Apple App Store Connect, Google Play service accounts, and Android signing.
+- authenticated mobile credential status API that returns metadata only and updates the mobile readiness scorecard.
 
 Next backend services:
 
 - generated mobile API client generator.
 - Expo Web preview provider.
 - persistent build job queue/store and real `EASBuildProvider` integration.
-- credential vault integrations for EAS, Apple, Google Play, and Android signing.
 - store metadata/readiness generators.
 
 ## Frontend UI Components
@@ -83,6 +84,7 @@ Next backend services:
 Implemented now:
 
 - `frontend/src/services/api.ts` accepts and reads optional mobile target metadata.
+- `frontend/src/services/api.ts` exposes mobile credential status/create/delete methods with metadata-only response types.
 
 Next frontend work:
 
@@ -127,7 +129,9 @@ Mobile agent rules must be appended to generated mobile work orders before Expo 
 
 EAS Build, EAS Submit, Apple, Google Play, and Android signing credentials must use encrypted, scoped credential storage. Secrets must never be returned to the frontend after storage, embedded in generated mobile source, logged, or included in AI prompts. Missing credentials must produce actionable disabled states, not generic failures.
 
-The current branch does not enable EAS or store submission. The feature flags default to off so production cannot accidentally claim or run mobile binary workflows before the credential model is complete.
+The current branch stores mobile credentials through `backend/internal/mobile.MobileCredentialVault` and exposes safe project-owner routes under `/api/v1/projects/:id/mobile/credentials`. Raw values are accepted only on create/update, stored through the encrypted secrets subsystem, and never returned in status responses. The readiness scorecard can now distinguish missing, partial, and validated mobile credential states.
+
+The current branch still does not enable live EAS Build or store submission. The feature flags default to off so production cannot accidentally claim or run mobile binary workflows before provider execution, artifact persistence, and submission workflows are complete.
 
 ## Store Readiness Workflow
 
@@ -182,6 +186,7 @@ Required next:
 - frontend mobile wizard tests.
 - mocked mobile build-provider state tests.
 - credential redaction/encryption tests.
+- project-owner mobile credential route tests.
 - store-readiness generator tests.
 
 ## Known Limitations
@@ -190,7 +195,7 @@ Required next:
 - This branch has an internal mobile build-service abstraction and mocked provider tests, but no live provider execution.
 - This branch does not yet run Expo Web preview.
 - This branch does not yet call real EAS Build or EAS Submit.
-- This branch does not yet collect or store mobile credentials.
+- This branch stores mobile credentials and reports readiness status, but does not yet use those credentials to run EAS Build or EAS Submit.
 - This branch does not yet automate App Store Connect or Google Play metadata.
 - Public product copy must not claim native mobile binary generation until the EAS path is implemented, credential-gated, and validated.
 

@@ -1,5 +1,37 @@
 # Contracts
 
+## Mobile Credential Vault API
+- Source of truth: `backend/internal/mobile/credentials.go`, `backend/internal/handlers/secrets.go`, project mobile metadata in `backend/pkg/models/models.go`, and frontend API types in `frontend/src/services/api.ts`.
+- Producers:
+  - Authenticated project owners call `POST /api/v1/projects/:id/mobile/credentials` with `{ type, values }`.
+  - Supported `type` values are `eas_token`, `apple_app_store_connect`, `google_play_service_account`, and `android_signing`.
+  - `MobileCredentialVault.Store` validates payload shape before encryption and stores project-scoped rows in `internal/secrets.Secret` using `mobile:<type>` names.
+- Transport:
+  - `GET /api/v1/projects/:id/mobile/credentials` returns `{ credentials }`.
+  - `POST /api/v1/projects/:id/mobile/credentials` stores/replaces one credential and returns `{ message, credentials }`.
+  - `DELETE /api/v1/projects/:id/mobile/credentials/:type` deletes one credential and returns `{ message, credentials }`.
+  - Response `credentials` is `MobileCredentialStatus`: `status`, `complete`, `required`, `present`, `missing`, safe `metadata`, and optional `blockers`.
+- Consumers:
+  - `frontend/src/services/api.ts` exposes `getProjectMobileCredentials`, `createProjectMobileCredential`, and `deleteProjectMobileCredential`.
+  - `BuildMobileReadinessScorecard` reads `project.MobileMetadata.credential_status`, `credentials_validated`, and missing credential lists.
+  - Future mobile build panels and EAS provider integration should use this status before enabling binary build actions.
+- Defaults / zero-value behavior:
+  - Mobile projects require an EAS token plus Apple credentials for iOS and Google Play service-account credentials for Android.
+  - Missing credentials report `missing`; partial storage reports `partial`; all required credentials report `validated`.
+  - Raw credential values are accepted only on POST and are never returned by GET/POST/DELETE responses.
+  - Stored secret values must remain encrypted and redacted from logs, prompts, generated mobile source, and frontend state.
+- Backward compatibility risk:
+  - Low; this is additive to existing secrets routes and project mobile metadata.
+  - Existing web projects and generic project secrets continue to use the previous secrets API.
+- Required tests / validations:
+  - `cd backend && go test ./internal/mobile -run 'TestMobileCredentialVault|TestBuildMobileReadinessScorecard' -count=1`
+  - `cd backend && go test ./internal/handlers -run 'Test.*MobileCredential' -count=1`
+  - `cd frontend && npm run test -- --run src/services/api.test.ts`
+  - `cd frontend && npm run typecheck`
+  - `cd backend && go test ./internal/mobile ./internal/handlers -count=1`
+  - `cd backend && go test ./... -run '^$'`
+  - `git diff --check`
+
 ## Mobile Build Job Service
 - Source of truth: `backend/internal/mobile/build_service.go` plus existing mobile enums in `backend/internal/mobile/types.go` and feature flags in `backend/internal/mobile/flags.go`.
 - Producers:

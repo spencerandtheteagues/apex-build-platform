@@ -163,6 +163,57 @@ describe('mobile validation API', () => {
     expect(scorecard.overall_score).toBe(61)
     expect(scorecard.categories[0].id).toBe('credentials_signing')
   })
+
+  it('manages project mobile credentials without exposing raw values in API helpers', async () => {
+    const service = new ApiService('/api/v1')
+    const get = vi.spyOn(service.client, 'get').mockResolvedValue({
+      data: {
+        credentials: {
+          status: 'partial',
+          complete: false,
+          required: ['eas_token', 'apple_app_store_connect'],
+          present: ['eas_token'],
+          missing: ['apple_app_store_connect'],
+          metadata: [{ type: 'eas_token', secret_id: 12, project_id: 42, status: 'stored', label: 'EAS token', created_at: '2026-05-06T00:00:00Z', updated_at: '2026-05-06T00:00:00Z' }],
+        },
+      },
+    } as any)
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({
+      data: {
+        credentials: {
+          status: 'partial',
+          complete: false,
+          required: ['eas_token'],
+          present: ['eas_token'],
+          missing: [],
+          metadata: [],
+        },
+      },
+    } as any)
+    const del = vi.spyOn(service.client, 'delete').mockResolvedValue({
+      data: {
+        credentials: {
+          status: 'missing',
+          complete: false,
+          required: ['eas_token'],
+          present: [],
+          missing: ['eas_token'],
+          metadata: [],
+        },
+      },
+    } as any)
+
+    const listed = await service.getProjectMobileCredentials(42)
+    const stored = await service.createProjectMobileCredential(42, { type: 'eas_token', values: { token: 'raw-token' } })
+    const deleted = await service.deleteProjectMobileCredential(42, 'eas_token')
+
+    expect(get).toHaveBeenCalledWith('/projects/42/mobile/credentials')
+    expect(post).toHaveBeenCalledWith('/projects/42/mobile/credentials', { type: 'eas_token', values: { token: 'raw-token' } })
+    expect(del).toHaveBeenCalledWith('/projects/42/mobile/credentials/eas_token')
+    expect(JSON.stringify(listed)).not.toContain('raw-token')
+    expect(stored.present).toContain('eas_token')
+    expect(deleted.missing).toContain('eas_token')
+  })
 })
 
 describe('logout', () => {
