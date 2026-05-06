@@ -1,7 +1,6 @@
 package mobile
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -171,6 +170,53 @@ func (p *EASBuildProvider) CreateBuild(ctx context.Context, req MobileBuildReque
 	return result, nil
 }
 
+func (p *EASBuildProvider) RefreshBuild(ctx context.Context, job MobileBuildJob) (MobileBuildProviderResult, error) {
+	if p == nil || p.runner == nil {
+		return MobileBuildProviderResult{}, ErrMobileBuildProviderMissing
+	}
+	providerBuildID := strings.TrimSpace(job.ProviderBuildID)
+	if providerBuildID == "" {
+		return MobileBuildProviderResult{}, fmt.Errorf("%w: provider_build_id is required for EAS build refresh", ErrMobileBuildInvalidRequest)
+	}
+	easToken, err := p.resolveEASToken(ctx, MobileBuildRequest{ProjectID: job.ProjectID, UserID: job.UserID})
+	if err != nil {
+		return MobileBuildProviderResult{}, err
+	}
+
+	runCtx := ctx
+	cancel := func() {}
+	if p.timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, p.timeout)
+	}
+	defer cancel()
+
+	output, err := p.runner.Run(runCtx, EASCommand{
+		CLIPath: p.cliPath,
+		Args: []string{
+			"build:view",
+			providerBuildID,
+			"--json",
+		},
+		Env: []string{
+			"EXPO_TOKEN=" + easToken,
+			"EAS_TOKEN=" + easToken,
+			"CI=1",
+		},
+	})
+	if err != nil {
+		return MobileBuildProviderResult{}, fmt.Errorf("%w: %s", ErrMobileBuildProviderFailed, RedactMobileBuildSecrets(output+" "+err.Error()))
+	}
+	result := parseEASBuildOutput(output)
+	if result.ProviderBuildID == "" {
+		result.ProviderBuildID = providerBuildID
+	}
+	result.Logs = append([]MobileBuildLogLine{{
+		Level:   "info",
+		Message: "EAS build status refreshed from provider.",
+	}}, result.Logs...)
+	return result, nil
+}
+
 func (p *EASBuildProvider) resolveEASToken(ctx context.Context, req MobileBuildRequest) (string, error) {
 	if p.credentials == nil {
 		return "", fmt.Errorf("%w: EAS credential resolver is not configured", ErrMobileCredentialInvalidPayload)
@@ -200,14 +246,8 @@ func parseEASBuildOutput(output string) MobileBuildProviderResult {
 	if trimmed == "" {
 		return MobileBuildProviderResult{}
 	}
-	jsonPayload := extractJSONPayload(trimmed)
-	if len(jsonPayload) == 0 {
-		return MobileBuildProviderResult{
-			Logs: []MobileBuildLogLine{{Level: "info", Message: RedactMobileBuildSecrets(trimmed)}},
-		}
-	}
-	var decoded any
-	if err := json.Unmarshal(jsonPayload, &decoded); err != nil {
+	decoded, ok := decodeFirstJSONValue(trimmed)
+	if !ok {
 		return MobileBuildProviderResult{
 			Logs: []MobileBuildLogLine{{Level: "info", Message: RedactMobileBuildSecrets(trimmed)}},
 		}
@@ -227,7 +267,7 @@ func parseEASBuildOutput(output string) MobileBuildProviderResult {
 	}
 }
 
-func extractJSONPayload(output string) []byte {
+func decodeFirstJSONValue(output string) (any, bool) {
 	startObject := strings.Index(output, "{")
 	startArray := strings.Index(output, "[")
 	start := -1
@@ -244,11 +284,14 @@ func extractJSONPayload(output string) []byte {
 		start = startArray
 	}
 	if start < 0 {
-		return nil
+		return nil, false
 	}
-	payload := []byte(output[start:])
-	payload = bytes.TrimSpace(payload)
-	return payload
+	var decoded any
+	decoder := json.NewDecoder(strings.NewReader(output[start:]))
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, false
+	}
+	return decoded, true
 }
 
 func firstString(object map[string]any, keys ...string) string {

@@ -204,6 +204,66 @@ func TestCreateProjectMobileBuildPersistsJobAndArtifactEndpoints(t *testing.T) {
 	require.Contains(t, artifactRecorder.Body.String(), "https://artifacts.example.com/app.apk")
 }
 
+func TestRefreshProjectMobileBuildUpdatesProviderStatusAndProjectSummary(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	provider := &mockAPIMobileBuildProvider{
+		result: mobile.MobileBuildProviderResult{
+			ProviderBuildID: "eas-build-android-refresh",
+			Status:          mobile.MobileBuildBuilding,
+			Logs: []mobile.MobileBuildLogLine{{
+				Level:   "info",
+				Message: "queued",
+			}},
+		},
+		refreshResult: mobile.MobileBuildProviderResult{
+			Status:      mobile.MobileBuildSucceeded,
+			ArtifactURL: "https://artifacts.example.com/refreshed.apk",
+			Logs: []mobile.MobileBuildLogLine{{
+				Level:   "info",
+				Message: "finished with EAS_TOKEN=refresh-secret",
+			}},
+		},
+	}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(
+		mobileBuildAPITestFlags(),
+		provider,
+		mobile.NewGormMobileBuildStore(gormDB),
+		mobile.WithMobileBuildIDGenerator(func() string { return "mbld_api_refresh" }),
+	))
+
+	createRecorder := httptest.NewRecorder()
+	createContext, _ := gin.CreateTestContext(createRecorder)
+	createContext.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds", project.ID), strings.NewReader(`{
+		"platform":"android",
+		"profile":"preview",
+		"release_level":"internal_android_apk"
+	}`))
+	createContext.Request.Header.Set("Content-Type", "application/json")
+	createContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	createContext.Set("user_id", userID)
+	server.CreateProjectMobileBuild(createContext)
+	require.Equal(t, http.StatusCreated, createRecorder.Code)
+
+	refreshRecorder := httptest.NewRecorder()
+	refreshContext, _ := gin.CreateTestContext(refreshRecorder)
+	refreshContext.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_refresh/refresh", project.ID), nil)
+	refreshContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_refresh"}}
+	refreshContext.Set("user_id", userID)
+	server.RefreshProjectMobileBuild(refreshContext)
+
+	require.Equal(t, http.StatusOK, refreshRecorder.Code)
+	require.NotContains(t, refreshRecorder.Body.String(), "refresh-secret")
+	require.Contains(t, refreshRecorder.Body.String(), "https://artifacts.example.com/refreshed.apk")
+	require.Equal(t, 1, provider.refreshCalls)
+
+	var updated models.Project
+	require.NoError(t, gormDB.First(&updated, project.ID).Error)
+	require.Equal(t, string(mobile.MobileBuildSucceeded), updated.MobileBuildStatus)
+	require.Equal(t, "https://artifacts.example.com/refreshed.apk", mobileMetadataStringForAPITest(updated.MobileMetadata, "android_apk_url"))
+}
+
 func createMobileBuildAPIProject(t *testing.T, gormDB *gorm.DB, userID uint, platforms []string) models.Project {
 	t.Helper()
 	project := models.Project{
@@ -273,8 +333,12 @@ func mobileMetadataStringForAPITest(metadata map[string]interface{}, key string)
 type mockAPIMobileBuildProvider struct {
 	result              mobile.MobileBuildProviderResult
 	err                 error
+	refreshResult       mobile.MobileBuildProviderResult
+	refreshErr          error
 	calls               int
+	refreshCalls        int
 	lastReq             mobile.MobileBuildRequest
+	lastRefreshJob      mobile.MobileBuildJob
 	sourcePackageExists bool
 }
 
@@ -289,4 +353,13 @@ func (p *mockAPIMobileBuildProvider) CreateBuild(_ context.Context, req mobile.M
 		p.sourcePackageExists = true
 	}
 	return p.result, p.err
+}
+
+func (p *mockAPIMobileBuildProvider) RefreshBuild(_ context.Context, job mobile.MobileBuildJob) (mobile.MobileBuildProviderResult, error) {
+	p.refreshCalls++
+	p.lastRefreshJob = job
+	if p.refreshErr != nil {
+		return mobile.MobileBuildProviderResult{}, p.refreshErr
+	}
+	return p.refreshResult, nil
 }
