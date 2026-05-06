@@ -558,6 +558,21 @@ export class ApiService {
     return response.data.scorecard
   }
 
+  async getProjectMobileCredentials(projectId: number): Promise<MobileCredentialStatus> {
+    const response = await this.client.get<{ credentials: MobileCredentialStatus }>(`/projects/${projectId}/mobile/credentials`)
+    return response.data.credentials
+  }
+
+  async createProjectMobileCredential(projectId: number, data: MobileCredentialRequest): Promise<MobileCredentialStatus> {
+    const response = await this.client.post<{ credentials: MobileCredentialStatus }>(`/projects/${projectId}/mobile/credentials`, data)
+    return response.data.credentials
+  }
+
+  async deleteProjectMobileCredential(projectId: number, type: MobileCredentialType): Promise<MobileCredentialStatus> {
+    const response = await this.client.delete<{ credentials: MobileCredentialStatus }>(`/projects/${projectId}/mobile/credentials/${type}`)
+    return response.data.credentials
+  }
+
   async updateProject(id: number, data: Partial<Project>): Promise<Project> {
     const response = await this.client.put<{ project?: Project; data?: { project?: Project } }>(`/projects/${id}`, data)
     return response.data.project || response.data.data?.project || (response.data as unknown as Project)
@@ -3726,6 +3741,38 @@ export interface MobileReadinessScorecard {
   categories: MobileReadinessCategory[]
   blockers?: string[]
   next_actions?: string[]
+}
+
+export type MobileCredentialType =
+  | 'eas_token'
+  | 'apple_app_store_connect'
+  | 'google_play_service_account'
+  | 'android_signing'
+
+export interface MobileCredentialRequest {
+  type: MobileCredentialType
+  values: Record<string, string>
+}
+
+export interface MobileCredentialMetadata {
+  type: MobileCredentialType
+  secret_id: number
+  project_id: number
+  status: string
+  label: string
+  last_tested?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MobileCredentialStatus {
+  status: 'missing' | 'partial' | 'validated' | string
+  complete: boolean
+  required: MobileCredentialType[]
+  present: MobileCredentialType[]
+  missing: MobileCredentialType[]
+  metadata: MobileCredentialMetadata[]
+  blockers?: string[]
 }
 
 export type BuildMessageTargetMode = 'lead' | 'agent' | 'role' | 'all_agents'

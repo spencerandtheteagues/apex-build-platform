@@ -2,10 +2,12 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
+	"apex-build/internal/mobile"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
@@ -41,6 +43,11 @@ type UpdateSecretRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Value       *string `json:"value,omitempty"`
 	Description *string `json:"description,omitempty"`
+}
+
+type MobileCredentialRequest struct {
+	Type   mobile.MobileCredentialType `json:"type" binding:"required"`
+	Values map[string]string           `json:"values" binding:"required"`
 }
 
 // ListSecrets returns all secrets for the authenticated user (metadata only, no values)
@@ -348,6 +355,103 @@ func (h *SecretsHandler) GetProjectSecrets(c *gin.Context) {
 		"environment_variables": envVars,
 		"count":                 len(envVars),
 	})
+}
+
+// ListProjectMobileCredentials returns safe mobile credential metadata for a project.
+func (h *SecretsHandler) ListProjectMobileCredentials(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	project, ok := h.requireOwnedProject(c, userID)
+	if !ok {
+		return
+	}
+
+	vault := mobile.NewMobileCredentialVault(h.db, h.manager)
+	status, err := vault.Status(c.Request.Context(), userID, project)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch mobile credentials"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"credentials": status})
+}
+
+// CreateProjectMobileCredential stores an encrypted mobile credential and returns metadata only.
+func (h *SecretsHandler) CreateProjectMobileCredential(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	project, ok := h.requireOwnedProject(c, userID)
+	if !ok {
+		return
+	}
+
+	var req MobileCredentialRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	vault := mobile.NewMobileCredentialVault(h.db, h.manager)
+	status, err := vault.Store(c.Request.Context(), userID, project, mobile.MobileCredentialInput{
+		Type:   req.Type,
+		Values: req.Values,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, mobile.ErrMobileCredentialInvalidType), errors.Is(err, mobile.ErrMobileCredentialInvalidPayload):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store mobile credential"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":     "Mobile credential stored successfully",
+		"credentials": status,
+	})
+}
+
+// DeleteProjectMobileCredential deletes one project-scoped mobile credential.
+func (h *SecretsHandler) DeleteProjectMobileCredential(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	project, ok := h.requireOwnedProject(c, userID)
+	if !ok {
+		return
+	}
+
+	credentialType := mobile.MobileCredentialType(c.Param("type"))
+	vault := mobile.NewMobileCredentialVault(h.db, h.manager)
+	status, err := vault.Delete(c.Request.Context(), userID, project, credentialType)
+	if err != nil {
+		switch {
+		case errors.Is(err, mobile.ErrMobileCredentialInvalidType):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, mobile.ErrMobileCredentialNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "Mobile credential not found"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete mobile credential"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Mobile credential deleted successfully",
+		"credentials": status,
+	})
+}
+
+func (h *SecretsHandler) requireOwnedProject(c *gin.Context, userID uint) (models.Project, bool) {
+	projectID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return models.Project{}, false
+	}
+
+	var project models.Project
+	if err := h.db.Where("id = ? AND owner_id = ?", projectID, userID).First(&project).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Project not found or access denied"})
+		return models.Project{}, false
+	}
+	return project, true
 }
 
 // GetAuditLog retrieves the access audit log for a secret

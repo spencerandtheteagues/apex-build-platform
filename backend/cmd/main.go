@@ -1637,9 +1637,15 @@ func setupRoutes(
 
 				// Project-specific secrets (environment variables)
 				protected.GET("/projects/:id/secrets", secretsHandler.GetProjectSecrets)
+				protected.GET("/projects/:id/mobile/credentials", secretsHandler.ListProjectMobileCredentials)
+				protected.POST("/projects/:id/mobile/credentials", secretsHandler.CreateProjectMobileCredential)
+				protected.DELETE("/projects/:id/mobile/credentials/:type", secretsHandler.DeleteProjectMobileCredential)
 			} else {
 				registerUnavailableRoutes(protected, "/secrets", "Secrets management is currently unavailable")
 				protected.GET("/projects/:id/secrets", featureUnavailableHandler("Secrets management is currently unavailable"))
+				protected.GET("/projects/:id/mobile/credentials", featureUnavailableHandler("Secrets management is currently unavailable"))
+				protected.POST("/projects/:id/mobile/credentials", featureUnavailableHandler("Secrets management is currently unavailable"))
+				protected.DELETE("/projects/:id/mobile/credentials/:type", featureUnavailableHandler("Secrets management is currently unavailable"))
 			}
 
 			// MCP Server Management endpoints

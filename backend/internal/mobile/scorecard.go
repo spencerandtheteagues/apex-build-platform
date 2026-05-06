@@ -275,6 +275,14 @@ func scoreCredentialsAndSigning(project models.Project, target int) MobileReadin
 		strings.EqualFold(mobileMetadataString(project.MobileMetadata, "credential_status"), "validated") {
 		return readinessCategory("credentials_signing", "Credentials and signing", 100, target, "User-provided build credentials are validated.", []string{"Credential metadata reports validated state."}, nil)
 	}
+	if strings.EqualFold(mobileMetadataString(project.MobileMetadata, "credential_status"), "partial") {
+		missing := mobileMetadataStringList(project.MobileMetadata, "mobile_credential_missing")
+		blockers := []string{"Add the missing mobile credentials before native EAS builds can reach the 95% target."}
+		if len(missing) > 0 {
+			blockers = []string{"Add missing mobile credentials: " + strings.Join(missing, ", ") + "."}
+		}
+		return readinessCategory("credentials_signing", "Credentials and signing", 50, target, "Some required mobile credentials are stored, but the platform credential set is incomplete.", []string{"Credential metadata reports partial state."}, blockers)
+	}
 	return readinessCategory("credentials_signing", "Credentials and signing", 0, target, "No validated EAS/Apple/Google signing credentials are recorded.", nil, []string{"Add encrypted user-provided mobile credential vault and validate EAS/Apple/Google signing prerequisites."})
 }
 
