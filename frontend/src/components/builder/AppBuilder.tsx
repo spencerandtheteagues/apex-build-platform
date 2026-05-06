@@ -32,7 +32,12 @@ import apiService, {
   BuildPermissionRequest as ApiBuildPermissionRequest,
   BuildPermissionRule as ApiBuildPermissionRule,
   CompletedBuildDetail,
+  MobileCapability,
+  MobileFramework,
+  MobilePlatform,
+  MobileReleaseLevel,
   ProposedBuildEdit,
+  TargetPlatform,
 } from '@/services/api'
 import {
   Button,
@@ -80,7 +85,8 @@ import {
   PlugZap,
   LockKeyhole,
   CreditCard,
-  MonitorUp
+  MonitorUp,
+  Smartphone
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
@@ -284,6 +290,15 @@ interface BuildTechStack {
   extras?: string[]
 }
 
+type BuildTargetRequestFields = {
+  target_platform?: TargetPlatform
+  mobile_platforms?: MobilePlatform[]
+  mobile_framework?: MobileFramework
+  mobile_release_level?: MobileReleaseLevel
+  mobile_capabilities?: MobileCapability[]
+  mobile_dependency_policy?: string
+}
+
 interface AppBuilderProps {
   onNavigateToIDE?: (options?: { target?: 'dashboard' | 'editor' | 'preview'; projectId?: number | null }) => void
   startOverSignal?: number
@@ -294,6 +309,16 @@ const LAST_WORKFLOW_BUILD_STORAGE_KEY = 'apex_last_workflow_build_id'
 const BUILD_TELEMETRY_STORAGE_KEY = 'apex_build_telemetry_cache'
 const DEFAULT_RESTART_FAILED_MESSAGE = 'Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the app is runnable.'
 const TERMINAL_REVIVAL_PHASES = new Set(['restart_recovery', 'auto_recovery', 'recovery_restart'])
+const DEFAULT_MOBILE_PLATFORMS: MobilePlatform[] = ['android', 'ios']
+const DEFAULT_MOBILE_CAPABILITIES: MobileCapability[] = ['offlineMode', 'fileUploads']
+const MOBILE_CAPABILITY_OPTIONS: Array<{ id: MobileCapability; label: string; hint: string }> = [
+  { id: 'offlineMode', label: 'Offline drafts', hint: 'Local draft storage and sync queue scaffolding.' },
+  { id: 'fileUploads', label: 'File uploads', hint: 'Typed upload contracts for photos and documents.' },
+  { id: 'camera', label: 'Camera', hint: 'Expo camera/photo capture path with permission manifest.' },
+  { id: 'photoLibrary', label: 'Photo library', hint: 'Image picker flow for existing device photos.' },
+  { id: 'pushNotifications', label: 'Push reminders', hint: 'Notification registration scaffold and caveats.' },
+  { id: 'location', label: 'Location', hint: 'Location permission and mobile-safe location hooks.' },
+]
 
 const shouldAllowTerminalRevivalFromPayload = (payload: Record<string, any> | null | undefined): boolean => {
   if (!payload || typeof payload !== 'object') return false
@@ -2040,6 +2065,11 @@ const BuilderControlSurface: React.FC<{
 export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOverSignal }) => {
   // Build state
   const [buildMode, setBuildMode] = useState<BuildMode>('full')
+  const [targetPlatform, setTargetPlatform] = useState<TargetPlatform>('fullstack_web')
+  const [targetPathExplicit, setTargetPathExplicit] = useState(false)
+  const [mobilePlatforms, setMobilePlatforms] = useState<MobilePlatform[]>(DEFAULT_MOBILE_PLATFORMS)
+  const [mobileReleaseLevel, setMobileReleaseLevel] = useState<MobileReleaseLevel>('source_only')
+  const [mobileCapabilities, setMobileCapabilities] = useState<MobileCapability[]>(DEFAULT_MOBILE_CAPABILITIES)
   const [appDescription, setAppDescription] = useState('')
   const [wireframeImage, setWireframeImage] = useState<string>('')
   const wireframeInputRef = useRef<HTMLInputElement>(null)
@@ -3184,6 +3214,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setUpgradePrompt(null)
     setUpgradeCheckoutPending(false)
     setPlatformReadiness(null)
+    setTargetPlatform('fullstack_web')
+    setTargetPathExplicit(false)
+    setMobilePlatforms(DEFAULT_MOBILE_PLATFORMS)
+    setMobileReleaseLevel('source_only')
+    setMobileCapabilities(DEFAULT_MOBILE_CAPABILITIES)
     if (options?.clearPrompt) {
       setAppDescription('')
     }
@@ -3199,6 +3234,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       if (clearPrompt) {
         setAppDescription('')
       }
+      setTargetPlatform('fullstack_web')
+      setTargetPathExplicit(false)
+      setMobilePlatforms(DEFAULT_MOBILE_PLATFORMS)
+      setMobileReleaseLevel('source_only')
+      setMobileCapabilities(DEFAULT_MOBILE_CAPABILITIES)
       builderRootRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -3341,6 +3381,78 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     if (override.extras && override.extras.length > 0) parts.push(`Extras: ${override.extras.join(', ')}`)
 
     return parts.length > 0 ? parts.join(' | ') : 'Auto (AI chooses best)'
+  }
+
+  const selectTargetPath = (platform: TargetPlatform) => {
+    setTargetPlatform(platform)
+    setTargetPathExplicit(true)
+
+    if (platform === 'web') {
+      setBuildMode('fast')
+      return
+    }
+
+    setBuildMode('full')
+
+    if (platform === 'mobile_expo') {
+      setMobileReleaseLevel('source_only')
+      if (mobilePlatforms.length === 0) {
+        setMobilePlatforms(DEFAULT_MOBILE_PLATFORMS)
+      }
+    }
+  }
+
+  const toggleMobilePlatform = (platform: MobilePlatform) => {
+    setMobilePlatforms(prev => {
+      if (prev.includes(platform)) {
+        const next = prev.filter(item => item !== platform)
+        return next.length > 0 ? next : prev
+      }
+
+      return [...prev, platform]
+    })
+  }
+
+  const toggleMobileCapability = (capability: MobileCapability) => {
+    setMobileCapabilities(prev => (
+      prev.includes(capability)
+        ? prev.filter(item => item !== capability)
+        : [...prev, capability]
+    ))
+  }
+
+  const buildTargetPathSummary = () => {
+    if (targetPlatform === 'mobile_expo') {
+      const platforms = (mobilePlatforms.length > 0 ? mobilePlatforms : DEFAULT_MOBILE_PLATFORMS)
+        .map(platform => platform === 'ios' ? 'iOS' : 'Android')
+        .join(' + ')
+      return `Mobile App: Expo/React Native source for ${platforms}`
+    }
+
+    if (targetPlatform === 'web') {
+      return 'Web UI: browser-first frontend generation'
+    }
+
+    return 'Full-stack Web: browser app plus backend/API when required'
+  }
+
+  const buildTargetRequestFields = (): BuildTargetRequestFields => {
+    if (!targetPathExplicit && targetPlatform === 'fullstack_web') {
+      return {}
+    }
+
+    if (targetPlatform !== 'mobile_expo') {
+      return { target_platform: targetPlatform }
+    }
+
+    return {
+      target_platform: 'mobile_expo',
+      mobile_platforms: mobilePlatforms.length > 0 ? mobilePlatforms : DEFAULT_MOBILE_PLATFORMS,
+      mobile_framework: 'expo-react-native',
+      mobile_release_level: mobileReleaseLevel,
+      mobile_capabilities: mobileCapabilities,
+      mobile_dependency_policy: 'expo-allowlist',
+    }
   }
 
   // Scroll chat to bottom
@@ -6083,6 +6195,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       return
     }
 
+    if (targetPlatform === 'mobile_expo' && mobilePlatforms.length === 0) {
+      const mobilePlatformMessage = 'Select at least one mobile platform before launching a mobile app build.'
+      addSystemMessage(mobilePlatformMessage)
+      setSetupStartError(mobilePlatformMessage)
+      return
+    }
+
     // Hard reset every build-scoped piece of state BEFORE the API call so the
     // UI can never show leftover agents, files, chat, or project links from
     // any previous build while the new build is being created. Without this,
@@ -6124,6 +6243,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     previewPreparedRef.current = false
 
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
+    addSystemMessage(`Target path: ${buildTargetPathSummary()}`)
+    if (targetPlatform === 'mobile_expo') {
+      addSystemMessage('Mobile scope: Expo/React Native source and export metadata. Native EAS builds, signing, and store submission remain gated stages.')
+    }
     addSystemMessage(`Tech stack: ${buildTechStackSummary()}`)
     addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER' : powerMode === 'balanced' ? 'Balanced' : 'Fast'} (${getPowerModeModelSummary(powerMode)})`)
 
@@ -6135,6 +6258,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       let preflightCapabilityState: BuildCapabilityState | undefined
       let preflightPolicyState: BuildPolicyState | undefined
       const techStackOverride = buildTechStackOverride()
+      const targetRequestFields = buildTargetRequestFields()
       try {
         const preflight = await apiService.buildPreflight({
           description: appDescription,
@@ -6142,6 +6266,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           provider_mode: 'platform',
           require_preview_ready: true,
           tech_stack: techStackOverride || undefined,
+          ...targetRequestFields,
         })
         if (!preflight.ready) {
           const errorMsg = preflight.suggestion || preflight.error || 'AI providers unavailable'
@@ -6181,6 +6306,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         provider_mode: freshProviderMode,
         require_preview_ready: true,
         tech_stack: techStackOverride || undefined,
+        ...targetRequestFields,
         diff_mode: false,
         role_assignments: roleConfigMode === 'manual' ? roleAssignments : undefined,
         provider_model_overrides: serializeProviderModelOverrides(providerModelOverrides, powerMode),
@@ -6956,6 +7082,143 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                             ? `Full-stack stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters on Fast power. Switch to Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
                             : `Rapid stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Full-stack with Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`}
                     </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Target path</div>
+                        <div className="mt-1 text-sm text-slate-300">{buildTargetPathSummary()}</div>
+                      </div>
+                      <Shield className="h-5 w-5 text-cyan-300" />
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {([
+                        {
+                          id: 'web' as TargetPlatform,
+                          label: 'Web UI',
+                          hint: 'Browser-first frontend when a fast static experience is enough.',
+                          icon: <MonitorUp className="h-4 w-4" />,
+                        },
+                        {
+                          id: 'fullstack_web' as TargetPlatform,
+                          label: 'Full-stack Web',
+                          hint: 'React web app plus backend/API when the contract requires it.',
+                          icon: <Server className="h-4 w-4" />,
+                        },
+                        {
+                          id: 'mobile_expo' as TargetPlatform,
+                          label: 'Mobile App',
+                          hint: 'Expo/React Native source path for Android and iOS.',
+                          icon: <Smartphone className="h-4 w-4" />,
+                        },
+                      ]).map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          aria-pressed={targetPlatform === option.id}
+                          data-testid={`target-path-${option.id}`}
+                          onClick={() => selectTargetPath(option.id)}
+                          className={cn(
+                            'rounded-2xl border p-4 text-left transition-all',
+                            targetPlatform === option.id
+                              ? 'border-cyan-300/55 bg-cyan-400/10 text-white shadow-lg shadow-cyan-500/10'
+                              : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:text-white'
+                          )}
+                        >
+                          <div className="flex items-center gap-2 text-sm font-bold">
+                            <span className={targetPlatform === option.id ? 'text-cyan-200' : 'text-slate-400'}>
+                              {option.icon}
+                            </span>
+                            {option.label}
+                          </div>
+                          <p className="mt-2 text-xs leading-5 text-slate-400">{option.hint}</p>
+                        </button>
+                      ))}
+                    </div>
+
+                    {targetPlatform === 'mobile_expo' && (
+                      <div
+                        data-testid="mobile-target-panel"
+                        className="mt-4 space-y-4 rounded-2xl border border-cyan-300/20 bg-cyan-400/[0.06] p-4"
+                      >
+                        <div className="rounded-xl border border-cyan-300/20 bg-slate-950/70 px-4 py-3 text-xs leading-6 text-cyan-100">
+                          Current rollout stage: Expo/React Native source generation and export metadata. Expo Web preview, EAS builds, signing, and store submission are separate gated stages.
+                        </div>
+
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.75fr),minmax(0,1.25fr)]">
+                          <div>
+                            <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">Platforms</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {DEFAULT_MOBILE_PLATFORMS.map((platform) => (
+                                <button
+                                  key={platform}
+                                  type="button"
+                                  aria-pressed={mobilePlatforms.includes(platform)}
+                                  onClick={() => toggleMobilePlatform(platform)}
+                                  className={cn(
+                                    'rounded-xl border px-3 py-2 text-sm font-semibold transition-all',
+                                    mobilePlatforms.includes(platform)
+                                      ? 'border-cyan-300/55 bg-cyan-400/15 text-white'
+                                      : 'border-white/10 bg-white/[0.03] text-slate-400 hover:text-white'
+                                  )}
+                                >
+                                  {platform === 'ios' ? 'iOS' : 'Android'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">Release level</div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <button
+                                type="button"
+                                aria-pressed={mobileReleaseLevel === 'source_only'}
+                                onClick={() => setMobileReleaseLevel('source_only')}
+                                className="rounded-xl border border-cyan-300/55 bg-cyan-400/15 px-3 py-2 text-left text-sm font-semibold text-white"
+                              >
+                                Source only
+                                <span className="mt-1 block text-xs font-normal leading-5 text-cyan-100/75">
+                                  Generate mobile project files and export package.
+                                </span>
+                              </button>
+                              <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-sm font-semibold text-slate-400">
+                                Native binaries gated
+                                <span className="mt-1 block text-xs font-normal leading-5 text-slate-500">
+                                  EAS credentials, build jobs, and store workflows are not claimed here.
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">Native capabilities</div>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            {MOBILE_CAPABILITY_OPTIONS.map((capability) => (
+                              <button
+                                key={capability.id}
+                                type="button"
+                                aria-pressed={mobileCapabilities.includes(capability.id)}
+                                data-testid={`mobile-capability-${capability.id}`}
+                                onClick={() => toggleMobileCapability(capability.id)}
+                                className={cn(
+                                  'rounded-xl border px-3 py-2 text-left transition-all',
+                                  mobileCapabilities.includes(capability.id)
+                                    ? 'border-cyan-300/45 bg-cyan-400/12 text-white'
+                                    : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20'
+                                )}
+                              >
+                                <span className="block text-sm font-semibold">{capability.label}</span>
+                                <span className="mt-1 block text-xs leading-5 text-slate-400">{capability.hint}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-3">
