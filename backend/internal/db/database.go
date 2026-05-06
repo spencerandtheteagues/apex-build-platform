@@ -15,6 +15,7 @@ import (
 	"apex-build/internal/git"
 	"apex-build/internal/hosting"
 	"apex-build/internal/mcp"
+	"apex-build/internal/mobile"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
@@ -349,6 +350,7 @@ func (d *Database) Migrate() error {
 		&hosting.SSLCertificate{},
 		// Completed build history (persist builds across restarts)
 		&models.CompletedBuild{},
+		&mobile.MobileBuildRecord{},
 		// Prompt-pack activation requests stay separate from build snapshots.
 		&models.PromptPackActivationRequest{},
 		&models.PromptPackVersion{},

@@ -573,6 +573,31 @@ export class ApiService {
     return response.data.credentials
   }
 
+  async listProjectMobileBuilds(projectId: number): Promise<MobileBuildJob[]> {
+    const response = await this.client.get<{ builds: MobileBuildJob[] }>(`/projects/${projectId}/mobile/builds`)
+    return response.data.builds
+  }
+
+  async createProjectMobileBuild(projectId: number, data: MobileBuildRequest): Promise<MobileBuildCreateResponse> {
+    const response = await this.client.post<MobileBuildCreateResponse>(`/projects/${projectId}/mobile/builds`, data)
+    return response.data
+  }
+
+  async getProjectMobileBuild(projectId: number, buildId: string): Promise<MobileBuildJob> {
+    const response = await this.client.get<{ build: MobileBuildJob }>(`/projects/${projectId}/mobile/builds/${buildId}`)
+    return response.data.build
+  }
+
+  async getProjectMobileBuildLogs(projectId: number, buildId: string): Promise<MobileBuildLogLine[]> {
+    const response = await this.client.get<{ build_id: string; logs: MobileBuildLogLine[] }>(`/projects/${projectId}/mobile/builds/${buildId}/logs`)
+    return response.data.logs
+  }
+
+  async getProjectMobileBuildArtifacts(projectId: number, buildId: string): Promise<MobileBuildArtifactsResponse> {
+    const response = await this.client.get<MobileBuildArtifactsResponse>(`/projects/${projectId}/mobile/builds/${buildId}/artifacts`)
+    return response.data
+  }
+
   async updateProject(id: number, data: Partial<Project>): Promise<Project> {
     const response = await this.client.put<{ project?: Project; data?: { project?: Project } }>(`/projects/${id}`, data)
     return response.data.project || response.data.data?.project || (response.data as unknown as Project)
@@ -3773,6 +3798,89 @@ export interface MobileCredentialStatus {
   missing: MobileCredentialType[]
   metadata: MobileCredentialMetadata[]
   blockers?: string[]
+}
+
+export type MobileBuildStatus =
+  | 'queued'
+  | 'preparing'
+  | 'validating'
+  | 'uploading'
+  | 'building'
+  | 'signing'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+  | 'repair_pending'
+  | 'repaired_retry_pending'
+
+export type MobileBuildProfile = 'development' | 'preview' | 'internal' | 'production'
+
+export type MobileBuildFailureType =
+  | 'dependency_install_failed'
+  | 'expo_config_invalid'
+  | 'unsupported_native_module'
+  | 'android_signing_failed'
+  | 'ios_credentials_failed'
+  | 'ios_provisioning_failed'
+  | 'metro_bundle_failed'
+  | 'typescript_failed'
+  | 'backend_api_mismatch'
+  | 'permission_config_missing'
+  | 'app_identifier_invalid'
+  | 'store_submission_failed'
+  | 'unknown'
+
+export interface MobileBuildRequest {
+  platform: MobilePlatform
+  profile?: MobileBuildProfile
+  release_level?: MobileReleaseLevel
+  app_version?: string
+  build_number?: string
+  version_code?: number
+  commit_ref?: string
+  source_path?: string
+  dry_run?: boolean
+}
+
+export interface MobileBuildLogLine {
+  timestamp: string
+  level?: string
+  message: string
+}
+
+export interface MobileBuildJob {
+  id: string
+  project_id: number
+  user_id: number
+  platform: MobilePlatform
+  profile: MobileBuildProfile
+  release_level: MobileReleaseLevel
+  status: MobileBuildStatus
+  provider?: string
+  provider_build_id?: string
+  artifact_url?: string
+  app_version?: string
+  build_number?: string
+  version_code?: number
+  commit_ref?: string
+  failure_type?: MobileBuildFailureType
+  failure_message?: string
+  logs?: MobileBuildLogLine[]
+  created_at: string
+  updated_at: string
+}
+
+export interface MobileBuildCreateResponse {
+  build: MobileBuildJob
+  credentials?: MobileCredentialStatus
+}
+
+export interface MobileBuildArtifactsResponse {
+  build_id: string
+  artifact_url: string
+  platform: MobilePlatform
+  profile: MobileBuildProfile
+  release_level: MobileReleaseLevel
 }
 
 export type BuildMessageTargetMode = 'lead' | 'agent' | 'role' | 'all_agents'

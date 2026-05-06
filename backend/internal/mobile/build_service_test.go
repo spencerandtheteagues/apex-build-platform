@@ -6,7 +6,64 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+func TestGormMobileBuildStorePersistsJobsAndRedactsLogs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&MobileBuildRecord{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	store := NewGormMobileBuildStore(db)
+	job := MobileBuildJob{
+		ID:           "mbld_gorm_roundtrip",
+		ProjectID:    44,
+		UserID:       7,
+		Platform:     MobilePlatformAndroid,
+		Profile:      MobileBuildProfilePreview,
+		ReleaseLevel: ReleaseInternalAndroidAPK,
+		Status:       MobileBuildQueued,
+		Logs: []MobileBuildLogLine{{
+			Timestamp: time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC),
+			Level:     "info",
+			Message:   "queued with EXPO_TOKEN=secret-token",
+		}},
+		CreatedAt: time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(context.Background(), job); err != nil {
+		t.Fatalf("save job: %v", err)
+	}
+	job.Status = MobileBuildSucceeded
+	job.ArtifactURL = "https://artifacts.example.com/app.apk"
+	if err := store.Update(context.Background(), job); err != nil {
+		t.Fatalf("update job: %v", err)
+	}
+
+	stored, ok, err := store.Get(context.Background(), job.ID)
+	if err != nil || !ok {
+		t.Fatalf("expected stored job, ok=%v err=%v", ok, err)
+	}
+	if stored.Status != MobileBuildSucceeded || stored.ArtifactURL == "" {
+		t.Fatalf("unexpected stored job %+v", stored)
+	}
+	if len(stored.Logs) != 1 || strings.Contains(stored.Logs[0].Message, "secret-token") {
+		t.Fatalf("expected redacted stored logs, got %+v", stored.Logs)
+	}
+	list, err := store.ListByProject(context.Background(), 44)
+	if err != nil {
+		t.Fatalf("list project jobs: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != job.ID {
+		t.Fatalf("unexpected project job list %+v", list)
+	}
+}
 
 func TestMobileBuildServiceRejectsWhenEASBuildDisabled(t *testing.T) {
 	provider := &mockMobileBuildProvider{}

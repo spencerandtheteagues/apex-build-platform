@@ -41,6 +41,7 @@ import (
 	"apex-build/internal/mcp"
 	"apex-build/internal/metrics"
 	"apex-build/internal/middleware"
+	"apex-build/internal/mobile"
 	"apex-build/internal/payments"
 	"apex-build/internal/preview"
 	"apex-build/internal/search"
@@ -1025,6 +1026,11 @@ func main() {
 	server.SetReadinessRegistry(startupRegistry)
 	server.SetUsageTracker(usageTracker)
 	server.SetCacheStatusProvider(redisCache.Status)
+	server.SetMobileBuildService(mobile.NewMobileBuildService(
+		mobile.LoadFeatureFlagsFromEnv(),
+		nil,
+		mobile.NewGormMobileBuildStore(database.GetDB()),
+	))
 
 	// Initialize Email Service (SMTP transactional email for verification codes etc.)
 	emailSvc := email.NewService()
@@ -1579,6 +1585,11 @@ func setupRoutes(
 				projects.GET("/:id/download", server.DownloadProject)
 				projects.GET("/:id/mobile/validation", server.GetProjectMobileValidation)
 				projects.GET("/:id/mobile/scorecard", server.GetProjectMobileScorecard)
+				projects.GET("/:id/mobile/builds", server.ListProjectMobileBuilds)
+				projects.POST("/:id/mobile/builds", server.CreateProjectMobileBuild)
+				projects.GET("/:id/mobile/builds/:buildId", server.GetProjectMobileBuild)
+				projects.GET("/:id/mobile/builds/:buildId/logs", server.GetProjectMobileBuildLogs)
+				projects.GET("/:id/mobile/builds/:buildId/artifacts", server.GetProjectMobileBuildArtifacts)
 
 				// File endpoints under projects - using optimized handler
 				// Storage quota checked on file creation

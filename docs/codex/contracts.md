@@ -1,5 +1,40 @@
 # Contracts
 
+## Mobile Build Job API
+- Source of truth: `backend/internal/mobile/build_service.go`, `backend/internal/mobile/build_store.go`, `backend/internal/api/mobile_builds.go`, route registration in `backend/cmd/main.go`, and frontend types in `frontend/src/services/api.ts`.
+- Producers:
+  - Project owners call `POST /api/v1/projects/:id/mobile/builds` with platform/profile/release-level build intent.
+  - `MobileBuildService` validates feature flags, platform enablement, binary release level, provider availability, and provider results.
+  - `GormMobileBuildStore` persists restart-safe `mobile_build_jobs` rows and redacted logs/failure messages.
+  - `ApplyMobileBuildJobToProject` updates project mobile summary fields and artifact metadata after job creation/provider result.
+- Transport:
+  - `GET /api/v1/projects/:id/mobile/builds` returns `{ builds }`.
+  - `POST /api/v1/projects/:id/mobile/builds` returns `{ build, credentials }` on success.
+  - `GET /api/v1/projects/:id/mobile/builds/:buildId` returns `{ build }`.
+  - `GET /api/v1/projects/:id/mobile/builds/:buildId/logs` returns `{ build_id, logs }`.
+  - `GET /api/v1/projects/:id/mobile/builds/:buildId/artifacts` returns artifact metadata only when an artifact URL exists.
+- Consumers:
+  - `frontend/src/services/api.ts` exposes typed mobile build-job methods.
+  - `Project.MobileBuildStatus` and `Project.MobileMetadata` feed the mobile readiness scorecard's native artifact category.
+  - Future Project Dashboard build panel should consume this project-scoped API.
+- Defaults / zero-value behavior:
+  - Routes require authenticated project ownership and `target_platform=mobile_expo`.
+  - Feature flags still default off; disabled native builds return `503 MOBILE_BUILD_DISABLED`.
+  - Credentials must be complete before provider invocation; missing credentials return `409 MOBILE_CREDENTIALS_REQUIRED`.
+  - The production app currently configures no live provider, so even with flags and credentials set the route fails closed with `503 MOBILE_BUILD_PROVIDER_MISSING` until a real EAS provider is wired.
+  - Logs and failure messages are redacted before persistence and responses.
+- Backward compatibility risk:
+  - Medium-low; new project-scoped routes and a new migration model are additive.
+  - Existing web/mobile source generation and export routes remain unchanged.
+- Required tests / validations:
+  - `cd backend && go test ./internal/mobile -run 'TestGormMobileBuildStore|TestMobileBuildService' -count=1`
+  - `cd backend && go test ./internal/api -run 'TestCreateProjectMobileBuild|TestGetProjectMobile|TestDownloadProjectPreparesMobile' -count=1`
+  - `cd frontend && npm run test -- --run src/services/api.test.ts`
+  - `cd frontend && npm run typecheck`
+  - `cd backend && go test ./internal/mobile ./internal/api -count=1`
+  - `cd backend && go test ./... -run '^$'`
+  - `git diff --check`
+
 ## Mobile Credential Vault API
 - Source of truth: `backend/internal/mobile/credentials.go`, `backend/internal/handlers/secrets.go`, project mobile metadata in `backend/pkg/models/models.go`, and frontend API types in `frontend/src/services/api.ts`.
 - Producers:

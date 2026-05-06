@@ -178,7 +178,7 @@ func (s *MobileBuildService) CreateBuild(ctx context.Context, req MobileBuildReq
 		return MobileBuildJob{}, fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)
 	}
 	req = NormalizeMobileBuildRequest(req)
-	if err := ValidateMobileBuildRequest(s.flags, req); err != nil {
+	if err := s.ValidateRequest(req); err != nil {
 		return MobileBuildJob{}, err
 	}
 	if s.provider == nil {
@@ -245,6 +245,27 @@ func (s *MobileBuildService) CreateBuild(ctx context.Context, req MobileBuildReq
 	}
 
 	return job, nil
+}
+
+func (s *MobileBuildService) ValidateRequest(req MobileBuildRequest) error {
+	if s == nil {
+		return fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)
+	}
+	return ValidateMobileBuildRequest(s.flags, NormalizeMobileBuildRequest(req))
+}
+
+func (s *MobileBuildService) GetBuild(ctx context.Context, id string) (MobileBuildJob, bool, error) {
+	if s == nil || s.store == nil {
+		return MobileBuildJob{}, false, ErrMobileBuildJobNotFound
+	}
+	return s.store.Get(ctx, id)
+}
+
+func (s *MobileBuildService) ListProjectBuilds(ctx context.Context, projectID uint) ([]MobileBuildJob, error) {
+	if s == nil || s.store == nil {
+		return nil, nil
+	}
+	return s.store.ListByProject(ctx, projectID)
 }
 
 func NormalizeMobileBuildRequest(req MobileBuildRequest) MobileBuildRequest {
