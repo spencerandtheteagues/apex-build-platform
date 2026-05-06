@@ -16,6 +16,10 @@ func TestGenerateExpoProjectCreatesFieldServiceSource(t *testing.T) {
 	if !hasSourceFile(files, "mobile/package.json") ||
 		!hasSourceFile(files, "mobile/app.config.ts") ||
 		!hasSourceFile(files, "mobile/app/(tabs)/jobs.tsx") ||
+		!hasSourceFile(files, "mobile/store/store-readiness.json") ||
+		!hasSourceFile(files, "mobile/store/privacy-data-safety.md") ||
+		!hasSourceFile(files, "mobile/store/screenshot-checklist.md") ||
+		!hasSourceFile(files, "mobile/store/release-notes.md") ||
 		!hasSourceFile(files, "mobile/assets/icon.png") ||
 		!hasSourceFile(files, "mobile/assets/splash.png") ||
 		!hasSourceFile(files, "mobile/assets/adaptive-icon.png") {
@@ -23,6 +27,27 @@ func TestGenerateExpoProjectCreatesFieldServiceSource(t *testing.T) {
 	}
 	if errs := ValidateGeneratedExpoFiles(files, ExpoDependenciesForSpec(spec, ExpoGeneratorOptions{}), DefaultNativeCapabilityRegistry()); len(errs) > 0 {
 		t.Fatalf("expected generated files to pass policy validation, got %+v", errs)
+	}
+}
+
+func TestGenerateStoreReadinessPackageLabelsDraftsAndManualPrerequisites(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	pkg := GenerateStoreReadinessPackage(spec)
+
+	if pkg.Status != "draft_ready_needs_manual_store_assets" {
+		t.Fatalf("unexpected store readiness status %q", pkg.Status)
+	}
+	if len(pkg.ManualPrerequisites) == 0 || len(pkg.MissingItems) == 0 {
+		t.Fatalf("expected manual prerequisites and missing items, got %+v", pkg)
+	}
+	if !stringSliceContains(pkg.DataSafetyDraft.DataCollected, "Photos or documents selected by the user") {
+		t.Fatalf("expected photo/file data safety draft, got %+v", pkg.DataSafetyDraft.DataCollected)
+	}
+	if !hasScreenshotTarget(pkg.ScreenshotChecklist, "Android") || !hasScreenshotTarget(pkg.ScreenshotChecklist, "iOS") {
+		t.Fatalf("expected Android and iOS screenshot targets, got %+v", pkg.ScreenshotChecklist)
+	}
+	if errs := ValidateStoreReadinessPackage(pkg); len(errs) > 0 {
+		t.Fatalf("expected store readiness package to validate, got %+v", errs)
 	}
 }
 
@@ -129,6 +154,24 @@ func runGeneratedCommand(t *testing.T, dir string, name string, args ...string) 
 func hasSourceFile(files []SourceFile, path string) bool {
 	for _, file := range files {
 		if file.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func hasScreenshotTarget(targets []StoreScreenshotTarget, platform string) bool {
+	for _, target := range targets {
+		if target.Platform == platform {
 			return true
 		}
 	}

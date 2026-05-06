@@ -51,6 +51,10 @@ func GenerateExpoProject(spec MobileAppSpec, options ExpoGeneratorOptions) ([]So
 		sourceFile("mobile/README.md", mobileReadme(spec), "markdown"),
 		sourceFile("mobile/BUILD.md", buildMd(spec), "markdown"),
 		sourceFile("mobile/STORE_RELEASE.md", storeReleaseMd(spec), "markdown"),
+		sourceFile("mobile/store/store-readiness.json", StoreReadinessJSON(spec), "json"),
+		sourceFile("mobile/store/privacy-data-safety.md", StorePrivacyDataSafetyMarkdown(spec), "markdown"),
+		sourceFile("mobile/store/screenshot-checklist.md", StoreScreenshotChecklistMarkdown(spec), "markdown"),
+		sourceFile("mobile/store/release-notes.md", StoreReleaseNotesMarkdown(spec), "markdown"),
 		pngSourceFile("mobile/assets/icon.png"),
 		pngSourceFile("mobile/assets/splash.png"),
 		pngSourceFile("mobile/assets/adaptive-icon.png"),
@@ -410,6 +414,15 @@ func storeReleaseMd(spec MobileAppSpec) string {
 - Apple privacy nutrition label answers
 - Signed Android/iOS build artifacts
 - Store-console processing complete
+
+## Generated Store Package
+
+- mobile/store/store-readiness.json
+- mobile/store/privacy-data-safety.md
+- mobile/store/screenshot-checklist.md
+- mobile/store/release-notes.md
+
+These files are launch-preparation drafts. They do not mean the app has been uploaded, reviewed, approved, or released by Apple or Google.
 `, spec.Identity.DisplayName, spec.Store.ShortDescription, spec.Store.Category)
 }
 

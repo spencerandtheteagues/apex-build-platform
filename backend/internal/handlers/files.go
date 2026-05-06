@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"apex-build/internal/middleware"
+	"apex-build/internal/mobile"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -158,14 +159,14 @@ func (h *Handler) CreateFile(c *gin.Context) {
 
 	// Create file
 	file := models.File{
-		ProjectID:   uint(projectID),
-		Name:        req.Name,
-		Path:        req.Path,
-		Type:        req.Type,
-		MimeType:    req.MimeType,
-		Content:     req.Content,
-		Size:        int64(len(req.Content)),
-		LastEditBy:  userID,
+		ProjectID:  uint(projectID),
+		Name:       req.Name,
+		Path:       req.Path,
+		Type:       req.Type,
+		MimeType:   req.MimeType,
+		Content:    req.Content,
+		Size:       int64(len(req.Content)),
+		LastEditBy: userID,
 	}
 
 	if err := h.DB.Create(&file).Error; err != nil {
@@ -532,6 +533,17 @@ func (h *Handler) DownloadProject(c *gin.Context) {
 			Code:    "DATABASE_ERROR",
 		})
 		return
+	}
+
+	if project.OwnerID == userID {
+		if err := mobile.PrepareExpoProjectFiles(c.Request.Context(), h.DB, project); err != nil {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Failed to prepare mobile export files",
+				Code:    "MOBILE_EXPORT_PREP_FAILED",
+			})
+			return
+		}
 	}
 
 	// Get all files for the project
