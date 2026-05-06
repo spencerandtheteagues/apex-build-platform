@@ -1,5 +1,30 @@
 # Contracts
 
+## Mobile Build Job Service
+- Source of truth: `backend/internal/mobile/build_service.go` plus existing mobile enums in `backend/internal/mobile/types.go` and feature flags in `backend/internal/mobile/flags.go`.
+- Producers:
+  - Future mobile build API handlers will construct `MobileBuildRequest` from project/user context and requested platform/profile/release level.
+  - `MobileBuildService.CreateBuild` validates flags, platform, release level, and provider availability before creating a job.
+  - `MobileBuildProvider` implementations return provider build IDs, status, logs, artifact URLs, and classified failures.
+- Transport:
+  - No public HTTP route in this slice.
+  - Future route payloads must preserve separate statuses for source validation, native build, and store submission.
+- Consumers:
+  - Backend tests consume the service directly in this slice.
+  - Future build panels and artifact/log endpoints will read persisted `MobileBuildJob` records.
+- Defaults / zero-value behavior:
+  - `MOBILE_EAS_BUILD_ENABLED`, `MOBILE_ANDROID_BUILDS_ENABLED`, and `MOBILE_IOS_BUILDS_ENABLED` default off, so native build jobs cannot run accidentally.
+  - Empty profile defaults to `preview`.
+  - Empty native release level defaults to `dev_build` for build-service requests; `source_only` and `web_preview` are rejected because they are not binary build jobs.
+  - Provider logs and errors are redacted before storage.
+- Backward compatibility risk:
+  - Low; this is an additive backend-internal foundation with no routes, migrations, or frontend consumers yet.
+- Required tests / validations:
+  - `cd backend && go test ./internal/mobile -run 'TestMobileBuildService|TestInMemoryMobileBuildStore|TestClassifyMobileBuildFailure|TestRedactMobileBuildSecrets' -count=1`
+  - `cd backend && go test ./internal/mobile -count=1`
+  - `cd backend && go test ./... -run '^$'`
+  - `git diff --check`
+
 ## Mobile App Builder Target Metadata
 - Source of truth: `backend/internal/mobile/types.go`, `backend/internal/mobile/validation.go`, `backend/internal/mobile/classifier.go`, `backend/internal/agents/types.go`, `backend/internal/agents/orchestration_contracts.go`, `backend/internal/agents/validated_build_spec.go`, and `backend/pkg/models/models.go`.
 - Producers:
