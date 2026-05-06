@@ -353,6 +353,86 @@ func TestMobileBuildServiceRefreshProviderErrorDoesNotMarkBuildFailed(t *testing
 	}
 }
 
+func TestMobileBuildServiceCancelsProviderBuild(t *testing.T) {
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	store := NewInMemoryMobileBuildStore()
+	job := MobileBuildJob{
+		ID:              "mbld_cancel",
+		ProjectID:       71,
+		UserID:          9,
+		Platform:        MobilePlatformAndroid,
+		Profile:         MobileBuildProfilePreview,
+		ReleaseLevel:    ReleaseInternalAndroidAPK,
+		Status:          MobileBuildBuilding,
+		Provider:        "mock-eas",
+		ProviderBuildID: "eas-build-123",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := store.Save(context.Background(), job); err != nil {
+		t.Fatalf("save cancel job: %v", err)
+	}
+	provider := &mockMobileBuildProvider{
+		name: "mock-eas",
+		cancelResult: MobileBuildProviderResult{
+			Status: MobileBuildCanceled,
+			Logs: []MobileBuildLogLine{{
+				Level:   "info",
+				Message: "cancelled with EAS_TOKEN=cancel-secret",
+			}},
+		},
+	}
+	service := NewMobileBuildService(
+		mobileBuildTestFlags(),
+		provider,
+		store,
+		WithMobileBuildClock(func() time.Time { return now.Add(time.Minute) }),
+	)
+
+	canceled, err := service.CancelBuild(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("cancel build: %v", err)
+	}
+	if provider.cancelCalls != 1 || provider.lastCancelJob.ID != job.ID {
+		t.Fatalf("expected provider cancel call, got provider=%+v", provider)
+	}
+	if canceled.Status != MobileBuildCanceled {
+		t.Fatalf("expected canceled status, got %+v", canceled)
+	}
+	if len(canceled.Logs) != 1 || strings.Contains(canceled.Logs[0].Message, "cancel-secret") {
+		t.Fatalf("expected redacted cancel log, got %+v", canceled.Logs)
+	}
+}
+
+func TestMobileBuildServiceRejectsCancelForTerminalBuild(t *testing.T) {
+	store := NewInMemoryMobileBuildStore()
+	job := MobileBuildJob{
+		ID:              "mbld_cancel_done",
+		ProjectID:       71,
+		UserID:          9,
+		Platform:        MobilePlatformAndroid,
+		Profile:         MobileBuildProfilePreview,
+		ReleaseLevel:    ReleaseInternalAndroidAPK,
+		Status:          MobileBuildSucceeded,
+		ProviderBuildID: "eas-build-123",
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	if err := store.Save(context.Background(), job); err != nil {
+		t.Fatalf("save terminal cancel job: %v", err)
+	}
+	provider := &mockMobileBuildProvider{name: "mock-eas"}
+	service := NewMobileBuildService(mobileBuildTestFlags(), provider, store)
+
+	_, err := service.CancelBuild(context.Background(), job.ID)
+	if !errors.Is(err, ErrMobileBuildInvalidRequest) {
+		t.Fatalf("expected invalid request for terminal cancel, got %v", err)
+	}
+	if provider.cancelCalls != 0 {
+		t.Fatalf("provider should not be called for terminal cancel, got %d", provider.cancelCalls)
+	}
+}
+
 func TestInMemoryMobileBuildStoreRoundTrip(t *testing.T) {
 	store := NewInMemoryMobileBuildStore()
 	job := MobileBuildJob{
@@ -434,10 +514,14 @@ type mockMobileBuildProvider struct {
 	err            error
 	refreshResult  MobileBuildProviderResult
 	refreshErr     error
+	cancelResult   MobileBuildProviderResult
+	cancelErr      error
 	calls          int
 	refreshCalls   int
+	cancelCalls    int
 	lastReq        MobileBuildRequest
 	lastRefreshJob MobileBuildJob
+	lastCancelJob  MobileBuildJob
 }
 
 func (p *mockMobileBuildProvider) Name() string {
@@ -460,6 +544,15 @@ func (p *mockMobileBuildProvider) RefreshBuild(_ context.Context, job MobileBuil
 		return MobileBuildProviderResult{}, p.refreshErr
 	}
 	return p.refreshResult, nil
+}
+
+func (p *mockMobileBuildProvider) CancelBuild(_ context.Context, job MobileBuildJob) (MobileBuildProviderResult, error) {
+	p.cancelCalls++
+	p.lastCancelJob = job
+	if p.cancelErr != nil {
+		return MobileBuildProviderResult{}, p.cancelErr
+	}
+	return p.cancelResult, nil
 }
 
 func mobileBuildTestFlags() FeatureFlags {

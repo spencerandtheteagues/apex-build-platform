@@ -225,6 +225,64 @@ func TestEASBuildProviderRefreshRedactsRunnerFailures(t *testing.T) {
 	}
 }
 
+func TestEASBuildProviderCancelsBuild(t *testing.T) {
+	resolver := &fakeMobileCredentialResolver{values: map[string]string{"token": "secret-eas-token"}}
+	runner := &fakeEASCommandRunner{
+		output: `{"id":"eas-build-123","status":"canceled"}`,
+	}
+	provider := NewEASBuildProvider(EASBuildProviderConfig{
+		CLIPath:     "/usr/local/bin/eas",
+		Credentials: resolver,
+		Runner:      runner,
+	})
+
+	result, err := provider.CancelBuild(context.Background(), MobileBuildJob{
+		ID:              "mbld_cancel",
+		ProjectID:       71,
+		UserID:          9,
+		ProviderBuildID: "eas-build-123",
+	})
+	if err != nil {
+		t.Fatalf("expected cancel result, got %v", err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("expected one EAS cancel call, got %d", runner.calls)
+	}
+	for _, arg := range []string{"build:cancel", "eas-build-123", "--non-interactive", "--json"} {
+		if !slices.Contains(runner.lastCommand.Args, arg) {
+			t.Fatalf("expected cancel args to include %q, got %+v", arg, runner.lastCommand.Args)
+		}
+	}
+	if result.ProviderBuildID != "eas-build-123" || result.Status != MobileBuildCanceled {
+		t.Fatalf("unexpected cancel result %+v", result)
+	}
+}
+
+func TestEASBuildProviderCancelRedactsRunnerFailures(t *testing.T) {
+	resolver := &fakeMobileCredentialResolver{values: map[string]string{"token": "secret-eas-token"}}
+	runner := &fakeEASCommandRunner{
+		output: "cancel failed with EXPO_TOKEN=secret-eas-token",
+		err:    errors.New("provider rejected EAS_TOKEN=secret-eas-token"),
+	}
+	provider := NewEASBuildProvider(EASBuildProviderConfig{
+		Credentials: resolver,
+		Runner:      runner,
+	})
+
+	_, err := provider.CancelBuild(context.Background(), MobileBuildJob{
+		ID:              "mbld_cancel",
+		ProjectID:       71,
+		UserID:          9,
+		ProviderBuildID: "eas-build-123",
+	})
+	if !errors.Is(err, ErrMobileBuildProviderFailed) {
+		t.Fatalf("expected provider failure, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-eas-token") {
+		t.Fatalf("expected redacted cancel error, got %v", err)
+	}
+}
+
 func newEASProviderSourceDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

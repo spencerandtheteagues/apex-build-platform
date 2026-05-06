@@ -129,6 +129,10 @@ type MobileBuildProviderRefresher interface {
 	RefreshBuild(ctx context.Context, job MobileBuildJob) (MobileBuildProviderResult, error)
 }
 
+type MobileBuildProviderCanceler interface {
+	CancelBuild(ctx context.Context, job MobileBuildJob) (MobileBuildProviderResult, error)
+}
+
 type MobileBuildStore interface {
 	Save(ctx context.Context, job MobileBuildJob) error
 	Update(ctx context.Context, job MobileBuildJob) error
@@ -338,11 +342,79 @@ func (s *MobileBuildService) RefreshBuild(ctx context.Context, id string) (Mobil
 	return job, nil
 }
 
+func (s *MobileBuildService) CancelBuild(ctx context.Context, id string) (MobileBuildJob, error) {
+	if s == nil {
+		return MobileBuildJob{}, fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)
+	}
+	if s.store == nil {
+		return MobileBuildJob{}, ErrMobileBuildJobNotFound
+	}
+	job, exists, err := s.store.Get(ctx, id)
+	if err != nil {
+		return MobileBuildJob{}, err
+	}
+	if !exists {
+		return MobileBuildJob{}, ErrMobileBuildJobNotFound
+	}
+	if err := s.ValidatePolicyRequest(MobileBuildRequest{
+		ProjectID:    job.ProjectID,
+		UserID:       job.UserID,
+		Platform:     job.Platform,
+		Profile:      job.Profile,
+		ReleaseLevel: job.ReleaseLevel,
+	}); err != nil {
+		return job, err
+	}
+	if !isCancelableMobileBuildStatus(job.Status) {
+		return job, fmt.Errorf("%w: build status %q cannot be canceled", ErrMobileBuildInvalidRequest, job.Status)
+	}
+	provider, ok := s.provider.(MobileBuildProviderCanceler)
+	if s.provider == nil || !ok {
+		return job, ErrMobileBuildProviderMissing
+	}
+	if strings.TrimSpace(job.ProviderBuildID) == "" {
+		return job, fmt.Errorf("%w: provider_build_id is required to cancel mobile build", ErrMobileBuildInvalidRequest)
+	}
+
+	result, err := provider.CancelBuild(ctx, job)
+	now := s.now()
+	if err != nil {
+		job.Logs = append(job.Logs, MobileBuildLogLine{
+			Timestamp: now,
+			Level:     "error",
+			Message:   RedactMobileBuildSecrets(err.Error()),
+		})
+		job.UpdatedAt = now
+		if updateErr := s.store.Update(ctx, job); updateErr != nil {
+			return job, updateErr
+		}
+		return job, fmt.Errorf("%w: %s", ErrMobileBuildProviderFailed, RedactMobileBuildSecrets(err.Error()))
+	}
+
+	if result.Status == "" {
+		result.Status = MobileBuildCanceled
+	}
+	job = applyMobileBuildProviderResult(job, result, now)
+	if err := s.store.Update(ctx, job); err != nil {
+		return job, err
+	}
+	return job, nil
+}
+
 func (s *MobileBuildService) ListProjectBuilds(ctx context.Context, projectID uint) ([]MobileBuildJob, error) {
 	if s == nil || s.store == nil {
 		return nil, nil
 	}
 	return s.store.ListByProject(ctx, projectID)
+}
+
+func isCancelableMobileBuildStatus(status MobileBuildStatus) bool {
+	switch status {
+	case MobileBuildQueued, MobileBuildPreparing, MobileBuildValidating, MobileBuildUploading, MobileBuildBuilding, MobileBuildSigning:
+		return true
+	default:
+		return false
+	}
 }
 
 func applyMobileBuildProviderResult(job MobileBuildJob, result MobileBuildProviderResult, now time.Time) MobileBuildJob {

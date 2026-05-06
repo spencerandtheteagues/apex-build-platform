@@ -217,6 +217,57 @@ func (p *EASBuildProvider) RefreshBuild(ctx context.Context, job MobileBuildJob)
 	return result, nil
 }
 
+func (p *EASBuildProvider) CancelBuild(ctx context.Context, job MobileBuildJob) (MobileBuildProviderResult, error) {
+	if p == nil || p.runner == nil {
+		return MobileBuildProviderResult{}, ErrMobileBuildProviderMissing
+	}
+	providerBuildID := strings.TrimSpace(job.ProviderBuildID)
+	if providerBuildID == "" {
+		return MobileBuildProviderResult{}, fmt.Errorf("%w: provider_build_id is required for EAS build cancel", ErrMobileBuildInvalidRequest)
+	}
+	easToken, err := p.resolveEASToken(ctx, MobileBuildRequest{ProjectID: job.ProjectID, UserID: job.UserID})
+	if err != nil {
+		return MobileBuildProviderResult{}, err
+	}
+
+	runCtx := ctx
+	cancel := func() {}
+	if p.timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, p.timeout)
+	}
+	defer cancel()
+
+	output, err := p.runner.Run(runCtx, EASCommand{
+		CLIPath: p.cliPath,
+		Args: []string{
+			"build:cancel",
+			providerBuildID,
+			"--non-interactive",
+			"--json",
+		},
+		Env: []string{
+			"EXPO_TOKEN=" + easToken,
+			"EAS_TOKEN=" + easToken,
+			"CI=1",
+		},
+	})
+	if err != nil {
+		return MobileBuildProviderResult{}, fmt.Errorf("%w: %s", ErrMobileBuildProviderFailed, RedactMobileBuildSecrets(output+" "+err.Error()))
+	}
+	result := parseEASBuildOutput(output)
+	if result.ProviderBuildID == "" {
+		result.ProviderBuildID = providerBuildID
+	}
+	if result.Status == "" {
+		result.Status = MobileBuildCanceled
+	}
+	result.Logs = append([]MobileBuildLogLine{{
+		Level:   "info",
+		Message: "EAS build cancellation requested with provider.",
+	}}, result.Logs...)
+	return result, nil
+}
+
 func (p *EASBuildProvider) resolveEASToken(ctx context.Context, req MobileBuildRequest) (string, error) {
 	if p.credentials == nil {
 		return "", fmt.Errorf("%w: EAS credential resolver is not configured", ErrMobileCredentialInvalidPayload)

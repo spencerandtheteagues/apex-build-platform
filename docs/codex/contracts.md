@@ -8,6 +8,7 @@
   - `MobileBuildService` validates feature flags, platform enablement, binary release level, provider source requirements, provider availability, and provider results.
   - `EASBuildProvider` resolves a project-scoped EAS token from `MobileCredentialVault` and invokes `eas build --non-interactive --no-wait --json` only when configured behind feature flags.
   - `MobileBuildService.RefreshBuild` and `EASBuildProvider.RefreshBuild` refresh an existing job from `eas build:view --json` by provider build ID.
+  - `MobileBuildService.CancelBuild` and `EASBuildProvider.CancelBuild` cancel a non-terminal provider build through `eas build:cancel`.
   - `GormMobileBuildStore` persists restart-safe `mobile_build_jobs` rows and redacted logs/failure messages.
   - `ApplyMobileBuildJobToProject` updates project mobile summary fields and artifact metadata after job creation and refresh results.
 - Transport:
@@ -15,6 +16,7 @@
   - `POST /api/v1/projects/:id/mobile/builds` returns `{ build, credentials }` on success.
   - `GET /api/v1/projects/:id/mobile/builds/:buildId` returns `{ build }`.
   - `POST /api/v1/projects/:id/mobile/builds/:buildId/refresh` returns `{ build }` after provider refresh.
+  - `POST /api/v1/projects/:id/mobile/builds/:buildId/cancel` returns `{ build }` after provider cancellation.
   - `GET /api/v1/projects/:id/mobile/builds/:buildId/logs` returns `{ build_id, logs }`.
   - `GET /api/v1/projects/:id/mobile/builds/:buildId/artifacts` returns artifact metadata only when an artifact URL exists.
 - Consumers:
@@ -29,7 +31,7 @@
   - Store-readiness credential status is broader and still tracks Apple/App Store Connect and Google Play credentials separately from EAS queueing.
   - Startup wires `EASBuildProvider` only when `MOBILE_EAS_BUILD_ENABLED=true`; otherwise provider execution fails closed with `503 MOBILE_BUILD_PROVIDER_MISSING`.
   - `EAS_CLI_PATH` defaults to `eas`; `MOBILE_EAS_BUILD_TIMEOUT` defaults to `30m`.
-  - EAS builds are queued with `--no-wait`; explicit owner-scoped refresh is available, but background polling, cancellation, retry, repair, and store submission remain separate future contracts.
+  - EAS builds are queued with `--no-wait`; explicit owner-scoped refresh and cancel actions are available, but background polling, retry, repair, and store submission remain separate future contracts.
   - Provider refresh transport failures append a redacted error log but do not mark the native build itself failed.
   - Logs and failure messages are redacted before persistence and responses.
 - Backward compatibility risk:
