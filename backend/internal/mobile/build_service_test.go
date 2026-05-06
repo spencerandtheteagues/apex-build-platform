@@ -181,6 +181,27 @@ func TestMobileBuildServiceCreatesAndroidBuildJobWithProviderResult(t *testing.T
 	}
 }
 
+func TestMobileBuildServiceNormalizesRequestEnumCasing(t *testing.T) {
+	provider := &mockMobileBuildProvider{
+		name: "mock-eas",
+		result: MobileBuildProviderResult{
+			Status: MobileBuildQueued,
+		},
+	}
+	service := NewMobileBuildService(mobileBuildTestFlags(), provider, NewInMemoryMobileBuildStore())
+	req := validMobileBuildRequest()
+	req.Platform = MobilePlatform(" Android ")
+	req.Profile = MobileBuildProfile(" Preview ")
+	req.ReleaseLevel = MobileReleaseLevel(" Internal_Android_APK ")
+
+	if _, err := service.CreateBuild(context.Background(), req); err != nil {
+		t.Fatalf("expected normalized request to pass, got %v", err)
+	}
+	if provider.lastReq.Platform != MobilePlatformAndroid || provider.lastReq.Profile != MobileBuildProfilePreview || provider.lastReq.ReleaseLevel != ReleaseInternalAndroidAPK {
+		t.Fatalf("expected normalized provider request, got %+v", provider.lastReq)
+	}
+}
+
 func TestMobileBuildServiceRecordsProviderFailure(t *testing.T) {
 	store := NewInMemoryMobileBuildStore()
 	provider := &mockMobileBuildProvider{

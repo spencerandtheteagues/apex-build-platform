@@ -355,7 +355,11 @@ func validationCheckEvidence(validation MobileValidationReport) []string {
 func normalizedProjectPlatformSet(project models.Project) map[string]bool {
 	out := map[string]bool{}
 	for _, platform := range project.MobilePlatforms {
-		out[strings.TrimSpace(platform)] = true
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		if platform == "" {
+			continue
+		}
+		out[platform] = true
 	}
 	return out
 }

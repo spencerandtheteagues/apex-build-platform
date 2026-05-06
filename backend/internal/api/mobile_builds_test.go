@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -63,7 +65,8 @@ func TestCreateProjectMobileBuildRequiresValidatedCredentials(t *testing.T) {
 
 	require.Equal(t, http.StatusConflict, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "MOBILE_CREDENTIALS_REQUIRED")
-	require.Contains(t, recorder.Body.String(), "google_play_service_account")
+	require.Contains(t, recorder.Body.String(), "eas_token")
+	require.NotContains(t, recorder.Body.String(), "google_play_service_account")
 	require.Zero(t, provider.calls)
 }
 
@@ -90,10 +93,35 @@ func TestCreateProjectMobileBuildReportsMissingProviderAfterCredentials(t *testi
 	require.Contains(t, recorder.Body.String(), "MOBILE_BUILD_PROVIDER_MISSING")
 }
 
+func TestCreateProjectMobileBuildRejectsPlatformNotEnabledForProject(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	provider := &mockAPIMobileBuildProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(mobileBuildAPITestFlags(), provider, mobile.NewGormMobileBuildStore(gormDB)))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds", project.ID), strings.NewReader(`{
+		"platform":"ios",
+		"profile":"preview",
+		"release_level":"ios_internal"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.CreateProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "INVALID_MOBILE_BUILD_REQUEST")
+	require.Contains(t, recorder.Body.String(), "not enabled")
+	require.Zero(t, provider.calls)
+}
+
 func TestCreateProjectMobileBuildPersistsJobAndArtifactEndpoints(t *testing.T) {
 	server, userID, gormDB := newProjectAPITestServer(t, "pro")
 	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
-	storeRequiredAndroidMobileCredentials(t, gormDB, userID, project)
+	storeEASMobileCredential(t, gormDB, userID, project)
 	provider := &mockAPIMobileBuildProvider{
 		result: mobile.MobileBuildProviderResult{
 			ProviderBuildID: "eas-build-android-1",
@@ -119,7 +147,8 @@ func TestCreateProjectMobileBuildPersistsJobAndArtifactEndpoints(t *testing.T) {
 		"profile":"preview",
 		"release_level":"internal_android_apk",
 		"app_version":"1.2.3",
-		"version_code":12
+		"version_code":12,
+		"source_path":"/etc"
 	}`))
 	context.Request.Header.Set("Content-Type", "application/json")
 	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
@@ -137,6 +166,9 @@ func TestCreateProjectMobileBuildPersistsJobAndArtifactEndpoints(t *testing.T) {
 	require.Equal(t, mobile.MobileBuildSucceeded, createResponse.Build.Status)
 	require.Equal(t, "https://artifacts.example.com/app.apk", createResponse.Build.ArtifactURL)
 	require.Equal(t, 1, provider.calls)
+	require.NotEqual(t, "/etc", provider.lastReq.SourcePath)
+	require.True(t, filepath.IsAbs(provider.lastReq.SourcePath), "provider source path should be an absolute materialized path, got %q", provider.lastReq.SourcePath)
+	require.True(t, provider.sourcePackageExists, "provider should receive a materialized Expo source directory containing package.json")
 
 	var updated models.Project
 	require.NoError(t, gormDB.First(&updated, project.ID).Error)
@@ -190,6 +222,18 @@ func createMobileBuildAPIProject(t *testing.T, gormDB *gorm.DB, userID uint, pla
 	return project
 }
 
+func storeEASMobileCredential(t *testing.T, gormDB *gorm.DB, userID uint, project models.Project) {
+	t.Helper()
+	manager, err := secretstore.NewSecretsManager("mobile-build-api-test-master-key")
+	require.NoError(t, err)
+	vault := mobile.NewMobileCredentialVault(gormDB, manager)
+	_, err = vault.Store(context.Background(), userID, project, mobile.MobileCredentialInput{
+		Type:   mobile.MobileCredentialEASToken,
+		Values: map[string]string{"token": "eas-test-token"},
+	})
+	require.NoError(t, err)
+}
+
 func storeRequiredAndroidMobileCredentials(t *testing.T, gormDB *gorm.DB, userID uint, project models.Project) {
 	t.Helper()
 	manager, err := secretstore.NewSecretsManager("mobile-build-api-test-master-key")
@@ -227,10 +271,11 @@ func mobileMetadataStringForAPITest(metadata map[string]interface{}, key string)
 }
 
 type mockAPIMobileBuildProvider struct {
-	result  mobile.MobileBuildProviderResult
-	err     error
-	calls   int
-	lastReq mobile.MobileBuildRequest
+	result              mobile.MobileBuildProviderResult
+	err                 error
+	calls               int
+	lastReq             mobile.MobileBuildRequest
+	sourcePackageExists bool
 }
 
 func (p *mockAPIMobileBuildProvider) Name() string {
@@ -240,5 +285,8 @@ func (p *mockAPIMobileBuildProvider) Name() string {
 func (p *mockAPIMobileBuildProvider) CreateBuild(_ context.Context, req mobile.MobileBuildRequest) (mobile.MobileBuildProviderResult, error) {
 	p.calls++
 	p.lastReq = req
+	if _, err := os.Stat(filepath.Join(req.SourcePath, "package.json")); err == nil {
+		p.sourcePackageExists = true
+	}
 	return p.result, p.err
 }

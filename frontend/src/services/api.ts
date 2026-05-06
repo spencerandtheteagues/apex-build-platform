@@ -3838,7 +3838,6 @@ export interface MobileBuildRequest {
   build_number?: string
   version_code?: number
   commit_ref?: string
-  source_path?: string
   dry_run?: boolean
 }
 

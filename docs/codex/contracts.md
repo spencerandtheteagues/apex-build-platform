@@ -4,7 +4,9 @@
 - Source of truth: `backend/internal/mobile/build_service.go`, `backend/internal/mobile/build_store.go`, `backend/internal/api/mobile_builds.go`, route registration in `backend/cmd/main.go`, and frontend types in `frontend/src/services/api.ts`.
 - Producers:
   - Project owners call `POST /api/v1/projects/:id/mobile/builds` with platform/profile/release-level build intent.
-  - `MobileBuildService` validates feature flags, platform enablement, binary release level, provider availability, and provider results.
+  - The API validates feature flags, platform enablement, project mobile-platform ownership, credential completeness, and then materializes stored project `mobile/` files into a temporary absolute source directory.
+  - `MobileBuildService` validates feature flags, platform enablement, binary release level, provider source requirements, provider availability, and provider results.
+  - `EASBuildProvider` resolves a project-scoped EAS token from `MobileCredentialVault` and invokes `eas build --non-interactive --no-wait --json` only when configured behind feature flags.
   - `GormMobileBuildStore` persists restart-safe `mobile_build_jobs` rows and redacted logs/failure messages.
   - `ApplyMobileBuildJobToProject` updates project mobile summary fields and artifact metadata after job creation/provider result.
 - Transport:
@@ -20,8 +22,12 @@
 - Defaults / zero-value behavior:
   - Routes require authenticated project ownership and `target_platform=mobile_expo`.
   - Feature flags still default off; disabled native builds return `503 MOBILE_BUILD_DISABLED`.
-  - Credentials must be complete before provider invocation; missing credentials return `409 MOBILE_CREDENTIALS_REQUIRED`.
-  - The production app currently configures no live provider, so even with flags and credentials set the route fails closed with `503 MOBILE_BUILD_PROVIDER_MISSING` until a real EAS provider is wired.
+  - Public HTTP requests do not accept/trust `source_path`; source is always materialized from project-owned stored files before provider validation.
+  - Build credentials must be complete before provider invocation; EAS build queueing currently requires the project-scoped EAS token and missing build credentials return `409 MOBILE_CREDENTIALS_REQUIRED`.
+  - Store-readiness credential status is broader and still tracks Apple/App Store Connect and Google Play credentials separately from EAS queueing.
+  - Startup wires `EASBuildProvider` only when `MOBILE_EAS_BUILD_ENABLED=true`; otherwise provider execution fails closed with `503 MOBILE_BUILD_PROVIDER_MISSING`.
+  - `EAS_CLI_PATH` defaults to `eas`; `MOBILE_EAS_BUILD_TIMEOUT` defaults to `30m`.
+  - EAS builds are queued with `--no-wait`; completion polling, artifact refresh, cancellation, retry, repair, and store submission remain separate future contracts.
   - Logs and failure messages are redacted before persistence and responses.
 - Backward compatibility risk:
   - Medium-low; new project-scoped routes and a new migration model are additive.
