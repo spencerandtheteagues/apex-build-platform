@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Project } from '@/types'
@@ -10,6 +10,7 @@ import ProjectDashboard from './ProjectDashboard'
 // Vitest in this repo predates vi.hoisted; var keeps the mock factory safely hoistable.
 var mockCurrentProject: Project | null = null
 var mockApiService: any
+var mockAddNotification: any
 
 vi.mock('@/hooks/useStore', () => ({
   useStore: () => ({
@@ -18,7 +19,7 @@ vi.mock('@/hooks/useStore', () => ({
     collaborationUsers: [],
     apiService: mockApiService,
     setCurrentProject: vi.fn(),
-    addNotification: vi.fn(),
+    addNotification: mockAddNotification,
   }),
 }))
 
@@ -53,6 +54,7 @@ const baseProject: Project = {
 describe('ProjectDashboard mobile export visibility', () => {
   beforeEach(() => {
     mockCurrentProject = null
+    mockAddNotification = vi.fn()
     mockApiService = {
       getProject: vi.fn(),
       getFiles: vi.fn(),
@@ -83,6 +85,70 @@ describe('ProjectDashboard mobile export visibility', () => {
         ],
         blockers: ['Produce a signed Android APK/AAB artifact through EAS Build.'],
       }),
+      getProjectMobileCredentials: vi.fn().mockResolvedValue({
+        status: 'validated',
+        complete: true,
+        required: ['eas_token'],
+        present: ['eas_token'],
+        missing: [],
+        metadata: [
+          {
+            type: 'eas_token',
+            secret_id: 91,
+            project_id: 42,
+            status: 'stored',
+            label: 'EAS token',
+            created_at: '2026-05-01T00:00:00.000Z',
+            updated_at: '2026-05-01T00:00:00.000Z',
+          },
+        ],
+      }),
+      listProjectMobileBuilds: vi.fn().mockResolvedValue([
+        {
+          id: 'mbld_existing',
+          project_id: 42,
+          user_id: 1,
+          platform: 'android',
+          profile: 'preview',
+          release_level: 'internal_android_apk',
+          status: 'building',
+          provider: 'eas',
+          provider_build_id: 'eas-build-1',
+          created_at: '2026-05-01T00:00:00.000Z',
+          updated_at: '2026-05-01T00:05:00.000Z',
+          logs: [{ timestamp: '2026-05-01T00:05:00.000Z', level: 'info', message: 'EAS build is running.' }],
+        },
+      ]),
+      createProjectMobileBuild: vi.fn().mockResolvedValue({
+        build: {
+          id: 'mbld_created',
+          project_id: 42,
+          user_id: 1,
+          platform: 'android',
+          profile: 'preview',
+          release_level: 'internal_android_apk',
+          status: 'queued',
+          provider: 'eas',
+          provider_build_id: 'eas-build-created',
+          created_at: '2026-05-01T00:10:00.000Z',
+          updated_at: '2026-05-01T00:10:00.000Z',
+        },
+      }),
+      refreshProjectMobileBuild: vi.fn().mockResolvedValue({
+        id: 'mbld_existing',
+        project_id: 42,
+        user_id: 1,
+        platform: 'android',
+        profile: 'preview',
+        release_level: 'internal_android_apk',
+        status: 'succeeded',
+        provider: 'eas',
+        provider_build_id: 'eas-build-1',
+        artifact_url: 'https://artifacts.example.com/app.apk',
+        created_at: '2026-05-01T00:00:00.000Z',
+        updated_at: '2026-05-01T00:15:00.000Z',
+      }),
+      cancelProjectMobileBuild: vi.fn(),
       exportProject: vi.fn(),
       executeProject: vi.fn(),
     }
@@ -103,7 +169,7 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(screen.getByTestId('mobile-export-readiness')).toBeTruthy()
     expect(screen.getByText('Expo/React Native export is source-ready')).toBeTruthy()
     expect(screen.getByText(/ZIP and GitHub export will include a/)).toBeTruthy()
-    expect(screen.getByText('Android + iOS')).toBeTruthy()
+    expect(screen.getAllByText('Android + iOS').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Source only')).toBeTruthy()
     expect(screen.getByText(/Native APK\/AAB, iOS builds, TestFlight, and store submission are separate gated workflows/)).toBeTruthy()
     expect(await screen.findByText('Validation passed')).toBeTruthy()
@@ -111,8 +177,45 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(await screen.findByText('61% / 95%')).toBeTruthy()
     expect(screen.getByText('95% Readiness Target')).toBeTruthy()
     expect(screen.getByText(/Next blocker: Produce a signed Android APK\/AAB artifact through EAS Build/)).toBeTruthy()
+    expect(await screen.findByTestId('mobile-build-operations')).toBeTruthy()
+    expect(screen.getByText('Native Build Pipeline')).toBeTruthy()
+    expect(screen.getByText('Stored for builds')).toBeTruthy()
+    expect(screen.getByTestId('mobile-build-job-mbld_existing')).toBeTruthy()
+    expect(screen.getByText('EAS build is running.')).toBeTruthy()
     expect(mockApiService.getProjectMobileValidation).toHaveBeenCalledWith(42)
     expect(mockApiService.getProjectMobileScorecard).toHaveBeenCalledWith(42)
+    expect(mockApiService.listProjectMobileBuilds).toHaveBeenCalledWith(42)
+    expect(mockApiService.getProjectMobileCredentials).toHaveBeenCalledWith(42)
+  })
+
+  it('queues an Android APK build from the mobile build operations panel', async () => {
+    mockApiService.listProjectMobileBuilds.mockResolvedValueOnce([])
+    mockCurrentProject = {
+      ...baseProject,
+      target_platform: 'mobile_expo',
+      mobile_framework: 'expo-react-native',
+      mobile_platforms: ['android'],
+      mobile_release_level: 'source_only',
+      mobile_capabilities: ['offlineMode'],
+    }
+
+    render(<ProjectDashboard />)
+
+    const startButton = await screen.findByRole('button', { name: /Start Android APK/i })
+    fireEvent.click(startButton)
+
+    await waitFor(() => {
+      expect(mockApiService.createProjectMobileBuild).toHaveBeenCalledWith(42, {
+        platform: 'android',
+        profile: 'preview',
+        release_level: 'internal_android_apk',
+      })
+    })
+    expect(await screen.findByTestId('mobile-build-job-mbld_created')).toBeTruthy()
+    expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'success',
+      title: 'Native build queued',
+    }))
   })
 
   it('does not show mobile export messaging for legacy web projects', async () => {
@@ -125,6 +228,7 @@ describe('ProjectDashboard mobile export visibility', () => {
     render(<ProjectDashboard />)
 
     expect(screen.queryByTestId('mobile-export-readiness')).toBeNull()
+    expect(screen.queryByTestId('mobile-build-operations')).toBeNull()
     expect(screen.queryByText('Expo/React Native export is source-ready')).toBeNull()
     await waitFor(() => {
       expect(mockApiService.getProjectMobileValidation).not.toHaveBeenCalled()

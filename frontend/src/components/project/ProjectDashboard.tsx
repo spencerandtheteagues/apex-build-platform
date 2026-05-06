@@ -4,6 +4,7 @@ import { useStore } from '@/hooks/useStore'
 import { AIUsage, Execution, File } from '@/types'
 import type { MobileReadinessScorecard, MobileValidationReport, MobileValidationStatus } from '@/services/api'
 import { Badge, Button, Loading } from '@/components/ui'
+import MobileBuildOperationsPanel from './MobileBuildOperationsPanel'
 import {
   Activity,
   ArrowRight,
@@ -478,145 +479,154 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
       </section>
 
       {isMobileProject ? (
-        <section
-          className={cn(panelClass, 'overflow-hidden border-cyan-300/18')}
-          data-testid="mobile-export-readiness"
-        >
-          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <div className="relative overflow-hidden px-6 py-6 md:px-8">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_34%)]" />
-              <div className="relative">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100">
-                    <Smartphone className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/75">
-                      Mobile Source Path
+        <>
+          <section
+            className={cn(panelClass, 'overflow-hidden border-cyan-300/18')}
+            data-testid="mobile-export-readiness"
+          >
+            <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="relative overflow-hidden px-6 py-6 md:px-8">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_34%)]" />
+                <div className="relative">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100">
+                      <Smartphone className="h-6 w-6" />
                     </div>
-                    <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-white">
-                      Expo/React Native export is source-ready
-                    </h2>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/75">
+                        Mobile Source Path
+                      </div>
+                      <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-white">
+                        Expo/React Native export is source-ready
+                      </h2>
+                    </div>
                   </div>
-                </div>
-                <p className="mt-5 max-w-3xl text-sm leading-7 text-gray-300 md:text-base">
-                  ZIP and GitHub export will include a <span className="font-medium text-cyan-100">mobile/</span> Expo project
-                  with app config, EAS config, generated assets, build notes, and store-release guidance when this project is exported.
-                </p>
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {mobileCapabilities.length > 0 ? (
-                    mobileCapabilities.slice(0, 6).map((capability) => (
-                      <span
-                        key={capability}
-                        className="rounded-full border border-cyan-300/14 bg-cyan-300/8 px-3 py-1.5 text-[11px] font-medium text-cyan-100"
-                      >
-                        {mobileCapabilityLabels[capability] || capability}
+                  <p className="mt-5 max-w-3xl text-sm leading-7 text-gray-300 md:text-base">
+                    ZIP and GitHub export will include a <span className="font-medium text-cyan-100">mobile/</span> Expo project
+                    with app config, EAS config, generated assets, build notes, and store-release guidance when this project is exported.
+                  </p>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {mobileCapabilities.length > 0 ? (
+                      mobileCapabilities.slice(0, 6).map((capability) => (
+                        <span
+                          key={capability}
+                          className="rounded-full border border-cyan-300/14 bg-cyan-300/8 px-3 py-1.5 text-[11px] font-medium text-cyan-100"
+                        >
+                          {mobileCapabilityLabels[capability] || capability}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-medium text-gray-300">
+                        Capability manifest pending
                       </span>
-                    ))
-                  ) : (
-                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-medium text-gray-300">
-                      Capability manifest pending
-                    </span>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="border-t border-white/6 bg-black/20 p-6 lg:border-l lg:border-t-0">
-              <div className="space-y-3">
-                <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4">
-                  <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Platforms</div>
-                  <div className="mt-2 text-sm font-medium text-white">
-                    {mobilePlatforms.map(formatMobilePlatform).join(' + ')}
+              <div className="border-t border-white/6 bg-black/20 p-6 lg:border-l lg:border-t-0">
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Platforms</div>
+                    <div className="mt-2 text-sm font-medium text-white">
+                      {mobilePlatforms.map(formatMobilePlatform).join(' + ')}
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4">
-                  <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Release Level</div>
-                  <div className="mt-2 text-sm font-medium text-white">
-                    {releaseLevelLabels[mobileReleaseLevel] || mobileReleaseLevel}
+                  <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Release Level</div>
+                    <div className="mt-2 text-sm font-medium text-white">
+                      {releaseLevelLabels[mobileReleaseLevel] || mobileReleaseLevel}
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4" data-testid="mobile-validation-status">
-                  <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Validation</div>
-                  {isMobileValidationLoading ? (
-                    <div className="mt-3 text-sm font-medium text-cyan-100">Checking mobile source package...</div>
-                  ) : mobileValidation ? (
-                    <>
-                      <span className={cn('mt-3 inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', validationStatusClasses[mobileValidation.status])}>
-                        {validationStatusLabels[mobileValidation.status]}
-                      </span>
-                      <p className="mt-3 text-xs leading-5 text-gray-300">{mobileValidation.summary}</p>
-                      {mobileValidation.checks.length > 0 ? (
-                        <div className="mt-3 space-y-2">
-                          {mobileValidation.checks.slice(0, 4).map((check) => (
-                            <div key={check.id} className="flex items-start justify-between gap-3 text-xs">
-                              <span className="text-gray-300">{check.label}</span>
-                              <span className={cn('shrink-0 rounded-full px-2 py-0.5 font-medium', validationStatusClasses[check.status])}>
-                                {check.status}
-                              </span>
-                            </div>
-                          ))}
+                  <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4" data-testid="mobile-validation-status">
+                    <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">Validation</div>
+                    {isMobileValidationLoading ? (
+                      <div className="mt-3 text-sm font-medium text-cyan-100">Checking mobile source package...</div>
+                    ) : mobileValidation ? (
+                      <>
+                        <span className={cn('mt-3 inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', validationStatusClasses[mobileValidation.status])}>
+                          {validationStatusLabels[mobileValidation.status]}
+                        </span>
+                        <p className="mt-3 text-xs leading-5 text-gray-300">{mobileValidation.summary}</p>
+                        {mobileValidation.checks.length > 0 ? (
+                          <div className="mt-3 space-y-2">
+                            {mobileValidation.checks.slice(0, 4).map((check) => (
+                              <div key={check.id} className="flex items-start justify-between gap-3 text-xs">
+                                <span className="text-gray-300">{check.label}</span>
+                                <span className={cn('shrink-0 rounded-full px-2 py-0.5 font-medium', validationStatusClasses[check.status])}>
+                                  {check.status}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="mt-3 text-sm font-medium text-gray-300">Validation not loaded yet.</div>
+                    )}
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4" data-testid="mobile-readiness-scorecard">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">95% Readiness Target</div>
+                        <div className="mt-2 text-sm font-medium text-white">
+                          {isMobileValidationLoading ? 'Scoring mobile launch evidence...' : `${mobileScorecard?.overall_score ?? 0}% / ${mobileScorecard?.target_score ?? 95}%`}
                         </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div className="mt-3 text-sm font-medium text-gray-300">Validation not loaded yet.</div>
-                  )}
-                </div>
-                <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4" data-testid="mobile-readiness-scorecard">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">95% Readiness Target</div>
-                      <div className="mt-2 text-sm font-medium text-white">
-                        {isMobileValidationLoading ? 'Scoring mobile launch evidence...' : `${mobileScorecard?.overall_score ?? 0}% / ${mobileScorecard?.target_score ?? 95}%`}
                       </div>
+                      {mobileScorecard ? (
+                        <span className={cn(
+                          'shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]',
+                          mobileScorecard.is_ready ? readinessStatusClasses.complete : readinessStatusClasses.blocked
+                        )}>
+                          {mobileScorecard.is_ready ? 'Ready' : 'Blocked'}
+                        </span>
+                      ) : null}
                     </div>
                     {mobileScorecard ? (
-                      <span className={cn(
-                        'shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]',
-                        mobileScorecard.is_ready ? readinessStatusClasses.complete : readinessStatusClasses.blocked
-                      )}>
-                        {mobileScorecard.is_ready ? 'Ready' : 'Blocked'}
-                      </span>
-                    ) : null}
+                      <>
+                        <p className="mt-3 text-xs leading-5 text-gray-300">{mobileScorecard.summary}</p>
+                        {mobileScorecard.categories.length > 0 ? (
+                          <div className="mt-3 space-y-2">
+                            {mobileScorecard.categories.slice(0, 5).map((category) => (
+                              <div key={category.id} className="flex items-start justify-between gap-3 text-xs">
+                                <span className="text-gray-300">{category.label}</span>
+                                <span className={cn('shrink-0 rounded-full px-2 py-0.5 font-medium', readinessStatusClasses[category.status] || readinessStatusClasses.partial)}>
+                                  {category.score}%
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {mobileScorecard.blockers?.length ? (
+                          <div className="mt-3 rounded-xl border border-red-300/12 bg-red-300/8 px-3 py-2 text-xs leading-5 text-red-50/90">
+                            Next blocker: {mobileScorecard.blockers[0]}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="mt-3 text-xs leading-5 text-gray-300">Readiness scorecard not loaded yet.</p>
+                    )}
                   </div>
-                  {mobileScorecard ? (
-                    <>
-                      <p className="mt-3 text-xs leading-5 text-gray-300">{mobileScorecard.summary}</p>
-                      {mobileScorecard.categories.length > 0 ? (
-                        <div className="mt-3 space-y-2">
-                          {mobileScorecard.categories.slice(0, 5).map((category) => (
-                            <div key={category.id} className="flex items-start justify-between gap-3 text-xs">
-                              <span className="text-gray-300">{category.label}</span>
-                              <span className={cn('shrink-0 rounded-full px-2 py-0.5 font-medium', readinessStatusClasses[category.status] || readinessStatusClasses.partial)}>
-                                {category.score}%
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                      {mobileScorecard.blockers?.length ? (
-                        <div className="mt-3 rounded-xl border border-red-300/12 bg-red-300/8 px-3 py-2 text-xs leading-5 text-red-50/90">
-                          Next blocker: {mobileScorecard.blockers[0]}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="mt-3 text-xs leading-5 text-gray-300">Readiness scorecard not loaded yet.</p>
-                  )}
-                </div>
-                <div className="rounded-2xl border border-amber-300/16 bg-amber-300/8 px-4 py-4">
-                  <div className="flex items-start gap-3">
-                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />
-                    <p className="text-xs leading-5 text-amber-50/90">
-                      Native APK/AAB, iOS builds, TestFlight, and store submission are separate gated workflows and are not claimed by this export panel.
-                    </p>
+                  <div className="rounded-2xl border border-amber-300/16 bg-amber-300/8 px-4 py-4">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />
+                      <p className="text-xs leading-5 text-amber-50/90">
+                        Native APK/AAB, iOS builds, TestFlight, and store submission are separate gated workflows and are not claimed by this export panel.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+          <MobileBuildOperationsPanel
+            projectId={currentProject.id}
+            mobilePlatforms={mobilePlatforms}
+            mobileBuildStatus={currentProject.mobile_build_status}
+            apiService={apiService}
+            addNotification={addNotification}
+          />
+        </>
       ) : null}
 
       {projectStats ? (
