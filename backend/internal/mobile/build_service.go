@@ -121,6 +121,10 @@ type MobileBuildProvider interface {
 	CreateBuild(ctx context.Context, req MobileBuildRequest) (MobileBuildProviderResult, error)
 }
 
+type MobileBuildProviderRequestValidator interface {
+	ValidateBuildRequest(req MobileBuildRequest) error
+}
+
 type MobileBuildStore interface {
 	Save(ctx context.Context, job MobileBuildJob) error
 	Update(ctx context.Context, job MobileBuildJob) error
@@ -251,6 +255,22 @@ func (s *MobileBuildService) ValidateRequest(req MobileBuildRequest) error {
 	if s == nil {
 		return fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)
 	}
+	req = NormalizeMobileBuildRequest(req)
+	if err := s.ValidatePolicyRequest(req); err != nil {
+		return err
+	}
+	if validator, ok := s.provider.(MobileBuildProviderRequestValidator); ok {
+		if err := validator.ValidateBuildRequest(req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *MobileBuildService) ValidatePolicyRequest(req MobileBuildRequest) error {
+	if s == nil {
+		return fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)
+	}
 	return ValidateMobileBuildRequest(s.flags, NormalizeMobileBuildRequest(req))
 }
 
@@ -269,6 +289,9 @@ func (s *MobileBuildService) ListProjectBuilds(ctx context.Context, projectID ui
 }
 
 func NormalizeMobileBuildRequest(req MobileBuildRequest) MobileBuildRequest {
+	req.Platform = MobilePlatform(strings.ToLower(strings.TrimSpace(string(req.Platform))))
+	req.Profile = MobileBuildProfile(strings.ToLower(strings.TrimSpace(string(req.Profile))))
+	req.ReleaseLevel = MobileReleaseLevel(strings.ToLower(strings.TrimSpace(string(req.ReleaseLevel))))
 	if req.Profile == "" {
 		req.Profile = MobileBuildProfilePreview
 	}

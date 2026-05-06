@@ -1026,9 +1026,18 @@ func main() {
 	server.SetReadinessRegistry(startupRegistry)
 	server.SetUsageTracker(usageTracker)
 	server.SetCacheStatusProvider(redisCache.Status)
+	mobileFlags := mobile.LoadFeatureFlagsFromEnv()
+	var mobileBuildProvider mobile.MobileBuildProvider
+	if mobileFlags.MobileEASBuildEnabled {
+		mobileBuildProvider = mobile.NewEASBuildProvider(mobile.EASBuildProviderConfig{
+			CLIPath:     getEnv("EAS_CLI_PATH", "eas"),
+			Timeout:     getEnvDuration("MOBILE_EAS_BUILD_TIMEOUT", 30*time.Minute),
+			Credentials: mobile.NewMobileCredentialVault(database.GetDB(), secretsManager),
+		})
+	}
 	server.SetMobileBuildService(mobile.NewMobileBuildService(
-		mobile.LoadFeatureFlagsFromEnv(),
-		nil,
+		mobileFlags,
+		mobileBuildProvider,
 		mobile.NewGormMobileBuildStore(database.GetDB()),
 	))
 
@@ -1977,6 +1986,15 @@ func getEnvAny(keys []string, defaultValue string) string {
 func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			return parsed
 		}
 	}

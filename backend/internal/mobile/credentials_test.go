@@ -94,6 +94,74 @@ func TestMobileCredentialVaultMarksValidatedWhenRequiredPlatformCredentialsExist
 	}
 }
 
+func TestMobileCredentialVaultBuildStatusRequiresEASTokenOnly(t *testing.T) {
+	gormDB, manager := newMobileCredentialTestDB(t)
+	project := createMobileCredentialTestProject(t, gormDB, []string{string(MobilePlatformAndroid)})
+	vault := NewMobileCredentialVault(gormDB, manager)
+
+	status, err := vault.BuildStatus(context.Background(), project.OwnerID, project, MobilePlatformAndroid, ReleaseInternalAndroidAPK)
+	if err != nil {
+		t.Fatalf("build credential status: %v", err)
+	}
+	if status.Complete || len(status.Missing) != 1 || status.Missing[0] != MobileCredentialEASToken {
+		t.Fatalf("expected only EAS token missing for build credentials, got %+v", status)
+	}
+
+	if _, err := vault.Store(context.Background(), project.OwnerID, project, MobileCredentialInput{
+		Type:   MobileCredentialEASToken,
+		Values: map[string]string{"token": "eas-secret-token"},
+	}); err != nil {
+		t.Fatalf("store EAS credential: %v", err)
+	}
+	status, err = vault.BuildStatus(context.Background(), project.OwnerID, project, MobilePlatformAndroid, ReleaseInternalAndroidAPK)
+	if err != nil {
+		t.Fatalf("build credential status after storing EAS: %v", err)
+	}
+	if !status.Complete || len(status.Missing) != 0 {
+		t.Fatalf("expected EAS token to complete build credential status, got %+v", status)
+	}
+	readinessStatus, err := vault.Status(context.Background(), project.OwnerID, project)
+	if err != nil {
+		t.Fatalf("store readiness credential status: %v", err)
+	}
+	if readinessStatus.Complete || len(readinessStatus.Missing) != 1 || readinessStatus.Missing[0] != MobileCredentialGooglePlayService {
+		t.Fatalf("expected store readiness to still require Google Play credential, got %+v", readinessStatus)
+	}
+}
+
+func TestMobileCredentialVaultResolvesEncryptedCredentialValues(t *testing.T) {
+	gormDB, manager := newMobileCredentialTestDB(t)
+	project := createMobileCredentialTestProject(t, gormDB, []string{string(MobilePlatformAndroid)})
+	vault := NewMobileCredentialVault(gormDB, manager)
+
+	if _, err := vault.Store(context.Background(), project.OwnerID, project, MobileCredentialInput{
+		Type:   MobileCredentialEASToken,
+		Values: map[string]string{"token": "eas-secret-token"},
+	}); err != nil {
+		t.Fatalf("store EAS credential: %v", err)
+	}
+
+	values, err := vault.ResolveCredentialValues(context.Background(), project.OwnerID, project.ID, MobileCredentialEASToken)
+	if err != nil {
+		t.Fatalf("resolve EAS credential values: %v", err)
+	}
+	if values["token"] != "eas-secret-token" {
+		t.Fatalf("unexpected resolved token values %+v", values)
+	}
+
+	var stored secretstore.Secret
+	if err := gormDB.Where("user_id = ? AND project_id = ? AND name = ?", project.OwnerID, project.ID, mobileCredentialSecretName(MobileCredentialEASToken)).First(&stored).Error; err != nil {
+		t.Fatalf("fetch stored EAS secret: %v", err)
+	}
+	stored.EncryptedValue = strings.ReplaceAll(stored.EncryptedValue, stored.EncryptedValue[len(stored.EncryptedValue)-4:], "xxxx")
+	if err := gormDB.Save(&stored).Error; err != nil {
+		t.Fatalf("corrupt stored EAS secret: %v", err)
+	}
+	if _, err := vault.ResolveCredentialValues(context.Background(), project.OwnerID, project.ID, MobileCredentialEASToken); err == nil {
+		t.Fatalf("expected corrupted encrypted credential to fail resolution")
+	}
+}
+
 func TestMobileCredentialVaultRejectsInvalidPayloadShape(t *testing.T) {
 	gormDB, manager := newMobileCredentialTestDB(t)
 	project := createMobileCredentialTestProject(t, gormDB, []string{string(MobilePlatformAndroid)})

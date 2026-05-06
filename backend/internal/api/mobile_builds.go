@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -20,7 +21,6 @@ type mobileBuildRequestPayload struct {
 	BuildNumber  string                    `json:"build_number,omitempty"`
 	VersionCode  int                       `json:"version_code,omitempty"`
 	CommitRef    string                    `json:"commit_ref,omitempty"`
-	SourcePath   string                    `json:"source_path,omitempty"`
 	DryRun       bool                      `json:"dry_run,omitempty"`
 }
 
@@ -53,15 +53,19 @@ func (s *Server) CreateProjectMobileBuild(c *gin.Context) {
 		BuildNumber:  payload.BuildNumber,
 		VersionCode:  payload.VersionCode,
 		CommitRef:    payload.CommitRef,
-		SourcePath:   payload.SourcePath,
 		DryRun:       payload.DryRun,
 	}
-	if err := s.mobile.ValidateRequest(req); err != nil {
+
+	if err := s.mobile.ValidatePolicyRequest(req); err != nil {
 		s.writeMobileBuildError(c, err, nil)
 		return
 	}
+	if !mobile.ProjectAllowsMobileBuildPlatform(project, req.Platform) {
+		s.writeMobileBuildError(c, fmt.Errorf("%w: platform %q is not enabled for this project", mobile.ErrMobileBuildInvalidRequest, req.Platform), nil)
+		return
+	}
 
-	credentials, err := mobile.NewMobileCredentialVault(s.db.DB, nil).Status(c.Request.Context(), uid, project)
+	credentials, err := mobile.NewMobileCredentialVault(s.db.DB, nil).BuildStatus(c.Request.Context(), uid, project, req.Platform, req.ReleaseLevel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify mobile credentials", "code": "MOBILE_CREDENTIAL_STATUS_FAILED"})
 		return
@@ -72,6 +76,23 @@ func (s *Server) CreateProjectMobileBuild(c *gin.Context) {
 			"code":        "MOBILE_CREDENTIALS_REQUIRED",
 			"credentials": credentials,
 		})
+		return
+	}
+
+	var cleanup func() error
+	materialized, err := mobile.MaterializeProjectMobileSource(c.Request.Context(), s.db.DB, project)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "MOBILE_SOURCE_MATERIALIZATION_FAILED"})
+		return
+	}
+	req.SourcePath = materialized.MobileDir
+	cleanup = materialized.Cleanup
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	if err := s.mobile.ValidateRequest(req); err != nil {
+		s.writeMobileBuildError(c, err, nil)
 		return
 	}
 
@@ -194,10 +215,10 @@ func (s *Server) persistMobileBuildProjectSummary(c *gin.Context, project models
 
 func normalizeRequestedMobileBuildPlatform(project models.Project, requested mobile.MobilePlatform) mobile.MobilePlatform {
 	if requested != "" {
-		return requested
+		return mobile.MobilePlatform(strings.ToLower(strings.TrimSpace(string(requested))))
 	}
 	if len(project.MobilePlatforms) == 1 {
-		return mobile.MobilePlatform(project.MobilePlatforms[0])
+		return mobile.MobilePlatform(strings.ToLower(strings.TrimSpace(project.MobilePlatforms[0])))
 	}
 	return requested
 }

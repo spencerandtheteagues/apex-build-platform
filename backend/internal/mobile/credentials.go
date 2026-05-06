@@ -140,6 +140,14 @@ func (v *MobileCredentialVault) Store(ctx context.Context, userID uint, project 
 }
 
 func (v *MobileCredentialVault) Status(ctx context.Context, userID uint, project models.Project) (MobileCredentialStatus, error) {
+	return v.statusForRequired(ctx, userID, project, RequiredMobileCredentialTypes(project))
+}
+
+func (v *MobileCredentialVault) BuildStatus(ctx context.Context, userID uint, project models.Project, platform MobilePlatform, releaseLevel MobileReleaseLevel) (MobileCredentialStatus, error) {
+	return v.statusForRequired(ctx, userID, project, RequiredMobileBuildCredentialTypes(project, platform, releaseLevel))
+}
+
+func (v *MobileCredentialVault) statusForRequired(ctx context.Context, userID uint, project models.Project, required []MobileCredentialType) (MobileCredentialStatus, error) {
 	if v == nil || v.db == nil {
 		return MobileCredentialStatus{}, fmt.Errorf("%w: credential vault unavailable", ErrMobileCredentialInvalidPayload)
 	}
@@ -170,7 +178,6 @@ func (v *MobileCredentialVault) Status(ctx context.Context, userID uint, project
 		})
 	}
 
-	required := RequiredMobileCredentialTypes(project)
 	var present []MobileCredentialType
 	var missing []MobileCredentialType
 	var blockers []string
@@ -198,6 +205,39 @@ func (v *MobileCredentialVault) Status(ctx context.Context, userID uint, project
 		Metadata: metadata,
 		Blockers: blockers,
 	}, nil
+}
+
+func (v *MobileCredentialVault) ResolveCredentialValues(ctx context.Context, userID, projectID uint, credType MobileCredentialType) (map[string]string, error) {
+	if v == nil || v.db == nil || v.manager == nil {
+		return nil, fmt.Errorf("%w: credential vault unavailable", ErrMobileCredentialInvalidPayload)
+	}
+	credType = normalizeMobileCredentialType(credType)
+	if !isSupportedMobileCredentialType(credType) {
+		return nil, ErrMobileCredentialInvalidType
+	}
+
+	var secret secretstore.Secret
+	if err := v.db.WithContext(ctx).
+		Where("user_id = ? AND project_id = ? AND name = ?", userID, projectID, mobileCredentialSecretName(credType)).
+		First(&secret).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrMobileCredentialNotFound
+		}
+		return nil, err
+	}
+
+	var payload MobileCredentialSecretPayload
+	if err := v.manager.DecryptJSON(userID, secret.EncryptedValue, secret.Salt, &payload); err != nil {
+		return nil, fmt.Errorf("%w: failed to decrypt mobile credential", ErrMobileCredentialInvalidPayload)
+	}
+	if normalizeMobileCredentialType(payload.Type) != credType {
+		return nil, fmt.Errorf("%w: credential type mismatch", ErrMobileCredentialInvalidPayload)
+	}
+	values := normalizeCredentialValues(payload.Values)
+	if err := validateMobileCredentialPayload(credType, values); err != nil {
+		return nil, err
+	}
+	return values, nil
 }
 
 func (v *MobileCredentialVault) Delete(ctx context.Context, userID uint, project models.Project, credType MobileCredentialType) (MobileCredentialStatus, error) {
@@ -262,6 +302,22 @@ func RequiredMobileCredentialTypes(project models.Project) []MobileCredentialTyp
 		required = append(required, MobileCredentialGooglePlayService)
 	}
 	return required
+}
+
+func RequiredMobileBuildCredentialTypes(_ models.Project, _ MobilePlatform, _ MobileReleaseLevel) []MobileCredentialType {
+	return []MobileCredentialType{MobileCredentialEASToken}
+}
+
+func ProjectAllowsMobileBuildPlatform(project models.Project, platform MobilePlatform) bool {
+	platformName := strings.ToLower(strings.TrimSpace(string(platform)))
+	if platformName == "" {
+		return false
+	}
+	platforms := normalizedProjectPlatformSet(project)
+	if len(platforms) == 0 {
+		return true
+	}
+	return platforms[platformName]
 }
 
 func validateMobileCredentialPayload(credType MobileCredentialType, values map[string]string) error {
