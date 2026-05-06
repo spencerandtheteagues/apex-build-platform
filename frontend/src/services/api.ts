@@ -593,6 +593,11 @@ export class ApiService {
     return response.data.build
   }
 
+  async cancelProjectMobileBuild(projectId: number, buildId: string): Promise<MobileBuildJob> {
+    const response = await this.client.post<{ build: MobileBuildJob }>(`/projects/${projectId}/mobile/builds/${buildId}/cancel`, {})
+    return response.data.build
+  }
+
   async getProjectMobileBuildLogs(projectId: number, buildId: string): Promise<MobileBuildLogLine[]> {
     const response = await this.client.get<{ build_id: string; logs: MobileBuildLogLine[] }>(`/projects/${projectId}/mobile/builds/${buildId}/logs`)
     return response.data.logs

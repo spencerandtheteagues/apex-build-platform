@@ -264,6 +264,56 @@ func TestRefreshProjectMobileBuildUpdatesProviderStatusAndProjectSummary(t *test
 	require.Equal(t, "https://artifacts.example.com/refreshed.apk", mobileMetadataStringForAPITest(updated.MobileMetadata, "android_apk_url"))
 }
 
+func TestCancelProjectMobileBuildUpdatesProviderStatus(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	provider := &mockAPIMobileBuildProvider{
+		result: mobile.MobileBuildProviderResult{
+			ProviderBuildID: "eas-build-android-cancel",
+			Status:          mobile.MobileBuildBuilding,
+		},
+		cancelResult: mobile.MobileBuildProviderResult{
+			Status: mobile.MobileBuildCanceled,
+			Logs: []mobile.MobileBuildLogLine{{
+				Level:   "info",
+				Message: "cancelled with EAS_TOKEN=cancel-secret",
+			}},
+		},
+	}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(
+		mobileBuildAPITestFlags(),
+		provider,
+		mobile.NewGormMobileBuildStore(gormDB),
+		mobile.WithMobileBuildIDGenerator(func() string { return "mbld_api_cancel" }),
+	))
+
+	createRecorder := httptest.NewRecorder()
+	createContext, _ := gin.CreateTestContext(createRecorder)
+	createContext.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds", project.ID), strings.NewReader(`{
+		"platform":"android",
+		"profile":"preview",
+		"release_level":"internal_android_apk"
+	}`))
+	createContext.Request.Header.Set("Content-Type", "application/json")
+	createContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	createContext.Set("user_id", userID)
+	server.CreateProjectMobileBuild(createContext)
+	require.Equal(t, http.StatusCreated, createRecorder.Code)
+
+	cancelRecorder := httptest.NewRecorder()
+	cancelContext, _ := gin.CreateTestContext(cancelRecorder)
+	cancelContext.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_cancel/cancel", project.ID), nil)
+	cancelContext.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_cancel"}}
+	cancelContext.Set("user_id", userID)
+	server.CancelProjectMobileBuild(cancelContext)
+
+	require.Equal(t, http.StatusOK, cancelRecorder.Code)
+	require.NotContains(t, cancelRecorder.Body.String(), "cancel-secret")
+	require.Contains(t, cancelRecorder.Body.String(), string(mobile.MobileBuildCanceled))
+	require.Equal(t, 1, provider.cancelCalls)
+}
+
 func createMobileBuildAPIProject(t *testing.T, gormDB *gorm.DB, userID uint, platforms []string) models.Project {
 	t.Helper()
 	project := models.Project{
@@ -335,10 +385,14 @@ type mockAPIMobileBuildProvider struct {
 	err                 error
 	refreshResult       mobile.MobileBuildProviderResult
 	refreshErr          error
+	cancelResult        mobile.MobileBuildProviderResult
+	cancelErr           error
 	calls               int
 	refreshCalls        int
+	cancelCalls         int
 	lastReq             mobile.MobileBuildRequest
 	lastRefreshJob      mobile.MobileBuildJob
+	lastCancelJob       mobile.MobileBuildJob
 	sourcePackageExists bool
 }
 
@@ -362,4 +416,13 @@ func (p *mockAPIMobileBuildProvider) RefreshBuild(_ context.Context, job mobile.
 		return mobile.MobileBuildProviderResult{}, p.refreshErr
 	}
 	return p.refreshResult, nil
+}
+
+func (p *mockAPIMobileBuildProvider) CancelBuild(_ context.Context, job mobile.MobileBuildJob) (mobile.MobileBuildProviderResult, error) {
+	p.cancelCalls++
+	p.lastCancelJob = job
+	if p.cancelErr != nil {
+		return mobile.MobileBuildProviderResult{}, p.cancelErr
+	}
+	return p.cancelResult, nil
 }

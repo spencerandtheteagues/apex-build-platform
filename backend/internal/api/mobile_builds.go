@@ -155,6 +155,25 @@ func (s *Server) RefreshProjectMobileBuild(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"build": refreshed})
 }
 
+func (s *Server) CancelProjectMobileBuild(c *gin.Context) {
+	job, project, ok := s.requireProjectMobileBuildWithProject(c)
+	if !ok {
+		return
+	}
+	canceled, err := s.mobile.CancelBuild(c.Request.Context(), job.ID)
+	if canceled.ID != "" {
+		if persistErr := s.persistMobileBuildProjectSummary(c, project, canceled); persistErr != nil && err == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist mobile build status", "code": "MOBILE_BUILD_STATUS_PERSIST_FAILED"})
+			return
+		}
+	}
+	if err != nil {
+		s.writeMobileBuildError(c, err, &canceled)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"build": canceled})
+}
+
 func (s *Server) GetProjectMobileBuildLogs(c *gin.Context) {
 	job, ok := s.requireProjectMobileBuild(c)
 	if !ok {
