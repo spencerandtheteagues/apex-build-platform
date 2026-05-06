@@ -201,6 +201,12 @@ interface ProjectsActions {
     framework?: string
     is_public?: boolean
     environment?: Record<string, any>
+    target_platform?: Project['target_platform']
+    mobile_platforms?: Project['mobile_platforms']
+    mobile_framework?: Project['mobile_framework']
+    mobile_release_level?: Project['mobile_release_level']
+    mobile_capabilities?: Project['mobile_capabilities']
+    mobile_dependency_policy?: string
   }) => Promise<Project>
   selectProject: (id: number) => Promise<void>
   setCurrentProject: (project: Project) => void  // Direct setter for current project

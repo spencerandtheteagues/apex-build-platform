@@ -9,6 +9,7 @@ import (
 
 	"apex-build/internal/database"
 	"apex-build/internal/middleware"
+	"apex-build/internal/mobile"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
@@ -90,6 +91,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		Framework   string                 `json:"framework"`
 		IsPublic    *bool                  `json:"is_public"`
 		Environment map[string]interface{} `json:"environment"`
+		mobile.ProjectMetadataFields
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -138,6 +140,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		BuildConfig:  make(map[string]interface{}),
 		Dependencies: make(map[string]interface{}),
 	}
+	mobile.ApplyProjectMetadata(&project, req.ProjectMetadataFields)
 
 	if err := h.DB.Create(&project).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, StandardResponse{
