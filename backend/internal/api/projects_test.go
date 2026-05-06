@@ -160,6 +160,55 @@ func TestGetProjectMobileValidationPreparesAndReportsSourceStatus(t *testing.T) 
 	require.True(t, hasValidationCheck(response.Validation, "release_truth", mobile.MobileValidationPassed))
 }
 
+func TestGetProjectMobileScorecardReportsBlockersUntilNativeProofExists(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+
+	project := models.Project{
+		Name:                      "Mobile Scorecard",
+		Language:                  "typescript",
+		OwnerID:                   userID,
+		TargetPlatform:            string(mobile.TargetPlatformMobileExpo),
+		MobilePlatforms:           []string{"android", "ios"},
+		MobileFramework:           string(mobile.MobileFrameworkExpoReactNative),
+		MobileReleaseLevel:        string(mobile.ReleaseSourceOnly),
+		GeneratedMobileClientPath: "mobile/",
+		MobileBuildStatus:         "not_requested",
+	}
+	require.NoError(t, gormDB.Create(&project).Error)
+
+	spec := mobile.FieldServiceContractorQuoteSpec()
+	spec.App.Slug = "mobile-scorecard-spec"
+	specJSON, err := json.Marshal(spec)
+	require.NoError(t, err)
+	require.NoError(t, gormDB.Create(&models.CompletedBuild{
+		BuildID:        "mobile-scorecard-build",
+		UserID:         userID,
+		ProjectID:      &project.ID,
+		Status:         "completed",
+		TargetPlatform: string(mobile.TargetPlatformMobileExpo),
+		MobileSpecJSON: string(specJSON),
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/mobile/scorecard", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.GetProjectMobileScorecard(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Scorecard mobile.MobileReadinessScorecard `json:"scorecard"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.False(t, response.Scorecard.IsReady)
+	require.Less(t, response.Scorecard.OverallScore, response.Scorecard.TargetScore)
+	require.GreaterOrEqual(t, readinessCategoryScore(response.Scorecard, "source_generation"), 95)
+	require.Equal(t, 0, readinessCategoryScore(response.Scorecard, "credentials_signing"))
+	require.Contains(t, response.Scorecard.Blockers, "Add encrypted user-provided mobile credential vault and validate EAS/Apple/Google signing prerequisites.")
+}
+
 func TestCreateProjectRejectsPublicProjectOnFreePlan(t *testing.T) {
 	server, userID, gormDB := newProjectAPITestServer(t, "free")
 
@@ -216,4 +265,13 @@ func hasValidationCheck(report mobile.MobileValidationReport, id string, status 
 		}
 	}
 	return false
+}
+
+func readinessCategoryScore(scorecard mobile.MobileReadinessScorecard, id string) int {
+	for _, category := range scorecard.Categories {
+		if category.ID == id {
+			return category.Score
+		}
+	}
+	return -1
 }

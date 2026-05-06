@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { cn, formatFileSize, formatRelativeTime, getFileIcon } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { AIUsage, Execution, File } from '@/types'
-import type { MobileValidationReport, MobileValidationStatus } from '@/services/api'
+import type { MobileReadinessScorecard, MobileValidationReport, MobileValidationStatus } from '@/services/api'
 import { Badge, Button, Loading } from '@/components/ui'
 import {
   Activity,
@@ -87,6 +87,13 @@ const validationStatusClasses: Record<MobileValidationStatus, string> = {
   not_mobile: 'border-white/10 bg-white/[0.03] text-gray-300',
 }
 
+const readinessStatusClasses: Record<string, string> = {
+  complete: 'border-emerald-300/20 bg-emerald-300/10 text-emerald-100',
+  partial: 'border-cyan-300/20 bg-cyan-300/10 text-cyan-100',
+  blocked: 'border-red-300/20 bg-red-300/10 text-red-100',
+  not_applicable: 'border-white/10 bg-white/[0.03] text-gray-300',
+}
+
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   className,
   projectId,
@@ -100,6 +107,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const [aiUsage, setAIUsage] = useState<AIUsage | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [mobileValidation, setMobileValidation] = useState<MobileValidationReport | null>(null)
+  const [mobileScorecard, setMobileScorecard] = useState<MobileReadinessScorecard | null>(null)
   const [isMobileValidationLoading, setIsMobileValidationLoading] = useState(false)
 
   const {
@@ -131,26 +139,41 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   useEffect(() => {
     if (!currentProjectId || !isMobileProject) {
       setMobileValidation(null)
+      setMobileScorecard(null)
       setIsMobileValidationLoading(false)
       return
     }
 
     let cancelled = false
     setIsMobileValidationLoading(true)
-    void apiService.getProjectMobileValidation(currentProjectId)
-      .then((validation) => {
+    void Promise.allSettled([
+      apiService.getProjectMobileValidation(currentProjectId),
+      apiService.getProjectMobileScorecard(currentProjectId),
+    ])
+      .then(([validationResult, scorecardResult]) => {
         if (!cancelled) {
-          setMobileValidation(validation)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMobileValidation({
-            status: 'failed',
-            summary: 'Unable to load mobile validation status.',
-            checks: [],
-            errors: ['Unable to load mobile validation status.'],
-          })
+          if (validationResult.status === 'fulfilled') {
+            setMobileValidation(validationResult.value)
+          } else {
+            setMobileValidation({
+              status: 'failed',
+              summary: 'Unable to load mobile validation status.',
+              checks: [],
+              errors: ['Unable to load mobile validation status.'],
+            })
+          }
+          if (scorecardResult.status === 'fulfilled') {
+            setMobileScorecard(scorecardResult.value)
+          } else {
+            setMobileScorecard({
+              overall_score: 0,
+              target_score: 95,
+              is_ready: false,
+              summary: 'Unable to load mobile readiness scorecard.',
+              categories: [],
+              blockers: ['Unable to load mobile readiness scorecard.'],
+            })
+          }
         }
       })
       .finally(() => {
@@ -538,6 +561,48 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                     </>
                   ) : (
                     <div className="mt-3 text-sm font-medium text-gray-300">Validation not loaded yet.</div>
+                  )}
+                </div>
+                <div className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4" data-testid="mobile-readiness-scorecard">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.24em] text-gray-500">95% Readiness Target</div>
+                      <div className="mt-2 text-sm font-medium text-white">
+                        {isMobileValidationLoading ? 'Scoring mobile launch evidence...' : `${mobileScorecard?.overall_score ?? 0}% / ${mobileScorecard?.target_score ?? 95}%`}
+                      </div>
+                    </div>
+                    {mobileScorecard ? (
+                      <span className={cn(
+                        'shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]',
+                        mobileScorecard.is_ready ? readinessStatusClasses.complete : readinessStatusClasses.blocked
+                      )}>
+                        {mobileScorecard.is_ready ? 'Ready' : 'Blocked'}
+                      </span>
+                    ) : null}
+                  </div>
+                  {mobileScorecard ? (
+                    <>
+                      <p className="mt-3 text-xs leading-5 text-gray-300">{mobileScorecard.summary}</p>
+                      {mobileScorecard.categories.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          {mobileScorecard.categories.slice(0, 5).map((category) => (
+                            <div key={category.id} className="flex items-start justify-between gap-3 text-xs">
+                              <span className="text-gray-300">{category.label}</span>
+                              <span className={cn('shrink-0 rounded-full px-2 py-0.5 font-medium', readinessStatusClasses[category.status] || readinessStatusClasses.partial)}>
+                                {category.score}%
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {mobileScorecard.blockers?.length ? (
+                        <div className="mt-3 rounded-xl border border-red-300/12 bg-red-300/8 px-3 py-2 text-xs leading-5 text-red-50/90">
+                          Next blocker: {mobileScorecard.blockers[0]}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="mt-3 text-xs leading-5 text-gray-300">Readiness scorecard not loaded yet.</p>
                   )}
                 </div>
                 <div className="rounded-2xl border border-amber-300/16 bg-amber-300/8 px-4 py-4">

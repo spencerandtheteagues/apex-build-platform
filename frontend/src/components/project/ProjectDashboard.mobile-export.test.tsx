@@ -72,6 +72,17 @@ describe('ProjectDashboard mobile export visibility', () => {
           },
         ],
       }),
+      getProjectMobileScorecard: vi.fn().mockResolvedValue({
+        overall_score: 61,
+        target_score: 95,
+        is_ready: false,
+        summary: 'Mobile readiness is 61% toward the 95% launch-readiness target.',
+        categories: [
+          { id: 'source_generation', label: 'Expo source generation', score: 100, target: 95, status: 'complete', summary: 'Generated Expo project file coverage.' },
+          { id: 'native_artifacts', label: 'Native artifacts', score: 0, target: 95, status: 'blocked', summary: 'Signed Android/iOS artifact proof.' },
+        ],
+        blockers: ['Produce a signed Android APK/AAB artifact through EAS Build.'],
+      }),
       exportProject: vi.fn(),
       executeProject: vi.fn(),
     }
@@ -97,7 +108,11 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(screen.getByText(/Native APK\/AAB, iOS builds, TestFlight, and store submission are separate gated workflows/)).toBeTruthy()
     expect(await screen.findByText('Validation passed')).toBeTruthy()
     expect(screen.getByText('Mobile source package passed validation.')).toBeTruthy()
+    expect(await screen.findByText('61% / 95%')).toBeTruthy()
+    expect(screen.getByText('95% Readiness Target')).toBeTruthy()
+    expect(screen.getByText(/Next blocker: Produce a signed Android APK\/AAB artifact through EAS Build/)).toBeTruthy()
     expect(mockApiService.getProjectMobileValidation).toHaveBeenCalledWith(42)
+    expect(mockApiService.getProjectMobileScorecard).toHaveBeenCalledWith(42)
   })
 
   it('does not show mobile export messaging for legacy web projects', async () => {
@@ -113,6 +128,7 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(screen.queryByText('Expo/React Native export is source-ready')).toBeNull()
     await waitFor(() => {
       expect(mockApiService.getProjectMobileValidation).not.toHaveBeenCalled()
+      expect(mockApiService.getProjectMobileScorecard).not.toHaveBeenCalled()
     })
   })
 })
