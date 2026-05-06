@@ -1035,11 +1035,33 @@ func main() {
 			Credentials: mobile.NewMobileCredentialVault(database.GetDB(), secretsManager),
 		})
 	}
-	server.SetMobileBuildService(mobile.NewMobileBuildService(
+	mobileBuildService := mobile.NewMobileBuildService(
 		mobileFlags,
 		mobileBuildProvider,
 		mobile.NewGormMobileBuildStore(database.GetDB()),
-	))
+	)
+	server.SetMobileBuildService(mobileBuildService)
+	var mobileBuildPollerCancel context.CancelFunc
+	if mobileFlags.MobileEASBuildEnabled && mobileFlags.MobileEASPollingEnabled && mobileBuildProvider != nil {
+		mobileBuildPollerCtx, cancel := context.WithCancel(context.Background())
+		mobileBuildPollerCancel = cancel
+		mobileBuildPoller := mobile.NewMobileBuildPoller(database.GetDB(), mobileBuildService, mobile.MobileBuildPollerConfig{
+			Interval:  getEnvDuration("MOBILE_EAS_POLL_INTERVAL", time.Minute),
+			MinAge:    getEnvDuration("MOBILE_EAS_POLL_MIN_AGE", 30*time.Second),
+			BatchSize: getEnvInt("MOBILE_EAS_POLL_BATCH_SIZE", 10),
+		})
+		mobileBuildPoller.Start(mobileBuildPollerCtx)
+		startupRegistry.MarkReady("mobile_eas_poller", startup.TierOptional, "Mobile EAS build poller started", map[string]any{
+			"enabled":    true,
+			"interval":   getEnvDuration("MOBILE_EAS_POLL_INTERVAL", time.Minute).String(),
+			"min_age":    getEnvDuration("MOBILE_EAS_POLL_MIN_AGE", 30*time.Second).String(),
+			"batch_size": getEnvInt("MOBILE_EAS_POLL_BATCH_SIZE", 10),
+		})
+	} else {
+		startupRegistry.MarkReady("mobile_eas_poller", startup.TierOptional, "Mobile EAS build poller disabled", map[string]any{
+			"enabled": false,
+		})
+	}
 
 	// Initialize Email Service (SMTP transactional email for verification codes etc.)
 	emailSvc := email.NewService()
@@ -1123,13 +1145,19 @@ func main() {
 	}
 	log.Println("HTTP server stopped")
 
-	// 2. Stop all preview backend processes (prevents orphan child processes)
+	// 2. Stop mobile build poller before shutting down dependent services.
+	if mobileBuildPollerCancel != nil {
+		mobileBuildPollerCancel()
+		log.Println("Mobile EAS build poller stopped")
+	}
+
+	// 3. Stop all preview backend processes (prevents orphan child processes)
 	if sr := previewHandler.GetServerRunner(); sr != nil {
 		sr.StopAll(shutdownCtx)
 		log.Println("Preview backend processes stopped")
 	}
 
-	// 3. Shutdown agent manager (cancels in-flight builds, closes task queues)
+	// 4. Shutdown agent manager (cancels in-flight builds, closes task queues)
 	agentManager.Shutdown()
 	log.Println("Agent manager stopped")
 
@@ -1182,6 +1210,7 @@ func newStartupRegistry() *startup.Registry {
 	registry.Register("admin_controls", startup.TierOptional, "Waiting for admin controls initialization", nil)
 	registry.Register("usage_tracking", startup.TierOptional, "Waiting for usage tracker", nil)
 	registry.Register("metrics", startup.TierOptional, "Waiting for metrics subsystem", nil)
+	registry.Register("mobile_eas_poller", startup.TierOptional, "Waiting for mobile EAS build poller", nil)
 	return registry
 }
 

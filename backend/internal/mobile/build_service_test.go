@@ -65,6 +65,80 @@ func TestGormMobileBuildStorePersistsJobsAndRedactsLogs(t *testing.T) {
 	}
 }
 
+func TestGormMobileBuildStoreListsPollableJobs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&MobileBuildRecord{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	store := NewGormMobileBuildStore(db)
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	jobs := []MobileBuildJob{
+		{
+			ID:              "mbld_old_building",
+			ProjectID:       44,
+			UserID:          7,
+			Platform:        MobilePlatformAndroid,
+			Profile:         MobileBuildProfilePreview,
+			ReleaseLevel:    ReleaseInternalAndroidAPK,
+			Status:          MobileBuildBuilding,
+			ProviderBuildID: "eas-old",
+			CreatedAt:       now.Add(-10 * time.Minute),
+			UpdatedAt:       now.Add(-2 * time.Minute),
+		},
+		{
+			ID:              "mbld_recent_building",
+			ProjectID:       44,
+			UserID:          7,
+			Platform:        MobilePlatformAndroid,
+			Profile:         MobileBuildProfilePreview,
+			ReleaseLevel:    ReleaseInternalAndroidAPK,
+			Status:          MobileBuildBuilding,
+			ProviderBuildID: "eas-recent",
+			CreatedAt:       now,
+			UpdatedAt:       now.Add(-5 * time.Second),
+		},
+		{
+			ID:              "mbld_done",
+			ProjectID:       44,
+			UserID:          7,
+			Platform:        MobilePlatformAndroid,
+			Profile:         MobileBuildProfilePreview,
+			ReleaseLevel:    ReleaseInternalAndroidAPK,
+			Status:          MobileBuildSucceeded,
+			ProviderBuildID: "eas-done",
+			CreatedAt:       now.Add(-10 * time.Minute),
+			UpdatedAt:       now.Add(-2 * time.Minute),
+		},
+		{
+			ID:           "mbld_no_provider",
+			ProjectID:    44,
+			UserID:       7,
+			Platform:     MobilePlatformAndroid,
+			Profile:      MobileBuildProfilePreview,
+			ReleaseLevel: ReleaseInternalAndroidAPK,
+			Status:       MobileBuildBuilding,
+			CreatedAt:    now.Add(-10 * time.Minute),
+			UpdatedAt:    now.Add(-2 * time.Minute),
+		},
+	}
+	for _, job := range jobs {
+		if err := store.Save(context.Background(), job); err != nil {
+			t.Fatalf("save job %s: %v", job.ID, err)
+		}
+	}
+
+	pollable, err := store.ListPollable(context.Background(), pollableMobileBuildStatuses(), now.Add(-30*time.Second), 10)
+	if err != nil {
+		t.Fatalf("list pollable: %v", err)
+	}
+	if len(pollable) != 1 || pollable[0].ID != "mbld_old_building" {
+		t.Fatalf("expected only old active provider-backed job, got %+v", pollable)
+	}
+}
+
 func TestMobileBuildServiceRejectsWhenEASBuildDisabled(t *testing.T) {
 	provider := &mockMobileBuildProvider{}
 	service := NewMobileBuildService(FeatureFlags{}, provider, NewInMemoryMobileBuildStore())
@@ -353,6 +427,68 @@ func TestMobileBuildServiceRefreshProviderErrorDoesNotMarkBuildFailed(t *testing
 	}
 }
 
+func TestMobileBuildServiceRefreshesPollableBuilds(t *testing.T) {
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	store := NewInMemoryMobileBuildStore()
+	jobs := []MobileBuildJob{
+		{
+			ID:              "mbld_pollable",
+			ProjectID:       71,
+			UserID:          9,
+			Platform:        MobilePlatformAndroid,
+			Profile:         MobileBuildProfilePreview,
+			ReleaseLevel:    ReleaseInternalAndroidAPK,
+			Status:          MobileBuildBuilding,
+			Provider:        "mock-eas",
+			ProviderBuildID: "eas-build-123",
+			CreatedAt:       now.Add(-10 * time.Minute),
+			UpdatedAt:       now.Add(-2 * time.Minute),
+		},
+		{
+			ID:              "mbld_recent",
+			ProjectID:       71,
+			UserID:          9,
+			Platform:        MobilePlatformAndroid,
+			Profile:         MobileBuildProfilePreview,
+			ReleaseLevel:    ReleaseInternalAndroidAPK,
+			Status:          MobileBuildBuilding,
+			Provider:        "mock-eas",
+			ProviderBuildID: "eas-build-456",
+			CreatedAt:       now,
+			UpdatedAt:       now.Add(-5 * time.Second),
+		},
+	}
+	for _, job := range jobs {
+		if err := store.Save(context.Background(), job); err != nil {
+			t.Fatalf("save job %s: %v", job.ID, err)
+		}
+	}
+	provider := &mockMobileBuildProvider{
+		name: "mock-eas",
+		refreshResult: MobileBuildProviderResult{
+			Status:      MobileBuildSucceeded,
+			ArtifactURL: "https://artifacts.example.com/pollable.apk",
+		},
+	}
+	service := NewMobileBuildService(
+		mobileBuildTestFlags(),
+		provider,
+		store,
+		WithMobileBuildClock(func() time.Time { return now }),
+	)
+
+	refreshed, errs := service.RefreshPollableBuilds(context.Background(), 10, 30*time.Second)
+	if len(errs) != 0 {
+		t.Fatalf("expected no refresh errors, got %+v", errs)
+	}
+	if provider.refreshCalls != 1 || provider.lastRefreshJob.ID != "mbld_pollable" {
+		t.Fatalf("expected only old pollable job to refresh, got provider=%+v", provider)
+	}
+	if len(refreshed) != 1 || refreshed[0].Status != MobileBuildSucceeded || refreshed[0].ArtifactURL == "" {
+		t.Fatalf("unexpected refreshed jobs %+v", refreshed)
+	}
+}
+
 func TestMobileBuildServiceCancelsProviderBuild(t *testing.T) {
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
 	store := NewInMemoryMobileBuildStore()
@@ -466,6 +602,49 @@ func TestInMemoryMobileBuildStoreRoundTrip(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].ID != job.ID {
 		t.Fatalf("unexpected project jobs %+v", list)
+	}
+}
+
+func TestInMemoryMobileBuildStoreListsPollableJobsByOldestUpdate(t *testing.T) {
+	store := NewInMemoryMobileBuildStore()
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	for _, job := range []MobileBuildJob{
+		{
+			ID:              "mbld_newer",
+			ProjectID:       44,
+			UserID:          7,
+			Platform:        MobilePlatformAndroid,
+			Profile:         MobileBuildProfilePreview,
+			ReleaseLevel:    ReleaseInternalAndroidAPK,
+			Status:          MobileBuildBuilding,
+			ProviderBuildID: "eas-newer",
+			CreatedAt:       now.Add(-10 * time.Minute),
+			UpdatedAt:       now.Add(-2 * time.Minute),
+		},
+		{
+			ID:              "mbld_older",
+			ProjectID:       44,
+			UserID:          7,
+			Platform:        MobilePlatformAndroid,
+			Profile:         MobileBuildProfilePreview,
+			ReleaseLevel:    ReleaseInternalAndroidAPK,
+			Status:          MobileBuildQueued,
+			ProviderBuildID: "eas-older",
+			CreatedAt:       now.Add(-10 * time.Minute),
+			UpdatedAt:       now.Add(-3 * time.Minute),
+		},
+	} {
+		if err := store.Save(context.Background(), job); err != nil {
+			t.Fatalf("save job %s: %v", job.ID, err)
+		}
+	}
+
+	pollable, err := store.ListPollable(context.Background(), pollableMobileBuildStatuses(), now.Add(-30*time.Second), 1)
+	if err != nil {
+		t.Fatalf("list pollable: %v", err)
+	}
+	if len(pollable) != 1 || pollable[0].ID != "mbld_older" {
+		t.Fatalf("expected oldest pollable job first, got %+v", pollable)
 	}
 }
 
