@@ -597,3 +597,29 @@
   - Frontend ProjectDashboard test proving web projects do not show mobile messaging.
   - Frontend typecheck.
   - Handler ZIP export test proving the legacy project download endpoint prepares mobile source files.
+
+## Mobile source validation report
+- Source of truth:
+  - `backend/internal/mobile/source_validation.go` `MobileValidationReport`, `MobileValidationCheck`, and status enum.
+  - `backend/internal/mobile/export_files.go` prepares Expo source before validation for project owners.
+- Producers:
+  - `backend/internal/api/handlers.go` `GetProjectMobileValidation`.
+  - `backend/internal/mobile.ValidateProjectSourcePackage`.
+- Transport:
+  - `GET /api/v1/projects/:id/mobile/validation`.
+  - Response shape: `{ "validation": MobileValidationReport }`.
+- Consumers:
+  - `frontend/src/services/api.ts` `getProjectMobileValidation`.
+  - `frontend/src/components/project/ProjectDashboard.tsx` mobile validation panel.
+- Defaults / zero-value behavior:
+  - Non-mobile projects return `not_mobile` if the backend is called directly; dashboard does not call the endpoint for web projects.
+  - Missing validation data renders as loading/not-loaded, not as success.
+  - `source_only` release level can pass without native build artifacts; native release levels fail unless the mobile build status is `succeeded`.
+- Backward compatibility risk:
+  - Additive read-only endpoint and optional UI panel only; existing project, ZIP, GitHub, and build contracts are unchanged.
+  - Stale clients ignore the endpoint and keep current behavior.
+- Required tests / validations:
+  - Backend mobile package tests for passed source validation, missing required files, and false native release claims.
+  - Backend API handler test proving validation prepares generated files and reports source/store status.
+  - Frontend API test for route shape.
+  - Frontend ProjectDashboard test for mobile validation rendering and web-project non-call.

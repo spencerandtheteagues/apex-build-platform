@@ -548,6 +548,11 @@ export class ApiService {
     return response.data.project
   }
 
+  async getProjectMobileValidation(projectId: number): Promise<MobileValidationReport> {
+    const response = await this.client.get<{ validation: MobileValidationReport }>(`/projects/${projectId}/mobile/validation`)
+    return response.data.validation
+  }
+
   async updateProject(id: number, data: Partial<Project>): Promise<Project> {
     const response = await this.client.put<{ project?: Project; data?: { project?: Project } }>(`/projects/${id}`, data)
     return response.data.project || response.data.data?.project || (response.data as unknown as Project)
@@ -3671,6 +3676,29 @@ export type MobileCapability =
   | 'biometrics'
   | 'deepLinks'
   | 'universalLinks'
+
+export type MobileValidationStatus = 'passed' | 'warning' | 'failed' | 'not_mobile'
+
+export interface MobileValidationCheck {
+  id: string
+  label: string
+  status: MobileValidationStatus
+  detail: string
+  required: boolean
+}
+
+export interface MobileValidationReport {
+  status: MobileValidationStatus
+  target_platform?: TargetPlatform | string
+  release_level?: MobileReleaseLevel | string
+  mobile_build_status?: string
+  store_readiness_state?: string
+  summary: string
+  checks: MobileValidationCheck[]
+  missing_files?: string[]
+  warnings?: string[]
+  errors?: string[]
+}
 
 export type BuildMessageTargetMode = 'lead' | 'agent' | 'role' | 'all_agents'
 

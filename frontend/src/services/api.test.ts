@@ -113,6 +113,26 @@ describe('architecture intelligence API', () => {
   })
 })
 
+describe('mobile validation API', () => {
+  it('fetches project mobile validation from the project route', async () => {
+    const service = new ApiService('/api/v1')
+    const get = vi.spyOn(service.client, 'get').mockResolvedValue({
+      data: {
+        validation: {
+          status: 'passed',
+          summary: 'Mobile source package passed validation.',
+          checks: [],
+        },
+      },
+    } as any)
+
+    const validation = await service.getProjectMobileValidation(42)
+
+    expect(get).toHaveBeenCalledWith('/projects/42/mobile/validation')
+    expect(validation.status).toBe('passed')
+  })
+})
+
 describe('logout', () => {
   it('logs out via cookie auth and clears legacy token storage', async () => {
     const service = new ApiService('/api/v1')

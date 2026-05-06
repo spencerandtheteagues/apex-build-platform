@@ -1042,6 +1042,39 @@ func (s *Server) DownloadProject(c *gin.Context) {
 	}
 }
 
+// GetProjectMobileValidation validates the generated Expo source package for a project.
+func (s *Server) GetProjectMobileValidation(c *gin.Context) {
+	projectID := c.Param("id")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	var project models.Project
+	query := s.db.DB.Where("id = ?", projectID)
+	query = query.Where("owner_id = ? OR is_public = ?", uid, true)
+	if err := query.First(&project).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID == uid {
+		if err := mobile.PrepareExpoProjectFiles(c.Request.Context(), s.db.DB, project); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare mobile validation files"})
+			return
+		}
+	}
+
+	var files []models.File
+	if err := s.db.DB.Where("project_id = ? AND (path LIKE ? OR path LIKE ?)", project.ID, "mobile/%", "/mobile/%").Find(&files).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch mobile files"})
+		return
+	}
+
+	report := mobile.ValidateProjectSourcePackage(project, files)
+	c.JSON(http.StatusOK, gin.H{"validation": report})
+}
+
 // UpdateFile updates a file's content
 func (s *Server) UpdateFile(c *gin.Context) {
 	fileID := c.Param("id")

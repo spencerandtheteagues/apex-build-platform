@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Project } from '@/types'
@@ -9,20 +9,14 @@ import ProjectDashboard from './ProjectDashboard'
 
 // Vitest in this repo predates vi.hoisted; var keeps the mock factory safely hoistable.
 var mockCurrentProject: Project | null = null
+var mockApiService: any
 
 vi.mock('@/hooks/useStore', () => ({
   useStore: () => ({
     currentProject: mockCurrentProject,
     files: [],
     collaborationUsers: [],
-    apiService: {
-      getProject: vi.fn(),
-      getFiles: vi.fn(),
-      getExecutionHistory: vi.fn(),
-      getAIUsage: vi.fn(),
-      exportProject: vi.fn(),
-      executeProject: vi.fn(),
-    },
+    apiService: mockApiService,
     setCurrentProject: vi.fn(),
     addNotification: vi.fn(),
   }),
@@ -59,9 +53,31 @@ const baseProject: Project = {
 describe('ProjectDashboard mobile export visibility', () => {
   beforeEach(() => {
     mockCurrentProject = null
+    mockApiService = {
+      getProject: vi.fn(),
+      getFiles: vi.fn(),
+      getExecutionHistory: vi.fn(),
+      getAIUsage: vi.fn(),
+      getProjectMobileValidation: vi.fn().mockResolvedValue({
+        status: 'passed',
+        summary: 'Mobile source package passed validation.',
+        store_readiness_state: 'draft_ready_needs_manual_store_assets',
+        checks: [
+          {
+            id: 'required_files',
+            label: 'Required mobile files',
+            status: 'passed',
+            detail: 'All required files are present.',
+            required: true,
+          },
+        ],
+      }),
+      exportProject: vi.fn(),
+      executeProject: vi.fn(),
+    }
   })
 
-  it('shows truthful Expo source export messaging for mobile projects', () => {
+  it('shows truthful Expo source export and validation messaging for mobile projects', async () => {
     mockCurrentProject = {
       ...baseProject,
       target_platform: 'mobile_expo',
@@ -79,9 +95,12 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(screen.getByText('Android + iOS')).toBeTruthy()
     expect(screen.getByText('Source only')).toBeTruthy()
     expect(screen.getByText(/Native APK\/AAB, iOS builds, TestFlight, and store submission are separate gated workflows/)).toBeTruthy()
+    expect(await screen.findByText('Validation passed')).toBeTruthy()
+    expect(screen.getByText('Mobile source package passed validation.')).toBeTruthy()
+    expect(mockApiService.getProjectMobileValidation).toHaveBeenCalledWith(42)
   })
 
-  it('does not show mobile export messaging for legacy web projects', () => {
+  it('does not show mobile export messaging for legacy web projects', async () => {
     mockCurrentProject = {
       ...baseProject,
       name: 'Apex Web App',
@@ -92,5 +111,8 @@ describe('ProjectDashboard mobile export visibility', () => {
 
     expect(screen.queryByTestId('mobile-export-readiness')).toBeNull()
     expect(screen.queryByText('Expo/React Native export is source-ready')).toBeNull()
+    await waitFor(() => {
+      expect(mockApiService.getProjectMobileValidation).not.toHaveBeenCalled()
+    })
   })
 })
