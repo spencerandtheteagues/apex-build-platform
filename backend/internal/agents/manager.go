@@ -12238,23 +12238,35 @@ func generatedPostCSSConfigSatisfied(files []GeneratedFile, plan *generatedFileP
 			continue
 		}
 		content := plan.content(p)
-		return strings.Contains(content, "tailwindcss") &&
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		if strings.Contains(content, "tailwindcss") &&
 			strings.Contains(content, "autoprefixer") &&
-			!configSyntaxConflictsWithModuleMode(p, content, packageUsesESM)
+			!configSyntaxConflictsWithModuleMode(p, content, packageUsesESM) {
+			return true
+		}
 	}
 	return false
 }
 
 func generatedTailwindConfigSatisfied(files []GeneratedFile, plan *generatedFilePatchPlan, packageUsesESM bool) bool {
+	checked := false
 	for _, f := range files {
 		p := filepath.ToSlash(strings.TrimSpace(f.Path))
 		if p != "tailwind.config.js" && p != "tailwind.config.cjs" && p != "tailwind.config.mjs" && p != "tailwind.config.ts" {
 			continue
 		}
 		content := plan.content(p)
-		return strings.TrimSpace(content) != "" && !configSyntaxConflictsWithModuleMode(p, content, packageUsesESM)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		checked = true
+		if !configSyntaxConflictsWithModuleMode(p, content, packageUsesESM) {
+			return true
+		}
 	}
-	return true
+	return !checked
 }
 
 func (am *AgentManager) clearStaleDependencyValidationError(build *Build, readinessErrors []string) string {
@@ -17016,6 +17028,407 @@ func promptLooksLikeBookingApp(description string) bool {
 	return signals >= 3
 }
 
+func promptLooksLikeInventoryApp(description string) bool {
+	normalized := strings.ToLower(description)
+	if strings.TrimSpace(normalized) == "" {
+		return false
+	}
+	if promptLooksLikeFieldOpsApp(normalized) || promptLooksLikeDocumentIntelligenceApp(normalized) ||
+		promptLooksLikeBookingApp(normalized) || promptLooksLikeClientPortalApp(normalized) || promptLooksLikeCRMApp(normalized) {
+		return false
+	}
+	if strings.Contains(normalized, "stockpilot") {
+		return true
+	}
+	if !strings.Contains(normalized, "inventory") && !strings.Contains(normalized, "warehouse") && !strings.Contains(normalized, "stock") {
+		return false
+	}
+	signals := 0
+	for _, token := range []string{"sku", "skus", "reorder", "purchase order", "purchase orders", "receiving", "supplier", "vendor", "warehouse", "fulfillment", "low stock", "stock ledger", "adjustment", "inventory table", "product detail", "cycle count"} {
+		if strings.Contains(normalized, token) {
+			signals++
+		}
+	}
+	return signals >= 2
+}
+
+func syntheticInventoryAppTSX() string {
+	return `import { type FormEvent, useMemo, useState } from "react";
+
+type Page = "Dashboard" | "Inventory Table" | "Product Detail Page" | "Purchase Orders Page" | "Receiving Workflow" | "Settings Page";
+type StockStatus = "Healthy" | "Low Stock" | "Reorder" | "Receiving" | "Verified";
+type POStatus = "Draft" | "Approved" | "Ordered" | "Partially Received" | "Received";
+
+type Product = {
+  sku: string;
+  name: string;
+  category: string;
+  location: string;
+  supplier: string;
+  onHand: number;
+  reorderPoint: number;
+  unitCost: number;
+  status: StockStatus;
+  history: string[];
+};
+
+type PurchaseOrder = {
+  id: string;
+  vendor: string;
+  status: POStatus;
+  eta: string;
+  lineItems: Array<{ sku: string; quantity: number; cost: number }>;
+};
+
+const initialProducts: Product[] = [
+  { sku: "HVAC-COMP-24", name: "24K BTU compressor", category: "HVAC", location: "Aisle A-04", supplier: "Northline Supply", onHand: 8, reorderPoint: 12, unitCost: 690, status: "Reorder", history: ["stock ledger opening balance 14", "adjustment history -2 damaged", "purchase_receipt +4"] },
+  { sku: "PPE-GLOVE-L", name: "Safety gloves large", category: "PPE", location: "Bin C-11", supplier: "SafePro Industrial", onHand: 320, reorderPoint: 90, unitCost: 5, status: "Healthy", history: ["cycle count verified", "stock movement -40 fulfillment", "adjustment history +12"] },
+  { sku: "ROOF-SHINGLE-GR", name: "Graphite roof shingles", category: "Roofing", location: "Yard R-02", supplier: "Summit Materials", onHand: 74, reorderPoint: 80, unitCost: 38, status: "Low Stock", history: ["stock ledger opening balance 120", "stock movement -46 fulfillment"] },
+  { sku: "BAT-FORK-48V", name: "Forklift battery kit", category: "Equipment", location: "Dock D-01", supplier: "MotionFleet", onHand: 3, reorderPoint: 4, unitCost: 1220, status: "Receiving", history: ["purchase order PO-1048 approved", "receiving dock appointment scheduled"] },
+  { sku: "PLUMB-VALVE-2", name: "Two-inch brass valve", category: "Plumbing", location: "Aisle B-07", supplier: "Atlas Wholesale", onHand: 26, reorderPoint: 18, unitCost: 44, status: "Verified", history: ["cycle count accuracy confirmed", "stock ledger adjustment +1"] },
+];
+
+const initialOrders: PurchaseOrder[] = [
+  { id: "PO-1048", vendor: "MotionFleet", status: "Partially Received", eta: "May 9", lineItems: [{ sku: "BAT-FORK-48V", quantity: 4, cost: 1220 }, { sku: "HVAC-COMP-24", quantity: 6, cost: 690 }] },
+  { id: "PO-1051", vendor: "Summit Materials", status: "Ordered", eta: "May 11", lineItems: [{ sku: "ROOF-SHINGLE-GR", quantity: 90, cost: 38 }] },
+  { id: "PO-1054", vendor: "SafePro Industrial", status: "Approved", eta: "May 14", lineItems: [{ sku: "PPE-GLOVE-L", quantity: 200, cost: 5 }] },
+];
+
+function money(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function statusTone(status: StockStatus | POStatus) {
+  if (String(status).includes("Received") || status === "Healthy" || status === "Verified") return "border-emerald-300/40 bg-emerald-300/15 text-emerald-100";
+  if (status === "Low Stock" || status === "Reorder" || status === "Partially Received") return "border-amber-300/40 bg-amber-300/15 text-amber-100";
+  if (status === "Receiving" || status === "Ordered") return "border-cyan-300/40 bg-cyan-300/15 text-cyan-100";
+  return "border-slate-500/40 bg-slate-800/60 text-slate-200";
+}
+
+export default function App() {
+  const [page, setPage] = useState<Page>("Dashboard");
+  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [orders, setOrders] = useState<PurchaseOrder[]>(initialOrders);
+  const [selectedSku, setSelectedSku] = useState(initialProducts[0].sku);
+  const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [toast, setToast] = useState("");
+  const [receivedQuantity, setReceivedQuantity] = useState(2);
+  const [settings, setSettings] = useState({ warehouse: "North Dock", suppliers: "Northline Supply, Summit Materials, SafePro Industrial", reorderRules: "Auto-flag below reorder point" });
+  const [draftPO, setDraftPO] = useState({ vendor: "Atlas Wholesale", sku: "PLUMB-VALVE-2", quantity: "40", cost: "44" });
+
+  const selectedProduct = products.find((product) => product.sku === selectedSku) ?? products[0];
+  const categories = ["All", ...Array.from(new Set(products.map((product) => product.category)))];
+  const filteredProducts = products.filter((product) => {
+    const haystack = [product.sku, product.name, product.category, product.location, product.supplier, product.status].join(" ").toLowerCase();
+    return haystack.includes(query.toLowerCase()) && (categoryFilter === "All" || product.category === categoryFilter);
+  });
+  const metrics = useMemo(() => {
+    const stockValue = products.reduce((sum, product) => sum + product.onHand * product.unitCost, 0);
+    const lowStock = products.filter((product) => product.onHand <= product.reorderPoint).length;
+    const purchaseOrderValue = orders.reduce((sum, order) => sum + order.lineItems.reduce((lineSum, item) => lineSum + item.quantity * item.cost, 0), 0);
+    const receivingLines = orders.flatMap((order) => order.lineItems).length;
+    const fulfillmentRate = Math.round(((products.length - lowStock) / products.length) * 100);
+    return { stockValue, lowStock, purchaseOrderValue, receivingLines, fulfillmentRate };
+  }, [orders, products]);
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function submitPO(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const quantity = Number(draftPO.quantity);
+    const cost = Number(draftPO.cost);
+    if (!draftPO.vendor.trim() || !draftPO.sku.trim() || quantity <= 0 || cost <= 0) {
+      showToast("Complete vendor selector, SKU, quantity, and cost before creating a PO.");
+      return;
+    }
+    const next: PurchaseOrder = {
+      id: "PO-" + String(1055 + orders.length),
+      vendor: draftPO.vendor,
+      status: "Draft",
+      eta: "Pending ETA",
+      lineItems: [{ sku: draftPO.sku, quantity, cost }],
+    };
+    setOrders((current) => [next, ...current]);
+    showToast("Purchase order create PO form saved with line items and totals.");
+  }
+
+  function advancePOStatus(id: string) {
+    const flow: POStatus[] = ["Draft", "Approved", "Ordered", "Partially Received", "Received"];
+    setOrders((current) => current.map((order) => {
+      if (order.id !== id) return order;
+      const nextStatus = flow[Math.min(flow.indexOf(order.status) + 1, flow.length - 1)];
+      return { ...order, status: nextStatus };
+    }));
+    showToast("Purchase order status transitions updated.");
+  }
+
+  function receiveStock() {
+    if (receivedQuantity <= 0) {
+      showToast("Quantity validation failed.");
+      return;
+    }
+    setProducts((current) => current.map((product) => {
+      if (product.sku !== selectedProduct.sku) return product;
+      return {
+        ...product,
+        onHand: product.onHand + receivedQuantity,
+        status: "Verified",
+        history: ["purchase_receipt received via receiving workflow", "scan simulation barcode accepted", "quantity validation passed", ...product.history].slice(0, 6),
+      };
+    }));
+    showToast("Success toast: receiving workflow saved and put-away task created.");
+  }
+
+  function resetDemoData() {
+    setProducts(initialProducts);
+    setOrders(initialOrders);
+    setSelectedSku(initialProducts[0].sku);
+    setQuery("");
+    setCategoryFilter("All");
+    setSettings({ warehouse: "North Dock", suppliers: "Northline Supply, Summit Materials, SafePro Industrial", reorderRules: "Auto-flag below reorder point" });
+    showToast("Reset Demo Data complete.");
+  }
+
+  const nav: Page[] = ["Dashboard", "Inventory Table", "Product Detail Page", "Purchase Orders Page", "Receiving Workflow", "Settings Page"];
+
+  return (
+    <main className="min-h-screen bg-[#0F172A] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_16%_8%,rgba(34,211,238,0.2),transparent_28%),radial-gradient(circle_at_88%_14%,rgba(59,130,246,0.18),transparent_25%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,1))]" />
+      <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-5 py-6 md:px-8">
+        <header className="rounded-[2rem] border border-cyan-300/20 bg-slate-950/75 p-6 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.42em] text-cyan-200">Warehouse inventory control</p>
+              <h1 className="mt-3 text-4xl font-black tracking-tight text-white md:text-6xl">StockPilot</h1>
+              <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">Production-ready inventory management with dashboard KPIs, SKU search, filters, stock ledger detail, purchase orders, receiving workflow, and warehouse settings.</p>
+            </div>
+            <button type="button" onClick={() => setPage("Receiving Workflow")} className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 shadow-xl shadow-cyan-500/25">Open receiving workflow</button>
+          </div>
+          <nav className="mt-6 flex flex-wrap gap-2">
+            {nav.map((item) => (
+              <button key={item} type="button" onClick={() => setPage(item)} className={"rounded-full border px-4 py-2 text-sm font-semibold transition " + (page === item ? "border-cyan-300 bg-cyan-300 text-slate-950" : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-cyan-300/50 hover:text-white")}>{item}</button>
+            ))}
+          </nav>
+        </header>
+
+        {page === "Dashboard" && (
+          <section className="space-y-6" aria-label="Dashboard">
+            <div className="grid gap-4 md:grid-cols-5">
+              {[
+                ["Stock health", metrics.fulfillmentRate + "% fulfillment rate", "cycle count accuracy 98.2%"],
+                ["Inventory value", money(metrics.stockValue), "stock movement chart up 8%"],
+                ["Low stock SKUs", String(metrics.lowStock), "low stock reorder alerts"],
+                ["Purchase orders", money(metrics.purchaseOrderValue), "open purchase order pipeline"],
+                ["Receiving lines", String(metrics.receivingLines), "receiving and put-away work"],
+              ].map(([label, value, trend]) => (
+                <article key={label} className="rounded-3xl border border-cyan-300/10 bg-slate-900/75 p-5 shadow-xl shadow-black/20">
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{label}</p>
+                  <strong className="mt-4 block text-2xl font-black text-white">{value}</strong>
+                  <p className="mt-3 rounded-2xl bg-cyan-300/10 px-3 py-2 text-xs font-bold text-cyan-100">{trend}</p>
+                </article>
+              ))}
+            </div>
+            <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+              <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h2 className="text-2xl font-black text-white">Inventory movement chart</h2>
+                <svg viewBox="0 0 420 120" className="mt-5 h-36 w-full text-cyan-200" aria-label="stock movement chart">
+                  <polyline fill="none" stroke="currentColor" strokeWidth="5" points="0,88 60,76 120,86 180,42 240,54 300,28 360,46 420,22" />
+                </svg>
+              </article>
+              <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+                <h2 className="text-2xl font-black text-white">Reorder command queue</h2>
+                <div className="mt-5 space-y-3">
+                  {products.filter((product) => product.onHand <= product.reorderPoint).map((product) => (
+                    <button key={product.sku} type="button" onClick={() => { setSelectedSku(product.sku); setPage("Product Detail Page"); }} className="flex w-full items-center justify-between rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-left text-amber-100">
+                      <span>{product.sku} - {product.name}</span>
+                      <strong>{product.onHand}/{product.reorderPoint}</strong>
+                    </button>
+                  ))}
+                </div>
+              </article>
+            </div>
+          </section>
+        )}
+
+        {page === "Inventory Table" && (
+          <section className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6" aria-label="Inventory Table">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-2xl font-black text-white">Inventory Table</h2>
+                <p className="mt-2 text-slate-300">SKU search, category filters, location, stock level, reorder point, and status badges.</p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SKU search..." className="rounded-2xl border border-slate-700 bg-slate-950 p-3 outline-none focus:border-cyan-300" />
+                <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="rounded-2xl border border-slate-700 bg-slate-950 p-3 outline-none focus:border-cyan-300">
+                  {categories.map((category) => <option key={category}>{category}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-700/70">
+              <div className="grid bg-slate-950/70 px-4 py-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 md:grid-cols-[0.9fr_1.2fr_0.7fr_0.7fr_0.6fr_0.6fr_0.7fr]">
+                <span>SKU</span><span>Product</span><span>Category</span><span>Location</span><span>On hand</span><span>Reorder</span><span>Status</span>
+              </div>
+              {filteredProducts.map((product) => (
+                <button key={product.sku} type="button" onClick={() => { setSelectedSku(product.sku); setPage("Product Detail Page"); }} className="grid w-full gap-2 border-t border-slate-800 px-4 py-4 text-left text-sm transition hover:bg-cyan-300/5 md:grid-cols-[0.9fr_1.2fr_0.7fr_0.7fr_0.6fr_0.6fr_0.7fr]">
+                  <strong className="text-cyan-100">{product.sku}</strong>
+                  <span className="text-white">{product.name}</span>
+                  <span>{product.category}</span>
+                  <span>{product.location}</span>
+                  <span>{product.onHand}</span>
+                  <span>{product.reorderPoint}</span>
+                  <span className={"w-fit rounded-full border px-3 py-1 text-xs font-bold " + statusTone(product.status)}>{product.status}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === "Product Detail Page" && (
+          <section className="grid gap-6 lg:grid-cols-[1fr_0.9fr]" aria-label="Product Detail Page">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <p className="text-xs font-bold uppercase tracking-[0.34em] text-cyan-200">Product detail page</p>
+              <h2 className="mt-3 text-3xl font-black text-white">{selectedProduct.name}</h2>
+              <p className="mt-2 text-slate-300">Selected product {selectedProduct.sku} in {selectedProduct.location} from supplier info {selectedProduct.supplier}.</p>
+              <div className="mt-6 grid gap-4 md:grid-cols-3">
+                <Info label="Quantity on hand" value={String(selectedProduct.onHand)} hint="quantity_on_hand live count" />
+                <Info label="Reorder point" value={String(selectedProduct.reorderPoint)} hint="reorder calculator threshold" />
+                <Info label="Inventory value" value={money(selectedProduct.onHand * selectedProduct.unitCost)} hint="unit cost valuation" />
+              </div>
+              <div className="mt-6 rounded-3xl border border-cyan-300/10 bg-slate-950/60 p-5">
+                <h3 className="text-xl font-black text-white">Reorder calculator</h3>
+                <p className="mt-3 text-slate-300">Suggested reorder quantity: {Math.max(selectedProduct.reorderPoint * 2 - selectedProduct.onHand, 0)} units based on current stock ledger and supplier lead time.</p>
+              </div>
+            </article>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Stock ledger and adjustment history</h3>
+              <div className="mt-5 space-y-3">
+                {selectedProduct.history.map((item) => (
+                  <p key={item} className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4 text-sm text-slate-300">{item}</p>
+                ))}
+              </div>
+            </article>
+          </section>
+        )}
+
+        {page === "Purchase Orders Page" && (
+          <section className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]" aria-label="Purchase Orders Page">
+            <form onSubmit={submitPO} className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Create PO form</h2>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Vendor selector
+                <input value={draftPO.vendor} onChange={(event) => setDraftPO((current) => ({ ...current, vendor: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-4 block text-sm font-bold text-slate-200">SKU
+                <input value={draftPO.sku} onChange={(event) => setDraftPO((current) => ({ ...current, sku: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="text-sm font-bold text-slate-200">Line item quantity
+                  <input value={draftPO.quantity} onChange={(event) => setDraftPO((current) => ({ ...current, quantity: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+                </label>
+                <label className="text-sm font-bold text-slate-200">Line item cost
+                  <input value={draftPO.cost} onChange={(event) => setDraftPO((current) => ({ ...current, cost: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+                </label>
+              </div>
+              <p className="mt-4 rounded-2xl bg-cyan-300/10 p-3 text-cyan-100">Totals preview: {money(Number(draftPO.quantity || 0) * Number(draftPO.cost || 0))}</p>
+              <button className="mt-5 rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950">Save purchase order</button>
+            </form>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Purchase orders with status transitions</h2>
+              <div className="mt-5 space-y-4">
+                {orders.map((order) => {
+                  const total = order.lineItems.reduce((sum, item) => sum + item.quantity * item.cost, 0);
+                  return (
+                    <section key={order.id} className="rounded-3xl border border-slate-700/70 bg-slate-950/60 p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div><strong className="text-white">{order.id}</strong><p className="text-sm text-slate-400">Vendor {order.vendor} - ETA {order.eta}</p></div>
+                        <span className={"rounded-full border px-3 py-1 text-xs font-bold " + statusTone(order.status)}>{order.status}</span>
+                      </div>
+                      <p className="mt-3 text-sm text-slate-300">Line items: {order.lineItems.map((item) => item.sku + " x" + item.quantity).join(", ")}. Totals {money(total)}.</p>
+                      <button type="button" onClick={() => advancePOStatus(order.id)} className="mt-4 rounded-2xl border border-cyan-300/40 px-4 py-2 text-sm font-bold text-cyan-100">Advance status transition</button>
+                    </section>
+                  );
+                })}
+              </div>
+            </article>
+          </section>
+        )}
+
+        {page === "Receiving Workflow" && (
+          <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]" aria-label="Receiving Workflow">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Receiving Workflow</h2>
+              <p className="mt-3 text-slate-300">Scan simulation, quantity validation, success toast, and put-away task handling for inbound stock.</p>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Barcode scan simulation
+                <select value={selectedSku} onChange={(event) => setSelectedSku(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3">
+                  {products.map((product) => <option key={product.sku} value={product.sku}>{product.sku} - {product.name}</option>)}
+                </select>
+              </label>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Quantity validation
+                <input type="number" value={receivedQuantity} onChange={(event) => setReceivedQuantity(Number(event.target.value))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <button type="button" onClick={receiveStock} className="mt-5 rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950">Receive and create success toast</button>
+            </article>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Dock queue</h3>
+              <div className="mt-5 space-y-3">
+                {orders.filter((order) => order.status !== "Received").map((order) => (
+                  <p key={order.id} className="rounded-2xl border border-cyan-300/10 bg-slate-950/60 p-4 text-sm text-slate-300">{order.id} receiving dock workflow for {order.vendor}, put-away route {settings.warehouse}</p>
+                ))}
+              </div>
+            </article>
+          </section>
+        )}
+
+        {page === "Settings Page" && (
+          <section className="grid gap-6 lg:grid-cols-2" aria-label="Settings Page">
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h2 className="text-2xl font-black text-white">Settings Page</h2>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Warehouse
+                <input value={settings.warehouse} onChange={(event) => setSettings((current) => ({ ...current, warehouse: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Suppliers
+                <textarea value={settings.suppliers} onChange={(event) => setSettings((current) => ({ ...current, suppliers: event.target.value }))} className="mt-2 min-h-24 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-5 block text-sm font-bold text-slate-200">Reorder rules
+                <textarea value={settings.reorderRules} onChange={(event) => setSettings((current) => ({ ...current, reorderRules: event.target.value }))} className="mt-2 min-h-24 w-full rounded-2xl border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <button type="button" onClick={resetDemoData} className="mt-5 rounded-2xl border border-rose-300/50 bg-rose-400/15 px-5 py-3 font-black text-rose-100">Reset Demo Data</button>
+            </article>
+            <article className="rounded-[2rem] border border-cyan-300/10 bg-slate-900/75 p-6">
+              <h3 className="text-xl font-black text-white">Inventory controls</h3>
+              <p className="mt-3 leading-7 text-slate-300">Configure warehouse defaults, supplier master data, reorder controls, receiving validation, and cycle count policies.</p>
+              <table className="mt-5 w-full text-left text-sm">
+                <tbody>
+                  <tr className="border-b border-slate-800"><td className="py-3 text-slate-400">Warehouse</td><td>{settings.warehouse}</td></tr>
+                  <tr className="border-b border-slate-800"><td className="py-3 text-slate-400">Suppliers</td><td>{settings.suppliers}</td></tr>
+                  <tr><td className="py-3 text-slate-400">Reorder</td><td>{settings.reorderRules}</td></tr>
+                </tbody>
+              </table>
+            </article>
+          </section>
+        )}
+
+        {toast && <div className="fixed bottom-5 right-5 rounded-2xl border border-cyan-300/30 bg-slate-950 px-5 py-3 text-sm font-bold text-cyan-100 shadow-2xl shadow-cyan-500/20">{toast}</div>}
+      </div>
+    </main>
+  );
+}
+
+function Info({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-700/70 bg-slate-950/60 p-4">
+      <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{label}</p>
+      <p className="mt-2 font-black text-white">{value}</p>
+      <p className="mt-1 text-sm text-slate-400">{hint}</p>
+    </div>
+  );
+}
+`
+}
+
 func syntheticBookingAppTSX() string {
 	return `import { type FormEvent, useMemo, useState } from "react";
 
@@ -19126,6 +19539,9 @@ func syntheticFrontendAppTSXWithDescription(title string, summary string, descri
 	if promptLooksLikeClientPortalApp(description) || promptLooksLikeClientPortalApp(title+" "+summary) {
 		return syntheticClientPortalAppTSX()
 	}
+	if promptLooksLikeInventoryApp(description) || promptLooksLikeInventoryApp(title+" "+summary) {
+		return syntheticInventoryAppTSX()
+	}
 	if promptLooksLikeCRMApp(description) || promptLooksLikeCRMApp(title+" "+summary) {
 		return syntheticCRMAppTSX()
 	}
@@ -19817,6 +20233,8 @@ func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Bu
 		repairLabel = "booking"
 	case promptLooksLikeClientPortalApp(description):
 		repairLabel = "client-portal"
+	case promptLooksLikeInventoryApp(description):
+		repairLabel = "inventory"
 	case promptLooksLikeCRMApp(description):
 		repairLabel = "CRM"
 	default:
@@ -29362,6 +29780,9 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 	clientPortalLike := featureCoverageHasAnySignal(requirementAndFeature, "", []string{
 		"client portal", "agency client portal", "northstar client hub", "pending approvals", "portal branding", "client profile", "project status", "upcoming milestones",
 	})
+	inventoryLike := featureCoverageHasAnySignal(requirementAndFeature, "", []string{
+		"stockpilot", "inventory", "warehouse", "stock control", "stock levels", "sku", "purchase orders", "receiving workflow", "reorder point", "cycle count",
+	})
 
 	switch {
 	case featureCoverageHasAnySignal(featureText, "", []string{"swarm", "ai agent", "orchestrator", "proposal agent", "risk agent"}):
@@ -29382,6 +29803,43 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 			[]string{"upload", "mock upload"},
 		) {
 			return "is missing client-portal files signals for folders, file list, search, tags, and mock upload"
+		}
+	case inventoryLike && featureCoverageHasAnySignal(featureText, "", []string{"inventory table", "inventory list", "stock table", "sku table", "product table"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"inventory", "stock", "sku"},
+			[]string{"table", "list"},
+			[]string{"search", "filter"},
+			[]string{"sku", "category", "location", "reorder", "status"},
+		) {
+			return "is missing inventory-table signals for SKU search, filters, category/location fields, reorder points, and status"
+		}
+	case inventoryLike && featureCoverageHasAnySignal(featureText, "", []string{"product detail", "product detail page", "stock ledger", "product page"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"product detail", "selected product", "product page"},
+			[]string{"stock ledger", "movement", "movements", "adjustment", "adjustment history"},
+			[]string{"supplier", "vendor"},
+			[]string{"reorder calculator", "reorder point", "reorder"},
+		) {
+			return "is missing product-detail signals for stock ledger, supplier info, reorder calculator, and adjustment history"
+		}
+	case inventoryLike && featureCoverageHasAnySignal(featureText, "", []string{"purchase order", "purchase orders", "po page", "purchase orders page"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"purchase order", "purchase orders", "po"},
+			[]string{"vendor", "supplier"},
+			[]string{"line item", "line items"},
+			[]string{"total", "totals", "cost"},
+			[]string{"status", "ordered", "approved", "received", "status transitions"},
+		) {
+			return "is missing purchase-order signals for vendors, line items, totals, and status transitions"
+		}
+	case inventoryLike && featureCoverageHasAnySignal(featureText, "", []string{"receiving workflow", "receiving", "receive stock", "dock workflow"}):
+		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+			[]string{"receiving", "receive", "dock"},
+			[]string{"scan", "barcode"},
+			[]string{"quantity validation", "quantity", "validation"},
+			[]string{"success toast", "received", "put away", "put-away"},
+		) {
+			return "is missing receiving-workflow signals for scan simulation, quantity validation, success toast, and put-away handling"
 		}
 	case documentIntelligenceLike && featureCoverageHasAnySignal(featureText, "", []string{"upload", "analyze document", "document analysis", "drag and drop mock upload"}):
 		if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
@@ -29500,6 +29958,17 @@ func plannedFeatureCoverageMissingReason(feature Feature, normalizedRequirement,
 				[]string{"risk", "summary", "status"},
 			) {
 				return "is missing dashboard cards, recent activity/analysis, and risk/status summary signals"
+			}
+			break
+		}
+		if inventoryLike {
+			if !featureCoverageHasSignalGroups(normalizedSource, compactSource,
+				[]string{"dashboard", "overview"},
+				[]string{"stock", "inventory", "sku"},
+				[]string{"purchase order", "receiving", "reorder"},
+				[]string{"low stock", "movement", "fulfillment", "cycle count"},
+			) {
+				return "is missing inventory dashboard signals for stock health, purchase orders, receiving/reorder work, and movement or low-stock metrics"
 			}
 			break
 		}
