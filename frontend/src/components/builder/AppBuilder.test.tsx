@@ -29,6 +29,7 @@ vi.mock('@/hooks/useStore', () => ({
     currentProject: null,
     createProject: vi.fn(),
     setCurrentProject: vi.fn(),
+    clearCurrentProject: vi.fn(),
     addNotification: vi.fn(),
   }),
 }))

@@ -8,6 +8,7 @@ import { vi } from 'vitest'
 type StoreMocks = {
   createProject: ReturnType<typeof vi.fn>
   setCurrentProject: ReturnType<typeof vi.fn>
+  clearCurrentProject: ReturnType<typeof vi.fn>
   addNotification: ReturnType<typeof vi.fn>
 }
 
@@ -16,6 +17,7 @@ const getStoreMocks = (): StoreMocks => {
     ;(globalThis as any).__APEX_APP_BUILDER_STORE_MOCKS__ = {
       createProject: vi.fn(),
       setCurrentProject: vi.fn(),
+      clearCurrentProject: vi.fn(),
       addNotification: vi.fn(),
     }
   }
@@ -49,6 +51,7 @@ vi.mock('@/hooks/useStore', () => ({
       currentProject: null,
       createProject: storeMocks.createProject,
       setCurrentProject: storeMocks.setCurrentProject,
+      clearCurrentProject: storeMocks.clearCurrentProject,
       addNotification: storeMocks.addNotification,
     }
   },
@@ -128,6 +131,9 @@ export const storeMocks = {
   },
   get setCurrentProject() {
     return getStoreMocks().setCurrentProject
+  },
+  get clearCurrentProject() {
+    return getStoreMocks().clearCurrentProject
   },
   get addNotification() {
     return getStoreMocks().addNotification
@@ -269,6 +275,7 @@ export const primeAppBuilderHistoryTestEnv = () => {
   ;(apiService.createCheckoutSession as any).mockReset()
   storeMocks.createProject.mockReset()
   storeMocks.setCurrentProject.mockReset()
+  storeMocks.clearCurrentProject.mockReset()
   storeMocks.addNotification.mockReset()
 
   ;(apiService.buildPreflight as any).mockResolvedValue({

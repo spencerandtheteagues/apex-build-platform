@@ -3,21 +3,25 @@
 ## Mobile App Builder Target Metadata
 - Source of truth: `backend/internal/mobile/types.go`, `backend/internal/mobile/validation.go`, `backend/internal/mobile/classifier.go`, `backend/internal/agents/types.go`, `backend/internal/agents/orchestration_contracts.go`, `backend/internal/agents/validated_build_spec.go`, and `backend/pkg/models/models.go`.
 - Producers:
+  - `frontend/src/components/builder/AppBuilder.tsx` can explicitly send target metadata from the setup UI before launch.
   - `BuildRequest` can explicitly carry `target_platform`, `mobile_platforms`, `mobile_framework`, `mobile_release_level`, `mobile_capabilities`, and `mobile_app_spec`.
   - `mobile.ClassifyTargetPlatform` infers native mobile requests from iOS, Android, APK/AAB, TestFlight, App Store, Google Play, installed app, and native capability signals.
   - `compileIntentBriefFromRequest` normalizes mobile target metadata.
   - `compileBuildContractFromPlan` and `finalizeValidatedBuildSpec` carry metadata into the frozen orchestration contract.
   - Completed-build persistence and project auto-linking copy metadata into `CompletedBuild` and `Project`.
 - Transport:
+  - `POST /api/v1/build/preflight` optional mobile fields for provider/policy checks before launch.
   - `POST /api/v1/build/start` optional mobile fields.
   - Live build/detail/status payloads include optional mobile fields.
   - Completed build list/detail payloads include optional mobile fields.
   - Snapshot restore context stores optional mobile fields.
 - Consumers:
   - Current frontend API types in `frontend/src/services/api.ts`.
+  - Active builder setup target-path controls in `frontend/src/components/builder/AppBuilder.tsx`.
   - Future mobile wizard, Expo generator, export package, preview, EAS build, and store-readiness panels.
 - Defaults / zero-value behavior:
   - Omitted target platform is classified from the prompt.
+  - Builder setup shows Full-stack Web by default but does not send default target metadata until the user explicitly chooses a target path, preserving backend prompt classification for native mobile prompts.
   - Prompts without native mobile signals default to web/fullstack/API existing behavior.
   - Native mobile prompts default to `mobile_expo`, Android+iOS when no platform is specified, `expo-react-native`, and `source_only`.
   - EAS build/submit/store flags default off.
@@ -25,6 +29,7 @@
   - Medium-low; fields are additive, but build request/plan/contract/snapshot shapes changed.
   - Existing web prompt behavior is protected by targeted tests.
 - Required tests / validations:
+  - `cd frontend && npm run test -- --run src/components/builder/AppBuilder.mobile-target.test.tsx`
   - `cd backend && go test ./internal/mobile -count=1`
   - `cd backend && go test ./internal/agents -run 'Mobile|DoesNotTreatDomainJobs|ValidatedBuildSpecCarriesMobile' -count=1`
   - `cd backend && go test ./internal/agents ./internal/mobile -count=1`

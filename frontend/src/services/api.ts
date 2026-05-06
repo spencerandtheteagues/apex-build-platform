@@ -645,6 +645,13 @@ export class ApiService {
       styling?: string
       extras?: string[]
     }
+    target_platform?: TargetPlatform
+    mobile_platforms?: MobilePlatform[]
+    mobile_framework?: MobileFramework
+    mobile_release_level?: MobileReleaseLevel
+    mobile_capabilities?: MobileCapability[]
+    mobile_dependency_policy?: string
+    mobile_app_spec?: unknown
   }): Promise<{
     ready: boolean
     providers_available: number
