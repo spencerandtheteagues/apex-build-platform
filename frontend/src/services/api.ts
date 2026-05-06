@@ -598,6 +598,11 @@ export class ApiService {
     return response.data.build
   }
 
+  async retryProjectMobileBuild(projectId: number, buildId: string): Promise<MobileBuildCreateResponse> {
+    const response = await this.client.post<MobileBuildCreateResponse>(`/projects/${projectId}/mobile/builds/${buildId}/retry`, {})
+    return response.data
+  }
+
   async getProjectMobileBuildLogs(projectId: number, buildId: string): Promise<MobileBuildLogLine[]> {
     const response = await this.client.get<{ build_id: string; logs: MobileBuildLogLine[] }>(`/projects/${projectId}/mobile/builds/${buildId}/logs`)
     return response.data.logs

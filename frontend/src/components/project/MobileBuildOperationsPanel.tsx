@@ -28,6 +28,7 @@ interface MobileBuildOperationsPanelProps {
     | 'createProjectMobileBuild'
     | 'refreshProjectMobileBuild'
     | 'cancelProjectMobileBuild'
+    | 'retryProjectMobileBuild'
     | 'getProjectMobileCredentials'
   >
   addNotification: Notify
@@ -269,6 +270,34 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
     }
   }
 
+  const handleRetryBuild = async (build: MobileBuildJob) => {
+    setActionId(`retry-${build.id}`)
+    try {
+      const response = await apiService.retryProjectMobileBuild(projectId, build.id)
+      setBuilds((current) => upsertBuild(current, response.build))
+      if (response.credentials) {
+        setCredentials(response.credentials)
+      }
+      addNotification({
+        type: 'success',
+        title: 'Build retry queued',
+        message: `${formatBuildTitle(response.build)} retry was accepted by Apex.`,
+      })
+    } catch (error) {
+      const credentialStatus = extractCredentialsFromError(error)
+      if (credentialStatus) {
+        setCredentials(credentialStatus)
+      }
+      addNotification({
+        type: 'error',
+        title: 'Retry blocked',
+        message: getApiErrorMessage(error, 'Unable to retry this mobile build.'),
+      })
+    } finally {
+      setActionId(null)
+    }
+  }
+
   const handleOpenArtifact = (build: MobileBuildJob) => {
     if (!build.artifact_url) return
     window.open(build.artifact_url, '_blank', 'noopener,noreferrer')
@@ -401,6 +430,7 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
             <div className="space-y-3">
               {builds.slice(0, 5).map((build) => {
                 const canCancel = !terminalStatuses.has(build.status) && Boolean(build.provider_build_id)
+                const canRetry = build.status === 'failed' || build.status === 'canceled' || build.status === 'repair_pending' || build.status === 'repaired_retry_pending'
                 const logMessage = latestLogMessage(build)
                 return (
                   <div key={build.id} className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4" data-testid={`mobile-build-job-${build.id}`}>
@@ -455,6 +485,19 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
                         >
                           <XCircle className="mr-2 h-3.5 w-3.5" />
                           Cancel
+                        </Button>
+                      ) : null}
+                      {canRetry ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void handleRetryBuild(build)}
+                          disabled={Boolean(actionId) || missingEAS}
+                          className="rounded-xl border border-cyan-300/14 bg-cyan-300/8 px-3 text-xs text-cyan-50"
+                        >
+                          <RefreshCw className={cn('mr-2 h-3.5 w-3.5', actionId === `retry-${build.id}` && 'animate-spin')} />
+                          Retry
                         </Button>
                       ) : null}
                       {build.artifact_url ? (

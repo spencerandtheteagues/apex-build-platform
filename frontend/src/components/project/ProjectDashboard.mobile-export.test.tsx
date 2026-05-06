@@ -149,6 +149,21 @@ describe('ProjectDashboard mobile export visibility', () => {
         updated_at: '2026-05-01T00:15:00.000Z',
       }),
       cancelProjectMobileBuild: vi.fn(),
+      retryProjectMobileBuild: vi.fn().mockResolvedValue({
+        build: {
+          id: 'mbld_retry',
+          project_id: 42,
+          user_id: 1,
+          platform: 'android',
+          profile: 'preview',
+          release_level: 'internal_android_apk',
+          status: 'queued',
+          provider: 'eas',
+          provider_build_id: 'eas-build-retry',
+          created_at: '2026-05-01T00:20:00.000Z',
+          updated_at: '2026-05-01T00:20:00.000Z',
+        },
+      }),
       exportProject: vi.fn(),
       executeProject: vi.fn(),
     }
@@ -215,6 +230,47 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
       type: 'success',
       title: 'Native build queued',
+    }))
+  })
+
+  it('retries a failed mobile build from the operations panel', async () => {
+    mockApiService.listProjectMobileBuilds.mockResolvedValueOnce([
+      {
+        id: 'mbld_failed',
+        project_id: 42,
+        user_id: 1,
+        platform: 'android',
+        profile: 'preview',
+        release_level: 'internal_android_apk',
+        status: 'failed',
+        provider: 'eas',
+        provider_build_id: 'eas-build-failed',
+        failure_message: 'Metro bundle failed.',
+        created_at: '2026-05-01T00:00:00.000Z',
+        updated_at: '2026-05-01T00:05:00.000Z',
+      },
+    ])
+    mockCurrentProject = {
+      ...baseProject,
+      target_platform: 'mobile_expo',
+      mobile_framework: 'expo-react-native',
+      mobile_platforms: ['android'],
+      mobile_release_level: 'source_only',
+      mobile_capabilities: ['offlineMode'],
+    }
+
+    render(<ProjectDashboard />)
+
+    expect(await screen.findByTestId('mobile-build-job-mbld_failed')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Retry/i }))
+
+    await waitFor(() => {
+      expect(mockApiService.retryProjectMobileBuild).toHaveBeenCalledWith(42, 'mbld_failed')
+    })
+    expect(await screen.findByTestId('mobile-build-job-mbld_retry')).toBeTruthy()
+    expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'success',
+      title: 'Build retry queued',
     }))
   })
 

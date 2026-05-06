@@ -403,6 +403,37 @@ func (s *MobileBuildService) CancelBuild(ctx context.Context, id string) (Mobile
 	return job, nil
 }
 
+func (s *MobileBuildService) RetryBuild(ctx context.Context, id string, sourcePath string) (MobileBuildJob, error) {
+	if s == nil {
+		return MobileBuildJob{}, fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)
+	}
+	if s.store == nil {
+		return MobileBuildJob{}, ErrMobileBuildJobNotFound
+	}
+	previous, exists, err := s.store.Get(ctx, id)
+	if err != nil {
+		return MobileBuildJob{}, err
+	}
+	if !exists {
+		return MobileBuildJob{}, ErrMobileBuildJobNotFound
+	}
+	if !IsRetryableMobileBuildStatus(previous.Status) {
+		return previous, fmt.Errorf("%w: build status %q cannot be retried", ErrMobileBuildInvalidRequest, previous.Status)
+	}
+	return s.CreateBuild(ctx, MobileBuildRequest{
+		ProjectID:    previous.ProjectID,
+		UserID:       previous.UserID,
+		Platform:     previous.Platform,
+		Profile:      previous.Profile,
+		ReleaseLevel: previous.ReleaseLevel,
+		AppVersion:   previous.AppVersion,
+		BuildNumber:  previous.BuildNumber,
+		VersionCode:  previous.VersionCode,
+		CommitRef:    previous.CommitRef,
+		SourcePath:   strings.TrimSpace(sourcePath),
+	})
+}
+
 func (s *MobileBuildService) ListProjectBuilds(ctx context.Context, projectID uint) ([]MobileBuildJob, error) {
 	if s == nil || s.store == nil {
 		return nil, nil
@@ -446,6 +477,15 @@ func (s *MobileBuildService) RefreshPollableBuilds(ctx context.Context, limit in
 func isCancelableMobileBuildStatus(status MobileBuildStatus) bool {
 	switch status {
 	case MobileBuildQueued, MobileBuildPreparing, MobileBuildValidating, MobileBuildUploading, MobileBuildBuilding, MobileBuildSigning:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsRetryableMobileBuildStatus(status MobileBuildStatus) bool {
+	switch status {
+	case MobileBuildFailed, MobileBuildCanceled, MobileBuildRepairPending, MobileBuildRepairedRetryPending:
 		return true
 	default:
 		return false
