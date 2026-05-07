@@ -92,6 +92,7 @@ Implemented now:
 - `MobileCredentialPanel` lets project owners add, replace, or delete EAS, Apple App Store Connect, Google Play, and Android signing credentials from the mobile dashboard. It never pre-fills stored secret values and clears transient form values after save/cancel/delete.
 - `frontend/src/services/api.ts` exposes project-scoped mobile build-job methods for request, status, refresh, logs, and artifact metadata.
 - `ProjectDashboard` includes a mobile build operations panel for mobile projects. It lists native build jobs, checks EAS credential status, starts Android APK/AAB or iOS internal builds through the gated backend API, refreshes/cancels jobs, and opens artifact links when available.
+- `MobileStoreReadinessPanel` renders the generated store-readiness package, privacy/data-safety draft counts, screenshot targets, release notes state, manual prerequisites, and truthful approval caveats from current project files plus validation/scorecard evidence.
 
 Next frontend work:
 
@@ -99,8 +100,8 @@ Next frontend work:
 - mobile setup step with Android/iOS/capability/build-level controls.
 - mobile preview frame with honest Expo Web labeling.
 - provider credential testing beyond payload-shape validation.
-- store-readiness checklist.
 - mobile export options in `GitHubExportModal`.
+- typed read-only store-readiness endpoint if richer package state is needed outside the file tree.
 
 ## Agent Instructions
 

@@ -5,6 +5,7 @@ import { AIUsage, Execution, File } from '@/types'
 import type { MobileReadinessScorecard, MobileValidationReport, MobileValidationStatus } from '@/services/api'
 import { Badge, Button, Loading } from '@/components/ui'
 import MobileBuildOperationsPanel from './MobileBuildOperationsPanel'
+import MobileStoreReadinessPanel from './MobileStoreReadinessPanel'
 import {
   Activity,
   ArrowRight,
@@ -625,6 +626,13 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             mobileBuildStatus={currentProject.mobile_build_status}
             apiService={apiService}
             addNotification={addNotification}
+          />
+          <MobileStoreReadinessPanel
+            project={currentProject}
+            files={files || []}
+            validation={mobileValidation}
+            scorecard={mobileScorecard}
+            onDownloadPackage={handleDownload}
           />
         </>
       ) : null}

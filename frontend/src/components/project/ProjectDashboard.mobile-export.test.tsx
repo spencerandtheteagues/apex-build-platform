@@ -4,18 +4,19 @@ import React from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Project } from '@/types'
+import type { File, Project } from '@/types'
 import ProjectDashboard from './ProjectDashboard'
 
 // Vitest in this repo predates vi.hoisted; var keeps the mock factory safely hoistable.
 var mockCurrentProject: Project | null = null
+var mockFiles: File[] = []
 var mockApiService: any
 var mockAddNotification: any
 
 vi.mock('@/hooks/useStore', () => ({
   useStore: () => ({
     currentProject: mockCurrentProject,
-    files: [],
+    files: mockFiles,
     collaborationUsers: [],
     apiService: mockApiService,
     setCurrentProject: vi.fn(),
@@ -54,6 +55,7 @@ const baseProject: Project = {
 describe('ProjectDashboard mobile export visibility', () => {
   beforeEach(() => {
     mockCurrentProject = null
+    mockFiles = []
     mockAddNotification = vi.fn()
     mockApiService = {
       getProject: vi.fn(),
@@ -220,7 +222,9 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(screen.getByText('95% Readiness Target')).toBeTruthy()
     expect(screen.getByText(/Next blocker: Produce a signed Android APK\/AAB artifact through EAS Build/)).toBeTruthy()
     expect(await screen.findByTestId('mobile-build-operations')).toBeTruthy()
+    expect(await screen.findByTestId('mobile-store-readiness-panel')).toBeTruthy()
     expect(screen.getByText('Native Build Pipeline')).toBeTruthy()
+    expect(screen.getByText('Store Readiness')).toBeTruthy()
     expect(screen.getByText('Stored for builds')).toBeTruthy()
     expect(screen.getByTestId('mobile-build-job-mbld_existing')).toBeTruthy()
     expect(screen.getByText('EAS build is running.')).toBeTruthy()
@@ -228,6 +232,68 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(mockApiService.getProjectMobileScorecard).toHaveBeenCalledWith(42)
     expect(mockApiService.listProjectMobileBuilds).toHaveBeenCalledWith(42)
     expect(mockApiService.getProjectMobileCredentials).toHaveBeenCalledWith(42)
+  })
+
+  it('renders store readiness metadata from the generated store package', async () => {
+    mockFiles = [
+      {
+        id: 501,
+        project_id: 42,
+        path: 'mobile/store/store-readiness.json',
+        name: 'store-readiness.json',
+        type: 'file',
+        content: JSON.stringify({
+          status: 'draft_ready_needs_manual_store_assets',
+          app_name: 'Apex FieldOps Mobile',
+          short_description: 'Run field jobs from a native mobile app.',
+          category: 'Business',
+          release_notes: 'Initial internal release.',
+          android_package: 'dev.apexbuild.fieldops',
+          ios_bundle_identifier: 'dev.apexbuild.fieldops',
+          version: '1.0.0',
+          version_code: 1,
+          build_number: '1',
+          data_safety_draft: {
+            data_collected: ['Account credentials or session token', 'Job and estimate records'],
+            data_linked_to_user: ['Account credentials or session token'],
+            data_used_for_tracking: ['None declared by generated scaffold'],
+            privacy_notes: ['Review all generated defaults against the production backend before submission.'],
+          },
+          screenshot_checklist: [
+            { platform: 'Android', device: 'Phone', purpose: 'Home/jobs list with representative data' },
+            { platform: 'iOS', device: '6.7-inch iPhone', purpose: 'Primary create/edit workflow' },
+          ],
+          manual_prerequisites: ['Privacy policy URL and support URL supplied by the app owner.'],
+          truthful_status_notes: ['This package is a draft for launch preparation, not proof of App Store or Google Play approval.'],
+          missing_items: ['Signed Android/iOS build artifacts produced by a successful native build job.'],
+        }),
+        size: 1200,
+        version: 1,
+        is_locked: false,
+        created_at: '2026-05-01T00:00:00.000Z',
+        updated_at: '2026-05-01T00:00:00.000Z',
+      },
+    ]
+    mockCurrentProject = {
+      ...baseProject,
+      target_platform: 'mobile_expo',
+      mobile_framework: 'expo-react-native',
+      mobile_platforms: ['android', 'ios'],
+      mobile_release_level: 'source_only',
+      mobile_capabilities: ['offlineMode', 'fileUploads'],
+      android_package: 'dev.apexbuild.fieldops',
+      ios_bundle_identifier: 'dev.apexbuild.fieldops',
+    }
+
+    render(<ProjectDashboard />)
+
+    const panel = await screen.findByTestId('mobile-store-readiness-panel')
+    expect(within(panel).getByText('Apex FieldOps Mobile')).toBeTruthy()
+    expect(within(panel).getByText('Draft Ready Needs Manual Store Assets')).toBeTruthy()
+    expect(within(panel).getAllByText('dev.apexbuild.fieldops', { exact: false }).length).toBeGreaterThanOrEqual(1)
+    expect(within(panel).getByText('Signed Android/iOS build artifacts produced by a successful native build job.')).toBeTruthy()
+    expect(within(panel).getByText(/not proof of App Store or Google Play approval/)).toBeTruthy()
+    expect(within(panel).getByRole('button', { name: /Download ZIP with store package/i })).toBeTruthy()
   })
 
   it('queues an Android APK build from the mobile build operations panel', async () => {

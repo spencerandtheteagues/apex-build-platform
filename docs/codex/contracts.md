@@ -87,6 +87,31 @@
   - `cd backend && go test ./... -run '^$'`
   - `git diff --check`
 
+## Mobile Store Readiness Dashboard
+- Source of truth: generated source files from `backend/internal/mobile/store_readiness.go` and `backend/internal/mobile/generator.go`, validation evidence from `GET /api/v1/projects/:id/mobile/validation`, score evidence from `GET /api/v1/projects/:id/mobile/scorecard`, and frontend rendering in `frontend/src/components/project/MobileStoreReadinessPanel.tsx`.
+- Producers:
+  - Mobile source/export generation writes `mobile/store/store-readiness.json`, `mobile/store/privacy-data-safety.md`, `mobile/store/screenshot-checklist.md`, and `mobile/store/release-notes.md`.
+  - `ValidateProjectSourcePackage` validates `store-readiness.json`, sets `MobileValidationReport.store_readiness_state`, and emits the `store_readiness` validation check.
+  - `BuildMobileReadinessScorecard` emits the `store_readiness` category and blockers from generated source/validation/project state.
+- Transport:
+  - No new HTTP endpoint in this slice.
+  - `ProjectDashboard` already consumes mobile validation and scorecard endpoints, and passes current workspace `files` into the read-only store-readiness panel.
+- Consumers:
+  - `MobileStoreReadinessPanel` parses `mobile/store/store-readiness.json` from current project files when present and falls back to validation/scorecard/project fields when not present.
+  - The panel links store-readiness artifacts to ZIP export through the existing project export action.
+- Defaults / zero-value behavior:
+  - Missing or invalid `store-readiness.json` is shown as missing/needs fixes; it does not mutate `Project.MobileStoreReadinessStatus`.
+  - The panel must keep store metadata, screenshots, privacy answers, EAS Submit/upload, App Store review, Google Play review, and final approval as separate states.
+  - Browser/Expo Web screenshots are explicitly not treated as native store proof.
+- Backward compatibility risk:
+  - Low; this is a frontend-only read path over existing generated files and existing validation/scorecard contracts.
+- Required tests / validations:
+  - `cd frontend && npm run test -- --run src/components/project/ProjectDashboard.mobile-export.test.tsx`
+  - `cd frontend && npm run test -- --run src/services/api.test.ts src/components/project/ProjectDashboard.mobile-export.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run lint`
+  - `git diff --check`
+
 ## Mobile Build Job Service
 - Source of truth: `backend/internal/mobile/build_service.go` plus existing mobile enums in `backend/internal/mobile/types.go` and feature flags in `backend/internal/mobile/flags.go`.
 - Producers:
