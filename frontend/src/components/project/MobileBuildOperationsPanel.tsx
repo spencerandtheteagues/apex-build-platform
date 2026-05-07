@@ -33,6 +33,7 @@ interface MobileBuildOperationsPanelProps {
     | 'getProjectMobileCredentials'
     | 'createProjectMobileCredential'
     | 'deleteProjectMobileCredential'
+    | 'startProjectMobileExpoWebPreview'
   >
   addNotification: Notify
 }
@@ -170,6 +171,7 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
   const [isLoading, setIsLoading] = useState(false)
   const [actionId, setActionId] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [webPreviewUrl, setWebPreviewUrl] = useState<string | null>(null)
 
   const buildTargets = useMemo(() => buildTargetsForPlatforms(mobilePlatforms), [mobilePlatforms])
   const missingEAS = Boolean(credentials?.missing?.includes('eas_token'))
@@ -301,6 +303,28 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
     }
   }
 
+  const handleStartWebPreview = async () => {
+    setActionId('expo-web-preview')
+    try {
+      const response = await apiService.startProjectMobileExpoWebPreview(projectId)
+      const previewUrl = response.preview_url || response.url || ''
+      setWebPreviewUrl(previewUrl)
+      addNotification({
+        type: 'success',
+        title: 'Expo Web preview started',
+        message: response.message || 'Browser-rendered mobile preview is available. This is not a native Android/iOS build.',
+      })
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Expo Web preview failed',
+        message: getApiErrorMessage(error, 'Unable to start the browser-rendered mobile preview.'),
+      })
+    } finally {
+      setActionId(null)
+    }
+  }
+
   const handleOpenArtifact = (build: MobileBuildJob) => {
     if (!build.artifact_url) return
     window.open(build.artifact_url, '_blank', 'noopener,noreferrer')
@@ -397,6 +421,46 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
               addNotification={addNotification}
               onCredentialsChange={setCredentials}
             />
+
+            <div className="mt-5 rounded-2xl border border-cyan-300/14 bg-cyan-300/8 px-4 py-4" data-testid="mobile-expo-web-preview-card">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="max-w-2xl">
+                  <div className="text-sm font-semibold text-white">Expo Web preview</div>
+                  <p className="mt-2 text-xs leading-5 text-gray-300">
+                    Starts `npm run web` from the generated `mobile/` Expo source and proxies it in Apex.
+                    This is browser-rendered and does not prove a native APK/AAB, TestFlight, or store build.
+                  </p>
+                  {webPreviewUrl ? (
+                    <div className="mt-2 truncate text-xs text-cyan-100">{webPreviewUrl}</div>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void handleStartWebPreview()}
+                    disabled={Boolean(actionId)}
+                    className="rounded-xl border border-cyan-300/14 bg-cyan-300/10 px-3 text-xs text-cyan-50"
+                  >
+                    <Smartphone className="mr-2 h-3.5 w-3.5" />
+                    {actionId === 'expo-web-preview' ? 'Starting...' : 'Start Expo Web Preview'}
+                  </Button>
+                  {webPreviewUrl ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => window.open(webPreviewUrl, '_blank', 'noopener,noreferrer')}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] px-3 text-xs text-gray-100"
+                    >
+                      <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                      Open
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
 
             <div className="mt-5 grid gap-3 md:grid-cols-3">
               {buildTargets.map((target) => (

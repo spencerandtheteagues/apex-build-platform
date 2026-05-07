@@ -56,6 +56,7 @@ type ServerProcess struct {
 	ExitCode    int
 	LastError   string
 	WorkDir     string
+	CleanupDir  string
 	EnvVars     map[string]string
 	stopChan    chan struct{}
 	stoppedChan chan struct{}
@@ -89,11 +90,13 @@ func (p *ServerProcess) Stop() {
 
 // ServerConfig contains configuration for starting a backend server
 type ServerConfig struct {
-	ProjectID uint              `json:"project_id"`
-	EntryFile string            `json:"entry_file"` // Required if not auto-detected
-	Command   string            `json:"command"`    // Optional, auto-detect if empty
-	EnvVars   map[string]string `json:"env_vars"`
-	WorkDir   string            `json:"work_dir"`
+	ProjectID           uint              `json:"project_id"`
+	EntryFile           string            `json:"entry_file"` // Required if not auto-detected
+	Command             string            `json:"command"`    // Optional, auto-detect if empty
+	EnvVars             map[string]string `json:"env_vars"`
+	WorkDir             string            `json:"work_dir"`
+	CleanupDir          string            `json:"cleanup_dir"`
+	InstallDependencies bool              `json:"install_dependencies"`
 	// ReadyTimeout bounds the listen/readiness wait after the process starts.
 	// The caller context still controls detection, dependency installation, and
 	// build preparation before process launch.
@@ -514,6 +517,17 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 				return nil, fmt.Errorf("server startup cancelled before process launch: %w", err)
 			}
 		}
+	} else if config.InstallDependencies && sr.shouldInstallDependenciesLocally() {
+		sr.installDependencies(ctx, workDir)
+		if err := ctx.Err(); err != nil {
+			sr.releasePort(config.ProjectID)
+			return nil, fmt.Errorf("server startup cancelled before process launch: %w", err)
+		}
+		sr.prepareNodeStartArtifacts(ctx, workDir, config.Command)
+		if err := ctx.Err(); err != nil {
+			sr.releasePort(config.ProjectID)
+			return nil, fmt.Errorf("server startup cancelled before process launch: %w", err)
+		}
 	}
 
 	// Build environment variables
@@ -570,6 +584,7 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		URL:         fmt.Sprintf("http://127.0.0.1:%d", port),
 		Pid:         handle.Pid,
 		WorkDir:     workDir,
+		CleanupDir:  strings.TrimSpace(config.CleanupDir),
 		EnvVars:     config.EnvVars,
 		stopChan:    make(chan struct{}),
 		stoppedChan: make(chan struct{}),
@@ -776,6 +791,9 @@ func buildServerCommand(command string, entryFile string, framework string, port
 	nextRuntime := strings.EqualFold(strings.TrimSpace(framework), "next") || isNextRuntimeEntry(entryFile)
 
 	switch {
+	case command == "npm run web":
+		return "npm", []string{"run", "web", "--", "--port", strconv.Itoa(port)}, nil
+
 	case command == "npm":
 		if nextRuntime {
 			return "npm", []string{"exec", "--", "next", "dev", "--hostname", "0.0.0.0", "--port", strconv.Itoa(port)}, nil
@@ -916,8 +934,12 @@ func (sr *ServerRunner) stopProcessLocked(projectID uint) error {
 	sr.releasePort(projectID)
 
 	// Clean up work directory
-	if proc.WorkDir != "" && strings.HasPrefix(proc.WorkDir, os.TempDir()) {
-		os.RemoveAll(proc.WorkDir)
+	cleanupDir := strings.TrimSpace(proc.CleanupDir)
+	if cleanupDir == "" {
+		cleanupDir = proc.WorkDir
+	}
+	if cleanupDir != "" && strings.HasPrefix(filepath.Clean(cleanupDir), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		os.RemoveAll(cleanupDir)
 	}
 
 	delete(sr.processes, projectID)

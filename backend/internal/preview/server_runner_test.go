@@ -156,6 +156,19 @@ func TestBuildServerCommandPinsNextDevHostAndPort(t *testing.T) {
 	}
 }
 
+func TestBuildServerCommandPinsExpoWebPort(t *testing.T) {
+	t.Parallel()
+
+	cmd, args, err := buildServerCommand("npm run web", "package.json", "expo", 9130)
+	if err != nil {
+		t.Fatalf("build command: %v", err)
+	}
+	want := []string{"run", "web", "--", "--port", "9130"}
+	if cmd != "npm" || fmt.Sprint(args) != fmt.Sprint(want) {
+		t.Fatalf("cmd/args = %q %#v, want npm %#v", cmd, args, want)
+	}
+}
+
 func TestDetectServerPrefersDevServerForTypescriptBackend(t *testing.T) {
 	t.Parallel()
 

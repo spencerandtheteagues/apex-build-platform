@@ -1059,6 +1059,16 @@ export class ApiService {
     return response.data
   }
 
+  async startProjectMobileExpoWebPreview(projectId: number, envVars?: Record<string, string>): Promise<MobileExpoWebPreviewResponse> {
+    const response = await this.client.post<MobileExpoWebPreviewResponse>('/preview/mobile/expo-web/start', {
+      project_id: projectId,
+      env_vars: envVars,
+    }, {
+      timeout: PREVIEW_START_TIMEOUT_MS,
+    })
+    return response.data
+  }
+
   // Build history endpoints
   async listBuilds(page = 1, limit = 20): Promise<{
     builds: CompletedBuildSummary[]
@@ -3895,6 +3905,18 @@ export interface MobileBuildArtifactsResponse {
   platform: MobilePlatform
   profile: MobileBuildProfile
   release_level: MobileReleaseLevel
+}
+
+export interface MobileExpoWebPreviewResponse {
+  success: boolean
+  preview_level: 'expo_web' | string
+  preview_url: string
+  url?: string
+  port?: number
+  pid?: number
+  command?: string
+  runtime_type?: string
+  message?: string
 }
 
 export type BuildMessageTargetMode = 'lead' | 'agent' | 'role' | 'all_agents'

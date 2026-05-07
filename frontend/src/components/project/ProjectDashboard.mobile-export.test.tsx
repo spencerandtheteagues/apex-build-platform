@@ -193,6 +193,12 @@ describe('ProjectDashboard mobile export visibility', () => {
           updated_at: '2026-05-01T00:20:00.000Z',
         },
       }),
+      startProjectMobileExpoWebPreview: vi.fn().mockResolvedValue({
+        success: true,
+        preview_level: 'expo_web',
+        preview_url: 'https://api.example.com/api/v1/preview/backend-proxy/42',
+        message: 'Expo Web mobile preview started. This is browser-rendered and is not a native Android/iOS build.',
+      }),
       exportProject: vi.fn(),
       executeProject: vi.fn(),
     }
@@ -323,6 +329,34 @@ describe('ProjectDashboard mobile export visibility', () => {
     expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
       type: 'success',
       title: 'Native build queued',
+    }))
+  })
+
+  it('starts an Expo Web preview with honest browser-rendered labeling', async () => {
+    mockApiService.listProjectMobileBuilds.mockResolvedValueOnce([])
+    mockCurrentProject = {
+      ...baseProject,
+      target_platform: 'mobile_expo',
+      mobile_framework: 'expo-react-native',
+      mobile_platforms: ['android', 'ios'],
+      mobile_release_level: 'source_only',
+      mobile_capabilities: ['offlineMode'],
+    }
+
+    render(<ProjectDashboard />)
+
+    const previewCard = await screen.findByTestId('mobile-expo-web-preview-card')
+    expect(within(previewCard).getByText(/browser-rendered and does not prove a native APK\/AAB/)).toBeTruthy()
+    fireEvent.click(within(previewCard).getByRole('button', { name: /Start Expo Web Preview/i }))
+
+    await waitFor(() => {
+      expect(mockApiService.startProjectMobileExpoWebPreview).toHaveBeenCalledWith(42)
+    })
+    expect(await within(previewCard).findByText('https://api.example.com/api/v1/preview/backend-proxy/42')).toBeTruthy()
+    expect(mockAddNotification).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'success',
+      title: 'Expo Web preview started',
+      message: expect.stringContaining('not a native Android/iOS build'),
     }))
   })
 
