@@ -3,6 +3,9 @@ package mobile
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
+	"unicode"
 )
 
 func rootLayoutTSX() string {
@@ -281,40 +284,242 @@ type RuntimeConfig = {
   apiBaseUrl?: string;
 };
 
+type ApiRequestOptions = Omit<RequestInit, 'headers'> & {
+  auth?: boolean;
+  headers?: Record<string, string>;
+  json?: unknown;
+};
+
 const runtimeConfig = (Constants.expoConfig?.extra ?? {}) as RuntimeConfig;
 const API_BASE_URL = runtimeConfig.apiBaseUrl ?? '';
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  constructor(message: string, public status: number, public details?: unknown) {
     super(message);
   }
 }
 
-export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = await SecureStore.getItemAsync('auth_token');
-  const response = await fetch(API_BASE_URL + path, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: 'Bearer ' + token } : {}),
-      ...(options.headers ?? {})
+export function buildPath(path: string, params: Record<string, string | number> = {}) {
+  return path.replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => {
+    const value = params[key];
+    if (value === undefined || value === null) {
+      throw new Error('Missing API path parameter: ' + key);
     }
+    return encodeURIComponent(String(value));
   });
+}
+
+export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const { auth = true, headers, json, ...fetchOptions } = options;
+  const token = auth ? await SecureStore.getItemAsync('auth_token') : null;
+  const body = json === undefined ? fetchOptions.body : JSON.stringify(json);
+  const requestHeaders: Record<string, string> = {
+    ...(json === undefined ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { Authorization: 'Bearer ' + token } : {}),
+    ...(headers ?? {})
+  };
+  const response = await fetch(API_BASE_URL + path, {
+    ...fetchOptions,
+    body,
+    headers: requestHeaders
+  });
+  const payload = await response.text();
   if (!response.ok) {
-    throw new ApiError('Request failed with status ' + response.status, response.status);
+    let details: unknown = payload;
+    try {
+      details = payload ? JSON.parse(payload) : undefined;
+    } catch {
+      details = payload;
+    }
+    const message = typeof details === 'object' && details && 'error' in details
+      ? String((details as { error?: unknown }).error)
+      : 'Request failed with status ' + response.status;
+    throw new ApiError(message, response.status, details);
   }
-  return response.json() as Promise<T>;
+  if (!payload) return undefined as T;
+  try {
+    return JSON.parse(payload) as T;
+  } catch {
+    return payload as T;
+  }
 }
 `
 }
 
-func apiTypesTS() string {
-	return `export type AuthSession = {
+func apiEndpointsTS(spec MobileAppSpec) string {
+	contracts := spec.APIContracts
+	imports := endpointTypeImports(contracts)
+	var b strings.Builder
+	if contractsHavePathParams(contracts) {
+		b.WriteString("import { apiRequest, buildPath } from './client';\n")
+	} else {
+		b.WriteString("import { apiRequest } from './client';\n")
+	}
+	if len(imports) > 0 {
+		b.WriteString("import type { ")
+		b.WriteString(strings.Join(imports, ", "))
+		b.WriteString(" } from './types';\n")
+	}
+	b.WriteString("\n")
+	if len(contracts) == 0 {
+		b.WriteString("export async function healthCheck(): Promise<{ ok: boolean }> {\n")
+		b.WriteString("  return apiRequest<{ ok: boolean }>('/api/health', { method: 'GET' });\n")
+		b.WriteString("}\n")
+		return b.String()
+	}
+	usedNames := map[string]int{}
+	for _, contract := range contracts {
+		functionName := uniqueTSIdentifier(tsFunctionName(contract.Name), usedNames)
+		method := strings.ToUpper(strings.TrimSpace(contract.Method))
+		if method == "" {
+			method = "GET"
+		}
+		path := strings.TrimSpace(contract.Path)
+		if path == "" {
+			path = "/api/" + functionName
+		}
+		responseType := tsTypeExpression(contract.Response)
+		if responseType == "" {
+			responseType = "unknown"
+		}
+		requestType := tsTypeExpression(contract.Request)
+		pathParamKeys := pathParameterKeys(path)
+		hasPathParams := len(pathParamKeys) > 0
+		isMultipart := strings.EqualFold(strings.TrimSpace(contract.Request), "multipart/form-data")
+		requiresPayload := method != "GET" && method != "DELETE" && requestType != "" && !isMultipart
+
+		var params []string
+		if hasPathParams {
+			params = append(params, "pathParams: { "+pathParamsType(pathParamKeys)+" }")
+		}
+		if isMultipart {
+			params = append(params, "formData: FormData")
+		} else if requiresPayload {
+			params = append(params, "payload: "+requestType)
+		}
+
+		b.WriteString("export async function ")
+		b.WriteString(functionName)
+		b.WriteString("(")
+		b.WriteString(strings.Join(params, ", "))
+		b.WriteString("): Promise<")
+		b.WriteString(responseType)
+		b.WriteString("> {\n")
+		b.WriteString("  return apiRequest<")
+		b.WriteString(responseType)
+		b.WriteString(">(")
+		if hasPathParams {
+			b.WriteString("buildPath('")
+			b.WriteString(escapeTSString(path))
+			b.WriteString("', pathParams)")
+		} else {
+			b.WriteString("'")
+			b.WriteString(escapeTSString(path))
+			b.WriteString("'")
+		}
+		b.WriteString(", {\n")
+		b.WriteString("    method: '")
+		b.WriteString(method)
+		b.WriteString("'")
+		if isMultipart {
+			b.WriteString(",\n    body: formData")
+		} else if requiresPayload {
+			b.WriteString(",\n    json: payload")
+		}
+		if strings.Contains(strings.ToLower(contract.Name+" "+contract.Path), "login") {
+			b.WriteString(",\n    auth: false")
+		}
+		b.WriteString("\n  });\n")
+		b.WriteString("}\n\n")
+	}
+	return b.String()
+}
+
+func apiTypesTS(spec MobileAppSpec) string {
+	var b strings.Builder
+	b.WriteString(`export type AuthSession = {
   token: string;
   user: { id: string; email: string; name: string };
 };
 
-export type Job = {
+export type LoginRequest = {
+  email: string;
+  password: string;
+};
+
+`)
+	written := map[string]bool{"AuthSession": true, "LoginRequest": true}
+	for _, model := range spec.DataModels {
+		typeName := exportedTypeName(model.Name)
+		if typeName == "" || written[typeName] {
+			continue
+		}
+		written[typeName] = true
+		b.WriteString("export type ")
+		b.WriteString(typeName)
+		b.WriteString(" = {\n")
+		keys := make([]string, 0, len(model.Fields))
+		for key := range model.Fields {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			propertyName := tsPropertyName(key)
+			b.WriteString("  ")
+			b.WriteString(propertyName)
+			if propertyName == "id" {
+				b.WriteString(": ")
+			} else {
+				b.WriteString("?: ")
+			}
+			b.WriteString(tsFieldType(model.Fields[key]))
+			b.WriteString(";\n")
+		}
+		if typeName == "Job" {
+			writeMissingField(&b, model.Fields, "customerName", "string")
+			writeMissingField(&b, model.Fields, "address", "string")
+			writeMissingField(&b, model.Fields, "estimatedValue", "number")
+			if _, ok := model.Fields["syncState"]; !ok {
+				b.WriteString("  syncState: 'synced' | 'pending sync' | 'offline draft';\n")
+			}
+		}
+		b.WriteString("};\n\n")
+	}
+	if !written["EstimateDraft"] {
+		b.WriteString(`export type EstimateDraft = {
+  id: string;
+  estimate: Record<string, number>;
+};
+
+`)
+		written["EstimateDraft"] = true
+	}
+	for _, contract := range spec.APIContracts {
+		for _, rawType := range []string{contract.Request, contract.Response} {
+			for _, typeName := range referencedTypeNames(rawType) {
+				if typeName == "" || written[typeName] {
+					continue
+				}
+				written[typeName] = true
+				if typeName == "PhotoAsset" {
+					b.WriteString(`export type PhotoAsset = {
+  id: string;
+  url: string;
+  contentType?: string;
+  createdAt?: string;
+};
+
+`)
+					continue
+				}
+				b.WriteString("export type ")
+				b.WriteString(typeName)
+				b.WriteString(" = Record<string, unknown>;\n\n")
+			}
+		}
+	}
+	if len(spec.DataModels) == 0 && !written["Job"] {
+		b.WriteString(`export type Job = {
   id: string;
   title: string;
   customerName: string;
@@ -324,11 +529,243 @@ export type Job = {
   syncState: 'synced' | 'pending sync' | 'offline draft';
 };
 
-export type EstimateDraft = {
-  id: string;
-  estimate: Record<string, number>;
-};
-`
+`)
+	}
+	return b.String()
+}
+
+func contractsHavePathParams(contracts []MobileAPIContractSpec) bool {
+	for _, contract := range contracts {
+		if len(pathParameterKeys(contract.Path)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func endpointTypeImports(contracts []MobileAPIContractSpec) []string {
+	seen := map[string]bool{}
+	for _, contract := range contracts {
+		for _, rawType := range []string{contract.Request, contract.Response} {
+			for _, typeName := range referencedTypeNames(rawType) {
+				seen[typeName] = true
+			}
+		}
+	}
+	imports := make([]string, 0, len(seen))
+	for typeName := range seen {
+		imports = append(imports, typeName)
+	}
+	sort.Strings(imports)
+	return imports
+}
+
+func referencedTypeNames(rawType string) []string {
+	rawType = strings.TrimSpace(rawType)
+	if rawType == "" || strings.EqualFold(rawType, "multipart/form-data") {
+		return nil
+	}
+	replacer := strings.NewReplacer("[]", "", "Array<", "", ">", "", "Promise<", "")
+	cleaned := replacer.Replace(rawType)
+	fields := strings.FieldsFunc(cleaned, func(r rune) bool {
+		return !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_')
+	})
+	var types []string
+	for _, field := range fields {
+		if field == "" || isPrimitiveTSType(field) {
+			continue
+		}
+		types = append(types, exportedTypeName(field))
+	}
+	return uniqueStrings(types)
+}
+
+func tsTypeExpression(rawType string) string {
+	rawType = strings.TrimSpace(rawType)
+	if rawType == "" || strings.EqualFold(rawType, "multipart/form-data") {
+		return ""
+	}
+	if strings.HasSuffix(rawType, "[]") {
+		base := exportedTypeName(strings.TrimSuffix(rawType, "[]"))
+		if base == "" {
+			return "unknown[]"
+		}
+		return base + "[]"
+	}
+	if isPrimitiveTSType(rawType) {
+		return rawType
+	}
+	return exportedTypeName(rawType)
+}
+
+func isPrimitiveTSType(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "string", "number", "boolean", "unknown", "void", "null", "undefined", "record":
+		return true
+	default:
+		return false
+	}
+}
+
+func pathParameterKeys(path string) []string {
+	parts := strings.Split(path, "/")
+	var keys []string
+	for _, part := range parts {
+		if strings.HasPrefix(part, ":") && len(part) > 1 {
+			keys = append(keys, tsPropertyName(strings.TrimPrefix(part, ":")))
+		}
+	}
+	return uniqueStrings(keys)
+}
+
+func pathParamsType(keys []string) string {
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+": string | number")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func tsFunctionName(value string) string {
+	name := lowerCamelIdentifier(value)
+	if name == "" {
+		return "callEndpoint"
+	}
+	return name
+}
+
+func uniqueTSIdentifier(base string, used map[string]int) string {
+	if base == "" {
+		base = "callEndpoint"
+	}
+	count := used[base]
+	used[base] = count + 1
+	if count == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s%d", base, count+1)
+}
+
+func exportedTypeName(value string) string {
+	name := lowerCamelIdentifier(value)
+	if name == "" {
+		return ""
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+func lowerCamelIdentifier(value string) string {
+	value = strings.TrimSpace(value)
+	if isIdentifierLike(value) {
+		return strings.ToLower(value[:1]) + value[1:]
+	}
+	parts := identifierParts(value)
+	if len(parts) == 0 {
+		return ""
+	}
+	for i, part := range parts {
+		if i == 0 {
+			parts[i] = strings.ToLower(part[:1]) + part[1:]
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	name := strings.Join(parts, "")
+	if name == "" {
+		return ""
+	}
+	if unicode.IsDigit(rune(name[0])) {
+		name = "api" + strings.ToUpper(name[:1]) + name[1:]
+	}
+	return name
+}
+
+func isIdentifierLike(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i, r := range value {
+		if i == 0 {
+			if !(unicode.IsLetter(r) || r == '_') {
+				return false
+			}
+			continue
+		}
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func identifierParts(value string) []string {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return !(unicode.IsLetter(r) || unicode.IsDigit(r))
+	})
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if field == "" {
+			continue
+		}
+		lower := strings.ToLower(field)
+		parts = append(parts, strings.ToUpper(lower[:1])+lower[1:])
+	}
+	return parts
+}
+
+func tsPropertyName(value string) string {
+	name := lowerCamelIdentifier(value)
+	if name == "" {
+		return "value"
+	}
+	return name
+}
+
+func tsFieldType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "string", "number", "boolean":
+		return value
+	case "integer", "int", "float", "decimal":
+		return "number"
+	case "date", "datetime", "time":
+		return "string"
+	default:
+		if strings.HasSuffix(value, "[]") {
+			return tsFieldType(strings.TrimSuffix(value, "[]")) + "[]"
+		}
+		return "unknown"
+	}
+}
+
+func writeMissingField(b *strings.Builder, fields map[string]string, name string, typ string) {
+	for key := range fields {
+		if tsPropertyName(key) == name {
+			return
+		}
+	}
+	b.WriteString("  ")
+	b.WriteString(name)
+	b.WriteString(": ")
+	b.WriteString(typ)
+	b.WriteString(";\n")
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func escapeTSString(value string) string {
+	return strings.ReplaceAll(value, "'", "\\'")
 }
 
 func authProviderTSX() string {

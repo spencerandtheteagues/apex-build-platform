@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"apex-build/pkg/models"
@@ -18,6 +19,9 @@ func TestGenerateExpoProjectCreatesFieldServiceSource(t *testing.T) {
 	if !hasSourceFile(files, "mobile/package.json") ||
 		!hasSourceFile(files, "mobile/app.config.ts") ||
 		!hasSourceFile(files, "mobile/app/(tabs)/jobs.tsx") ||
+		!hasSourceFile(files, "mobile/src/api/client.ts") ||
+		!hasSourceFile(files, "mobile/src/api/endpoints.ts") ||
+		!hasSourceFile(files, "mobile/src/api/types.ts") ||
 		!hasSourceFile(files, "mobile/store/store-readiness.json") ||
 		!hasSourceFile(files, "mobile/store/privacy-data-safety.md") ||
 		!hasSourceFile(files, "mobile/store/screenshot-checklist.md") ||
@@ -29,6 +33,41 @@ func TestGenerateExpoProjectCreatesFieldServiceSource(t *testing.T) {
 	}
 	if errs := ValidateGeneratedExpoFiles(files, ExpoDependenciesForSpec(spec, ExpoGeneratorOptions{}), DefaultNativeCapabilityRegistry()); len(errs) > 0 {
 		t.Fatalf("expected generated files to pass policy validation, got %+v", errs)
+	}
+}
+
+func TestGenerateExpoProjectCreatesContractDrivenAPIClient(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	client := findSourceFile(t, files, "mobile/src/api/client.ts")
+	endpoints := findSourceFile(t, files, "mobile/src/api/endpoints.ts")
+	types := findSourceFile(t, files, "mobile/src/api/types.ts")
+
+	for _, expected := range []string{"json?: unknown", "auth?: boolean", "buildPath", "SecureStore.getItemAsync('auth_token')"} {
+		if !strings.Contains(client.Content, expected) {
+			t.Fatalf("expected API client to contain %q\n%s", expected, client.Content)
+		}
+	}
+	for _, expected := range []string{
+		"export async function login(payload: LoginRequest): Promise<AuthSession>",
+		"auth: false",
+		"export async function listJobs(): Promise<Job[]>",
+		"export async function syncEstimate(payload: EstimateDraft): Promise<Estimate>",
+		"export async function uploadJobPhoto(pathParams: { id: string | number }, formData: FormData): Promise<PhotoAsset>",
+		"buildPath('/api/jobs/:id/photos', pathParams)",
+	} {
+		if !strings.Contains(endpoints.Content, expected) {
+			t.Fatalf("expected endpoints to contain %q\n%s", expected, endpoints.Content)
+		}
+	}
+	for _, expected := range []string{"export type LoginRequest", "export type Customer", "export type Estimate", "export type PhotoAsset"} {
+		if !strings.Contains(types.Content, expected) {
+			t.Fatalf("expected API types to contain %q\n%s", expected, types.Content)
+		}
 	}
 }
 
@@ -83,6 +122,23 @@ func TestValidateProjectSourcePackageFailsMissingRequiredFiles(t *testing.T) {
 	}
 	if !stringSliceContains(report.MissingFiles, "mobile/eas.json") {
 		t.Fatalf("expected missing eas.json, got %+v", report.MissingFiles)
+	}
+}
+
+func TestValidateProjectSourcePackageRequiresGeneratedAPIClientFiles(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+	files = removeSourceFile(files, "mobile/src/api/endpoints.ts")
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseSourceOnly), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationFailed {
+		t.Fatalf("expected validation failed, got %+v", report)
+	}
+	if !stringSliceContains(report.MissingFiles, "mobile/src/api/endpoints.ts") {
+		t.Fatalf("expected missing endpoints.ts, got %+v", report.MissingFiles)
 	}
 }
 
@@ -209,6 +265,17 @@ func hasSourceFile(files []SourceFile, path string) bool {
 		}
 	}
 	return false
+}
+
+func findSourceFile(t *testing.T, files []SourceFile, path string) SourceFile {
+	t.Helper()
+	for _, file := range files {
+		if file.Path == path {
+			return file
+		}
+	}
+	t.Fatalf("missing generated file %s; got %+v", path, sourceFilePaths(files))
+	return SourceFile{}
 }
 
 func stringSliceContains(values []string, needle string) bool {
