@@ -794,19 +794,23 @@
 ## Generated mobile API client source
 - Source of truth:
   - `backend/internal/mobile/types.go` `MobileAPIContractSpec` and `MobileDataModelSpec`.
+  - `backend/internal/mobile/api_contract_manifest.go` OpenAPI-style manifest and endpoint descriptors.
   - `backend/internal/mobile/expo_files.go` `apiClientTS`, `apiEndpointsTS`, and `apiTypesTS`.
   - `backend/internal/mobile/source_validation.go` required mobile API source files.
 - Producers:
   - `GenerateExpoProject` emits `mobile/src/api/client.ts`, `mobile/src/api/endpoints.ts`, and `mobile/src/api/types.ts`.
+  - `GenerateExpoProject` emits `mobile/docs/api-contract.json` and `mobile/docs/api-contract.md`.
   - `MobileAppSpec.APIContracts` drive endpoint names, methods, paths, path params, payload types, auth behavior, and response types.
 - Transport:
   - Generated source files in owner ZIP/GitHub/mobile preview materialization flows.
 - Consumers:
   - Generated Expo app source imports typed API types from `@/api/types`.
   - Generated auth, jobs, and estimates screens call `@/api/endpoints` with explicit offline/demo fallback.
-  - Mobile source validation requires all three API client files for mobile projects.
+  - Mobile source validation requires all three API client files plus API contract docs for mobile projects.
 - Defaults / zero-value behavior:
   - Specs without API contracts generate a typed `healthCheck` helper instead of an empty file.
+  - Specs generate an OpenAPI 3.1-style manifest with Apex mobile metadata under `x-apex-mobile`.
+  - Apex `:id` path segments are represented as OpenAPI `{id}` while retaining the original mobile path under `x-mobile-path`.
   - `login` endpoints are generated with `auth: false`; other endpoints include stored bearer tokens by default.
   - `multipart/form-data` contracts use `FormData` body and do not force JSON content-type.
   - Dynamic path segments such as `:id` are encoded through `buildPath`.
@@ -817,7 +821,8 @@
   - Existing web projects are unaffected because validation only applies on mobile project paths.
 - Required tests / validations:
   - Mobile generator test proving API contract-derived endpoints/types/client behavior.
+  - Mobile generator test proving API contract JSON and markdown docs are generated and parseable.
   - Mobile generator test proving auth/jobs/estimates are wired to generated endpoint helpers with fallback.
-  - Mobile validation test proving `mobile/src/api/endpoints.ts` is required.
+  - Mobile validation tests proving `mobile/src/api/endpoints.ts` and `mobile/docs/api-contract.json` are required and the JSON manifest must be valid.
   - Full mobile package test suite.
   - Generated Expo dependency-resolution smoke with `MOBILE_GENERATOR_INSTALL_SMOKE=1`.

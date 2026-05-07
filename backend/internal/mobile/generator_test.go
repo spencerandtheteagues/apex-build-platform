@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,8 @@ func TestGenerateExpoProjectCreatesFieldServiceSource(t *testing.T) {
 	if !hasSourceFile(files, "mobile/package.json") ||
 		!hasSourceFile(files, "mobile/app.config.ts") ||
 		!hasSourceFile(files, "mobile/app/(tabs)/jobs.tsx") ||
+		!hasSourceFile(files, "mobile/docs/api-contract.json") ||
+		!hasSourceFile(files, "mobile/docs/api-contract.md") ||
 		!hasSourceFile(files, "mobile/src/api/client.ts") ||
 		!hasSourceFile(files, "mobile/src/api/endpoints.ts") ||
 		!hasSourceFile(files, "mobile/src/api/types.ts") ||
@@ -99,6 +102,43 @@ func TestGenerateExpoProjectWiresScreensToAPIEndpointsWithOfflineFallback(t *tes
 	}
 }
 
+func TestGenerateExpoProjectCreatesAPIContractManifest(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	manifestFile := findSourceFile(t, files, "mobile/docs/api-contract.json")
+	markdownFile := findSourceFile(t, files, "mobile/docs/api-contract.md")
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(manifestFile.Content), &manifest); err != nil {
+		t.Fatalf("api contract manifest must be valid JSON: %v\n%s", err, manifestFile.Content)
+	}
+	if manifest["openapi"] != "3.1.0" {
+		t.Fatalf("expected OpenAPI 3.1 manifest, got %+v", manifest["openapi"])
+	}
+	paths, ok := manifest["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected paths object, got %+v", manifest["paths"])
+	}
+	if _, ok := paths["/api/jobs/{id}/photos"]; !ok {
+		t.Fatalf("expected OpenAPI path conversion for upload endpoint, got %+v", paths)
+	}
+	for _, expected := range []string{
+		`"operationId": "uploadJobPhoto"`,
+		`"x-mobile-path": "/api/jobs/:id/photos"`,
+		`"token_storage": "expo-secure-store:auth_token"`,
+	} {
+		if !strings.Contains(manifestFile.Content, expected) {
+			t.Fatalf("manifest missing %q\n%s", expected, manifestFile.Content)
+		}
+	}
+	if !strings.Contains(markdownFile.Content, "| `uploadJobPhoto` | `POST` | `/api/jobs/:id/photos` | yes | `FormData` | `PhotoAsset` |") {
+		t.Fatalf("markdown contract missing upload row\n%s", markdownFile.Content)
+	}
+}
+
 func TestGenerateStoreReadinessPackageLabelsDraftsAndManualPrerequisites(t *testing.T) {
 	spec := FieldServiceContractorQuoteSpec()
 	pkg := GenerateStoreReadinessPackage(spec)
@@ -134,6 +174,9 @@ func TestValidateProjectSourcePackagePassesGeneratedExpoSource(t *testing.T) {
 	if !hasMobileValidationCheck(report, "store_readiness", MobileValidationPassed) {
 		t.Fatalf("expected store readiness check to pass, got %+v", report.Checks)
 	}
+	if !hasMobileValidationCheck(report, "api_contract_manifest", MobileValidationPassed) {
+		t.Fatalf("expected API contract manifest check to pass, got %+v", report.Checks)
+	}
 }
 
 func TestValidateProjectSourcePackageFailsMissingRequiredFiles(t *testing.T) {
@@ -167,6 +210,40 @@ func TestValidateProjectSourcePackageRequiresGeneratedAPIClientFiles(t *testing.
 	}
 	if !stringSliceContains(report.MissingFiles, "mobile/src/api/endpoints.ts") {
 		t.Fatalf("expected missing endpoints.ts, got %+v", report.MissingFiles)
+	}
+}
+
+func TestValidateProjectSourcePackageRequiresAPIContractManifest(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+	files = removeSourceFile(files, "mobile/docs/api-contract.json")
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseSourceOnly), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationFailed {
+		t.Fatalf("expected validation failed, got %+v", report)
+	}
+	if !stringSliceContains(report.MissingFiles, "mobile/docs/api-contract.json") {
+		t.Fatalf("expected missing api-contract.json, got %+v", report.MissingFiles)
+	}
+}
+
+func TestValidateProjectSourcePackageRejectsInvalidAPIContractManifest(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+	files = replaceSourceFileContent(files, "mobile/docs/api-contract.json", `{"openapi":"3.0.0","paths":{}}`)
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseSourceOnly), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationFailed {
+		t.Fatalf("expected validation failed, got %+v", report)
+	}
+	if !hasMobileValidationCheck(report, "api_contract_manifest", MobileValidationFailed) {
+		t.Fatalf("expected API contract manifest failure, got %+v", report.Checks)
 	}
 }
 
@@ -341,6 +418,18 @@ func removeSourceFile(files []SourceFile, path string) []SourceFile {
 		}
 	}
 	return filtered
+}
+
+func replaceSourceFileContent(files []SourceFile, path string, content string) []SourceFile {
+	updated := make([]SourceFile, 0, len(files))
+	for _, file := range files {
+		if file.Path == path {
+			file.Content = content
+			file.Size = int64(len(content))
+		}
+		updated = append(updated, file)
+	}
+	return updated
 }
 
 func modelFilesFromSource(files []SourceFile) []models.File {

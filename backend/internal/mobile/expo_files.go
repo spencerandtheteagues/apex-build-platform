@@ -386,66 +386,46 @@ func apiEndpointsTS(spec MobileAppSpec) string {
 		b.WriteString("}\n")
 		return b.String()
 	}
-	usedNames := map[string]int{}
-	for _, contract := range contracts {
-		functionName := uniqueTSIdentifier(tsFunctionName(contract.Name), usedNames)
-		method := strings.ToUpper(strings.TrimSpace(contract.Method))
-		if method == "" {
-			method = "GET"
-		}
-		path := strings.TrimSpace(contract.Path)
-		if path == "" {
-			path = "/api/" + functionName
-		}
-		responseType := tsTypeExpression(contract.Response)
-		if responseType == "" {
-			responseType = "unknown"
-		}
-		requestType := tsTypeExpression(contract.Request)
-		pathParamKeys := pathParameterKeys(path)
-		hasPathParams := len(pathParamKeys) > 0
-		isMultipart := strings.EqualFold(strings.TrimSpace(contract.Request), "multipart/form-data")
-		requiresPayload := method != "GET" && method != "DELETE" && requestType != "" && !isMultipart
-
+	for _, endpoint := range apiEndpointDescriptors(contracts) {
 		var params []string
-		if hasPathParams {
-			params = append(params, "pathParams: { "+pathParamsType(pathParamKeys)+" }")
+		if len(endpoint.PathParams) > 0 {
+			params = append(params, "pathParams: { "+pathParamsType(endpoint.PathParams)+" }")
 		}
-		if isMultipart {
+		if endpoint.IsMultipart {
 			params = append(params, "formData: FormData")
-		} else if requiresPayload {
-			params = append(params, "payload: "+requestType)
+		} else if endpoint.RequiresPayload {
+			params = append(params, "payload: "+endpoint.RequestType)
 		}
 
 		b.WriteString("export async function ")
-		b.WriteString(functionName)
+		b.WriteString(endpoint.FunctionName)
 		b.WriteString("(")
 		b.WriteString(strings.Join(params, ", "))
 		b.WriteString("): Promise<")
-		b.WriteString(responseType)
+		b.WriteString(endpoint.ResponseType)
 		b.WriteString("> {\n")
 		b.WriteString("  return apiRequest<")
-		b.WriteString(responseType)
+		b.WriteString(endpoint.ResponseType)
 		b.WriteString(">(")
-		if hasPathParams {
+		if len(endpoint.PathParams) > 0 {
 			b.WriteString("buildPath('")
-			b.WriteString(escapeTSString(path))
+			b.WriteString(escapeTSString(endpoint.Path))
 			b.WriteString("', pathParams)")
 		} else {
 			b.WriteString("'")
-			b.WriteString(escapeTSString(path))
+			b.WriteString(escapeTSString(endpoint.Path))
 			b.WriteString("'")
 		}
 		b.WriteString(", {\n")
 		b.WriteString("    method: '")
-		b.WriteString(method)
+		b.WriteString(endpoint.Method)
 		b.WriteString("'")
-		if isMultipart {
+		if endpoint.IsMultipart {
 			b.WriteString(",\n    body: formData")
-		} else if requiresPayload {
+		} else if endpoint.RequiresPayload {
 			b.WriteString(",\n    json: payload")
 		}
-		if strings.Contains(strings.ToLower(contract.Name+" "+contract.Path), "login") {
+		if !endpoint.AuthRequired {
 			b.WriteString(",\n    auth: false")
 		}
 		b.WriteString("\n  });\n")
