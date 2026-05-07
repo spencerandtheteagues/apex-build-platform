@@ -64,6 +64,8 @@ files/
 
 # Docker
 .dockerignore
+DockerDesktop/
+Docker.raw
 
 # Security
 certificates/
