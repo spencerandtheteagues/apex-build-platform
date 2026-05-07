@@ -66,6 +66,7 @@ Implemented now:
 - mobile feature flags.
 - contract propagation through orchestration and persistence.
 - Expo/React Native source generator for a field-service quote-builder starter under `mobile/`.
+- contract-driven generated mobile API client files under `mobile/src/api/`, including Expo-configured base URL handling, secure bearer-token injection, typed endpoint helpers, path-param encoding, JSON payload support, and multipart upload support.
 - generated mobile source validation for dependency allowlist and browser-only runtime API usage.
 - mobile source preparation for GitHub export and owner ZIP download.
 - internal `MobileBuildService` abstraction with feature-flag/platform gating, mocked provider seam, restart-safe build-state records, artifact/log metadata, failure classification, and secret redaction.
@@ -79,7 +80,6 @@ Implemented now:
 
 Next backend services:
 
-- generated mobile API client generator.
 - repair-loop integration.
 - store metadata/readiness generators.
 
@@ -192,10 +192,11 @@ Implemented now:
 - Feature flags default safely off.
 - Mobile prompt routes to `mobile_expo` without changing existing web/in-memory prompt behavior.
 - Mobile metadata reaches `BuildContract` and `ValidatedBuildSpec`.
+- Generated Expo source includes contract-driven API client, endpoint helpers, and API/data-model types.
+- Generated mobile source validation requires the API client files.
 
 Required next:
 
-- exported generated Expo template install/typecheck.
 - generated mobile export clone/install.
 - frontend mobile wizard tests.
 - mocked mobile build-provider state and project-scoped API tests.

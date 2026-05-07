@@ -790,3 +790,32 @@
   - Backend preview-handler tests for happy path and disabled feature flags.
   - Frontend API test for route shape and timeout.
   - Frontend dashboard test for the honest browser-rendered label and start/open flow.
+
+## Generated mobile API client source
+- Source of truth:
+  - `backend/internal/mobile/types.go` `MobileAPIContractSpec` and `MobileDataModelSpec`.
+  - `backend/internal/mobile/expo_files.go` `apiClientTS`, `apiEndpointsTS`, and `apiTypesTS`.
+  - `backend/internal/mobile/source_validation.go` required mobile API source files.
+- Producers:
+  - `GenerateExpoProject` emits `mobile/src/api/client.ts`, `mobile/src/api/endpoints.ts`, and `mobile/src/api/types.ts`.
+  - `MobileAppSpec.APIContracts` drive endpoint names, methods, paths, path params, payload types, auth behavior, and response types.
+- Transport:
+  - Generated source files in owner ZIP/GitHub/mobile preview materialization flows.
+- Consumers:
+  - Generated Expo app source imports typed API types from `@/api/types`.
+  - Future generated feature screens can call `@/api/endpoints` instead of hand-written fetches.
+  - Mobile source validation requires all three API client files for mobile projects.
+- Defaults / zero-value behavior:
+  - Specs without API contracts generate a typed `healthCheck` helper instead of an empty file.
+  - `login` endpoints are generated with `auth: false`; other endpoints include stored bearer tokens by default.
+  - `multipart/form-data` contracts use `FormData` body and do not force JSON content-type.
+  - Dynamic path segments such as `:id` are encoded through `buildPath`.
+  - Generated runtime code reads Expo config via `expo-constants` and never uses browser-only `window`, `document`, `localStorage`, or runtime `process.env`.
+- Backward compatibility risk:
+  - Additive generated file plus stricter source validation for newly generated mobile projects.
+  - Existing web projects are unaffected because validation only applies on mobile project paths.
+- Required tests / validations:
+  - Mobile generator test proving API contract-derived endpoints/types/client behavior.
+  - Mobile validation test proving `mobile/src/api/endpoints.ts` is required.
+  - Full mobile package test suite.
+  - Generated Expo dependency-resolution smoke with `MOBILE_GENERATOR_INSTALL_SMOKE=1`.
