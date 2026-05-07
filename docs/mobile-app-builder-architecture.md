@@ -66,7 +66,7 @@ Implemented now:
 - mobile feature flags.
 - contract propagation through orchestration and persistence.
 - Expo/React Native source generator for a field-service quote-builder starter under `mobile/`.
-- contract-driven generated mobile API client files under `mobile/src/api/`, including Expo-configured base URL handling, secure bearer-token injection, typed endpoint helpers, path-param encoding, JSON payload support, multipart upload support, and generated auth/jobs/estimate screens that use those helpers with offline-safe fallbacks.
+- contract-driven generated mobile API client files under `mobile/src/api/`, plus `mobile/docs/api-contract.json` and `mobile/docs/api-contract.md` generated from the same `MobileAppSpec.APIContracts`. The generated source includes Expo-configured base URL handling, secure bearer-token injection, typed endpoint helpers, path-param encoding, JSON payload support, multipart upload support, OpenAPI-style backend route reference docs, and generated auth/jobs/estimate screens that use those helpers with offline-safe fallbacks.
 - generated mobile source validation for dependency allowlist and browser-only runtime API usage.
 - mobile source preparation for GitHub export and owner ZIP download.
 - internal `MobileBuildService` abstraction with feature-flag/platform gating, mocked provider seam, restart-safe build-state records, artifact/log metadata, failure classification, and secret redaction.
@@ -192,8 +192,8 @@ Implemented now:
 - Feature flags default safely off.
 - Mobile prompt routes to `mobile_expo` without changing existing web/in-memory prompt behavior.
 - Mobile metadata reaches `BuildContract` and `ValidatedBuildSpec`.
-- Generated Expo source includes contract-driven API client, endpoint helpers, API/data-model types, and generated screen/auth wiring that keeps local/offline fallback when backend calls fail.
-- Generated mobile source validation requires the API client files.
+- Generated Expo source includes contract-driven API client, endpoint helpers, API/data-model types, API contract docs, and generated screen/auth wiring that keeps local/offline fallback when backend calls fail.
+- Generated mobile source validation requires the API client files and parses the API contract manifest.
 
 Required next:
 

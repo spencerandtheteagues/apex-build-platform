@@ -51,6 +51,8 @@ func GenerateExpoProject(spec MobileAppSpec, options ExpoGeneratorOptions) ([]So
 		sourceFile("mobile/README.md", mobileReadme(spec), "markdown"),
 		sourceFile("mobile/BUILD.md", buildMd(spec), "markdown"),
 		sourceFile("mobile/STORE_RELEASE.md", storeReleaseMd(spec), "markdown"),
+		sourceFile("mobile/docs/api-contract.json", APIContractManifestJSON(spec), "json"),
+		sourceFile("mobile/docs/api-contract.md", APIContractMarkdown(spec), "markdown"),
 		sourceFile("mobile/store/store-readiness.json", StoreReadinessJSON(spec), "json"),
 		sourceFile("mobile/store/privacy-data-safety.md", StorePrivacyDataSafetyMarkdown(spec), "markdown"),
 		sourceFile("mobile/store/screenshot-checklist.md", StoreScreenshotChecklistMarkdown(spec), "markdown"),

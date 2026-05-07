@@ -74,6 +74,8 @@ func ValidateProjectSourcePackage(project models.Project, files []models.File) M
 		"mobile/README.md",
 		"mobile/BUILD.md",
 		"mobile/STORE_RELEASE.md",
+		"mobile/docs/api-contract.json",
+		"mobile/docs/api-contract.md",
 		"mobile/src/api/client.ts",
 		"mobile/src/api/endpoints.ts",
 		"mobile/src/api/types.ts",
@@ -94,6 +96,7 @@ func ValidateProjectSourcePackage(project models.Project, files []models.File) M
 	dependencies := validatePackageJSON(fileMap["mobile/package.json"], &report)
 	validateAppConfig(project, fileMap["mobile/app.config.ts"], &report)
 	validateSourcePolicy(files, dependencies, &report)
+	validateAPIContractManifest(fileMap["mobile/docs/api-contract.json"], &report)
 	validateStoreReadiness(fileMap["mobile/store/store-readiness.json"], &report)
 	validateReleaseTruth(project, &report)
 
@@ -203,6 +206,31 @@ func validateSourcePolicy(files []models.File, dependencies map[string]string, r
 		return
 	}
 	addMobileCheck(report, "source_policy", "Mobile source policy", MobileValidationPassed, "No browser-only APIs or unsupported dependencies were found in mobile source.", true)
+}
+
+func validateAPIContractManifest(file models.File, report *MobileValidationReport) {
+	if strings.TrimSpace(file.Path) == "" {
+		return
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(file.Content), &manifest); err != nil {
+		addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationFailed, "api-contract.json is not valid JSON.", true)
+		return
+	}
+	if manifest["openapi"] != "3.1.0" {
+		addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationFailed, "api-contract.json must declare OpenAPI 3.1.0.", true)
+		return
+	}
+	paths, ok := manifest["paths"].(map[string]any)
+	if !ok || len(paths) == 0 {
+		addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationFailed, "api-contract.json must include at least one API path.", true)
+		return
+	}
+	if _, ok := manifest["x-apex-mobile"].(map[string]any); !ok {
+		addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationFailed, "api-contract.json must include x-apex-mobile metadata.", true)
+		return
+	}
+	addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationPassed, "OpenAPI-style mobile API contract manifest is present and parseable.", true)
 }
 
 func validateStoreReadiness(file models.File, report *MobileValidationReport) {
