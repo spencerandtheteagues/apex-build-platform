@@ -803,19 +803,21 @@
   - Generated source files in owner ZIP/GitHub/mobile preview materialization flows.
 - Consumers:
   - Generated Expo app source imports typed API types from `@/api/types`.
-  - Future generated feature screens can call `@/api/endpoints` instead of hand-written fetches.
+  - Generated auth, jobs, and estimates screens call `@/api/endpoints` with explicit offline/demo fallback.
   - Mobile source validation requires all three API client files for mobile projects.
 - Defaults / zero-value behavior:
   - Specs without API contracts generate a typed `healthCheck` helper instead of an empty file.
   - `login` endpoints are generated with `auth: false`; other endpoints include stored bearer tokens by default.
   - `multipart/form-data` contracts use `FormData` body and do not force JSON content-type.
   - Dynamic path segments such as `:id` are encoded through `buildPath`.
+  - Generated screens do not hard-fail when the backend is absent: auth uses a demo token, jobs show offline sample data, and estimates queue drafts locally.
   - Generated runtime code reads Expo config via `expo-constants` and never uses browser-only `window`, `document`, `localStorage`, or runtime `process.env`.
 - Backward compatibility risk:
   - Additive generated file plus stricter source validation for newly generated mobile projects.
   - Existing web projects are unaffected because validation only applies on mobile project paths.
 - Required tests / validations:
   - Mobile generator test proving API contract-derived endpoints/types/client behavior.
+  - Mobile generator test proving auth/jobs/estimates are wired to generated endpoint helpers with fallback.
   - Mobile validation test proving `mobile/src/api/endpoints.ts` is required.
   - Full mobile package test suite.
   - Generated Expo dependency-resolution smoke with `MOBILE_GENERATOR_INSTALL_SMOKE=1`.
