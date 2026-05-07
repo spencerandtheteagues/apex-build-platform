@@ -16,6 +16,7 @@ import (
 	"time"
 	"unsafe"
 
+	"apex-build/internal/mobile"
 	"apex-build/internal/preview"
 	"apex-build/pkg/models"
 
@@ -33,7 +34,7 @@ func newPreviewHandlerTestFixture(t *testing.T, requireSandbox bool) (*PreviewHa
 	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}, &models.CompletedBuild{}))
 
 	user := models.User{
 		Username:     strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),
@@ -303,6 +304,69 @@ func TestPreviewHandlerFullStackOptionalBackendTimeoutStillReturnsFrontendPrevie
 	require.Contains(t, recorder.Body.String(), `"degraded":true`)
 	require.Contains(t, recorder.Body.String(), `"backend_started":false`)
 	require.Contains(t, recorder.Body.String(), `/api/v1/preview/proxy/`+strconv.FormatUint(uint64(projectID), 10)+`/`)
+}
+
+func TestPreviewHandlerStartsMobileExpoWebPreview(t *testing.T) {
+	t.Setenv("MOBILE_BUILDER_ENABLED", "true")
+	t.Setenv("MOBILE_EXPO_ENABLED", "true")
+
+	readyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("<!doctype html><html><body>Expo web ready</body></html>"))
+	}))
+	defer readyServer.Close()
+
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+	var mobileProject models.Project
+	require.NoError(t, handler.db.First(&mobileProject, projectID).Error)
+	mobileProject.TargetPlatform = string(mobile.TargetPlatformMobileExpo)
+	mobileProject.MobileFramework = string(mobile.MobileFrameworkExpoReactNative)
+	mobileProject.MobilePlatforms = []string{"android", "ios"}
+	mobileProject.MobileReleaseLevel = string(mobile.ReleaseSourceOnly)
+	mobileProject.AppDisplayName = "Preview Mobile"
+	mobileProject.AndroidPackage = "dev.apex.preview"
+	mobileProject.IOSBundleIdentifier = "dev.apex.preview"
+	mobileProject.AppVersion = "1.0.0"
+	require.NoError(t, handler.db.Save(&mobileProject).Error)
+	handler.serverRunner = preview.NewServerRunnerWithRuntime(handler.db, newFakePreviewRuntime("host", readyServer.URL))
+
+	body, err := json.Marshal(map[string]any{"project_id": projectID})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/preview/mobile/expo-web/start", bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Request.Host = "apex-build.dev"
+	context.Set("user_id", uint(1))
+
+	handler.StartMobileExpoWebPreview(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"preview_level":"expo_web"`)
+	require.Contains(t, recorder.Body.String(), `/api/v1/preview/backend-proxy/`+strconv.FormatUint(uint64(projectID), 10))
+	require.Contains(t, recorder.Body.String(), `not a native Android/iOS build`)
+
+	var project models.Project
+	require.NoError(t, handler.db.First(&project, projectID).Error)
+	require.Equal(t, "web_preview", project.MobilePreviewStatus)
+}
+
+func TestPreviewHandlerMobileExpoWebPreviewRespectsFlags(t *testing.T) {
+	t.Setenv("MOBILE_BUILDER_ENABLED", "false")
+	t.Setenv("MOBILE_EXPO_ENABLED", "false")
+
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+	body, err := json.Marshal(map[string]any{"project_id": projectID})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/preview/mobile/expo-web/start", bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set("user_id", uint(1))
+
+	handler.StartMobileExpoWebPreview(context)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "MOBILE_EXPO_PREVIEW_DISABLED")
 }
 
 func TestPreviewHandlerFullStackOmitsBackendByDefaultForFrontendOnlyApps(t *testing.T) {

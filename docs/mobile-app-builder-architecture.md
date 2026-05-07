@@ -72,6 +72,7 @@ Implemented now:
 - project-scoped mobile build-job API for request/status/log/artifact reads, gated by project ownership, mobile target type, feature flags, credentials, and provider availability.
 - encrypted, project-scoped mobile credential vault for EAS, Apple App Store Connect, Google Play service accounts, and Android signing.
 - authenticated mobile credential status API that returns metadata only and updates the mobile readiness scorecard.
+- feature-flagged Expo Web preview route that materializes project-owned generated `mobile/` source, starts `npm run web`, serves it through the existing backend preview proxy, and records `mobile_preview_status` without treating the result as native-device proof.
 - `EASBuildProvider` seam behind `MOBILE_EAS_BUILD_ENABLED`; it materializes stored project `mobile/` files into a temporary source directory, resolves the project-scoped EAS token from the encrypted vault, invokes `eas build --non-interactive --no-wait --json`, refreshes status/artifacts through `eas build:view --json`, and requests cancellation through `eas build:cancel` with redacted logs.
 - default-off `MobileBuildPoller` behind `MOBILE_EAS_POLLING_ENABLED`; it periodically refreshes active provider-backed EAS build jobs, updates stored job/project summary metadata, and preserves transport errors as redacted logs without falsely marking builds failed.
 - retry support for failed/canceled/repair-pending mobile build jobs. Retry reuses the original platform/profile/release metadata, re-materializes project-owned `mobile/` source, re-checks credentials, and queues a new provider job instead of mutating the old attempt.
@@ -79,7 +80,6 @@ Implemented now:
 Next backend services:
 
 - generated mobile API client generator.
-- Expo Web preview provider.
 - repair-loop integration.
 - store metadata/readiness generators.
 
@@ -91,14 +91,16 @@ Implemented now:
 - `frontend/src/services/api.ts` exposes mobile credential status/create/delete methods with metadata-only response types.
 - `MobileCredentialPanel` lets project owners add, replace, or delete EAS, Apple App Store Connect, Google Play, and Android signing credentials from the mobile dashboard. It never pre-fills stored secret values and clears transient form values after save/cancel/delete.
 - `frontend/src/services/api.ts` exposes project-scoped mobile build-job methods for request, status, refresh, logs, and artifact metadata.
+- `frontend/src/services/api.ts` exposes a feature-flagged Expo Web preview start method with a preview-start timeout.
 - `ProjectDashboard` includes a mobile build operations panel for mobile projects. It lists native build jobs, checks EAS credential status, starts Android APK/AAB or iOS internal builds through the gated backend API, refreshes/cancels jobs, and opens artifact links when available.
+- `MobileBuildOperationsPanel` includes an Expo Web preview card that starts browser-rendered Expo preview, links to the proxied preview URL, and explicitly says this is not APK/AAB/TestFlight/store proof.
 - `MobileStoreReadinessPanel` renders the generated store-readiness package, privacy/data-safety draft counts, screenshot targets, release notes state, manual prerequisites, and truthful approval caveats from current project files plus validation/scorecard evidence.
 
 Next frontend work:
 
 - new-project target selector.
 - mobile setup step with Android/iOS/capability/build-level controls.
-- mobile preview frame with honest Expo Web labeling.
+- richer mobile preview frame/device chrome around the existing honest Expo Web preview URL.
 - provider credential testing beyond payload-shape validation.
 - mobile export options in `GitHubExportModal`.
 - typed read-only store-readiness endpoint if richer package state is needed outside the file tree.
@@ -206,7 +208,7 @@ Required next:
 - This branch generates Expo source files through `backend/internal/mobile.GenerateExpoProject` and prepares them for GitHub export and owner ZIP download.
 - This branch has an internal mobile build-service abstraction, restart-safe build-job persistence, project-scoped build API, credential-gated EAS provider queue/refresh seam, and mocked provider tests.
 - This branch has a default-off EAS polling worker that refreshes active provider-backed build jobs and updates project artifact metadata when enabled.
-- This branch does not yet run Expo Web preview.
+- This branch can run a feature-flagged Expo Web preview by materializing generated `mobile/` files and starting `npm run web`; this preview is browser-rendered and does not prove Android/iOS native build readiness.
 - This branch can invoke EAS Build only when `MOBILE_EAS_BUILD_ENABLED` and the relevant platform flags are enabled and an EAS token is stored; this has not been live-validated against EAS in this session.
 - This branch does not yet call EAS Submit.
 - This branch does not yet automate App Store Connect or Google Play metadata.

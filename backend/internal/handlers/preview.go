@@ -19,6 +19,7 @@ import (
 	"apex-build/internal/auth"
 	"apex-build/internal/bundler"
 	"apex-build/internal/metrics"
+	"apex-build/internal/mobile"
 	"apex-build/internal/preview"
 	"apex-build/pkg/models"
 
@@ -463,6 +464,112 @@ response:
 		metrics.RecordPreviewStart("fullstack", "success", req.Sandbox)
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// StartMobileExpoWebPreview starts an Expo Web runtime from the generated mobile/ source tree.
+// This is a browser-rendered mobile preview, not proof of a native Android/iOS binary.
+// POST /api/v1/preview/mobile/expo-web/start
+func (h *PreviewHandler) StartMobileExpoWebPreview(c *gin.Context) {
+	if !h.ensureBackendPreviewAvailable(c) {
+		return
+	}
+
+	flags := mobile.LoadFeatureFlagsFromEnv()
+	if !flags.MobileBuilderEnabled || !flags.MobileExpoEnabled {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Expo Web mobile preview is disabled",
+			"code":    "MOBILE_EXPO_PREVIEW_DISABLED",
+		})
+		return
+	}
+
+	userID := c.GetUint("user_id")
+	var req struct {
+		ProjectID uint              `json:"project_id" binding:"required"`
+		EnvVars   map[string]string `json:"env_vars"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var project models.Project
+	if err := h.db.First(&project, req.ProjectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(project.TargetPlatform), string(mobile.TargetPlatformMobileExpo)) &&
+		!strings.EqualFold(strings.TrimSpace(project.MobileFramework), string(mobile.MobileFrameworkExpoReactNative)) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Project is not an Expo mobile project",
+			"code":    "NOT_MOBILE_EXPO_PROJECT",
+		})
+		return
+	}
+
+	source, err := mobile.MaterializeProjectMobileSource(c.Request.Context(), h.db, project)
+	if err != nil {
+		_ = h.updateMobilePreviewStatus(c.Request.Context(), project.ID, "failed")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+			"code":    "MOBILE_PREVIEW_SOURCE_FAILED",
+		})
+		return
+	}
+	cleanupOwned := true
+	defer func() {
+		if cleanupOwned && source.Cleanup != nil {
+			_ = source.Cleanup()
+		}
+	}()
+
+	envVars := mergePreviewEnvVars(map[string]string{
+		"APEX_MOBILE_PREVIEW_LEVEL": "expo_web",
+		"BROWSER":                   "none",
+		"CI":                        "1",
+		"EXPO_NO_TELEMETRY":         "1",
+	}, req.EnvVars)
+	proc, err := h.serverRunner.Start(context.Background(), &preview.ServerConfig{
+		ProjectID:           req.ProjectID,
+		EntryFile:           "package.json",
+		Command:             "npm run web",
+		EnvVars:             envVars,
+		WorkDir:             source.MobileDir,
+		CleanupDir:          source.RootDir,
+		InstallDependencies: true,
+		ReadyTimeout:        previewRuntimeStartTimeout(),
+	})
+	if err != nil {
+		_ = h.updateMobilePreviewStatus(c.Request.Context(), project.ID, "failed")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+			"code":    "MOBILE_EXPO_WEB_PREVIEW_FAILED",
+		})
+		return
+	}
+	cleanupOwned = false
+
+	_ = h.updateMobilePreviewStatus(c.Request.Context(), project.ID, "web_preview")
+	previewURL := h.buildBackendProxyURL(c, req.ProjectID)
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"preview_level": "expo_web",
+		"preview_url":   previewURL,
+		"url":           previewURL,
+		"port":          proc.Port,
+		"pid":           proc.Pid,
+		"command":       proc.Command,
+		"runtime_type":  proc.RuntimeType,
+		"message":       "Expo Web mobile preview started. This is browser-rendered and is not a native Android/iOS build.",
+	})
 }
 
 // StopPreview stops a live preview session
@@ -1866,6 +1973,16 @@ func (h *PreviewHandler) ensureBackendPreviewAvailable(c *gin.Context) bool {
 		"error":   h.backendPreviewDisabledReason(),
 	})
 	return false
+}
+
+func (h *PreviewHandler) updateMobilePreviewStatus(ctx context.Context, projectID uint, status string) error {
+	if h == nil || h.db == nil || projectID == 0 || strings.TrimSpace(status) == "" {
+		return nil
+	}
+	return h.db.WithContext(ctx).
+		Model(&models.Project{}).
+		Where("id = ?", projectID).
+		Update("mobile_preview_status", strings.TrimSpace(status)).Error
 }
 
 // Helper methods

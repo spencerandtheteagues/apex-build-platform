@@ -760,3 +760,33 @@
   - Backend API handler test proving validation prepares generated files and reports source/store status.
   - Frontend API test for route shape.
   - Frontend ProjectDashboard test for mobile validation rendering and web-project non-call.
+
+## Mobile Expo Web preview API
+- Source of truth:
+  - `backend/internal/handlers/preview.go` `StartMobileExpoWebPreview`.
+  - `backend/internal/preview/server_runner.go` npm/Expo command preparation and temp-source cleanup.
+  - `backend/cmd/main.go` `/api/v1/preview/mobile/expo-web/start` route registration.
+- Producers:
+  - Frontend `MobileBuildOperationsPanel` calls `ApiService.startProjectMobileExpoWebPreview`.
+  - Backend materializes project-owned generated `mobile/` source before starting `npm run web`.
+- Transport:
+  - `POST /api/v1/preview/mobile/expo-web/start`.
+  - Request shape: `{ "project_id": number, "env_vars"?: Record<string,string> }`.
+  - Success response includes `success`, `preview_level: "expo_web"`, `preview_url`, `url`, `port`, `pid`, `command`, `runtime_type`, and an honesty message.
+- Consumers:
+  - `frontend/src/services/api.ts` `MobileExpoWebPreviewResponse`.
+  - `frontend/src/components/project/MobileBuildOperationsPanel.tsx` Expo Web preview card.
+- Defaults / zero-value behavior:
+  - Route fails closed unless `MOBILE_BUILDER_ENABLED=true` and `MOBILE_EXPO_ENABLED=true`.
+  - Only `mobile_expo` or `expo-react-native` projects are accepted.
+  - Backend sets `mobile_preview_status` to `web_preview` on start and `failed` on source/start failures.
+  - `preview_url` points at the existing backend proxy and is browser-rendered only. It is not native APK/AAB/TestFlight/store evidence.
+  - Temp source cleanup is owned by the server runner after successful start and is restricted to temp-directory paths.
+- Backward compatibility risk:
+  - Additive endpoint and optional UI only; existing web preview routes and project export routes are unchanged.
+  - Existing server-runner callers with explicit `WorkDir` keep prior behavior unless `InstallDependencies` is explicitly true.
+- Required tests / validations:
+  - Backend server-runner test that `npm run web` pins the requested port.
+  - Backend preview-handler tests for happy path and disabled feature flags.
+  - Frontend API test for route shape and timeout.
+  - Frontend dashboard test for the honest browser-rendered label and start/open flow.

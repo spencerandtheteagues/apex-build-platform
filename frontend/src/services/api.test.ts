@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiService, isAuthRefreshRequestUrl, reloadExpiredSession } from './api'
+import { ApiService, PREVIEW_START_TIMEOUT_MS, isAuthRefreshRequestUrl, reloadExpiredSession } from './api'
 
 const createStorageMock = (): Storage => {
   const store = new Map<string, string>()
@@ -267,6 +267,29 @@ describe('mobile validation API', () => {
     expect(retried.build.id).toBe('mbld_retry')
     expect(logs[0].message).toBe('queued')
     expect(artifact.artifact_url).toContain('app.apk')
+  })
+
+  it('starts Expo Web mobile previews through the gated preview route', async () => {
+    const service = new ApiService('/api/v1')
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        preview_level: 'expo_web',
+        preview_url: 'https://api.example.com/api/v1/preview/backend-proxy/42',
+        message: 'Expo Web mobile preview started.',
+      },
+    } as any)
+
+    const response = await service.startProjectMobileExpoWebPreview(42, { EXPO_PUBLIC_API_BASE_URL: 'https://api.example.com' })
+
+    expect(post).toHaveBeenCalledWith('/preview/mobile/expo-web/start', {
+      project_id: 42,
+      env_vars: { EXPO_PUBLIC_API_BASE_URL: 'https://api.example.com' },
+    }, {
+      timeout: PREVIEW_START_TIMEOUT_MS,
+    })
+    expect(response.preview_level).toBe('expo_web')
+    expect(response.preview_url).toContain('/preview/backend-proxy/42')
   })
 })
 
