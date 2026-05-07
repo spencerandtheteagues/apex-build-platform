@@ -130,15 +130,25 @@ export default function TabsLayout() {
 }
 
 func jobsScreenTSX() string {
-	return `import { FlatList, Pressable, Text, View } from 'react-native';
+	return `import { useQuery } from '@tanstack/react-query';
+import { FlatList, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { listJobs } from '@/api/endpoints';
 import { Screen } from '@/components/ui/Screen';
-import { jobs } from '@/features/fieldService/sampleData';
+import { jobs as offlineJobs } from '@/features/fieldService/sampleData';
 import { theme } from '@/theme/theme';
 
 export default function JobsScreen() {
+  const { data, isError, isLoading } = useQuery({
+    queryKey: ['jobs'],
+    queryFn: listJobs,
+    retry: false
+  });
+  const jobs = data?.length ? data : offlineJobs;
+  const syncLabel = isLoading ? 'Checking backend data...' : isError ? 'Backend unavailable. Showing offline sample data.' : 'Synced with generated backend contract.';
+
   return (
-    <Screen title="Active Jobs" subtitle="Live field pipeline with offline-safe draft state." scroll={false}>
+    <Screen title="Active Jobs" subtitle={syncLabel} scroll={false}>
       <FlatList
         data={jobs}
         keyExtractor={(item) => item.id}
@@ -190,6 +200,7 @@ export default function CustomersScreen() {
 func estimatesScreenTSX() string {
 	return `import { useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
+import { syncEstimate } from '@/api/endpoints';
 import { Screen } from '@/components/ui/Screen';
 import { queueDraftForSync } from '@/data/syncQueue';
 import { theme } from '@/theme/theme';
@@ -199,7 +210,7 @@ export default function EstimatesScreen() {
   const [laborRate, setLaborRate] = useState('85');
   const [materials, setMaterials] = useState('4200');
   const [markup, setMarkup] = useState('32');
-  const [saved, setSaved] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'synced' | 'queued'>('idle');
   const estimate = useMemo(() => {
     const labor = Number(laborHours || 0) * Number(laborRate || 0);
     const materialCost = Number(materials || 0);
@@ -212,8 +223,14 @@ export default function EstimatesScreen() {
   }, [laborHours, laborRate, materials, markup]);
 
   const saveDraft = async () => {
-    await queueDraftForSync({ id: 'draft-' + Date.now(), estimate });
-    setSaved(true);
+    const draft = { id: 'draft-' + Date.now(), estimate };
+    try {
+      await syncEstimate(draft);
+      setSaveState('synced');
+    } catch {
+      await queueDraftForSync(draft);
+      setSaveState('queued');
+    }
   };
 
   return (
@@ -242,7 +259,9 @@ export default function EstimatesScreen() {
           <Text style={theme.caption}>Subtotal ${Math.round(estimate.subtotal).toLocaleString()} + markup ${Math.round(estimate.markupAmount).toLocaleString()}</Text>
         </View>
         <Pressable accessibilityRole="button" onPress={saveDraft} style={theme.primaryButton}>
-          <Text style={theme.primaryButtonText}>{saved ? 'Draft queued for sync' : 'Save offline draft'}</Text>
+          <Text style={theme.primaryButtonText}>
+            {saveState === 'synced' ? 'Draft synced' : saveState === 'queued' ? 'Draft queued for sync' : 'Save or sync draft'}
+          </Text>
         </Pressable>
       </View>
     </Screen>
@@ -771,6 +790,8 @@ func escapeTSString(value string) string {
 func authProviderTSX() string {
 	return `import * as SecureStore from 'expo-secure-store';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { login } from '@/api/endpoints';
+import type { AuthSession } from '@/api/types';
 
 type Session = { email: string; token: string };
 type AuthContextValue = {
@@ -796,10 +817,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(() => ({
     session,
     bootstrapped,
-    signIn: async (email: string) => {
-      const token = 'demo-token-' + Date.now();
+    signIn: async (email: string, password: string) => {
+      let authSession: AuthSession | null = null;
+      try {
+        authSession = await login({ email, password });
+      } catch {
+        authSession = { token: 'demo-token-' + Date.now(), user: { id: 'offline-user', email, name: 'Offline Demo User' } };
+      }
+      const token = authSession.token;
       await SecureStore.setItemAsync('auth_token', token);
-      setSession({ email, token });
+      setSession({ email: authSession.user.email || email, token });
     },
     signOut: async () => {
       await SecureStore.deleteItemAsync('auth_token');

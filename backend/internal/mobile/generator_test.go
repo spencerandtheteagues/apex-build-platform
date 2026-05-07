@@ -71,6 +71,34 @@ func TestGenerateExpoProjectCreatesContractDrivenAPIClient(t *testing.T) {
 	}
 }
 
+func TestGenerateExpoProjectWiresScreensToAPIEndpointsWithOfflineFallback(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	auth := findSourceFile(t, files, "mobile/src/auth/AuthProvider.tsx")
+	jobs := findSourceFile(t, files, "mobile/app/(tabs)/jobs.tsx")
+	estimates := findSourceFile(t, files, "mobile/app/(tabs)/estimates.tsx")
+
+	for _, expected := range []string{"import { login } from '@/api/endpoints'", "await login({ email, password })", "demo-token-"} {
+		if !strings.Contains(auth.Content, expected) {
+			t.Fatalf("expected auth provider to contain %q\n%s", expected, auth.Content)
+		}
+	}
+	for _, expected := range []string{"import { listJobs } from '@/api/endpoints'", "queryFn: listJobs", "offlineJobs", "Backend unavailable. Showing offline sample data."} {
+		if !strings.Contains(jobs.Content, expected) {
+			t.Fatalf("expected jobs screen to contain %q\n%s", expected, jobs.Content)
+		}
+	}
+	for _, expected := range []string{"import { syncEstimate } from '@/api/endpoints'", "await syncEstimate(draft)", "await queueDraftForSync(draft)"} {
+		if !strings.Contains(estimates.Content, expected) {
+			t.Fatalf("expected estimates screen to contain %q\n%s", expected, estimates.Content)
+		}
+	}
+}
+
 func TestGenerateStoreReadinessPackageLabelsDraftsAndManualPrerequisites(t *testing.T) {
 	spec := FieldServiceContractorQuoteSpec()
 	pkg := GenerateStoreReadinessPackage(spec)
