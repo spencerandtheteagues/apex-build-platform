@@ -38,6 +38,7 @@
   - Runtime-config details expose boolean presence only; secret values and host values are not serialized.
 - Consumers:
   - Launch runbook and operational checks use `details.launch_ready` for `code_execution` and `preview_service` as hold criteria.
+  - Production launch and preview Playwright smoke checks assert runtime launch readiness when `PLAYWRIGHT_EXPECT_LAUNCH_READY=1`.
   - Builder platform-readiness UI treats degraded optional services as warnings while preserving critical-service readiness semantics.
 - Defaults / zero-value behavior:
   - Non-production without forced containers can remain launch-ready for local development.
@@ -50,6 +51,7 @@
   - `cd backend && go test ./cmd -run 'TestExecutionLaunchReadinessDetails|TestPreviewLaunchReadinessDetails|TestResolvePreviewRuntimeVerify|TestPreviewRuntimeVerificationEnabled' -count=1`
   - `cd backend && go test ./cmd ./internal/api -run 'TestExecutionLaunchReadinessDetails|TestPreviewLaunchReadinessDetails|TestFeatureReadiness|TestPlatformTruth' -count=1`
   - `cd backend && go test ./... -timeout 12m`
+  - `cd tests/e2e && npx tsc --noEmit`
   - `git diff --check`
 
 ## Mobile API Contract Generated Backend

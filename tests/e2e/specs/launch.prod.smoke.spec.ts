@@ -14,6 +14,7 @@ const placeholderStripePriceIds = new Set([
 const launchUsername = process.env.PLAYWRIGHT_LAUNCH_USERNAME?.trim() || ''
 const launchPassword = process.env.PLAYWRIGHT_LAUNCH_PASSWORD?.trim() || ''
 const expectLiveStripe = process.env.PLAYWRIGHT_EXPECT_LIVE_STRIPE === '1'
+const expectLaunchReady = process.env.PLAYWRIGHT_EXPECT_LAUNCH_READY === '1'
 
 const resolveApiTargets = (): { apiOrigin: string; apiV1Base: string } => {
   const configured = (process.env.PLAYWRIGHT_API_URL || 'http://127.0.0.1:8080').replace(/\/$/, '')
@@ -31,6 +32,11 @@ const resolveApiTargets = (): { apiOrigin: string; apiV1Base: string } => {
 }
 
 const { apiOrigin, apiV1Base } = resolveApiTargets()
+
+const findReadinessService = (body: any, name: string): any | undefined => {
+  const services = Array.isArray(body?.services) ? body.services : []
+  return services.find((service: any) => service?.name === name)
+}
 
 test.describe('Launch readiness smoke', () => {
   test('landing exposes real public resource links', async ({ page }) => {
@@ -81,6 +87,31 @@ test.describe('Launch readiness smoke', () => {
     const readinessBody = await readinessResponse.json()
     expect(readinessBody.ready).toBeTruthy()
     expect(['healthy', 'degraded']).toContain(readinessBody.status)
+
+    const codeExecution = findReadinessService(readinessBody, 'code_execution')
+    const previewService = findReadinessService(readinessBody, 'preview_service')
+    const runtimeVerify = findReadinessService(readinessBody, 'preview_runtime_verify')
+
+    if (expectLaunchReady) {
+      expect(codeExecution, 'code_execution readiness service must be registered').toBeTruthy()
+      expect(codeExecution?.details?.launch_ready, JSON.stringify(codeExecution, null, 2)).toBe(true)
+      expect(previewService, 'preview_service readiness service must be registered').toBeTruthy()
+      expect(previewService?.details?.launch_ready, JSON.stringify(previewService, null, 2)).toBe(true)
+      expect(runtimeVerify, 'preview_runtime_verify readiness service must be registered').toBeTruthy()
+      expect(runtimeVerify?.state, JSON.stringify(runtimeVerify, null, 2)).toBe('ready')
+      expect(runtimeVerify?.details?.enabled, JSON.stringify(runtimeVerify, null, 2)).toBe(true)
+      expect(runtimeVerify?.details?.browser_proof, JSON.stringify(runtimeVerify, null, 2)).toBe(true)
+    } else {
+      if (Object.prototype.hasOwnProperty.call(codeExecution?.details ?? {}, 'launch_ready')) {
+        expect(codeExecution.details.launch_ready, JSON.stringify(codeExecution, null, 2)).not.toBe(false)
+      }
+      if (Object.prototype.hasOwnProperty.call(previewService?.details ?? {}, 'launch_ready')) {
+        expect(previewService.details.launch_ready, JSON.stringify(previewService, null, 2)).not.toBe(false)
+      }
+      if (runtimeVerify?.details?.enabled === true) {
+        expect(runtimeVerify.details.browser_proof, JSON.stringify(runtimeVerify, null, 2)).toBe(true)
+      }
+    }
   })
 
   test('billing plans endpoint is customer-ready', async ({ request }) => {
