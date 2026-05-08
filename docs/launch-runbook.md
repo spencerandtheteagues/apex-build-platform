@@ -89,7 +89,27 @@ PLAYWRIGHT_LAUNCH_PASSWORD='replace-me' \
 npm run test:launch
 ```
 
-### 3. Platform build smoke
+### 3. Render environment verification
+
+From the repo root, validate the Render blueprint and, when Render API credentials are available, verify production env-var presence without printing secret values.
+
+```bash
+node scripts/verify_render_launch_env.mjs
+```
+
+Strict production check:
+
+```bash
+APEX_RENDER_EXPECT_PRODUCTION=1 \
+RENDER_API_KEY='replace-me' \
+RENDER_BACKEND_SERVICE_ID='replace-me' \
+RENDER_FRONTEND_SERVICE_ID='replace-me' \
+node scripts/verify_render_launch_env.mjs
+```
+
+The strict check also calls production `/health` and `/health/features`, and fails if Redis, code execution, preview runtime, or browser proof readiness is not launch-ready.
+
+### 4. Platform build smoke
 
 Runs a sacrificial end-to-end app build with preview readiness enforced and asserts the completed-build detail agrees with the live build status.
 
@@ -125,7 +145,7 @@ LOGIN_PASSWORD='replace-me' \
 ./scripts/run_platform_build_smoke.sh
 ```
 
-### 4. Platform canary matrix
+### 5. Platform canary matrix
 
 Runs the production-critical matrix instead of a single build:
 

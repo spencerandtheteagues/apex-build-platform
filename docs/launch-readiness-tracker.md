@@ -27,13 +27,14 @@ This tracker reconciles the master launch plan with the current repository state
 - Launch and preview Playwright smoke checks now assert runtime launch readiness when `PLAYWRIGHT_EXPECT_LAUNCH_READY=1`.
 - Local Stripe webhook replay coverage now proves duplicate subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and subscription deletion delivery does not double-credit or corrupt billing state.
 - Stripe launch verification is now scripted through `scripts/verify_stripe_launch.mjs` for production payments readiness, authenticated billing config, paid price IDs, and opt-in checkout-session probes.
+- Render launch environment verification is now scripted through `scripts/verify_render_launch_env.mjs` for blueprint checks, optional Render API env-var presence, and strict live health/readiness checks.
 
 ## Launch Blockers Still Open
 
 - Configure real Stripe live/test price IDs matching the current launch contract and confirm `/health/features` no longer reports `payments` degraded.
 - Replay real Stripe test webhooks through the configured webhook endpoint for subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and duplicate event delivery.
 - Run a controlled live checkout and billing portal flow before enabling broad public signup.
-- Confirm Render production has `DATABASE_URL`, `REDIS_URL`, JWT secrets, `SECRETS_MASTER_KEY`, Stripe secrets, provider keys, remote Docker/preview env, and current frontend/backend URLs.
+- Run strict Render launch env verification and confirm production has `DATABASE_URL`, `REDIS_URL`, JWT secrets, `SECRETS_MASTER_KEY`, Stripe secrets, provider keys, remote Docker/preview env, and current frontend/backend URLs.
 - Redeploy production and confirm `/health/features` shows `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and runtime browser proof ready.
 - Run production canary matrix against `https://apex-build.dev` and `https://api.apex-build.dev`.
 - Verify free frontend build, paid full-stack build, preview proof, export/deploy handoff, billing upgrade/downgrade, credit top-up, and failed-build restart in production.
@@ -45,6 +46,7 @@ This tracker reconciles the master launch plan with the current repository state
 - `cd frontend && npm run typecheck && npm run test -- --run && npm run lint && npm run build`
 - `cd tests/e2e && PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 PLAYWRIGHT_EXPECT_LAUNCH_READY=1 npm run test:launch -- --project=chromium`
 - `cd tests/e2e && npm run test:preview-verify -- --project=chromium`
+- `APEX_RENDER_EXPECT_PRODUCTION=1 RENDER_API_KEY=... RENDER_BACKEND_SERVICE_ID=... RENDER_FRONTEND_SERVICE_ID=... node scripts/verify_render_launch_env.mjs`
 - Production platform build canary matrix: free-fast, paid-balanced, paid-max.
 - Stripe webhook replay and controlled live checkout evidence.
 - Screenshot/console evidence for generated preview readiness.
