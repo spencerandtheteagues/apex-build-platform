@@ -1,6 +1,6 @@
 # Launch Runbook
 
-Last updated: 2026-03-26
+Last updated: 2026-05-08
 
 This is the minimum go-live runbook for opening `apex-build.dev` to real customers.
 
@@ -19,6 +19,9 @@ This is the minimum go-live runbook for opening `apex-build.dev` to real custome
   - every `STRIPE_PRICE_*` value used by the app
 - Confirm `https://apex-build.dev` and `https://api.apex-build.dev` are serving the latest deployed commit.
 - Confirm backend `REDIS_URL` resolves to the internal `apex-redis` Render Key Value connection string, not an external allowlisted Redis URL.
+- Confirm `/health/features` reports `code_execution.details.launch_ready=true` and `preview_service.details.launch_ready=true`.
+- Confirm production has one reachable isolated runtime path for code execution: `E2B_API_KEY` or a remote Docker configuration such as `APEX_EXECUTION_DOCKER_HOST`.
+- Confirm production preview has one reachable isolated runtime path for preview containers/backend preview: `APEX_PREVIEW_DOCKER_HOST` plus `APEX_PREVIEW_CONNECT_HOST` when needed, or a validated E2B preview runtime.
 
 ## Render Workspace Setup
 
@@ -145,6 +148,9 @@ Do not open the product to customers if any of these are true:
 - `/health/features` is not `200`
 - `/health/features` reports `redis_cache` degraded because of an allowlist or external Redis connection error
 - `/health/features` reports `payments` degraded because Stripe secrets, webhook secret, or self-serve plan price IDs are missing/placeholders
+- `/health/features` reports `code_execution.details.launch_ready=false`
+- `/health/features` reports `preview_service.details.launch_ready=false`
+- `/health/features` reports `preview_runtime_verify` degraded in production because runtime browser proof is enabled but Chrome/Chromium is missing
 - billing plans return placeholder Stripe price IDs
 - the platform build smoke does not reach a clean terminal result
 - restart recovery acknowledges the action but does not create new execution

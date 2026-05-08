@@ -545,15 +545,21 @@ func main() {
 	if previewFactoryErr != nil {
 		previewFeatureStatus["factory_error"] = previewFactoryErr.Error()
 	}
+	previewFeatureStatus = previewLaunchReadinessDetails(previewFeatureStatus, previewFactoryConfig.ForceContainerMode)
 	if sandboxRequired, _ := previewFeatureStatus["sandbox_required"].(bool); sandboxRequired {
 		if sandboxReady, _ := previewFeatureStatus["sandbox_ready"].(bool); sandboxReady {
 			log.Println("SECURITY: Live preview sandbox enforcement enabled")
 		} else {
 			log.Println("WARNING: Live preview sandbox enforcement enabled, but Docker preview is unavailable")
 		}
+		if sandboxDegraded, _ := previewFeatureStatus["sandbox_degraded"].(bool); sandboxDegraded {
+			log.Println("WARNING: Live preview sandbox is running in fallback mode")
+		}
 	}
 	if bundlerStatus, ok := previewFeatureStatus["bundler"].(map[string]interface{}); ok {
-		if sandboxRequired, _ := previewFeatureStatus["sandbox_required"].(bool); sandboxRequired {
+		if launchReady, _ := previewFeatureStatus["launch_ready"].(bool); !launchReady {
+			startupRegistry.MarkDegraded("preview_service", startup.TierOptional, "Live preview production runtime is not launch-ready", previewFeatureStatus)
+		} else if sandboxRequired, _ := previewFeatureStatus["sandbox_required"].(bool); sandboxRequired {
 			if sandboxReady, _ := previewFeatureStatus["sandbox_ready"].(bool); !sandboxReady {
 				startupRegistry.MarkDegraded("preview_service", startup.TierOptional, "Live preview sandbox required but unavailable", previewFeatureStatus)
 			} else if available, ok := bundlerStatus["available"].(bool); ok && !available {
@@ -567,7 +573,11 @@ func main() {
 			startupRegistry.MarkReady("preview_service", startup.TierOptional, "Live preview service initialized", previewFeatureStatus)
 		}
 	} else {
-		startupRegistry.MarkReady("preview_service", startup.TierOptional, "Live preview service initialized", previewFeatureStatus)
+		if launchReady, _ := previewFeatureStatus["launch_ready"].(bool); !launchReady {
+			startupRegistry.MarkDegraded("preview_service", startup.TierOptional, "Live preview production runtime is not launch-ready", previewFeatureStatus)
+		} else {
+			startupRegistry.MarkReady("preview_service", startup.TierOptional, "Live preview service initialized", previewFeatureStatus)
+		}
 	}
 
 	// Initialize Git Integration Service
@@ -696,7 +706,7 @@ func main() {
 		log.Println("   - Languages: JavaScript, TypeScript, Python, Go, Rust, Java, C, C++, Ruby, PHP")
 
 		// Log sandbox status
-		sandboxStatus := executionHandler.GetSandboxStatus()
+		sandboxStatus := executionLaunchReadinessDetails(executionHandler.GetSandboxStatus(), executionConfig.ForceContainer)
 
 		// Check for E2B first (highest security)
 		if e2bAvail, ok := sandboxStatus["e2b_available"].(bool); ok && e2bAvail {
