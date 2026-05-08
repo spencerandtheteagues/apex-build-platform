@@ -1339,6 +1339,7 @@ func (h *PaymentHandlers) CheckUsageLimit(c *gin.Context) {
 // GET /api/v1/billing/config-status
 func (h *PaymentHandlers) StripeConfigStatus(c *gin.Context) {
 	configured := h.stripeService.IsConfigured()
+	readiness := h.stripeService.LaunchConfigStatus()
 
 	// Don't expose the actual key, just whether it's configured
 	testMode := false
@@ -1349,8 +1350,14 @@ func (h *PaymentHandlers) StripeConfigStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"configured": configured,
-			"test_mode":  testMode,
+			"configured":                    configured,
+			"test_mode":                     testMode,
+			"ready":                         readiness.Ready,
+			"webhook_configured":            readiness.WebhookConfigured,
+			"required_price_ids_configured": readiness.RequiredPriceIDsConfigured,
+			"missing_env":                   readiness.MissingEnv,
+			"placeholder_env":               readiness.PlaceholderEnv,
+			"issues":                        readiness.Issues,
 		},
 	})
 }

@@ -15,6 +15,8 @@
 - Transport:
   - Plan payloads keep existing fields: `monthly_price_cents`, `annual_price_cents`, `monthly_credits_usd`, `limits`, and `features`.
   - Usage pricing payload keeps existing shape: `pricing[plan].price_monthly` and `pricing[plan].price_yearly`.
+  - `/health/features` reports the `payments` service degraded when Stripe secret, webhook secret, or Builder/Pro/Team monthly/annual price IDs are missing/placeholders.
+  - `/api/v1/billing/config-status` keeps the existing `configured` and `test_mode` fields and adds `ready`, `webhook_configured`, `required_price_ids_configured`, `missing_env`, `placeholder_env`, and `issues`.
 - Consumers:
   - `BillingSettings`, `BuyCreditsModal`, `UsageDashboard`, `Landing`, SEO `index.html`, Stripe docs, launch runbooks, and quota messages.
 - Compatibility risk:

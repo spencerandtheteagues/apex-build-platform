@@ -189,3 +189,61 @@ func TestGetSubscriptionSupportsOwnerPlan(t *testing.T) {
 		t.Fatalf("status = %q, want %q", body.Data.Status, "active")
 	}
 }
+
+func TestStripeConfigStatusReportsIncompleteLaunchConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STRIPE_SECRET_KEY", "sk_test_valid_but_not_placeholder_123")
+	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_valid_123")
+	t.Setenv("STRIPE_PRICE_BUILDER_MONTHLY", "price_builder_monthly")
+	t.Setenv("STRIPE_PRICE_BUILDER_ANNUAL", "price_builder_annual_live")
+	t.Setenv("STRIPE_PRICE_PRO_MONTHLY", "price_pro_monthly_live")
+	t.Setenv("STRIPE_PRICE_PRO_ANNUAL", "price_pro_annual_live")
+	t.Setenv("STRIPE_PRICE_TEAM_MONTHLY", "price_team_monthly_live")
+	t.Setenv("STRIPE_PRICE_TEAM_ANNUAL", "price_team_annual_live")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/billing/config-status", nil)
+
+	h := NewPaymentHandlers(openTestDB(t), "")
+	h.StripeConfigStatus(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var body struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Configured                 bool     `json:"configured"`
+			Ready                      bool     `json:"ready"`
+			WebhookConfigured          bool     `json:"webhook_configured"`
+			RequiredPriceIDsConfigured bool     `json:"required_price_ids_configured"`
+			PlaceholderEnv             []string `json:"placeholder_env"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !body.Success || !body.Data.Configured || !body.Data.WebhookConfigured {
+		t.Fatalf("expected configured Stripe status with webhook configured, got %s", w.Body.String())
+	}
+	if body.Data.Ready {
+		t.Fatalf("expected billing launch readiness to be false, got %s", w.Body.String())
+	}
+	if body.Data.RequiredPriceIDsConfigured {
+		t.Fatalf("expected price IDs to be reported incomplete, got %s", w.Body.String())
+	}
+	if !stringSliceContains(body.Data.PlaceholderEnv, "STRIPE_PRICE_BUILDER_MONTHLY") {
+		t.Fatalf("expected placeholder env to include builder monthly, got %+v", body.Data.PlaceholderEnv)
+	}
+}
+
+func stringSliceContains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
