@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
+	"apex-build/internal/payments"
 	"apex-build/pkg/models"
 
 	"github.com/stretchr/testify/assert"
@@ -44,6 +46,13 @@ func seedUser(t *testing.T, db *gorm.DB, balance float64) models.User {
 
 func newTestHandler(db *gorm.DB) *PaymentHandlers {
 	return &PaymentHandlers{db: db}
+}
+
+func reloadUser(t *testing.T, db *gorm.DB, userID uint) models.User {
+	t.Helper()
+	var user models.User
+	require.NoError(t, db.First(&user, userID).Error)
+	return user
 }
 
 // TestApplyCredit_AddsBalanceAndLedgerEntry verifies that applyCredit increments
@@ -185,4 +194,213 @@ func TestCreditLedgerEntry_BalanceAfterProgression(t *testing.T) {
 		assert.InDelta(t, expectedBalances[i], e.BalanceAfterUSD, 0.001,
 			"entry %d balance_after mismatch", i)
 	}
+}
+
+func TestHandleSubscriptionCheckoutReplayUpdatesUserWithoutCreditGrant(t *testing.T) {
+	db := openTestDB(t)
+	user := seedUser(t, db, 0)
+	h := newTestHandler(db)
+
+	periodStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	event := &payments.WebhookEvent{
+		EventID:        "evt_subscription_checkout_replay",
+		Type:           "checkout.session.completed",
+		CustomerID:     "cus_subscription_checkout_replay",
+		SubscriptionID: "sub_checkout_replay",
+		Status:         payments.StatusActive,
+		PlanType:       payments.PlanBuilder,
+		PeriodStart:    periodStart,
+		Metadata: map[string]string{
+			"user_id": strconv.FormatUint(uint64(user.ID), 10),
+		},
+	}
+
+	require.NoError(t, h.handleCheckoutCompleted(event))
+	require.NoError(t, h.handleCheckoutCompleted(event))
+
+	updated := reloadUser(t, db, user.ID)
+	assert.Equal(t, "cus_subscription_checkout_replay", updated.StripeCustomerID)
+	assert.Equal(t, "sub_checkout_replay", updated.SubscriptionID)
+	assert.Equal(t, string(payments.StatusActive), updated.SubscriptionStatus)
+	assert.Equal(t, string(payments.PlanBuilder), updated.SubscriptionType)
+	assert.WithinDuration(t, periodStart, updated.BillingCycleStart, time.Second)
+	assert.InDelta(t, 0, updated.CreditBalance, 0.001)
+
+	var ledgerCount int64
+	require.NoError(t, db.Model(&models.CreditLedgerEntry{}).Where("user_id = ?", user.ID).Count(&ledgerCount).Error)
+	assert.Equal(t, int64(0), ledgerCount, "subscription checkout must not grant credits before invoice.paid")
+
+	var dedupCount int64
+	require.NoError(t, db.Model(&models.ProcessedStripeEvent{}).Count(&dedupCount).Error)
+	assert.Equal(t, int64(0), dedupCount, "subscription metadata replay is overwrite-idempotent and does not use the credit dedup table")
+}
+
+func TestHandleCreditPurchaseCompletedReplayIsIdempotent(t *testing.T) {
+	db := openTestDB(t)
+	user := seedUser(t, db, 5)
+	h := newTestHandler(db)
+
+	event := &payments.WebhookEvent{
+		EventID:    "evt_credit_purchase_replay",
+		Type:       "checkout.session.completed",
+		CustomerID: "cus_credit_purchase_replay",
+		Metadata: map[string]string{
+			"type":       "credit_purchase",
+			"user_id":    strconv.FormatUint(uint64(user.ID), 10),
+			"credit_usd": "25",
+		},
+	}
+
+	require.NoError(t, h.handleCheckoutCompleted(event))
+	require.NoError(t, h.handleCheckoutCompleted(event))
+
+	updated := reloadUser(t, db, user.ID)
+	assert.Equal(t, "cus_credit_purchase_replay", updated.StripeCustomerID)
+	assert.InDelta(t, 30, updated.CreditBalance, 0.001)
+
+	var entries []models.CreditLedgerEntry
+	require.NoError(t, db.Where("user_id = ?", user.ID).Find(&entries).Error)
+	require.Len(t, entries, 1)
+	assert.InDelta(t, 25, entries[0].AmountUSD, 0.001)
+	assert.InDelta(t, 30, entries[0].BalanceAfterUSD, 0.001)
+	assert.Equal(t, "credit_purchase", entries[0].EntryType)
+	assert.Equal(t, "evt_credit_purchase_replay", entries[0].StripeEventID)
+
+	var processed []models.ProcessedStripeEvent
+	require.NoError(t, db.Where("stripe_event_id = ?", event.EventID).Find(&processed).Error)
+	require.Len(t, processed, 1)
+	assert.Equal(t, "credit_purchase", processed[0].EventType)
+	require.NotNil(t, processed[0].UserID)
+	assert.Equal(t, user.ID, *processed[0].UserID)
+}
+
+func TestHandleInvoicePaidReplayIsIdempotent(t *testing.T) {
+	db := openTestDB(t)
+	user := seedUser(t, db, 2)
+	require.NoError(t, db.Model(&user).Updates(map[string]interface{}{
+		"stripe_customer_id":  "cus_invoice_paid_replay",
+		"subscription_type":   string(payments.PlanPro),
+		"subscription_status": string(payments.StatusPastDue),
+	}).Error)
+	h := newTestHandler(db)
+
+	event := &payments.WebhookEvent{
+		EventID:        "evt_invoice_paid_replay",
+		Type:           "invoice.paid",
+		CustomerID:     "cus_invoice_paid_replay",
+		SubscriptionID: "sub_invoice_paid_replay",
+		InvoiceID:      "in_invoice_paid_replay",
+		Amount:         5900,
+		Currency:       "usd",
+	}
+
+	require.NoError(t, h.handleInvoicePaid(event))
+	require.NoError(t, h.handleInvoicePaid(event))
+
+	plan := payments.GetPlanByType(payments.PlanPro)
+	require.NotNil(t, plan)
+	updated := reloadUser(t, db, user.ID)
+	assert.Equal(t, string(payments.StatusActive), updated.SubscriptionStatus)
+	assert.InDelta(t, 2+plan.MonthlyCreditsUSD, updated.CreditBalance, 0.001)
+
+	var entries []models.CreditLedgerEntry
+	require.NoError(t, db.Where("user_id = ?", user.ID).Find(&entries).Error)
+	require.Len(t, entries, 1)
+	assert.InDelta(t, plan.MonthlyCreditsUSD, entries[0].AmountUSD, 0.001)
+	assert.Equal(t, "monthly_allocation", entries[0].EntryType)
+	assert.Equal(t, "evt_invoice_paid_replay", entries[0].StripeEventID)
+	assert.Equal(t, "in_invoice_paid_replay", entries[0].StripeInvoiceID)
+	assert.Equal(t, string(payments.PlanPro), entries[0].PlanType)
+
+	var processedCount int64
+	require.NoError(t, db.Model(&models.ProcessedStripeEvent{}).Where("stripe_event_id = ?", event.EventID).Count(&processedCount).Error)
+	assert.Equal(t, int64(1), processedCount)
+}
+
+func TestHandleSubscriptionPlanChangeAndDeletionReplayAreIdempotent(t *testing.T) {
+	db := openTestDB(t)
+	user := seedUser(t, db, 0)
+	require.NoError(t, db.Model(&user).Updates(map[string]interface{}{
+		"stripe_customer_id":  "cus_plan_change_replay",
+		"subscription_id":     "sub_original",
+		"subscription_type":   string(payments.PlanBuilder),
+		"subscription_status": string(payments.StatusActive),
+	}).Error)
+	h := newTestHandler(db)
+
+	periodStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	updateEvent := &payments.WebhookEvent{
+		EventID:        "evt_subscription_update_replay",
+		Type:           "customer.subscription.updated",
+		CustomerID:     "cus_plan_change_replay",
+		SubscriptionID: "sub_updated",
+		Status:         payments.StatusActive,
+		PlanType:       payments.PlanTeam,
+		PeriodStart:    periodStart,
+		PeriodEnd:      periodEnd,
+	}
+
+	require.NoError(t, h.handleSubscriptionUpdate(updateEvent))
+	require.NoError(t, h.handleSubscriptionUpdate(updateEvent))
+
+	updated := reloadUser(t, db, user.ID)
+	assert.Equal(t, "sub_updated", updated.SubscriptionID)
+	assert.Equal(t, string(payments.StatusActive), updated.SubscriptionStatus)
+	assert.Equal(t, string(payments.PlanTeam), updated.SubscriptionType)
+	assert.WithinDuration(t, periodStart, updated.BillingCycleStart, time.Second)
+	assert.WithinDuration(t, periodEnd, updated.SubscriptionEnd, time.Second)
+
+	deleteEvent := &payments.WebhookEvent{
+		EventID:        "evt_subscription_deleted_replay",
+		Type:           "customer.subscription.deleted",
+		CustomerID:     "cus_plan_change_replay",
+		SubscriptionID: "sub_updated",
+		Status:         payments.StatusCanceled,
+	}
+	require.NoError(t, h.handleSubscriptionDeleted(deleteEvent))
+	require.NoError(t, h.handleSubscriptionDeleted(deleteEvent))
+
+	deleted := reloadUser(t, db, user.ID)
+	assert.Equal(t, "", deleted.SubscriptionID)
+	assert.Equal(t, string(payments.StatusCanceled), deleted.SubscriptionStatus)
+	assert.Equal(t, string(payments.PlanFree), deleted.SubscriptionType)
+
+	var ledgerCount int64
+	require.NoError(t, db.Model(&models.CreditLedgerEntry{}).Where("user_id = ?", user.ID).Count(&ledgerCount).Error)
+	assert.Equal(t, int64(0), ledgerCount)
+}
+
+func TestHandleInvoicePaymentFailedReplaySetsPastDueOnce(t *testing.T) {
+	db := openTestDB(t)
+	user := seedUser(t, db, 0)
+	require.NoError(t, db.Model(&user).Updates(map[string]interface{}{
+		"stripe_customer_id":  "cus_invoice_failed_replay",
+		"subscription_id":     "sub_invoice_failed_replay",
+		"subscription_type":   string(payments.PlanPro),
+		"subscription_status": string(payments.StatusActive),
+	}).Error)
+	h := newTestHandler(db)
+
+	event := &payments.WebhookEvent{
+		EventID:        "evt_invoice_failed_replay",
+		Type:           "invoice.payment_failed",
+		CustomerID:     "cus_invoice_failed_replay",
+		SubscriptionID: "sub_invoice_failed_replay",
+		InvoiceID:      "in_invoice_failed_replay",
+		Amount:         5900,
+		Currency:       "usd",
+		Status:         payments.StatusPastDue,
+	}
+
+	require.NoError(t, h.handleInvoicePaymentFailed(event))
+	require.NoError(t, h.handleInvoicePaymentFailed(event))
+
+	updated := reloadUser(t, db, user.ID)
+	assert.Equal(t, string(payments.StatusPastDue), updated.SubscriptionStatus)
+	assert.InDelta(t, 0, updated.CreditBalance, 0.001)
+
+	var ledgerCount int64
+	require.NoError(t, db.Model(&models.CreditLedgerEntry{}).Where("user_id = ?", user.ID).Count(&ledgerCount).Error)
+	assert.Equal(t, int64(0), ledgerCount)
 }
