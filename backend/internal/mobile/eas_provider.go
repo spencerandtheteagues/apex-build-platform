@@ -268,6 +268,71 @@ func (p *EASBuildProvider) CancelBuild(ctx context.Context, job MobileBuildJob) 
 	return result, nil
 }
 
+func (p *EASBuildProvider) SubmitBuild(ctx context.Context, req MobileSubmissionRequest) (MobileSubmissionProviderResult, error) {
+	if p == nil || p.runner == nil {
+		return MobileSubmissionProviderResult{}, ErrMobileBuildProviderMissing
+	}
+	req = NormalizeMobileSubmissionRequest(req)
+	if strings.TrimSpace(req.ProviderBuildID) == "" && strings.TrimSpace(req.ArtifactURL) == "" {
+		return MobileSubmissionProviderResult{}, fmt.Errorf("%w: provider_build_id or artifact_url is required for EAS submit", ErrMobileBuildInvalidRequest)
+	}
+	easToken, err := p.resolveEASToken(ctx, MobileBuildRequest{ProjectID: req.ProjectID, UserID: req.UserID})
+	if err != nil {
+		return MobileSubmissionProviderResult{}, err
+	}
+	if req.DryRun {
+		return MobileSubmissionProviderResult{
+			Status: MobileSubmissionQueued,
+			Logs: []MobileBuildLogLine{{
+				Level:   "info",
+				Message: "EAS submit dry run validated credentials and command construction without uploading a binary.",
+			}},
+		}, nil
+	}
+
+	runCtx := ctx
+	cancel := func() {}
+	if p.timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, p.timeout)
+	}
+	defer cancel()
+
+	args := []string{
+		"submit",
+		"--platform", string(req.Platform),
+		"--profile", "production",
+		"--non-interactive",
+		"--no-wait",
+	}
+	if req.ProviderBuildID != "" {
+		args = append(args, "--id", req.ProviderBuildID)
+	} else {
+		args = append(args, "--url", req.ArtifactURL)
+	}
+
+	output, err := p.runner.Run(runCtx, EASCommand{
+		CLIPath: p.cliPath,
+		Args:    args,
+		Env: []string{
+			"EXPO_TOKEN=" + easToken,
+			"EAS_TOKEN=" + easToken,
+			"CI=1",
+		},
+	})
+	if err != nil {
+		return MobileSubmissionProviderResult{}, fmt.Errorf("%w: %s", ErrMobileBuildProviderFailed, RedactMobileBuildSecrets(output+" "+err.Error()))
+	}
+	result := parseEASSubmitOutput(output, req.Platform)
+	result.Logs = append([]MobileBuildLogLine{{
+		Level:   "info",
+		Message: "EAS submit upload requested. Store processing/review remains a separate external state.",
+	}}, result.Logs...)
+	if result.Status == "" {
+		result.Status = MobileSubmissionSubmittedToStorePipeline
+	}
+	return result, nil
+}
+
 func (p *EASBuildProvider) resolveEASToken(ctx context.Context, req MobileBuildRequest) (string, error) {
 	if p.credentials == nil {
 		return "", fmt.Errorf("%w: EAS credential resolver is not configured", ErrMobileCredentialInvalidPayload)
@@ -281,6 +346,55 @@ func (p *EASBuildProvider) resolveEASToken(ctx context.Context, req MobileBuildR
 		return "", fmt.Errorf("%w: EAS token is empty", ErrMobileCredentialInvalidPayload)
 	}
 	return token, nil
+}
+
+func parseEASSubmitOutput(output string, platform MobilePlatform) MobileSubmissionProviderResult {
+	trimmed := strings.TrimSpace(output)
+	result := MobileSubmissionProviderResult{}
+	if trimmed == "" {
+		result.Status = submissionStatusForPlatform(platform)
+		return result
+	}
+	if decoded, ok := decodeFirstJSONValue(trimmed); ok {
+		if items, ok := decoded.([]any); ok && len(items) > 0 {
+			decoded = items[0]
+		}
+		if object, ok := decoded.(map[string]any); ok {
+			result.ProviderSubmissionID = firstString(object, "id", "submissionId", "submission_id")
+			result.Status = mapEASSubmitStatus(firstString(object, "status", "state"), platform)
+		}
+	}
+	if result.Status == "" {
+		result.Status = submissionStatusForPlatform(platform)
+	}
+	result.Logs = []MobileBuildLogLine{{Level: "info", Message: RedactMobileBuildSecrets(trimmed)}}
+	return result
+}
+
+func mapEASSubmitStatus(status string, platform MobilePlatform) MobileSubmissionStatus {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "finished", "succeeded", "success", "done", "completed":
+		return MobileSubmissionCompletedUpload
+	case "processing", "in_progress", "in-progress", "pending":
+		return MobileSubmissionProcessing
+	case "errored", "failed", "error":
+		return MobileSubmissionFailed
+	case "submitted", "uploaded", "submitted_to_store_pipeline":
+		return MobileSubmissionSubmittedToStorePipeline
+	default:
+		return submissionStatusForPlatform(platform)
+	}
+}
+
+func submissionStatusForPlatform(platform MobilePlatform) MobileSubmissionStatus {
+	switch platform {
+	case MobilePlatformIOS:
+		return MobileSubmissionReadyForTestFlight
+	case MobilePlatformAndroid:
+		return MobileSubmissionReadyForGoogleInternalTesting
+	default:
+		return MobileSubmissionSubmittedToStorePipeline
+	}
 }
 
 func sourceContainsExpoAppConfig(sourcePath string) bool {

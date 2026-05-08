@@ -3,6 +3,7 @@ package mobile
 import (
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"apex-build/pkg/models"
@@ -43,6 +44,32 @@ type packageJSONValidationShape struct {
 	Dependencies map[string]string `json:"dependencies"`
 }
 
+type apiContractManifestValidationShape struct {
+	OpenAPI    string                             `json:"openapi"`
+	Paths      map[string]map[string]apiOperation `json:"paths"`
+	ApexMobile apiContractManifestMetadata        `json:"x-apex-mobile"`
+}
+
+type apiContractManifestMetadata struct {
+	BackendMode BackendMode `json:"backend_mode"`
+	Operations  []apiContractOperation
+}
+
+type apiOperation struct {
+	OperationID  string `json:"operationId"`
+	MobilePath   string `json:"x-mobile-path"`
+	ResponseType string `json:"x-response-type"`
+	MobileHelper string `json:"x-mobile-helper"`
+	RequestType  string `json:"x-request-type"`
+}
+
+type apiContractOperation struct {
+	Helper       string
+	Method       string
+	Path         string
+	ResponseType string
+}
+
 func ValidateProjectSourcePackage(project models.Project, files []models.File) MobileValidationReport {
 	report := MobileValidationReport{
 		Status:            MobileValidationPassed,
@@ -53,7 +80,7 @@ func ValidateProjectSourcePackage(project models.Project, files []models.File) M
 		Checks:            []MobileValidationCheck{},
 	}
 
-	fileMap := mobileFileMap(files)
+	fileMap := mobileProjectFileMap(files)
 	if !HasExplicitMobileExportMetadata(project) && len(fileMap) == 0 {
 		report.Status = MobileValidationNotMobile
 		report.Summary = "This project has no mobile metadata or mobile source package."
@@ -96,7 +123,8 @@ func ValidateProjectSourcePackage(project models.Project, files []models.File) M
 	dependencies := validatePackageJSON(fileMap["mobile/package.json"], &report)
 	validateAppConfig(project, fileMap["mobile/app.config.ts"], &report)
 	validateSourcePolicy(files, dependencies, &report)
-	validateAPIContractManifest(fileMap["mobile/docs/api-contract.json"], &report)
+	manifestMeta := validateAPIContractManifest(fileMap["mobile/docs/api-contract.json"], &report)
+	validateGeneratedBackendRoutes(fileMap, manifestMeta, &report)
 	validateStoreReadiness(fileMap["mobile/store/store-readiness.json"], &report)
 	validateReleaseTruth(project, &report)
 
@@ -104,14 +132,16 @@ func ValidateProjectSourcePackage(project models.Project, files []models.File) M
 	return report
 }
 
-func mobileFileMap(files []models.File) map[string]models.File {
+func mobileProjectFileMap(files []models.File) map[string]models.File {
 	fileMap := map[string]models.File{}
 	for _, file := range files {
 		if file.Type == "directory" {
 			continue
 		}
 		path := normalizeProjectFilePath(file.Path)
-		if strings.HasPrefix(path, "mobile/") {
+		if strings.HasPrefix(path, "mobile/") ||
+			strings.HasPrefix(path, "backend/") ||
+			path == "docs/mobile-backend-routes.md" {
 			fileMap[path] = file
 		}
 	}
@@ -208,29 +238,109 @@ func validateSourcePolicy(files []models.File, dependencies map[string]string, r
 	addMobileCheck(report, "source_policy", "Mobile source policy", MobileValidationPassed, "No browser-only APIs or unsupported dependencies were found in mobile source.", true)
 }
 
-func validateAPIContractManifest(file models.File, report *MobileValidationReport) {
+func validateAPIContractManifest(file models.File, report *MobileValidationReport) apiContractManifestMetadata {
 	if strings.TrimSpace(file.Path) == "" {
-		return
+		return apiContractManifestMetadata{}
 	}
-	var manifest map[string]any
+	var manifest apiContractManifestValidationShape
 	if err := json.Unmarshal([]byte(file.Content), &manifest); err != nil {
 		addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationFailed, "api-contract.json is not valid JSON.", true)
-		return
+		return apiContractManifestMetadata{}
 	}
-	if manifest["openapi"] != "3.1.0" {
+	if manifest.OpenAPI != "3.1.0" {
 		addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationFailed, "api-contract.json must declare OpenAPI 3.1.0.", true)
-		return
+		return manifest.ApexMobile
 	}
-	paths, ok := manifest["paths"].(map[string]any)
-	if !ok || len(paths) == 0 {
+	if len(manifest.Paths) == 0 {
 		addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationFailed, "api-contract.json must include at least one API path.", true)
-		return
+		return manifest.ApexMobile
 	}
-	if _, ok := manifest["x-apex-mobile"].(map[string]any); !ok {
+	if strings.TrimSpace(string(manifest.ApexMobile.BackendMode)) == "" {
 		addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationFailed, "api-contract.json must include x-apex-mobile metadata.", true)
+		return manifest.ApexMobile
+	}
+	manifest.ApexMobile.Operations = apiOperationsFromManifest(manifest.Paths)
+	addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationPassed, "OpenAPI-style mobile API contract manifest is present and parseable.", true)
+	return manifest.ApexMobile
+}
+
+func apiOperationsFromManifest(paths map[string]map[string]apiOperation) []apiContractOperation {
+	operations := make([]apiContractOperation, 0)
+	pathKeys := make([]string, 0, len(paths))
+	for path := range paths {
+		pathKeys = append(pathKeys, path)
+	}
+	sort.Strings(pathKeys)
+	for _, openAPIPath := range pathKeys {
+		methods := paths[openAPIPath]
+		methodKeys := make([]string, 0, len(methods))
+		for method := range methods {
+			methodKeys = append(methodKeys, method)
+		}
+		sort.Strings(methodKeys)
+		for _, method := range methodKeys {
+			operation := methods[method]
+			helper := firstNonEmptyString(operation.MobileHelper, operation.OperationID)
+			path := firstNonEmptyString(operation.MobilePath, openAPIPath)
+			if helper == "" || path == "" {
+				continue
+			}
+			operations = append(operations, apiContractOperation{
+				Helper:       helper,
+				Method:       strings.ToUpper(method),
+				Path:         path,
+				ResponseType: operation.ResponseType,
+			})
+		}
+	}
+	return operations
+}
+
+func validateGeneratedBackendRoutes(fileMap map[string]models.File, manifestMeta apiContractManifestMetadata, report *MobileValidationReport) {
+	switch manifestMeta.BackendMode {
+	case BackendNewGenerated, BackendExistingApexGenerated:
+	default:
+		addMobileCheck(report, "generated_backend_routes", "Generated backend route source", MobileValidationPassed, "No Apex-generated backend route source is required for this mobile backend mode.", false)
 		return
 	}
-	addMobileCheck(report, "api_contract_manifest", "API contract manifest", MobileValidationPassed, "OpenAPI-style mobile API contract manifest is present and parseable.", true)
+
+	requiredFiles := []string{
+		"backend/package.json",
+		"backend/tsconfig.json",
+		"backend/src/server.ts",
+		"backend/src/authAdapter.ts",
+		"backend/src/persistenceAdapter.ts",
+		"backend/src/uploadAdapter.ts",
+		"backend/src/mobileContractRoutes.ts",
+		"docs/mobile-backend-routes.md",
+	}
+	missing := missingRequiredFiles(fileMap, requiredFiles)
+	if len(missing) > 0 {
+		addMobileCheck(report, "generated_backend_routes", "Generated backend route source", MobileValidationFailed, "Missing "+strings.Join(missing, ", "), true)
+		return
+	}
+	routes := fileMap["backend/src/mobileContractRoutes.ts"].Content
+	if !strings.Contains(routes, "mobileContractRoutes") || !strings.Contains(routes, "handleContractRoute") {
+		addMobileCheck(report, "generated_backend_routes", "Generated backend route source", MobileValidationFailed, "backend/src/mobileContractRoutes.ts is missing generated route registry code.", true)
+		return
+	}
+	var drift []string
+	for _, operation := range manifestMeta.Operations {
+		for _, token := range []string{
+			`"helper": "` + operation.Helper + `"`,
+			`"method": "` + operation.Method + `"`,
+			`"path": "` + operation.Path + `"`,
+		} {
+			if !strings.Contains(routes, token) {
+				drift = append(drift, operation.Helper+" missing "+token)
+			}
+		}
+	}
+	if len(drift) > 0 {
+		addMobileCheck(report, "generated_backend_routes", "Generated backend route source", MobileValidationFailed, "Backend route source does not match API contract manifest: "+strings.Join(drift, "; "), true)
+		return
+	}
+	addMobileCheck(report, "generated_backend_routes", "Generated backend route source", MobileValidationPassed, "Generated backend route source is present and aligned to the API contract manifest.", true)
 }
 
 func validateStoreReadiness(file models.File, report *MobileValidationReport) {

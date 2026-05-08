@@ -351,6 +351,7 @@ func (d *Database) Migrate() error {
 		// Completed build history (persist builds across restarts)
 		&models.CompletedBuild{},
 		&mobile.MobileBuildRecord{},
+		&mobile.MobileSubmissionRecord{},
 		// Prompt-pack activation requests stay separate from build snapshots.
 		&models.PromptPackActivationRequest{},
 		&models.PromptPackVersion{},

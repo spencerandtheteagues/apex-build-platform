@@ -67,10 +67,12 @@ Implemented now:
 - contract propagation through orchestration and persistence.
 - Expo/React Native source generator for a field-service quote-builder starter under `mobile/`.
 - contract-driven generated mobile API client files under `mobile/src/api/`, plus `mobile/docs/api-contract.json` and `mobile/docs/api-contract.md` generated from the same `MobileAppSpec.APIContracts`. The generated source includes Expo-configured base URL handling, secure bearer-token injection, typed endpoint helpers, path-param encoding, JSON payload support, multipart upload support, OpenAPI-style backend route reference docs, and generated auth/jobs/estimate screens that use those helpers with offline-safe fallbacks.
+- generated full-stack mobile backend starter files under `backend/` plus `docs/mobile-backend-routes.md` for Apex-generated backend modes. These files are generated from the same API contract descriptors as the mobile manifest and Expo endpoint helpers, provide runnable local Node/TypeScript route handlers with explicit `authAdapter`, `persistenceAdapter`, and `uploadAdapter` seams, and are included in ZIP/GitHub export. They are intentionally labeled as starter integration code, not production persistence, store-submission, or native-build proof.
 - generated mobile source validation for dependency allowlist and browser-only runtime API usage.
 - mobile source preparation for GitHub export and owner ZIP download.
 - internal `MobileBuildService` abstraction with feature-flag/platform gating, mocked provider seam, restart-safe build-state records, artifact/log metadata, failure classification, and secret redaction.
 - project-scoped mobile build-job API for request/status/log/artifact reads, gated by project ownership, mobile target type, feature flags, credentials, and provider availability.
+- plan and monthly quota gates for native mobile build/upload attempts. Free remains source/export only, Builder can request Android native builds, Pro unlocks iOS native builds and store-upload jobs, Team/Enterprise/Owner get higher or uncapped limits. These checks run before credential/provider work to protect cost and avoid misleading setup prompts.
 - encrypted, project-scoped mobile credential vault for EAS, Apple App Store Connect, Google Play service accounts, and Android signing.
 - authenticated mobile credential status API that returns metadata only and updates the mobile readiness scorecard.
 - feature-flagged Expo Web preview route that materializes project-owned generated `mobile/` source, starts `npm run web`, serves it through the existing backend preview proxy, and records `mobile_preview_status` without treating the result as native-device proof.
@@ -94,7 +96,8 @@ Implemented now:
 - `frontend/src/services/api.ts` exposes a feature-flagged Expo Web preview start method with a preview-start timeout.
 - `ProjectDashboard` includes a mobile build operations panel for mobile projects. It lists native build jobs, checks EAS credential status, starts Android APK/AAB or iOS internal builds through the gated backend API, refreshes/cancels jobs, and opens artifact links when available.
 - `MobileBuildOperationsPanel` includes an Expo Web preview card that starts browser-rendered Expo preview, links to the proxied preview URL, and explicitly says this is not APK/AAB/TestFlight/store proof.
-- `MobileStoreReadinessPanel` renders the generated store-readiness package, privacy/data-safety draft counts, screenshot targets, release notes state, manual prerequisites, and truthful approval caveats from current project files plus validation/scorecard evidence.
+- `MobileStoreReadinessPanel` renders the typed backend store-readiness report, generated store-readiness package, privacy/data-safety draft counts, screenshot targets, release notes state, manual prerequisites, and truthful approval caveats from current project files plus validation/scorecard evidence.
+- `MobileBuildOperationsPanel` can run conservative repair checks for failed native builds and can hand succeeded builds to a separate gated store-upload workflow when submission flags, artifacts, store-readiness evidence, and credentials are valid.
 
 Next frontend work:
 
@@ -103,7 +106,7 @@ Next frontend work:
 - richer mobile preview frame/device chrome around the existing honest Expo Web preview URL.
 - provider credential testing beyond payload-shape validation.
 - mobile export options in `GitHubExportModal`.
-- typed read-only store-readiness endpoint if richer package state is needed outside the file tree.
+- richer submission job detail UI beyond the current upload count/status controls.
 
 ## Agent Instructions
 
@@ -130,9 +133,9 @@ Mobile agent rules must be appended to generated mobile work orders before Expo 
 7. Offer source export and GitHub export.
 8. Offer Expo Web preview with clear "web-rendered mobile preview" labeling.
 9. If enabled and credentials exist, queue EAS Build jobs.
-10. Capture logs/artifacts and classify/repair failures.
+10. Capture logs/artifacts, classify failures, and run conservative repair checks before retry.
 11. Generate store-readiness package.
-12. If enabled and credentials/store setup are valid, submit/upload artifacts.
+12. If enabled and credentials/store setup are valid, submit/upload artifacts through a separate submission job lifecycle.
 
 ## Credential Handling And Security
 
@@ -142,9 +145,13 @@ The current branch stores mobile credentials through `backend/internal/mobile.Mo
 
 The current branch also exposes native mobile build-job endpoints under `/api/v1/projects/:id/mobile/builds`. These endpoints fail closed unless mobile build feature flags are enabled, the requested platform is enabled for the project, the build credential requirement is complete, and a provider is configured. Build queueing currently requires the project-scoped EAS token. Store-readiness credential status remains broader: Android store release still tracks Google Play credentials and iOS store release tracks Apple/App Store Connect credentials. Public requests cannot choose arbitrary server source paths; the API materializes the project-owned stored `mobile/` files into a temporary build directory before provider execution.
 
-When `MOBILE_EAS_BUILD_ENABLED=true`, startup wires `EASBuildProvider` with `EAS_CLI_PATH` (default `eas`), `MOBILE_EAS_BUILD_TIMEOUT` (default `30m`), and the encrypted mobile credential vault. The provider queues no-wait EAS builds and records the initial provider build ID/status/artifact URL when the CLI returns it. Project owners can explicitly refresh a stored build job; refresh calls `eas build:view --json`, updates status/artifact metadata, appends redacted logs, and updates project readiness metadata. Project owners can also cancel non-terminal jobs; cancel calls `eas build:cancel` and updates the stored job to `canceled` when accepted. Failed/canceled/repair-pending jobs can be retried through a separate endpoint, which creates a new build job after re-validating flags, credentials, platform eligibility, and source materialization. When `MOBILE_EAS_POLLING_ENABLED=true`, startup runs a background EAS status poller with `MOBILE_EAS_POLL_INTERVAL` (default `1m`), `MOBILE_EAS_POLL_MIN_AGE` (default `30s`), and `MOBILE_EAS_POLL_BATCH_SIZE` (default `10`). The poller refreshes only active jobs with a provider build ID and keeps provider/network refresh errors non-terminal. The current branch does not yet run automated repair loops or submit to stores.
+Native build and upload endpoints now also enforce subscription/cost safety before credential or provider checks. Native build attempts are blocked for Free, Android-only for Builder, Android/iOS for Pro, and uncapped for Team/Enterprise/Owner. Store-upload/submission attempts require Pro or higher. Monthly quotas are counted from persisted native build/submission job rows by authenticated user and UTC month, so failed attempts still count as real provider/cost attempts.
 
-The current branch still does not enable store submission. All EAS/build/submit/store feature flags default to off so production cannot accidentally claim or run mobile binary workflows before credentials, provider execution, and submission workflows are configured and validated.
+When `MOBILE_EAS_BUILD_ENABLED=true`, startup wires `EASBuildProvider` with `EAS_CLI_PATH` (default `eas`), `MOBILE_EAS_BUILD_TIMEOUT` (default `30m`), and the encrypted mobile credential vault. The provider queues no-wait EAS builds and records the initial provider build ID/status/artifact URL when the CLI returns it. Project owners can explicitly refresh a stored build job; refresh calls `eas build:view --json`, updates status/artifact metadata, appends redacted logs, and updates project readiness metadata. Project owners can also cancel non-terminal jobs; cancel calls `eas build:cancel` and updates the stored job to `canceled` when accepted. Failed/canceled/repair-pending jobs can be checked through a conservative repair endpoint, which may backfill missing generated files without overwriting stored source, validates source-caused failures, verifies credential preconditions, and only then marks the job retry-ready. Retry creates a new build job after re-validating flags, credentials, platform eligibility, and source materialization. When `MOBILE_EAS_POLLING_ENABLED=true`, startup runs a background EAS status poller with `MOBILE_EAS_POLL_INTERVAL` (default `1m`), `MOBILE_EAS_POLL_MIN_AGE` (default `30s`), and `MOBILE_EAS_POLL_BATCH_SIZE` (default `10`). The poller refreshes only active jobs with a provider build ID and keeps provider/network refresh errors non-terminal.
+
+When `MOBILE_EAS_SUBMIT_ENABLED=true`, startup also wires a submission service that can call `eas submit --platform <platform> --profile production --non-interactive --no-wait` using either the EAS provider build ID or an artifact URL. Submission jobs are persisted separately from build jobs and use statuses such as `completed_upload`, `ready_for_testflight`, `ready_for_google_internal_testing`, and `requires_manual_review_submission`. The API requires a succeeded native build, complete store credentials, a valid store-readiness package, and submission/build/platform feature flags before upload. This is a store-pipeline upload/handoff workflow, not store listing metadata automation or app approval.
+
+All EAS/build/submit/store feature flags default to off so production cannot accidentally claim or run mobile binary workflows before credentials, provider execution, and submission workflows are configured and validated.
 
 ## Store Readiness Workflow
 
@@ -194,6 +201,7 @@ Implemented now:
 - Mobile metadata reaches `BuildContract` and `ValidatedBuildSpec`.
 - Generated Expo source includes contract-driven API client, endpoint helpers, API/data-model types, API contract docs, and generated screen/auth wiring that keeps local/offline fallback when backend calls fail.
 - Generated mobile source validation requires the API client files and parses the API contract manifest.
+- Native build/upload endpoints enforce plan and monthly quota gates before provider work.
 
 Required next:
 
@@ -211,8 +219,8 @@ Required next:
 - This branch has a default-off EAS polling worker that refreshes active provider-backed build jobs and updates project artifact metadata when enabled.
 - This branch can run a feature-flagged Expo Web preview by materializing generated `mobile/` files and starting `npm run web`; this preview is browser-rendered and does not prove Android/iOS native build readiness.
 - This branch can invoke EAS Build only when `MOBILE_EAS_BUILD_ENABLED` and the relevant platform flags are enabled and an EAS token is stored; this has not been live-validated against EAS in this session.
-- This branch does not yet call EAS Submit.
-- This branch does not yet automate App Store Connect or Google Play metadata.
+- This branch can invoke EAS Submit only when `MOBILE_EAS_SUBMIT_ENABLED`, the relevant platform flags, a succeeded native build, complete store credentials, and a valid store-readiness package are present; this has not been live-validated against EAS, Apple, or Google Play in this session.
+- This branch does not yet automate App Store Connect or Google Play listing metadata/screenshots/release notes beyond generating and exporting drafts/checklists.
 - Public product copy must not claim native mobile binary generation until the EAS path is deployed, credential-gated, live-validated, and surfaced honestly in the UI.
 
 ## Official Reference Notes

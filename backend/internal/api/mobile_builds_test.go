@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"apex-build/internal/mobile"
 	secretstore "apex-build/internal/secrets"
@@ -67,6 +68,95 @@ func TestCreateProjectMobileBuildRequiresValidatedCredentials(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "MOBILE_CREDENTIALS_REQUIRED")
 	require.Contains(t, recorder.Body.String(), "eas_token")
 	require.NotContains(t, recorder.Body.String(), "google_play_service_account")
+	require.Zero(t, provider.calls)
+}
+
+func TestCreateProjectMobileBuildRequiresPaidMobilePlan(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "free")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	provider := &mockAPIMobileBuildProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(mobileBuildAPITestFlags(), provider, mobile.NewGormMobileBuildStore(gormDB)))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds", project.ID), strings.NewReader(`{
+		"platform":"android",
+		"profile":"preview",
+		"release_level":"internal_android_apk"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.CreateProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusPaymentRequired, recorder.Code)
+	require.Contains(t, recorder.Body.String(), mobileBuildPlanRequiredCode)
+	require.Contains(t, recorder.Body.String(), `"required_plan":"builder"`)
+	require.Zero(t, provider.calls)
+}
+
+func TestCreateProjectMobileBuildRequiresProForIOS(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "builder")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"ios"})
+	provider := &mockAPIMobileBuildProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(mobileBuildAPITestFlags(), provider, mobile.NewGormMobileBuildStore(gormDB)))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds", project.ID), strings.NewReader(`{
+		"platform":"ios",
+		"profile":"internal",
+		"release_level":"ios_internal"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.CreateProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusPaymentRequired, recorder.Code)
+	require.Contains(t, recorder.Body.String(), mobileBuildPlanRequiredCode)
+	require.Contains(t, recorder.Body.String(), `"required_plan":"pro"`)
+	require.Zero(t, provider.calls)
+}
+
+func TestCreateProjectMobileBuildEnforcesMonthlyQuota(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "builder")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	buildStore := mobile.NewGormMobileBuildStore(gormDB)
+	for i := 0; i < 5; i++ {
+		require.NoError(t, buildStore.Save(context.Background(), mobile.MobileBuildJob{
+			ID:           fmt.Sprintf("mbld_quota_%d", i),
+			ProjectID:    project.ID,
+			UserID:       userID,
+			Platform:     mobile.MobilePlatformAndroid,
+			Profile:      mobile.MobileBuildProfilePreview,
+			ReleaseLevel: mobile.ReleaseInternalAndroidAPK,
+			Status:       mobile.MobileBuildFailed,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}))
+	}
+	provider := &mockAPIMobileBuildProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(mobileBuildAPITestFlags(), provider, buildStore))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds", project.ID), strings.NewReader(`{
+		"platform":"android",
+		"profile":"preview",
+		"release_level":"internal_android_apk"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.CreateProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Contains(t, recorder.Body.String(), mobileBuildQuotaExceededCode)
+	require.Contains(t, recorder.Body.String(), `"monthly_limit":5`)
 	require.Zero(t, provider.calls)
 }
 
@@ -202,6 +292,54 @@ func TestCreateProjectMobileBuildPersistsJobAndArtifactEndpoints(t *testing.T) {
 	server.GetProjectMobileBuildArtifacts(artifactContext)
 	require.Equal(t, http.StatusOK, artifactRecorder.Code)
 	require.Contains(t, artifactRecorder.Body.String(), "https://artifacts.example.com/app.apk")
+}
+
+func TestCreateProjectMobileBuildReturnsRepairPlanForProviderFailure(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	provider := &mockAPIMobileBuildProvider{
+		err: fmt.Errorf("Metro bundle failed with EAS_TOKEN=secret-token"),
+	}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(
+		mobileBuildAPITestFlags(),
+		provider,
+		mobile.NewGormMobileBuildStore(gormDB),
+		mobile.WithMobileBuildIDGenerator(func() string { return "mbld_api_failure_repair" }),
+	))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds", project.ID), strings.NewReader(`{
+		"platform":"android",
+		"profile":"preview",
+		"release_level":"internal_android_apk"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.CreateProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusBadGateway, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "secret-token")
+	require.Contains(t, recorder.Body.String(), `"repair_plan"`)
+	require.Contains(t, recorder.Body.String(), `"failure_type":"metro_bundle_failed"`)
+	require.Contains(t, recorder.Body.String(), `"requires_source_change":true`)
+
+	var response struct {
+		Build mobile.MobileBuildJob `json:"build"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, mobile.MobileBuildFailed, response.Build.Status)
+	require.NotNil(t, response.Build.RepairPlan)
+	require.Equal(t, mobile.MobileBuildFailureMetroBundleFailed, response.Build.RepairPlan.FailureType)
+
+	var updated models.Project
+	require.NoError(t, gormDB.First(&updated, project.ID).Error)
+	require.Equal(t, string(mobile.MobileBuildFailed), updated.MobileBuildStatus)
+	require.Equal(t, "metro_bundle_failed", mobileMetadataStringForAPITest(updated.MobileMetadata, "last_mobile_build_failure_type"))
+	require.Equal(t, "Repair Metro bundling", mobileMetadataStringForAPITest(updated.MobileMetadata, "last_mobile_build_repair_title"))
 }
 
 func TestRefreshProjectMobileBuildUpdatesProviderStatusAndProjectSummary(t *testing.T) {
@@ -371,6 +509,370 @@ func TestRetryProjectMobileBuildQueuesNewProviderJob(t *testing.T) {
 	require.Equal(t, "mbld_api_retry", mobileMetadataStringForAPITest(updated.MobileMetadata, "last_mobile_build_id"))
 }
 
+func TestRetryProjectMobileBuildBlocksSourceFailureUntilValidationPasses(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	store := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, store.Save(context.Background(), mobile.MobileBuildJob{
+		ID:             "mbld_api_source_failed",
+		ProjectID:      project.ID,
+		UserID:         userID,
+		Platform:       mobile.MobilePlatformAndroid,
+		Profile:        mobile.MobileBuildProfilePreview,
+		ReleaseLevel:   mobile.ReleaseInternalAndroidAPK,
+		Status:         mobile.MobileBuildFailed,
+		FailureType:    mobile.MobileBuildFailureMetroBundleFailed,
+		FailureMessage: "Metro bundle failed.",
+	}))
+	spec := mobile.FieldServiceContractorQuoteSpec()
+	files, errs := mobile.GenerateExpoProject(spec, mobile.ExpoGeneratorOptions{})
+	require.Empty(t, errs)
+	for _, file := range files {
+		if file.Path == "mobile/package.json" {
+			createMobileBuildAPIFile(t, gormDB, project, file.Path, `{"scripts":`)
+			continue
+		}
+		createMobileBuildAPIFile(t, gormDB, project, file.Path, file.Content)
+	}
+	provider := &mockAPIMobileBuildProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(mobileBuildAPITestFlags(), provider, store))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_source_failed/retry", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_source_failed"}}
+	context.Set("user_id", userID)
+
+	server.RetryProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "MOBILE_BUILD_PRE_RETRY_VALIDATION_FAILED")
+	require.Contains(t, recorder.Body.String(), "package.json is not valid JSON")
+	require.Contains(t, recorder.Body.String(), `"repair_plan"`)
+	require.Equal(t, 0, provider.calls)
+}
+
+func TestRetryProjectMobileBuildAllowsCredentialFailureWithoutSourceValidation(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	store := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, store.Save(context.Background(), mobile.MobileBuildJob{
+		ID:             "mbld_api_credential_failed",
+		ProjectID:      project.ID,
+		UserID:         userID,
+		Platform:       mobile.MobilePlatformAndroid,
+		Profile:        mobile.MobileBuildProfilePreview,
+		ReleaseLevel:   mobile.ReleaseInternalAndroidAPK,
+		Status:         mobile.MobileBuildFailed,
+		FailureType:    mobile.MobileBuildFailureAndroidSigningFailed,
+		FailureMessage: "Android signing failed.",
+	}))
+	spec := mobile.FieldServiceContractorQuoteSpec()
+	files, errs := mobile.GenerateExpoProject(spec, mobile.ExpoGeneratorOptions{})
+	require.Empty(t, errs)
+	for _, file := range files {
+		if file.Path == "mobile/eas.json" {
+			continue
+		}
+		createMobileBuildAPIFile(t, gormDB, project, file.Path, file.Content)
+	}
+	provider := &mockAPIMobileBuildProvider{
+		result: mobile.MobileBuildProviderResult{
+			ProviderBuildID: "eas-build-credential-retry",
+			Status:          mobile.MobileBuildQueued,
+		},
+	}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(
+		mobileBuildAPITestFlags(),
+		provider,
+		store,
+		mobile.WithMobileBuildIDGenerator(func() string { return "mbld_api_credential_retry" }),
+	))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_credential_failed/retry", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_credential_failed"}}
+	context.Set("user_id", userID)
+
+	server.RetryProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "mbld_api_credential_retry")
+	require.Equal(t, 1, provider.calls)
+}
+
+func TestRepairProjectMobileBuildMarksSourceFailureReadyForRetryAfterValidation(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	store := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, store.Save(context.Background(), mobile.MobileBuildJob{
+		ID:             "mbld_api_repair_source",
+		ProjectID:      project.ID,
+		UserID:         userID,
+		Platform:       mobile.MobilePlatformAndroid,
+		Profile:        mobile.MobileBuildProfilePreview,
+		ReleaseLevel:   mobile.ReleaseInternalAndroidAPK,
+		Status:         mobile.MobileBuildFailed,
+		FailureType:    mobile.MobileBuildFailureMetroBundleFailed,
+		FailureMessage: "Metro bundle failed.",
+	}))
+	spec := mobile.FieldServiceContractorQuoteSpec()
+	files, errs := mobile.GenerateExpoProject(spec, mobile.ExpoGeneratorOptions{})
+	require.Empty(t, errs)
+	for _, file := range files {
+		createMobileBuildAPIFile(t, gormDB, project, file.Path, file.Content)
+	}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(mobileBuildAPITestFlags(), &mockAPIMobileBuildProvider{}, store))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_repair_source/repair", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_repair_source"}}
+	context.Set("user_id", userID)
+
+	server.RepairProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"repaired":true`)
+	require.Contains(t, recorder.Body.String(), string(mobile.MobileBuildRepairedRetryPending))
+
+	var response struct {
+		Build      mobile.MobileBuildJob         `json:"build"`
+		Validation mobile.MobileValidationReport `json:"validation"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, mobile.MobileBuildRepairedRetryPending, response.Build.Status)
+	require.Equal(t, mobile.MobileValidationPassed, response.Validation.Status)
+
+	var updated models.Project
+	require.NoError(t, gormDB.First(&updated, project.ID).Error)
+	require.Equal(t, string(mobile.MobileBuildRepairedRetryPending), updated.MobileBuildStatus)
+	require.Equal(t, "mbld_api_repair_source", mobileMetadataStringForAPITest(updated.MobileMetadata, "last_mobile_build_id"))
+}
+
+func TestRepairProjectMobileBuildRequiresCredentialRepairForSigningFailure(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	store := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, store.Save(context.Background(), mobile.MobileBuildJob{
+		ID:             "mbld_api_repair_signing",
+		ProjectID:      project.ID,
+		UserID:         userID,
+		Platform:       mobile.MobilePlatformAndroid,
+		Profile:        mobile.MobileBuildProfilePreview,
+		ReleaseLevel:   mobile.ReleaseInternalAndroidAPK,
+		Status:         mobile.MobileBuildFailed,
+		FailureType:    mobile.MobileBuildFailureAndroidSigningFailed,
+		FailureMessage: "Android signing failed.",
+	}))
+	server.SetMobileBuildService(mobile.NewMobileBuildService(mobileBuildAPITestFlags(), &mockAPIMobileBuildProvider{}, store))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_repair_signing/repair", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_repair_signing"}}
+	context.Set("user_id", userID)
+
+	server.RepairProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "MOBILE_REPAIR_CREDENTIALS_REQUIRED")
+	require.Contains(t, recorder.Body.String(), string(mobile.MobileCredentialAndroidSigning))
+	require.Contains(t, recorder.Body.String(), `"repair_plan"`)
+}
+
+func TestSubmitProjectMobileBuildCreatesStoreUploadJob(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	project.MobileStoreReadinessStatus = "succeeded"
+	require.NoError(t, gormDB.Save(&project).Error)
+	storeRequiredAndroidMobileCredentials(t, gormDB, userID, project)
+	buildStore := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, buildStore.Save(context.Background(), mobile.MobileBuildJob{
+		ID:              "mbld_api_submit_ready",
+		ProjectID:       project.ID,
+		UserID:          userID,
+		Platform:        mobile.MobilePlatformAndroid,
+		Profile:         mobile.MobileBuildProfileProduction,
+		ReleaseLevel:    mobile.ReleaseAndroidAAB,
+		Status:          mobile.MobileBuildSucceeded,
+		Provider:        "eas",
+		ProviderBuildID: "eas-build-submit-ready",
+		ArtifactURL:     "https://artifacts.example.com/app.aab",
+	}))
+	spec := mobile.FieldServiceContractorQuoteSpec()
+	files, errs := mobile.GenerateExpoProject(spec, mobile.ExpoGeneratorOptions{})
+	require.Empty(t, errs)
+	for _, file := range files {
+		createMobileBuildAPIFile(t, gormDB, project, file.Path, file.Content)
+	}
+	provider := &mockAPIMobileSubmissionProvider{
+		result: mobile.MobileSubmissionProviderResult{
+			ProviderSubmissionID: "eas-submit-ready",
+			Status:               mobile.MobileSubmissionReadyForGoogleInternalTesting,
+		},
+	}
+	flags := mobileBuildAPITestFlags()
+	flags.MobileEASSubmitEnabled = true
+	server.SetMobileBuildService(mobile.NewMobileBuildService(flags, &mockAPIMobileBuildProvider{}, buildStore))
+	server.SetMobileSubmissionService(mobile.NewMobileSubmissionService(
+		flags,
+		provider,
+		mobile.NewGormMobileSubmissionStore(gormDB),
+		mobile.WithMobileSubmissionIDGenerator(func() string { return "msub_api_submit" }),
+	))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_submit_ready/submit", project.ID), strings.NewReader(`{}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_submit_ready"}}
+	context.Set("user_id", userID)
+
+	server.SubmitProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "msub_api_submit")
+	require.Equal(t, 1, provider.calls)
+	require.Equal(t, "mbld_api_submit_ready", provider.last.BuildID)
+	require.Equal(t, "eas-build-submit-ready", provider.last.ProviderBuildID)
+
+	var updated models.Project
+	require.NoError(t, gormDB.First(&updated, project.ID).Error)
+	require.Equal(t, "submitted_to_store_pipeline", updated.MobileStoreReadinessStatus)
+	require.Equal(t, "msub_api_submit", mobileMetadataStringForAPITest(updated.MobileMetadata, "last_mobile_submission_id"))
+}
+
+func TestSubmitProjectMobileBuildRequiresCompleteStoreCredentials(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	storeEASMobileCredential(t, gormDB, userID, project)
+	buildStore := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, buildStore.Save(context.Background(), mobile.MobileBuildJob{
+		ID:              "mbld_api_submit_missing_creds",
+		ProjectID:       project.ID,
+		UserID:          userID,
+		Platform:        mobile.MobilePlatformAndroid,
+		Profile:         mobile.MobileBuildProfileProduction,
+		ReleaseLevel:    mobile.ReleaseAndroidAAB,
+		Status:          mobile.MobileBuildSucceeded,
+		ProviderBuildID: "eas-build-submit-missing-creds",
+	}))
+	flags := mobileBuildAPITestFlags()
+	flags.MobileEASSubmitEnabled = true
+	provider := &mockAPIMobileSubmissionProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(flags, &mockAPIMobileBuildProvider{}, buildStore))
+	server.SetMobileSubmissionService(mobile.NewMobileSubmissionService(flags, provider, mobile.NewGormMobileSubmissionStore(gormDB)))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_submit_missing_creds/submit", project.ID), strings.NewReader(`{}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_submit_missing_creds"}}
+	context.Set("user_id", userID)
+
+	server.SubmitProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "MOBILE_SUBMISSION_CREDENTIALS_REQUIRED")
+	require.Contains(t, recorder.Body.String(), string(mobile.MobileCredentialGooglePlayService))
+	require.Zero(t, provider.calls)
+}
+
+func TestSubmitProjectMobileBuildRequiresProPlan(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "builder")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	buildStore := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, buildStore.Save(context.Background(), mobile.MobileBuildJob{
+		ID:              "mbld_api_submit_builder_blocked",
+		ProjectID:       project.ID,
+		UserID:          userID,
+		Platform:        mobile.MobilePlatformAndroid,
+		Profile:         mobile.MobileBuildProfileProduction,
+		ReleaseLevel:    mobile.ReleaseAndroidAAB,
+		Status:          mobile.MobileBuildSucceeded,
+		ProviderBuildID: "eas-build-submit-builder-blocked",
+		ArtifactURL:     "https://artifacts.example.com/app.aab",
+	}))
+	flags := mobileBuildAPITestFlags()
+	flags.MobileEASSubmitEnabled = true
+	provider := &mockAPIMobileSubmissionProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(flags, &mockAPIMobileBuildProvider{}, buildStore))
+	server.SetMobileSubmissionService(mobile.NewMobileSubmissionService(flags, provider, mobile.NewGormMobileSubmissionStore(gormDB)))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_submit_builder_blocked/submit", project.ID), strings.NewReader(`{}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_submit_builder_blocked"}}
+	context.Set("user_id", userID)
+
+	server.SubmitProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusPaymentRequired, recorder.Code)
+	require.Contains(t, recorder.Body.String(), mobileSubmissionPlanRequiredCode)
+	require.Contains(t, recorder.Body.String(), `"required_plan":"pro"`)
+	require.Zero(t, provider.calls)
+}
+
+func TestSubmitProjectMobileBuildRejectsDuplicateActiveSubmission(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
+	project.MobileStoreReadinessStatus = "succeeded"
+	require.NoError(t, gormDB.Save(&project).Error)
+	storeRequiredAndroidMobileCredentials(t, gormDB, userID, project)
+	buildStore := mobile.NewGormMobileBuildStore(gormDB)
+	require.NoError(t, buildStore.Save(context.Background(), mobile.MobileBuildJob{
+		ID:              "mbld_api_submit_duplicate",
+		ProjectID:       project.ID,
+		UserID:          userID,
+		Platform:        mobile.MobilePlatformAndroid,
+		Profile:         mobile.MobileBuildProfileProduction,
+		ReleaseLevel:    mobile.ReleaseAndroidAAB,
+		Status:          mobile.MobileBuildSucceeded,
+		ProviderBuildID: "eas-build-submit-duplicate",
+		ArtifactURL:     "https://artifacts.example.com/app.aab",
+	}))
+	submissionStore := mobile.NewGormMobileSubmissionStore(gormDB)
+	require.NoError(t, submissionStore.Save(context.Background(), mobile.MobileSubmissionJob{
+		ID:                   "msub_api_existing",
+		ProjectID:            project.ID,
+		UserID:               userID,
+		BuildID:              "mbld_api_submit_duplicate",
+		Platform:             mobile.MobilePlatformAndroid,
+		Status:               mobile.MobileSubmissionReadyForGoogleInternalTesting,
+		Provider:             "eas",
+		ProviderSubmissionID: "eas-submit-existing",
+		Track:                "internal",
+		CreatedAt:            time.Now(),
+		UpdatedAt:            time.Now(),
+	}))
+	flags := mobileBuildAPITestFlags()
+	flags.MobileEASSubmitEnabled = true
+	provider := &mockAPIMobileSubmissionProvider{}
+	server.SetMobileBuildService(mobile.NewMobileBuildService(flags, &mockAPIMobileBuildProvider{}, buildStore))
+	server.SetMobileSubmissionService(mobile.NewMobileSubmissionService(flags, provider, submissionStore))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/mobile/builds/mbld_api_submit_duplicate/submit", project.ID), strings.NewReader(`{}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}, {Key: "buildId", Value: "mbld_api_submit_duplicate"}}
+	context.Set("user_id", userID)
+
+	server.SubmitProjectMobileBuild(context)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "MOBILE_SUBMISSION_ALREADY_EXISTS")
+	require.Contains(t, recorder.Body.String(), "msub_api_existing")
+	require.Zero(t, provider.calls)
+}
+
 func TestRetryProjectMobileBuildRejectsActiveJob(t *testing.T) {
 	server, userID, gormDB := newProjectAPITestServer(t, "pro")
 	project := createMobileBuildAPIProject(t, gormDB, userID, []string{"android"})
@@ -418,6 +920,18 @@ func createMobileBuildAPIProject(t *testing.T, gormDB *gorm.DB, userID uint, pla
 	}
 	require.NoError(t, gormDB.Create(&project).Error)
 	return project
+}
+
+func createMobileBuildAPIFile(t *testing.T, gormDB *gorm.DB, project models.Project, path string, content string) {
+	t.Helper()
+	require.NoError(t, gormDB.Create(&models.File{
+		ProjectID: project.ID,
+		Path:      path,
+		Name:      filepath.Base(path),
+		Type:      "file",
+		Content:   content,
+		Size:      int64(len(content)),
+	}).Error)
 }
 
 func storeEASMobileCredential(t *testing.T, gormDB *gorm.DB, userID uint, project models.Project) {
@@ -513,4 +1027,24 @@ func (p *mockAPIMobileBuildProvider) CancelBuild(_ context.Context, job mobile.M
 		return mobile.MobileBuildProviderResult{}, p.cancelErr
 	}
 	return p.cancelResult, nil
+}
+
+type mockAPIMobileSubmissionProvider struct {
+	result mobile.MobileSubmissionProviderResult
+	err    error
+	calls  int
+	last   mobile.MobileSubmissionRequest
+}
+
+func (p *mockAPIMobileSubmissionProvider) Name() string {
+	return "mock-eas-submit"
+}
+
+func (p *mockAPIMobileSubmissionProvider) SubmitBuild(_ context.Context, req mobile.MobileSubmissionRequest) (mobile.MobileSubmissionProviderResult, error) {
+	p.calls++
+	p.last = req
+	if p.err != nil {
+		return mobile.MobileSubmissionProviderResult{}, p.err
+	}
+	return p.result, nil
 }

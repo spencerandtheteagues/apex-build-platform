@@ -267,9 +267,9 @@ Paid plans include the full build workspace with specialist agent roles, live pr
 
 ## Technical Stack
 
-**Backend:** Go 1.23, Gin, GORM, PostgreSQL 15, Redis 7, Stripe Go SDK, Docker
+**Backend:** Go 1.26+, Gin, GORM, PostgreSQL 15, Redis 7, Stripe Go SDK, Docker
 
-**Frontend:** React 18, TypeScript, Vite 5, TailwindCSS, Monaco Editor, xterm.js, Framer Motion, Zustand
+**Frontend:** React 18, TypeScript 4.9, Vite 4, TailwindCSS 4, Monaco Editor, xterm.js, Framer Motion, Zustand
 
 **Infrastructure:** Render (backend + frontend), Render Managed PostgreSQL, Render Key Value, Stripe live mode
 
@@ -311,7 +311,7 @@ apex-build/
 ## Running Locally
 
 ### Prerequisites
-Go 1.23+, Node.js 18+, PostgreSQL 15+, Docker
+Go 1.26+, Node.js 20+, PostgreSQL 15+, Docker
 
 ### Setup
 

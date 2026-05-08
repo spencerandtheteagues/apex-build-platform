@@ -16,7 +16,7 @@ func testDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&BudgetCap{}, &spend.SpendEvent{}); err != nil {
+	if err := db.AutoMigrate(&BudgetCap{}, &BudgetReservation{}, &spend.SpendEvent{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -33,9 +33,15 @@ func testEnforcer(t *testing.T) (*BudgetEnforcer, *gorm.DB) {
 // the pricing engine so tests are deterministic.
 func seedSpend(t *testing.T, db *gorm.DB, userID uint, buildID string, billedCost float64) {
 	t.Helper()
+	seedProjectSpend(t, db, userID, nil, buildID, billedCost)
+}
+
+func seedProjectSpend(t *testing.T, db *gorm.DB, userID uint, projectID *uint, buildID string, billedCost float64) {
+	t.Helper()
 	now := time.Now().UTC()
 	ev := spend.SpendEvent{
 		UserID:     userID,
+		ProjectID:  projectID,
 		BuildID:    buildID,
 		Provider:   "claude",
 		Model:      "claude-opus-4-6",
@@ -209,6 +215,66 @@ func TestPreAuthorize_Below80Pct_NoWarning(t *testing.T) {
 	}
 	if result.WarningPct != 0 {
 		t.Fatalf("expected WarningPct=0 when below 80%%, got %f", result.WarningPct)
+	}
+}
+
+func TestPreAuthorizeForProject_AppliesOnlyMatchingProjectCaps(t *testing.T) {
+	enforcer, db := testEnforcer(t)
+	projectOne := uint(10)
+	projectTwo := uint(20)
+	_, _ = enforcer.SetCap(1, "daily", &projectOne, 1.00, "stop")
+	seedProjectSpend(t, db, 1, &projectTwo, "", 0.95)
+
+	otherProject, err := enforcer.PreAuthorizeForProject(1, &projectTwo, "", 0.10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !otherProject.Allowed {
+		t.Fatalf("project-specific cap blocked unrelated project: %s", otherProject.Reason)
+	}
+
+	seedProjectSpend(t, db, 1, &projectOne, "", 0.95)
+	matchingProject, err := enforcer.PreAuthorizeForProject(1, &projectOne, "", 0.10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if matchingProject.Allowed {
+		t.Fatalf("expected matching project cap to block projected spend")
+	}
+}
+
+func TestReserveCountsActiveReservationsAgainstHardCap(t *testing.T) {
+	enforcer, _ := testEnforcer(t)
+	_, _ = enforcer.SetCap(1, "daily", nil, 1.00, "stop")
+
+	first, firstResult, err := enforcer.Reserve(1, nil, "build-1", "claude", "model", 0.60, time.Minute)
+	if err != nil {
+		t.Fatalf("first reserve: %v", err)
+	}
+	if first == nil || !firstResult.Allowed {
+		t.Fatalf("expected first reservation to be allowed, got reservation=%+v result=%+v", first, firstResult)
+	}
+
+	second, secondResult, err := enforcer.Reserve(1, nil, "build-2", "claude", "model", 0.50, time.Minute)
+	if err != nil {
+		t.Fatalf("second reserve: %v", err)
+	}
+	if second != nil {
+		t.Fatalf("expected second reservation to be denied, got %+v", second)
+	}
+	if secondResult == nil || secondResult.Allowed {
+		t.Fatalf("expected second reservation to be blocked by active reservation, got %+v", secondResult)
+	}
+
+	if err := enforcer.ReleaseReservation(first.ID); err != nil {
+		t.Fatalf("release first reservation: %v", err)
+	}
+	third, thirdResult, err := enforcer.Reserve(1, nil, "build-3", "claude", "model", 0.50, time.Minute)
+	if err != nil {
+		t.Fatalf("third reserve: %v", err)
+	}
+	if third == nil || !thirdResult.Allowed {
+		t.Fatalf("expected reservation after release to be allowed, got reservation=%+v result=%+v", third, thirdResult)
 	}
 }
 

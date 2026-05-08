@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const ollamaCreditSaverProfile = "ollama-credit-saver"
+
 type providerAliasClient struct {
 	alias AIProvider
 	base  AIClient
@@ -89,17 +91,17 @@ func newAliasedOllamaProviderClient(alias AIProvider, baseURL, apiKey, model str
 func providerOllamaEmulationConfig(provider AIProvider) (string, string) {
 	switch provider {
 	case ProviderClaude:
-		return firstEnv("CLAUDE_OLLAMA_URL", "CLAUDE_LOCAL_OLLAMA_URL"), firstEnv("CLAUDE_OLLAMA_MODEL", "CLAUDE_LOCAL_OLLAMA_MODEL")
+		return firstEnv("CLAUDE_OLLAMA_URL", "CLAUDE_LOCAL_OLLAMA_URL", testingProfileOllamaURLKey()), firstEnv("CLAUDE_OLLAMA_MODEL", "CLAUDE_LOCAL_OLLAMA_MODEL", testingProfileModel(provider))
 	case ProviderGPT4:
-		return firstEnv("OPENAI_OLLAMA_URL", "GPT4_OLLAMA_URL", "OPENAI_LOCAL_OLLAMA_URL"), firstEnv("OPENAI_OLLAMA_MODEL", "GPT4_OLLAMA_MODEL", "OPENAI_LOCAL_OLLAMA_MODEL")
+		return firstEnv("OPENAI_OLLAMA_URL", "GPT4_OLLAMA_URL", "OPENAI_LOCAL_OLLAMA_URL", testingProfileOllamaURLKey()), firstEnv("OPENAI_OLLAMA_MODEL", "GPT4_OLLAMA_MODEL", "QWEN_OLLAMA_MODEL", "OPENAI_LOCAL_OLLAMA_MODEL", testingProfileModel(provider))
 	case ProviderGemini:
-		return firstEnv("GEMINI_OLLAMA_URL", "GEMINI_LOCAL_OLLAMA_URL"), firstEnv("GEMINI_OLLAMA_MODEL", "GEMINI_LOCAL_OLLAMA_MODEL")
+		return firstEnv("GEMINI_OLLAMA_URL", "GEMINI_LOCAL_OLLAMA_URL", testingProfileOllamaURLKey()), firstEnv("GEMINI_OLLAMA_MODEL", "GLM_OLLAMA_MODEL", "GEMINI_LOCAL_OLLAMA_MODEL", testingProfileModel(provider))
 	case ProviderGrok:
-		return firstEnv("GROK_OLLAMA_URL", "GROK_LOCAL_OLLAMA_URL"), firstEnv("GROK_OLLAMA_MODEL", "GROK_LOCAL_OLLAMA_MODEL")
+		return firstEnv("GROK_OLLAMA_URL", "GROK_LOCAL_OLLAMA_URL", testingProfileOllamaURLKey()), firstEnv("GROK_OLLAMA_MODEL", "DEEPSEEK_OLLAMA_MODEL", "GROK_LOCAL_OLLAMA_MODEL", testingProfileModel(provider))
 	case ProviderDeepSeek:
-		return firstEnv("DEEPSEEK_OLLAMA_URL", "OLLAMA_URL"), firstEnv("DEEPSEEK_OLLAMA_MODEL", "deepseek-v3.2")
+		return firstEnv("DEEPSEEK_OLLAMA_URL", testingProfileOllamaURLKey(), "OLLAMA_URL", "OLLAMA_HOST", "OLLAMA_BASE_URL"), firstEnv("DEEPSEEK_OLLAMA_MODEL", testingProfileModel(provider), "deepseek-v3.2")
 	case ProviderGLM:
-		return firstEnv("GLM_OLLAMA_URL", "OLLAMA_URL"), firstEnv("GLM_OLLAMA_MODEL", "glm-5.1")
+		return firstEnv("GLM_OLLAMA_URL", testingProfileOllamaURLKey(), "OLLAMA_URL", "OLLAMA_HOST", "OLLAMA_BASE_URL"), firstEnv("GLM_OLLAMA_MODEL", testingProfileModel(provider), "glm-5.1")
 	default:
 		return "", ""
 	}
@@ -131,9 +133,50 @@ func configuredOllamaEmulations() map[AIProvider]struct {
 
 func firstEnv(keys ...string) string {
 	for _, key := range keys {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		if strings.Contains(key, "://") {
+			return strings.TrimSpace(key)
+		}
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return value
 		}
 	}
 	return ""
+}
+
+func ollamaCreditSaverTestingProfileEnabled() bool {
+	profile := strings.ToLower(strings.TrimSpace(firstEnv("APEX_AI_TESTING_PROFILE", "APEX_LIVE_TEST_MODEL_PROFILE", "APEX_TEST_MODEL_PROFILE")))
+	switch profile {
+	case ollamaCreditSaverProfile, "ollama", "ollama-credit-saver-local", "credit-saver":
+		return true
+	default:
+		return false
+	}
+}
+
+func testingProfileOllamaURLKey() string {
+	if !ollamaCreditSaverTestingProfileEnabled() {
+		return ""
+	}
+	return firstEnv("OLLAMA_TEST_URL", "OLLAMA_URL", "OLLAMA_HOST")
+}
+
+func testingProfileModel(provider AIProvider) string {
+	if !ollamaCreditSaverTestingProfileEnabled() {
+		return ""
+	}
+	switch provider {
+	case ProviderClaude, ProviderOllama:
+		return firstEnv("KIMI_OLLAMA_MODEL", "OLLAMA_MODEL_ORCHESTRATOR", "OLLAMA_MODEL_DEFAULT", "kimi-k2.6")
+	case ProviderGPT4:
+		return firstEnv("QWEN_OLLAMA_MODEL", "OLLAMA_MODEL_CODER", "qwen3:latest")
+	case ProviderGemini, ProviderGLM:
+		return firstEnv("GLM_OLLAMA_MODEL", "OLLAMA_MODEL_TESTER", "glm-5.1")
+	case ProviderGrok, ProviderDeepSeek:
+		return firstEnv("DEEPSEEK_OLLAMA_MODEL", "OLLAMA_MODEL_REVIEWER", "deepseek-v4-pro")
+	default:
+		return ""
+	}
 }

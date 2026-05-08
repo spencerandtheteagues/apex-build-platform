@@ -164,6 +164,78 @@ describe('mobile validation API', () => {
     expect(scorecard.categories[0].id).toBe('credentials_signing')
   })
 
+  it('fetches project mobile store-readiness report from the project route', async () => {
+    const service = new ApiService('/api/v1')
+    const get = vi.spyOn(service.client, 'get').mockResolvedValue({
+      data: {
+        store_readiness: {
+          status: 'draft_ready_needs_manual_store_assets',
+          package_path: 'mobile/store/store-readiness.json',
+          validation_status: 'passed',
+          score: 75,
+          target: 95,
+          ready_for_submission: false,
+          summary: 'Draft store-readiness package is valid.',
+        },
+      },
+    } as any)
+
+    const report = await service.getProjectMobileStoreReadiness(42)
+
+    expect(get).toHaveBeenCalledWith('/projects/42/mobile/store-readiness')
+    expect(report.ready_for_submission).toBe(false)
+    expect(report.package_path).toBe('mobile/store/store-readiness.json')
+  })
+
+  it('checks project mobile build repairs through the project route', async () => {
+    const service = new ApiService('/api/v1')
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({
+      data: {
+        build: {
+          id: 'mbld_1',
+          project_id: 42,
+          user_id: 1,
+          platform: 'android',
+          profile: 'preview',
+          release_level: 'internal_android_apk',
+          status: 'repaired_retry_pending',
+          created_at: '2026-05-01T00:00:00Z',
+          updated_at: '2026-05-01T00:00:00Z',
+        },
+        repaired: true,
+      },
+    } as any)
+
+    const result = await service.repairProjectMobileBuild(42, 'mbld_1')
+
+    expect(post).toHaveBeenCalledWith('/projects/42/mobile/builds/mbld_1/repair', {})
+    expect(result.repaired).toBe(true)
+    expect(result.build.status).toBe('repaired_retry_pending')
+  })
+
+  it('submits a project mobile build through the project route', async () => {
+    const service = new ApiService('/api/v1')
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({
+      data: {
+        submission: {
+          id: 'msub_1',
+          project_id: 42,
+          user_id: 1,
+          build_id: 'mbld_1',
+          platform: 'android',
+          status: 'ready_for_google_internal_testing',
+          created_at: '2026-05-01T00:00:00Z',
+          updated_at: '2026-05-01T00:00:00Z',
+        },
+      },
+    } as any)
+
+    const result = await service.submitProjectMobileBuild(42, 'mbld_1', { track: 'internal' })
+
+    expect(post).toHaveBeenCalledWith('/projects/42/mobile/builds/mbld_1/submit', { track: 'internal' })
+    expect(result.submission.status).toBe('ready_for_google_internal_testing')
+  })
+
   it('manages project mobile credentials without exposing raw values in API helpers', async () => {
     const service = new ApiService('/api/v1')
     const get = vi.spyOn(service.client, 'get').mockResolvedValue({

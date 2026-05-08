@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/budget"
 )
 
 // modelsByPowerMode maps each provider + power mode to the correct model ID
@@ -41,6 +42,16 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerBalanced: "kimi-k2.6",
 		PowerFast:     "kimi-k2.6",
 	},
+	ai.ProviderDeepSeek: {
+		PowerMax:      "deepseek-v4-pro",
+		PowerBalanced: "deepseek-v4-flash",
+		PowerFast:     "deepseek-v4-flash",
+	},
+	ai.ProviderGLM: {
+		PowerMax:      "glm-5.1",
+		PowerBalanced: "glm-5.1",
+		PowerFast:     "glm-5.1",
+	},
 }
 
 var flagshipModelsByProvider = map[ai.AIProvider]map[string]bool{
@@ -60,6 +71,14 @@ var flagshipModelsByProvider = map[ai.AIProvider]map[string]bool{
 		"grok-4.20-0309-reasoning":     true,
 		"grok-4.20-0309-non-reasoning": true,
 		"grok-4.20-multi-agent-0309":   true,
+	},
+	ai.ProviderDeepSeek: {
+		"deepseek-v4-pro":       true,
+		"deepseek-v4-pro:cloud": true,
+	},
+	ai.ProviderGLM: {
+		"glm-5.1":       true,
+		"glm-5.1:cloud": true,
 	},
 }
 
@@ -101,6 +120,10 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 		return strings.HasPrefix(normalized, "gemini-")
 	case ai.ProviderGrok:
 		return strings.HasPrefix(normalized, "grok-")
+	case ai.ProviderDeepSeek:
+		return strings.HasPrefix(normalized, "deepseek-")
+	case ai.ProviderGLM:
+		return strings.HasPrefix(normalized, "glm-")
 	case ai.ProviderOllama:
 		if strings.HasSuffix(normalized, ":cloud") {
 			for _, ollamaCloudPrefix := range []string{
@@ -359,9 +382,10 @@ func clampAIRouterPrompt(prompt string, maxChars int) string {
 
 // AIRouterAdapter adapts the existing AI router to the agent system interface
 type AIRouterAdapter struct {
-	router      *ai.AIRouter
-	byokManager *ai.BYOKManager
-	startupTime time.Time // Track when adapter was created for grace period
+	router         *ai.AIRouter
+	byokManager    *ai.BYOKManager
+	budgetEnforcer *budget.BudgetEnforcer
+	startupTime    time.Time // Track when adapter was created for grace period
 }
 
 var platformProviderPreferenceOrder = []ai.AIProvider{
@@ -381,6 +405,10 @@ func NewAIRouterAdapter(router *ai.AIRouter, byokManager *ai.BYOKManager) *AIRou
 		byokManager: byokManager,
 		startupTime: time.Now(), // Track startup for grace period
 	}
+}
+
+func (a *AIRouterAdapter) SetBudgetEnforcer(enforcer *budget.BudgetEnforcer) {
+	a.budgetEnforcer = enforcer
 }
 
 // Generate executes an AI generation request using the specified provider
@@ -540,10 +568,32 @@ For code files, use this exact format:
 
 	plDone := pLog(opts.BuildID).AICallStart(string(aiProvider), model, string(capability), len(fullPrompt), maxTokens)
 
+	estimatedCost := 0.0
+	if a.byokManager != nil && opts.UserID > 0 {
+		estimatedCost = a.byokManager.EstimateCost(string(aiProvider), model, len(fullPrompt), maxTokens, string(opts.PowerMode), isBYOK)
+	}
+	if estimatedCost <= 0 {
+		estimatedCost = estimatedCostForGenerateOptions(opts)
+	}
+
+	// Reserve budget before making the AI call. This is separate from credit
+	// reservation: budget caps are user safety rails and must account for
+	// concurrent in-flight provider requests.
+	var budgetReservation *budget.BudgetReservation
+	if a.budgetEnforcer != nil && opts.UserID > 0 && estimatedCost > 0 {
+		reservation, preAuth, err := a.budgetEnforcer.Reserve(opts.UserID, nil, opts.BuildID, string(aiProvider), model, estimatedCost, 10*time.Minute)
+		if err != nil {
+			return nil, fmt.Errorf("budget reservation failed: %w", err)
+		}
+		if preAuth != nil && !preAuth.Allowed {
+			return nil, fmt.Errorf("budget cap exceeded: %s", preAuth.Reason)
+		}
+		budgetReservation = reservation
+	}
+
 	// Reserve credits before making the AI call
 	var reservation *ai.CreditReservation
 	if a.byokManager != nil && opts.UserID > 0 {
-		estimatedCost := a.byokManager.EstimateCost(string(aiProvider), model, len(fullPrompt), maxTokens, string(opts.PowerMode), isBYOK)
 		if estimatedCost > 0 {
 			res, err := a.byokManager.ReserveCredits(opts.UserID, estimatedCost, isBYOK)
 			if err != nil {
@@ -569,6 +619,9 @@ For code files, use this exact format:
 	response, err := targetRouter.Generate(genCtx, request)
 	if err != nil {
 		plDone(0, 0, 0, 0, err)
+		if a.budgetEnforcer != nil && budgetReservation != nil {
+			_ = a.budgetEnforcer.ReleaseReservation(budgetReservation.ID)
+		}
 		if a.byokManager != nil && reservation != nil {
 			_ = a.byokManager.FinalizeCredits(reservation, 0)
 		}
@@ -581,6 +634,9 @@ For code files, use this exact format:
 
 	if response == nil || response.Content == "" {
 		plDone(0, 0, 0, 0, fmt.Errorf("empty response"))
+		if a.budgetEnforcer != nil && budgetReservation != nil {
+			_ = a.budgetEnforcer.ReleaseReservation(budgetReservation.ID)
+		}
 		if a.byokManager != nil && reservation != nil {
 			_ = a.byokManager.FinalizeCredits(reservation, 0)
 		}
@@ -608,6 +664,9 @@ For code files, use this exact format:
 		if reservation != nil {
 			_ = a.byokManager.FinalizeCredits(reservation, finalCost)
 		}
+	}
+	if a.budgetEnforcer != nil && budgetReservation != nil {
+		_ = a.budgetEnforcer.SettleReservation(budgetReservation.ID, finalCost)
 	}
 
 	{
@@ -668,6 +727,17 @@ func (a *AIRouterAdapter) mapProviderToCapability(provider ai.AIProvider, opts G
 
 	// Default to code generation
 	return ai.CapabilityCodeGeneration
+}
+
+func estimatedCostForGenerateOptions(opts GenerateOptions) float64 {
+	switch opts.PowerMode {
+	case PowerMax:
+		return 0.15
+	case PowerBalanced:
+		return 0.06
+	default:
+		return defaultEstimatedRequestCostUSD
+	}
 }
 
 // GenerateWithStreaming generates content and streams it back via callback

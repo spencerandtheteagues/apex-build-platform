@@ -51,6 +51,8 @@ func TestDownloadProjectPreparesMobileExpoFilesForOwnerZip(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.True(t, zipBodyHasPath(t, recorder.Body.Bytes(), "mobile/package.json"))
+	require.True(t, zipBodyHasPath(t, recorder.Body.Bytes(), "backend/src/mobileContractRoutes.ts"))
+	require.True(t, zipBodyHasPath(t, recorder.Body.Bytes(), "docs/mobile-backend-routes.md"))
 	require.True(t, zipBodyHasPath(t, recorder.Body.Bytes(), "mobile/store/store-readiness.json"))
 	require.Contains(t, zipBodyReadPath(t, recorder.Body.Bytes(), "mobile/store/store-readiness.json"), "draft_ready_needs_manual_store_assets")
 }

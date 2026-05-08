@@ -18,12 +18,33 @@ import (
 // OllamaClient implements the Ollama AI API client (local or cloud).
 // Ollama uses an OpenAI-compatible chat completions endpoint.
 // https://ollama.com/blog/openai-compatibility
+//
+// Cloud Ollama (Moonshot/Kimi etc.) has a hard concurrency cap — only N
+// requests can be in flight simultaneously, additional requests queue.
+// The semaphore enforces that on the client side so we don't burn retries
+// on provider-rate-limit responses. Local Ollama leaves it nil = unbounded.
 type OllamaClient struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
 	usage      *ProviderUsage
 	usageMu    sync.RWMutex
+	concurrent chan struct{} // nil = unbounded; non-nil = bounded buffer
+}
+
+// ollamaCloudMaxConcurrent reads OLLAMA_CLOUD_MAX_CONCURRENT (default 3) —
+// Ollama Cloud accepts at most N concurrent in-flight calls; further calls
+// queue and wait. Setting to 0 disables the gate.
+func ollamaCloudMaxConcurrent() int {
+	const defaultLimit = 3
+	raw := strings.TrimSpace(os.Getenv("OLLAMA_CLOUD_MAX_CONCURRENT"))
+	if raw == "" {
+		return defaultLimit
+	}
+	if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+		return n
+	}
+	return defaultLimit
 }
 
 // Ollama uses OpenAI-compatible request/response format
@@ -114,12 +135,19 @@ func NewOllamaClient(baseURL, apiKey string) *OllamaClient {
 	}
 }
 
-// NewOllamaCloudClient creates an Ollama client configured for Ollama Cloud (e.g., kimi-k2.6:cloud)
+// NewOllamaCloudClient creates an Ollama client configured for Ollama Cloud (e.g., kimi-k2.6:cloud).
+// Cloud calls are gated through a concurrency semaphore (default 3 in flight)
+// so that the 4th+ request queues client-side instead of being rejected by
+// the provider's hard rate limit.
 func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
 	if baseURL == "" {
 		baseURL = "https://ollama.com/v1"
 	}
 	baseURL = normalizeOllamaBaseURL(baseURL)
+	var sem chan struct{}
+	if limit := ollamaCloudMaxConcurrent(); limit > 0 {
+		sem = make(chan struct{}, limit)
+	}
 	return &OllamaClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
@@ -130,6 +158,7 @@ func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
 			Provider: ProviderOllama,
 			LastUsed: time.Now(),
 		},
+		concurrent: sem,
 	}
 }
 
@@ -144,6 +173,22 @@ func normalizeOllamaBaseURL(baseURL string) string {
 
 // Generate implements the AIClient interface for Ollama
 func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+	// Acquire the cloud-concurrency slot before doing any I/O. Local
+	// Ollama leaves o.concurrent nil so this is a free fast-path.
+	if o.concurrent != nil {
+		select {
+		case o.concurrent <- struct{}{}:
+			defer func() { <-o.concurrent }()
+		case <-ctx.Done():
+			return &AIResponse{
+				ID:        req.ID,
+				Provider:  ProviderOllama,
+				Error:     ctx.Err().Error(),
+				CreatedAt: time.Now(),
+			}, ctx.Err()
+		}
+	}
+
 	startTime := time.Now()
 
 	messages := o.buildMessages(req)
@@ -480,6 +525,9 @@ func (o *OllamaClient) getModel(req *AIRequest) string {
 	if req.Model != "" {
 		return o.normalizeModelAlias(req.Model)
 	}
+	if model := ollamaModelOverrideForRequest(req); model != "" {
+		return o.normalizeModelAlias(model)
+	}
 
 	// Check if this is an Ollama Cloud client (has apiKey set)
 	isCloud := o.apiKey != ""
@@ -509,6 +557,31 @@ func (o *OllamaClient) getModel(req *AIRequest) string {
 		}
 		return "deepseek-r1:14b" // General purpose fallback
 	}
+}
+
+func ollamaModelOverrideForRequest(req *AIRequest) string {
+	if req == nil {
+		return firstEnv("OLLAMA_MODEL_DEFAULT")
+	}
+	mode := strings.ToLower(strings.TrimSpace(req.PowerMode))
+	switch mode {
+	case "max":
+		if model := firstEnv("OLLAMA_MODEL_MAX"); model != "" {
+			return model
+		}
+	case "balanced", "":
+		if model := firstEnv("OLLAMA_MODEL_BALANCED"); model != "" {
+			return model
+		}
+	case "fast":
+		if model := firstEnv("OLLAMA_MODEL_FAST"); model != "" {
+			return model
+		}
+	}
+	if model := testingProfileModel(ProviderOllama); model != "" {
+		return model
+	}
+	return firstEnv("OLLAMA_MODEL_DEFAULT")
 }
 
 func (o *OllamaClient) normalizeModelAlias(model string) string {

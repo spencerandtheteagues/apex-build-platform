@@ -25,6 +25,11 @@ type apexRule struct {
 	Message     string
 	Suggestion  string
 	LoopContext bool // Only applies inside loops
+	// AbsentSubstring, when non-empty, is a case-insensitive substring that
+	// MUST NOT appear in the matched line for the finding to fire. Go's RE2
+	// engine does not support negative lookaheads, so rules that need
+	// "matches X but does not contain Y" express the negation here.
+	AbsentSubstring string
 }
 
 // Analyze runs all Apex-specific rules against the given code
@@ -62,17 +67,21 @@ func (e *ApexRuleEngine) Analyze(code, fileName string) []ReviewFinding {
 			if rule.LoopContext && loopDepth == 0 {
 				continue
 			}
-			if rule.Pattern.MatchString(trimmed) {
-				findings = append(findings, ReviewFinding{
-					Type:       rule.Type,
-					Severity:   rule.Severity,
-					Line:       lineNum + 1,
-					Message:    rule.Message,
-					Suggestion: rule.Suggestion,
-					Code:       trimmed,
-					RuleID:     rule.ID,
-				})
+			if !rule.Pattern.MatchString(trimmed) {
+				continue
 			}
+			if rule.AbsentSubstring != "" && strings.Contains(lower, strings.ToLower(rule.AbsentSubstring)) {
+				continue
+			}
+			findings = append(findings, ReviewFinding{
+				Type:       rule.Type,
+				Severity:   rule.Severity,
+				Line:       lineNum + 1,
+				Message:    rule.Message,
+				Suggestion: rule.Suggestion,
+				Code:       trimmed,
+				RuleID:     rule.ID,
+			})
 		}
 
 		// Context-aware rules
@@ -136,70 +145,71 @@ func (e *ApexRuleEngine) getRules() []apexRule {
 
 		// ==================== Security Rules ====================
 		{
-			ID:       "apex-soql-injection",
-			Type:     "security",
-			Severity: "error",
-			Pattern:  regexp.MustCompile(`(?i)Database\.(query|getQueryLocator)\s*\(\s*['"].*\+`),
-			Message:  "Potential SOQL injection — dynamic query with string concatenation",
+			ID:         "apex-soql-injection",
+			Type:       "security",
+			Severity:   "error",
+			Pattern:    regexp.MustCompile(`(?i)Database\.(query|getQueryLocator)\s*\(\s*['"].*\+`),
+			Message:    "Potential SOQL injection — dynamic query with string concatenation",
 			Suggestion: "Use bind variables (:variable) or String.escapeSingleQuotes()",
 		},
 		{
-			ID:       "apex-soql-injection-var",
-			Type:     "security",
-			Severity: "error",
-			Pattern:  regexp.MustCompile(`(?i)\'\s*\+\s*\w+\s*\+\s*\'.*(?:SELECT|FROM|WHERE)`),
-			Message:  "Potential SOQL injection — user input concatenated into query string",
+			ID:         "apex-soql-injection-var",
+			Type:       "security",
+			Severity:   "error",
+			Pattern:    regexp.MustCompile(`(?i)\'\s*\+\s*\w+\s*\+\s*\'.*(?:SELECT|FROM|WHERE)`),
+			Message:    "Potential SOQL injection — user input concatenated into query string",
 			Suggestion: "Use bind variables (:variable) instead of string concatenation",
 		},
 		{
-			ID:       "apex-no-crud-check",
-			Type:     "security",
-			Severity: "warning",
-			Pattern:  regexp.MustCompile(`(?i)(?:insert|update|delete)\s+\w+;`),
-			Message:  "DML without CRUD/FLS check — may violate sharing rules",
+			ID:         "apex-no-crud-check",
+			Type:       "security",
+			Severity:   "warning",
+			Pattern:    regexp.MustCompile(`(?i)(?:insert|update|delete)\s+\w+;`),
+			Message:    "DML without CRUD/FLS check — may violate sharing rules",
 			Suggestion: "Check Schema.sObjectType.ObjectName.isCreateable()/isUpdateable()/isDeletable() before DML",
 		},
 		{
-			ID:       "apex-hardcoded-id",
-			Type:     "security",
-			Severity: "warning",
-			Pattern:  regexp.MustCompile(`(?i)['"]\s*[a-zA-Z0-9]{15,18}\s*['"]`),
-			Message:  "Hardcoded Salesforce record ID detected",
+			ID:         "apex-hardcoded-id",
+			Type:       "security",
+			Severity:   "warning",
+			Pattern:    regexp.MustCompile(`(?i)['"]\s*[a-zA-Z0-9]{15,18}\s*['"]`),
+			Message:    "Hardcoded Salesforce record ID detected",
 			Suggestion: "Use Custom Settings, Custom Metadata Types, or queries to get IDs dynamically",
 		},
 		{
-			ID:       "apex-without-sharing",
-			Type:     "security",
-			Severity: "warning",
-			Pattern:  regexp.MustCompile(`(?i)without\s+sharing`),
-			Message:  "Class declared 'without sharing' — bypasses all sharing rules",
+			ID:         "apex-without-sharing",
+			Type:       "security",
+			Severity:   "warning",
+			Pattern:    regexp.MustCompile(`(?i)without\s+sharing`),
+			Message:    "Class declared 'without sharing' — bypasses all sharing rules",
 			Suggestion: "Use 'with sharing' unless there is a documented reason to bypass sharing rules",
 		},
 
 		// ==================== Best Practices ====================
 		{
-			ID:       "apex-hardcoded-string",
-			Type:     "best_practice",
-			Severity: "info",
-			Pattern:  regexp.MustCompile(`(?i)System\.debug\s*\(\s*['"]`),
-			Message:  "System.debug with hardcoded string — consider using a logging framework",
+			ID:         "apex-hardcoded-string",
+			Type:       "best_practice",
+			Severity:   "info",
+			Pattern:    regexp.MustCompile(`(?i)System\.debug\s*\(\s*['"]`),
+			Message:    "System.debug with hardcoded string — consider using a logging framework",
 			Suggestion: "Use a custom Logger class with log levels for better production debugging",
 		},
 		{
-			ID:       "apex-select-star",
-			Type:     "performance",
-			Severity: "warning",
-			Pattern:  regexp.MustCompile(`(?i)SELECT\s+\*\s+FROM`),
-			Message:  "SELECT * in SOQL is not supported — list specific fields",
+			ID:         "apex-select-star",
+			Type:       "performance",
+			Severity:   "warning",
+			Pattern:    regexp.MustCompile(`(?i)SELECT\s+\*\s+FROM`),
+			Message:    "SELECT * in SOQL is not supported — list specific fields",
 			Suggestion: "Explicitly list the fields you need in the SELECT clause",
 		},
 		{
-			ID:       "apex-no-limit",
-			Type:     "performance",
-			Severity: "info",
-			Pattern:  regexp.MustCompile(`(?i)\[\s*SELECT\s+(?:(?!LIMIT).)*\]\s*;`),
-			Message:  "SOQL query without LIMIT clause — could return excessive records",
-			Suggestion: "Add a LIMIT clause to prevent hitting the 50,000 row limit",
+			ID:              "apex-no-limit",
+			Type:            "performance",
+			Severity:        "info",
+			Pattern:         regexp.MustCompile(`(?i)\[\s*SELECT\s+[^\]]*\]\s*;`),
+			AbsentSubstring: "LIMIT",
+			Message:         "SOQL query without LIMIT clause — could return excessive records",
+			Suggestion:      "Add a LIMIT clause to prevent hitting the 50,000 row limit",
 		},
 	}
 }

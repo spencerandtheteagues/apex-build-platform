@@ -1,12 +1,20 @@
 package mobile
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"apex-build/pkg/models"
 )
@@ -50,7 +58,16 @@ func TestGenerateExpoProjectCreatesContractDrivenAPIClient(t *testing.T) {
 	endpoints := findSourceFile(t, files, "mobile/src/api/endpoints.ts")
 	types := findSourceFile(t, files, "mobile/src/api/types.ts")
 
-	for _, expected := range []string{"json?: unknown", "auth?: boolean", "buildPath", "SecureStore.getItemAsync('auth_token')"} {
+	for _, expected := range []string{
+		"json?: unknown",
+		"auth?: boolean",
+		"buildPath",
+		"SecureStore.getItemAsync('auth_token')",
+		"public code?: string",
+		"export function isApiError",
+		"extractAPIErrorCode(details)",
+		"new ApiError(message, response.status, details, code)",
+	} {
 		if !strings.Contains(client.Content, expected) {
 			t.Fatalf("expected API client to contain %q\n%s", expected, client.Content)
 		}
@@ -136,6 +153,100 @@ func TestGenerateExpoProjectCreatesAPIContractManifest(t *testing.T) {
 	}
 	if !strings.Contains(markdownFile.Content, "| `uploadJobPhoto` | `POST` | `/api/jobs/:id/photos` | yes | `FormData` | `PhotoAsset` |") {
 		t.Fatalf("markdown contract missing upload row\n%s", markdownFile.Content)
+	}
+}
+
+func TestGenerateExpoProjectCreatesContractDrivenBackendRoutes(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	for _, path := range []string{
+		"backend/package.json",
+		"backend/tsconfig.json",
+		"backend/src/server.ts",
+		"backend/src/authAdapter.ts",
+		"backend/src/persistenceAdapter.ts",
+		"backend/src/uploadAdapter.ts",
+		"backend/src/mobileContractRoutes.ts",
+		"docs/mobile-backend-routes.md",
+	} {
+		if !hasSourceFile(files, path) {
+			t.Fatalf("expected generated backend contract file %s; got %+v", path, sourceFilePaths(files))
+		}
+	}
+
+	routes := findSourceFile(t, files, "backend/src/mobileContractRoutes.ts")
+	for _, expected := range []string{
+		`"helper": "uploadJobPhoto"`,
+		`"path": "/api/jobs/:id/photos"`,
+		`"requestType": "EstimateDraft"`,
+		`"bodyMode": "multipart"`,
+		"requestType: string;",
+		"issueDemoSession(loginEmailFromBody(body))",
+		"shouldPersistContractMutation(definition)",
+		"persistContractMutation(definition, ctx)",
+		"mobileStore.upsert(typeName, record)",
+		"deleteContractRecord(definition, ctx)",
+		"routeHTTPResponse(404",
+		"recordUpload(ctx.params, ctx.rawBody, ctx.headers)",
+		"createPhotoAsset",
+		"responseForType(definition.responseType, ctx)",
+	} {
+		if !strings.Contains(routes.Content, expected) {
+			t.Fatalf("expected generated backend routes to contain %q\n%s", expected, routes.Content)
+		}
+	}
+
+	server := findSourceFile(t, files, "backend/src/server.ts")
+	for _, expected := range []string{"authenticateMobileRequest", "mobileContractRoutes", "Missing bearer token", "MOBILE_API_ALLOWED_ORIGIN", "'/healthz'", "INVALID_JSON_BODY", "writeRouteResult"} {
+		if !strings.Contains(server.Content, expected) {
+			t.Fatalf("expected generated backend server to contain %q\n%s", expected, server.Content)
+		}
+	}
+
+	auth := findSourceFile(t, files, "backend/src/authAdapter.ts")
+	for _, expected := range []string{"issueDemoSession", "authenticateMobileRequest", "APEX_MOBILE_DEMO_TOKEN"} {
+		if !strings.Contains(auth.Content, expected) {
+			t.Fatalf("expected generated auth adapter to contain %q\n%s", expected, auth.Content)
+		}
+	}
+
+	persistence := findSourceFile(t, files, "backend/src/persistenceAdapter.ts")
+	for _, expected := range []string{"InMemoryMobileStore", "upsert", "get(typeName: string, id: string)", "remove(typeName: string, id: string)", "const seedData"} {
+		if !strings.Contains(persistence.Content, expected) {
+			t.Fatalf("expected generated persistence adapter to contain %q\n%s", expected, persistence.Content)
+		}
+	}
+
+	uploads := findSourceFile(t, files, "backend/src/uploadAdapter.ts")
+	for _, expected := range []string{"recordUpload", "mobileStore.append('PhotoAsset'", "byteLength"} {
+		if !strings.Contains(uploads.Content, expected) {
+			t.Fatalf("expected generated upload adapter to contain %q\n%s", expected, uploads.Content)
+		}
+	}
+
+	docs := findSourceFile(t, files, "docs/mobile-backend-routes.md")
+	if !strings.Contains(docs.Content, "| `uploadJobPhoto` | `POST` | `/api/jobs/:id/photos` | yes | multipart | `PhotoAsset` |") {
+		t.Fatalf("expected generated backend docs to include upload route\n%s", docs.Content)
+	}
+}
+
+func TestGenerateExpoProjectSkipsBackendRoutesForLocalOnlyMobileSpec(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	spec.Architecture.BackendMode = BackendLocalOnly
+	spec.Architecture.DatabaseMode = DatabaseLocalSQLite
+	spec.Architecture.AuthMode = AuthNone
+	spec.APIContracts = nil
+
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated local-only files, got errors %+v", errs)
+	}
+	if hasSourceFile(files, "backend/src/mobileContractRoutes.ts") {
+		t.Fatalf("expected local-only mobile app to omit generated backend source")
 	}
 }
 
@@ -230,6 +341,59 @@ func TestValidateProjectSourcePackageRequiresAPIContractManifest(t *testing.T) {
 	}
 }
 
+func TestValidateProjectSourcePackageRequiresGeneratedBackendRoutesForFullStackSpec(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+	files = removeSourceFile(files, "backend/src/mobileContractRoutes.ts")
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseSourceOnly), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationFailed {
+		t.Fatalf("expected validation failed, got %+v", report)
+	}
+	if !hasMobileValidationCheck(report, "generated_backend_routes", MobileValidationFailed) {
+		t.Fatalf("expected generated backend routes failure, got %+v", report.Checks)
+	}
+}
+
+func TestValidateProjectSourcePackageRejectsBackendRouteManifestDrift(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+	routeFile := findSourceFile(t, files, "backend/src/mobileContractRoutes.ts")
+	files = replaceSourceFileContent(files, "backend/src/mobileContractRoutes.ts", strings.ReplaceAll(routeFile.Content, `"path": "/api/jobs/:id/photos"`, `"path": "/api/jobs/:id/photo-upload"`))
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseSourceOnly), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationFailed {
+		t.Fatalf("expected validation failed, got %+v", report)
+	}
+	if !hasMobileValidationCheck(report, "generated_backend_routes", MobileValidationFailed) {
+		t.Fatalf("expected generated backend routes drift failure, got %+v", report.Checks)
+	}
+}
+
+func TestValidateProjectSourcePackageDoesNotRequireGeneratedBackendRoutesForLocalOnlySpec(t *testing.T) {
+	spec := FieldServiceContractorQuoteSpec()
+	spec.Architecture.BackendMode = BackendLocalOnly
+	spec.Architecture.DatabaseMode = DatabaseLocalSQLite
+	spec.Architecture.AuthMode = AuthNone
+	spec.APIContracts = nil
+
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	report := ValidateProjectSourcePackage(modelsProjectForSpec(spec, string(ReleaseSourceOnly), "not_requested"), modelFilesFromSource(files))
+	if report.Status != MobileValidationPassed {
+		t.Fatalf("expected local-only validation passed without backend routes, got %+v", report)
+	}
+}
+
 func TestValidateProjectSourcePackageRejectsInvalidAPIContractManifest(t *testing.T) {
 	spec := FieldServiceContractorQuoteSpec()
 	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
@@ -320,6 +484,16 @@ func TestValidateGeneratedExpoFilesAllowsProcessEnvOnlyInAppConfig(t *testing.T)
 	}
 }
 
+func TestValidateGeneratedExpoFilesIgnoresGeneratedBackendProcessEnv(t *testing.T) {
+	files := []SourceFile{
+		{Path: "backend/src/server.ts", Content: "const port = process.env.PORT ?? '8080';", Language: "typescript", IsNew: true},
+	}
+	errs := ValidateGeneratedExpoFiles(files, map[string]string{"expo": "~55.0.0"}, DefaultNativeCapabilityRegistry())
+	if hasValidationError(errs, "backend/src/server.ts") {
+		t.Fatalf("expected generated backend process.env to be outside mobile browser-only policy, got %+v", errs)
+	}
+}
+
 func TestGeneratedExpoProjectDependencyResolutionSmoke(t *testing.T) {
 	if os.Getenv("MOBILE_GENERATOR_INSTALL_SMOKE") != "1" {
 		t.Skip("set MOBILE_GENERATOR_INSTALL_SMOKE=1 to run generated Expo dependency resolution smoke")
@@ -353,6 +527,216 @@ func TestGeneratedExpoProjectDependencyResolutionSmoke(t *testing.T) {
 	}
 }
 
+func TestGeneratedMobileBackendTypecheckSmoke(t *testing.T) {
+	if os.Getenv("MOBILE_BACKEND_TYPECHECK_SMOKE") != "1" {
+		t.Skip("set MOBILE_BACKEND_TYPECHECK_SMOKE=1 to run generated backend TypeScript smoke")
+	}
+
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	root := t.TempDir()
+	backendRoot := filepath.Join(root, "backend")
+	for _, file := range files {
+		if !strings.HasPrefix(file.Path, "backend/") {
+			continue
+		}
+		target := filepath.Join(root, filepath.FromSlash(file.Path))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatalf("create generated backend directory: %v", err)
+		}
+		if err := os.WriteFile(target, []byte(file.Content), 0o644); err != nil {
+			t.Fatalf("write generated backend file %s: %v", file.Path, err)
+		}
+	}
+
+	runGeneratedCommand(t, backendRoot, "npm", "install", "--package-lock=false", "--ignore-scripts")
+	runGeneratedCommand(t, backendRoot, "npm", "run", "typecheck")
+}
+
+func TestGeneratedMobileBackendRuntimeSmoke(t *testing.T) {
+	if os.Getenv("MOBILE_BACKEND_RUNTIME_SMOKE") != "1" {
+		t.Skip("set MOBILE_BACKEND_RUNTIME_SMOKE=1 to run generated backend runtime smoke")
+	}
+
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	root := t.TempDir()
+	backendRoot := filepath.Join(root, "backend")
+	for _, file := range files {
+		if !strings.HasPrefix(file.Path, "backend/") {
+			continue
+		}
+		target := filepath.Join(root, filepath.FromSlash(file.Path))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatalf("create generated backend directory: %v", err)
+		}
+		if err := os.WriteFile(target, []byte(file.Content), 0o644); err != nil {
+			t.Fatalf("write generated backend file %s: %v", file.Path, err)
+		}
+	}
+
+	runGeneratedCommand(t, backendRoot, "npm", "install", "--package-lock=false", "--ignore-scripts")
+	script := `
+import { mobileContractRoutes } from './src/mobileContractRoutes.ts';
+async function main() {
+  const login = mobileContractRoutes.find((route) => route.path === '/api/auth/login');
+  const listJobs = mobileContractRoutes.find((route) => route.path === '/api/jobs');
+  const syncEstimate = mobileContractRoutes.find((route) => route.path === '/api/estimates/sync');
+  const upload = mobileContractRoutes.find((route) => route.path === '/api/jobs/:id/photos');
+  if (!login || !listJobs || !syncEstimate || !upload) throw new Error('missing generated contract routes');
+  const session = await login.handle({ params: {}, body: { email: 'smoke@example.test', password: 'pw' }, rawBody: Buffer.alloc(0), headers: {}, auth: null });
+  if (!session?.token || session.user.email !== 'smoke@example.test') throw new Error('login route did not issue session');
+  const jobs = await listJobs.handle({ params: {}, body: undefined, rawBody: Buffer.alloc(0), headers: {}, auth: session });
+  if (!Array.isArray(jobs) || jobs.length === 0) throw new Error('jobs route did not return seeded records');
+  const estimate = await syncEstimate.handle({ params: {}, body: { id: 'estimate-smoke', laborHours: 2 }, rawBody: Buffer.alloc(0), headers: {}, auth: session });
+  if (estimate?.id !== 'estimate-smoke' || estimate.laborHours !== 2 || estimate.finalPrice !== 1170) {
+    throw new Error('estimate mutation did not persist and enrich contract record');
+  }
+  const params = upload.match('/api/jobs/job-101/photos');
+  if (!params || params.id !== 'job-101') throw new Error('upload route path matcher failed');
+  const photo = await upload.handle({ params, body: undefined, rawBody: Buffer.from('image'), headers: { 'content-type': 'image/jpeg' }, auth: session });
+  if (!photo?.url || photo.jobId !== 'job-101' || photo.byteLength !== 5) throw new Error('upload route did not record metadata');
+}
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+`
+	runGeneratedCommand(t, backendRoot, "npx", "tsx", "--eval", script)
+}
+
+func TestGeneratedMobileBackendHTTPSmoke(t *testing.T) {
+	if os.Getenv("MOBILE_BACKEND_HTTP_SMOKE") != "1" {
+		t.Skip("set MOBILE_BACKEND_HTTP_SMOKE=1 to run generated backend HTTP smoke")
+	}
+
+	spec := FieldServiceContractorQuoteSpec()
+	files, errs := GenerateExpoProject(spec, ExpoGeneratorOptions{})
+	if len(errs) > 0 {
+		t.Fatalf("expected generated files, got errors %+v", errs)
+	}
+
+	root := t.TempDir()
+	backendRoot := filepath.Join(root, "backend")
+	for _, file := range files {
+		if !strings.HasPrefix(file.Path, "backend/") {
+			continue
+		}
+		target := filepath.Join(root, filepath.FromSlash(file.Path))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatalf("create generated backend directory: %v", err)
+		}
+		if err := os.WriteFile(target, []byte(file.Content), 0o644); err != nil {
+			t.Fatalf("write generated backend file %s: %v", file.Path, err)
+		}
+	}
+
+	runGeneratedCommand(t, backendRoot, "npm", "install", "--package-lock=false", "--ignore-scripts")
+
+	port := freeTCPPort(t)
+	baseURL := "http://127.0.0.1:" + port
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "npx", "tsx", "src/server.ts")
+	cmd.Dir = backendRoot
+	cmd.Env = append(os.Environ(),
+		"PORT="+port,
+		"APEX_MOBILE_DEMO_TOKEN=smoke-token",
+		"MOBILE_API_ALLOWED_ORIGIN=https://mobile.example.test",
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start generated backend server: %v", err)
+	}
+	defer terminateGeneratedBackendProcess(t, cancel, cmd)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	waitForGeneratedBackendHTTP(t, client, baseURL, &output)
+
+	status, headers, body := generatedHTTPRequest(t, client, http.MethodPost, baseURL+"/api/auth/login", "", "application/json", `{"email":"http-smoke@example.test","password":"pw"}`)
+	if status != http.StatusOK {
+		t.Fatalf("expected login 200, got %d: %s", status, body)
+	}
+	if headers.Get("Access-Control-Allow-Origin") != "https://mobile.example.test" {
+		t.Fatalf("expected configured CORS origin, got %q", headers.Get("Access-Control-Allow-Origin"))
+	}
+	var session struct {
+		Token string `json:"token"`
+		User  struct {
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(body, &session); err != nil {
+		t.Fatalf("decode login response: %v\n%s", err, body)
+	}
+	if session.Token != "smoke-token" || session.User.Email != "http-smoke@example.test" {
+		t.Fatalf("unexpected login session: %+v", session)
+	}
+
+	status, _, body = generatedHTTPRequest(t, client, http.MethodGet, baseURL+"/api/jobs", "", "", "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected auth-gated jobs 401 without token, got %d: %s", status, body)
+	}
+
+	status, _, body = generatedHTTPRequest(t, client, http.MethodGet, baseURL+"/api/jobs", session.Token, "", "")
+	if status != http.StatusOK {
+		t.Fatalf("expected jobs 200, got %d: %s", status, body)
+	}
+	var jobs []map[string]any
+	if err := json.Unmarshal(body, &jobs); err != nil {
+		t.Fatalf("decode jobs response: %v\n%s", err, body)
+	}
+	if len(jobs) == 0 {
+		t.Fatalf("expected seeded jobs, got %s", body)
+	}
+
+	status, _, body = generatedHTTPRequest(t, client, http.MethodPost, baseURL+"/api/estimates/sync", session.Token, "application/json", `{"id":"estimate-http","laborHours":2}`)
+	if status != http.StatusOK {
+		t.Fatalf("expected estimate sync 200, got %d: %s", status, body)
+	}
+	var estimate map[string]any
+	if err := json.Unmarshal(body, &estimate); err != nil {
+		t.Fatalf("decode estimate response: %v\n%s", err, body)
+	}
+	if estimate["id"] != "estimate-http" || estimate["laborHours"] != float64(2) || estimate["finalPrice"] != float64(1170) {
+		t.Fatalf("expected persisted/enriched estimate, got %+v", estimate)
+	}
+
+	status, _, body = generatedHTTPRequest(t, client, http.MethodPost, baseURL+"/api/estimates/sync", session.Token, "application/json", `{"id":`)
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "INVALID_JSON_BODY") {
+		t.Fatalf("expected invalid JSON 400, got %d: %s", status, body)
+	}
+
+	status, _, body = generatedHTTPRequest(t, client, http.MethodGet, baseURL+"/healthz", "", "", "")
+	if status != http.StatusOK || !strings.Contains(string(body), "apex-generated-mobile-backend") {
+		t.Fatalf("expected healthz 200, got %d: %s", status, body)
+	}
+
+	status, _, body = generatedHTTPRequest(t, client, http.MethodPost, baseURL+"/api/jobs/job-http/photos", session.Token, "image/jpeg", "image")
+	if status != http.StatusOK {
+		t.Fatalf("expected upload 200, got %d: %s", status, body)
+	}
+	var photo map[string]any
+	if err := json.Unmarshal(body, &photo); err != nil {
+		t.Fatalf("decode photo response: %v\n%s", err, body)
+	}
+	if photo["jobId"] != "job-http" || photo["byteLength"] != float64(5) || photo["contentType"] != "image/jpeg" {
+		t.Fatalf("expected recorded upload metadata, got %+v", photo)
+	}
+}
+
 func runGeneratedCommand(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)
@@ -361,6 +745,78 @@ func runGeneratedCommand(t *testing.T, dir string, name string, args ...string) 
 	if err != nil {
 		t.Fatalf("%s %v failed: %v\n%s", name, args, err, string(output))
 	}
+}
+
+func terminateGeneratedBackendProcess(t *testing.T, cancel context.CancelFunc, cmd *exec.Cmd) {
+	t.Helper()
+	cancel()
+	if cmd.Process == nil {
+		return
+	}
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	select {
+	case <-done:
+		return
+	case <-time.After(2 * time.Second):
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-done
+	}
+}
+
+func freeTCPPort(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve generated backend smoke port: %v", err)
+	}
+	defer listener.Close()
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("expected TCP listener address, got %T", listener.Addr())
+	}
+	return strconv.Itoa(addr.Port)
+}
+
+func waitForGeneratedBackendHTTP(t *testing.T, client *http.Client, baseURL string, output *bytes.Buffer) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(baseURL + "/__apex_probe")
+		if err == nil {
+			_ = resp.Body.Close()
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("generated backend server did not become reachable\n%s", output.String())
+}
+
+func generatedHTTPRequest(t *testing.T, client *http.Client, method string, url string, token string, contentType string, payload string) (int, http.Header, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(method, url, strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("create generated backend request: %v", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("send generated backend request %s %s: %v", method, url, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read generated backend response: %v", err)
+	}
+	return resp.StatusCode, resp.Header.Clone(), body
 }
 
 func hasSourceFile(files []SourceFile, path string) bool {

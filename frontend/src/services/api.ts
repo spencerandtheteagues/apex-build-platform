@@ -558,6 +558,11 @@ export class ApiService {
     return response.data.scorecard
   }
 
+  async getProjectMobileStoreReadiness(projectId: number): Promise<MobileStoreReadinessReport> {
+    const response = await this.client.get<{ store_readiness: MobileStoreReadinessReport }>(`/projects/${projectId}/mobile/store-readiness`)
+    return response.data.store_readiness
+  }
+
   async getProjectMobileCredentials(projectId: number): Promise<MobileCredentialStatus> {
     const response = await this.client.get<{ credentials: MobileCredentialStatus }>(`/projects/${projectId}/mobile/credentials`)
     return response.data.credentials
@@ -598,6 +603,11 @@ export class ApiService {
     return response.data.build
   }
 
+  async repairProjectMobileBuild(projectId: number, buildId: string): Promise<MobileBuildRepairResponse> {
+    const response = await this.client.post<MobileBuildRepairResponse>(`/projects/${projectId}/mobile/builds/${buildId}/repair`, {})
+    return response.data
+  }
+
   async retryProjectMobileBuild(projectId: number, buildId: string): Promise<MobileBuildCreateResponse> {
     const response = await this.client.post<MobileBuildCreateResponse>(`/projects/${projectId}/mobile/builds/${buildId}/retry`, {})
     return response.data
@@ -610,6 +620,16 @@ export class ApiService {
 
   async getProjectMobileBuildArtifacts(projectId: number, buildId: string): Promise<MobileBuildArtifactsResponse> {
     const response = await this.client.get<MobileBuildArtifactsResponse>(`/projects/${projectId}/mobile/builds/${buildId}/artifacts`)
+    return response.data
+  }
+
+  async listProjectMobileSubmissions(projectId: number): Promise<MobileSubmissionJob[]> {
+    const response = await this.client.get<{ submissions: MobileSubmissionJob[] }>(`/projects/${projectId}/mobile/submissions`)
+    return response.data.submissions
+  }
+
+  async submitProjectMobileBuild(projectId: number, buildId: string, data: MobileSubmissionRequest = {}): Promise<MobileSubmissionCreateResponse> {
+    const response = await this.client.post<MobileSubmissionCreateResponse>(`/projects/${projectId}/mobile/builds/${buildId}/submit`, data)
     return response.data
   }
 
@@ -3793,6 +3813,64 @@ export interface MobileReadinessScorecard {
   next_actions?: string[]
 }
 
+export interface StoreDataSafetyDraft {
+  data_collected?: string[]
+  data_linked_to_user?: string[]
+  data_used_for_tracking?: string[]
+  privacy_notes?: string[]
+}
+
+export interface StoreScreenshotTarget {
+  platform?: string
+  device?: string
+  purpose?: string
+}
+
+export interface StoreCapabilitySummary {
+  capability?: string
+  store_risk?: string
+  user_reason?: string
+}
+
+export interface StoreReadinessPackage {
+  status?: string
+  app_name?: string
+  short_description?: string
+  full_description?: string
+  category?: string
+  release_notes?: string
+  android_package?: string
+  ios_bundle_identifier?: string
+  version?: string
+  version_code?: number
+  build_number?: string
+  data_safety_draft?: StoreDataSafetyDraft
+  screenshot_checklist?: StoreScreenshotTarget[]
+  manual_prerequisites?: string[]
+  truthful_status_notes?: string[]
+  missing_items?: string[]
+  capability_summary?: StoreCapabilitySummary[]
+}
+
+export interface MobileStoreReadinessReport {
+  status: string
+  package_path: string
+  package?: StoreReadinessPackage
+  validation_status: MobileValidationStatus
+  store_readiness_state?: string
+  score: number
+  target: number
+  ready_for_submission: boolean
+  summary: string
+  missing_items?: string[]
+  manual_prerequisites?: string[]
+  truthful_status_notes?: string[]
+  capability_summary?: StoreCapabilitySummary[]
+  blockers?: string[]
+  errors?: string[]
+  warnings?: string[]
+}
+
 export type MobileCredentialType =
   | 'eas_token'
   | 'apple_app_store_connect'
@@ -3872,6 +3950,24 @@ export interface MobileBuildLogLine {
   message: string
 }
 
+export interface MobileBuildRepairAction {
+  id: string
+  label: string
+  description: string
+  owner: 'apex' | 'user' | string
+  blocking?: boolean
+}
+
+export interface MobileBuildRepairPlan {
+  failure_type: MobileBuildFailureType
+  title: string
+  summary: string
+  retry_recommended: boolean
+  requires_credential_action?: boolean
+  requires_source_change?: boolean
+  actions: MobileBuildRepairAction[]
+}
+
 export interface MobileBuildJob {
   id: string
   project_id: number
@@ -3889,6 +3985,7 @@ export interface MobileBuildJob {
   commit_ref?: string
   failure_type?: MobileBuildFailureType
   failure_message?: string
+  repair_plan?: MobileBuildRepairPlan
   logs?: MobileBuildLogLine[]
   created_at: string
   updated_at: string
@@ -3899,12 +3996,61 @@ export interface MobileBuildCreateResponse {
   credentials?: MobileCredentialStatus
 }
 
+export interface MobileBuildRepairResponse {
+  build: MobileBuildJob
+  credentials?: MobileCredentialStatus
+  repair_plan?: MobileBuildRepairPlan
+  repaired?: boolean
+  validation?: MobileValidationReport
+}
+
 export interface MobileBuildArtifactsResponse {
   build_id: string
   artifact_url: string
   platform: MobilePlatform
   profile: MobileBuildProfile
   release_level: MobileReleaseLevel
+}
+
+export type MobileSubmissionStatus =
+  | 'queued'
+  | 'validating_credentials'
+  | 'uploading'
+  | 'submitted_to_store_pipeline'
+  | 'processing'
+  | 'failed'
+  | 'completed_upload'
+  | 'requires_manual_review_submission'
+  | 'ready_for_testflight'
+  | 'ready_for_google_internal_testing'
+
+export interface MobileSubmissionRequest {
+  track?: string
+  dry_run?: boolean
+}
+
+export interface MobileSubmissionJob {
+  id: string
+  project_id: number
+  user_id: number
+  build_id: string
+  platform: MobilePlatform
+  status: MobileSubmissionStatus
+  provider?: string
+  provider_submission_id?: string
+  track?: string
+  artifact_url?: string
+  failure_type?: MobileBuildFailureType
+  failure_message?: string
+  logs?: MobileBuildLogLine[]
+  created_at: string
+  updated_at: string
+}
+
+export interface MobileSubmissionCreateResponse {
+  submission: MobileSubmissionJob
+  credentials?: MobileCredentialStatus
+  store_readiness?: MobileStoreReadinessReport
 }
 
 export interface MobileExpoWebPreviewResponse {

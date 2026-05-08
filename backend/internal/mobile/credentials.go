@@ -147,6 +147,10 @@ func (v *MobileCredentialVault) BuildStatus(ctx context.Context, userID uint, pr
 	return v.statusForRequired(ctx, userID, project, RequiredMobileBuildCredentialTypes(project, platform, releaseLevel))
 }
 
+func (v *MobileCredentialVault) RepairStatus(ctx context.Context, userID uint, project models.Project, job MobileBuildJob) (MobileCredentialStatus, error) {
+	return v.statusForRequired(ctx, userID, project, RequiredMobileRepairCredentialTypes(project, job))
+}
+
 func (v *MobileCredentialVault) statusForRequired(ctx context.Context, userID uint, project models.Project, required []MobileCredentialType) (MobileCredentialStatus, error) {
 	if v == nil || v.db == nil {
 		return MobileCredentialStatus{}, fmt.Errorf("%w: credential vault unavailable", ErrMobileCredentialInvalidPayload)
@@ -306,6 +310,23 @@ func RequiredMobileCredentialTypes(project models.Project) []MobileCredentialTyp
 
 func RequiredMobileBuildCredentialTypes(_ models.Project, _ MobilePlatform, _ MobileReleaseLevel) []MobileCredentialType {
 	return []MobileCredentialType{MobileCredentialEASToken}
+}
+
+func RequiredMobileRepairCredentialTypes(project models.Project, job MobileBuildJob) []MobileCredentialType {
+	failureType := job.FailureType
+	if failureType == "" {
+		failureType = ClassifyMobileBuildFailure(job.FailureMessage)
+	}
+	switch failureType {
+	case MobileBuildFailureAndroidSigningFailed:
+		return []MobileCredentialType{MobileCredentialEASToken, MobileCredentialAndroidSigning}
+	case MobileBuildFailureIOSCredentialsFailed, MobileBuildFailureIOSProvisioningFailed:
+		return []MobileCredentialType{MobileCredentialEASToken, MobileCredentialAppleAppStoreConnect}
+	case MobileBuildFailureStoreSubmissionFailed:
+		return RequiredMobileCredentialTypes(project)
+	default:
+		return RequiredMobileBuildCredentialTypes(project, job.Platform, job.ReleaseLevel)
+	}
 }
 
 func ProjectAllowsMobileBuildPlatform(project models.Project, platform MobilePlatform) bool {

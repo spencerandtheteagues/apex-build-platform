@@ -29,7 +29,7 @@ func newProjectAPITestServer(t *testing.T, subscriptionType string) (*Server, ui
 	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
 	gormDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, gormDB.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}, &models.CompletedBuild{}, &mobile.MobileBuildRecord{}, &secretstore.Secret{}, &secretstore.SecretAuditLog{}))
+	require.NoError(t, gormDB.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}, &models.CompletedBuild{}, &mobile.MobileBuildRecord{}, &mobile.MobileSubmissionRecord{}, &secretstore.Secret{}, &secretstore.SecretAuditLog{}))
 
 	user := models.User{
 		Username:         strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),
@@ -80,6 +80,8 @@ func TestDownloadProjectPreparesMobileExpoFilesForOwnerZip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, zipHasPath(zipReader, "mobile/package.json"))
 	require.True(t, zipHasPath(zipReader, "mobile/app.config.ts"))
+	require.True(t, zipHasPath(zipReader, "backend/src/mobileContractRoutes.ts"))
+	require.True(t, zipHasPath(zipReader, "docs/mobile-backend-routes.md"))
 }
 
 func TestCreateProjectPersistsMobileMetadata(t *testing.T) {
@@ -208,6 +210,56 @@ func TestGetProjectMobileScorecardReportsBlockersUntilNativeProofExists(t *testi
 	require.GreaterOrEqual(t, readinessCategoryScore(response.Scorecard, "source_generation"), 95)
 	require.Equal(t, 0, readinessCategoryScore(response.Scorecard, "credentials_signing"))
 	require.Contains(t, response.Scorecard.Blockers, "Add encrypted user-provided mobile credential vault and validate EAS/Apple/Google signing prerequisites.")
+}
+
+func TestGetProjectMobileStoreReadinessReturnsTypedReport(t *testing.T) {
+	server, userID, gormDB := newProjectAPITestServer(t, "pro")
+
+	project := models.Project{
+		Name:                      "Mobile Store Readiness",
+		Language:                  "typescript",
+		OwnerID:                   userID,
+		TargetPlatform:            string(mobile.TargetPlatformMobileExpo),
+		MobilePlatforms:           []string{"android", "ios"},
+		MobileFramework:           string(mobile.MobileFrameworkExpoReactNative),
+		MobileReleaseLevel:        string(mobile.ReleaseSourceOnly),
+		GeneratedMobileClientPath: "mobile/",
+		MobileBuildStatus:         "not_requested",
+	}
+	require.NoError(t, gormDB.Create(&project).Error)
+
+	spec := mobile.FieldServiceContractorQuoteSpec()
+	spec.App.Slug = "mobile-store-readiness-spec"
+	specJSON, err := json.Marshal(spec)
+	require.NoError(t, err)
+	require.NoError(t, gormDB.Create(&models.CompletedBuild{
+		BuildID:        "mobile-store-readiness-build",
+		UserID:         userID,
+		ProjectID:      &project.ID,
+		Status:         "completed",
+		TargetPlatform: string(mobile.TargetPlatformMobileExpo),
+		MobileSpecJSON: string(specJSON),
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/mobile/store-readiness", project.ID), nil)
+	context.Params = gin.Params{{Key: "id", Value: fmt.Sprint(project.ID)}}
+	context.Set("user_id", userID)
+
+	server.GetProjectMobileStoreReadiness(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		StoreReadiness mobile.MobileStoreReadinessReport `json:"store_readiness"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.False(t, response.StoreReadiness.ReadyForSubmission)
+	require.Equal(t, "mobile/store/store-readiness.json", response.StoreReadiness.PackagePath)
+	require.Equal(t, "draft_ready_needs_manual_store_assets", response.StoreReadiness.Status)
+	require.NotNil(t, response.StoreReadiness.Package)
+	require.Contains(t, response.StoreReadiness.Summary, "Draft store-readiness package is valid")
+	require.Contains(t, response.StoreReadiness.TruthfulStatusNotes[0], "not proof")
 }
 
 func TestCreateProjectRejectsPublicProjectOnFreePlan(t *testing.T) {

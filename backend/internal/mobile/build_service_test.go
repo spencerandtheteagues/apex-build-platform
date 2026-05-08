@@ -302,6 +302,9 @@ func TestMobileBuildServiceRecordsProviderFailure(t *testing.T) {
 	if job.FailureType != MobileBuildFailureMetroBundleFailed {
 		t.Fatalf("expected metro failure classification, got %+v", job)
 	}
+	if job.RepairPlan == nil || job.RepairPlan.FailureType != MobileBuildFailureMetroBundleFailed || !job.RepairPlan.RequiresSourceChange {
+		t.Fatalf("expected metro repair plan, got %+v", job.RepairPlan)
+	}
 	if strings.Contains(job.FailureMessage, "should-not-leak") {
 		t.Fatalf("expected redacted failure message, got %q", job.FailureMessage)
 	}
@@ -315,6 +318,13 @@ func TestMobileBuildServiceRecordsProviderFailure(t *testing.T) {
 	}
 	if stored.Status != MobileBuildFailed || stored.FailureType != MobileBuildFailureMetroBundleFailed {
 		t.Fatalf("unexpected stored failed job %+v", stored)
+	}
+	storedWithPlan, ok, err := service.GetBuild(context.Background(), job.ID)
+	if err != nil || !ok {
+		t.Fatalf("expected service get failed job, ok=%v err=%v", ok, err)
+	}
+	if storedWithPlan.RepairPlan == nil || storedWithPlan.RepairPlan.Title == "" || len(storedWithPlan.RepairPlan.Actions) == 0 {
+		t.Fatalf("expected computed repair plan on service get, got %+v", storedWithPlan.RepairPlan)
 	}
 }
 
@@ -754,6 +764,117 @@ func TestClassifyMobileBuildFailure(t *testing.T) {
 		if got := ClassifyMobileBuildFailure(tc.message); got != tc.want {
 			t.Fatalf("ClassifyMobileBuildFailure(%q) = %q, want %q", tc.message, got, tc.want)
 		}
+	}
+}
+
+func TestBuildMobileBuildRepairPlanMapsCredentialAndSourceActions(t *testing.T) {
+	sourceJob := MobileBuildJob{
+		Status:         MobileBuildFailed,
+		FailureType:    MobileBuildFailureDependencyInstallFailed,
+		FailureMessage: "npm install failed with EAS_TOKEN=should-not-leak",
+	}
+	sourcePlan := BuildMobileBuildRepairPlan(sourceJob)
+	if sourcePlan == nil || !sourcePlan.RequiresSourceChange || sourcePlan.RequiresCredentialAction || !sourcePlan.RetryRecommended {
+		t.Fatalf("expected source repair plan, got %+v", sourcePlan)
+	}
+	if len(sourcePlan.Actions) == 0 || sourcePlan.Actions[0].Owner != "apex" {
+		t.Fatalf("expected Apex-owned source actions, got %+v", sourcePlan)
+	}
+
+	credentialJob := MobileBuildJob{
+		Status:         MobileBuildFailed,
+		FailureType:    MobileBuildFailureIOSCredentialsFailed,
+		FailureMessage: "Apple credential failed with EAS_TOKEN=should-not-leak",
+	}
+	credentialPlan := BuildMobileBuildRepairPlan(credentialJob)
+	if credentialPlan == nil || !credentialPlan.RequiresCredentialAction || credentialPlan.RequiresSourceChange || !credentialPlan.RetryRecommended {
+		t.Fatalf("expected credential repair plan, got %+v", credentialPlan)
+	}
+	if len(credentialPlan.Actions) == 0 || credentialPlan.Actions[0].Owner != "user" {
+		t.Fatalf("expected user-owned credential actions, got %+v", credentialPlan)
+	}
+	if strings.Contains(credentialPlan.Summary, "should-not-leak") {
+		t.Fatalf("repair plan should not include raw failure message, got %+v", credentialPlan)
+	}
+
+	activeJob := MobileBuildJob{
+		Status:      MobileBuildBuilding,
+		FailureType: MobileBuildFailureMetroBundleFailed,
+	}
+	if plan := BuildMobileBuildRepairPlan(activeJob); plan != nil {
+		t.Fatalf("active builds should not expose repair plans, got %+v", plan)
+	}
+}
+
+func TestValidateMobileBuildPreRetrySourceBlocksSourceFailuresUntilValidationPasses(t *testing.T) {
+	previous := MobileBuildJob{
+		Status:      MobileBuildFailed,
+		FailureType: MobileBuildFailureMetroBundleFailed,
+	}
+	failedReport := MobileValidationReport{
+		Status:  MobileValidationFailed,
+		Summary: "Mobile source policy failed.",
+	}
+	err := ValidateMobileBuildPreRetrySource(previous, failedReport)
+	if !errors.Is(err, ErrMobileBuildPreRetryFailed) {
+		t.Fatalf("expected pre-retry validation error, got %v", err)
+	}
+
+	passedReport := MobileValidationReport{Status: MobileValidationPassed}
+	if err := ValidateMobileBuildPreRetrySource(previous, passedReport); err != nil {
+		t.Fatalf("expected passed source validation to allow retry, got %v", err)
+	}
+
+	credentialFailure := MobileBuildJob{
+		Status:      MobileBuildFailed,
+		FailureType: MobileBuildFailureIOSCredentialsFailed,
+	}
+	if err := ValidateMobileBuildPreRetrySource(credentialFailure, failedReport); err != nil {
+		t.Fatalf("credential failures should not be blocked by source preflight, got %v", err)
+	}
+}
+
+func TestMobileBuildServiceMarkBuildRepairedSetsRetryPending(t *testing.T) {
+	store := NewInMemoryMobileBuildStore()
+	service := NewMobileBuildService(mobileBuildTestFlags(), &mockMobileBuildProvider{name: "mock-eas"}, store, WithMobileBuildIDGenerator(func() string {
+		return "unused"
+	}))
+	previous := MobileBuildJob{
+		ID:             "mbld_repair_target",
+		ProjectID:      10,
+		UserID:         20,
+		Platform:       MobilePlatformAndroid,
+		Profile:        MobileBuildProfilePreview,
+		ReleaseLevel:   ReleaseInternalAndroidAPK,
+		Status:         MobileBuildFailed,
+		Provider:       "mock-eas",
+		FailureType:    MobileBuildFailureMetroBundleFailed,
+		FailureMessage: "Metro bundle failed with EAS_TOKEN=should-redact",
+	}
+	if err := store.Save(context.Background(), previous); err != nil {
+		t.Fatalf("save previous build: %v", err)
+	}
+
+	repaired, err := service.MarkBuildRepaired(context.Background(), previous.ID, "Repair checked EAS_TOKEN=should-redact")
+	if err != nil {
+		t.Fatalf("mark repaired: %v", err)
+	}
+	if repaired.Status != MobileBuildRepairedRetryPending {
+		t.Fatalf("expected repaired retry pending, got %q", repaired.Status)
+	}
+	if repaired.RepairPlan == nil || !repaired.RepairPlan.RetryRecommended {
+		t.Fatalf("expected retryable repair plan, got %+v", repaired.RepairPlan)
+	}
+	if len(repaired.Logs) == 0 || strings.Contains(repaired.Logs[len(repaired.Logs)-1].Message, "should-redact") {
+		t.Fatalf("expected redacted repair log, got %+v", repaired.Logs)
+	}
+
+	active := MobileBuildJob{ID: "mbld_active_repair", ProjectID: 10, UserID: 20, Platform: MobilePlatformAndroid, Profile: MobileBuildProfilePreview, ReleaseLevel: ReleaseInternalAndroidAPK, Status: MobileBuildBuilding}
+	if err := store.Save(context.Background(), active); err != nil {
+		t.Fatalf("save active build: %v", err)
+	}
+	if _, err := service.MarkBuildRepaired(context.Background(), active.ID, "not allowed"); !errors.Is(err, ErrMobileBuildInvalidRequest) {
+		t.Fatalf("expected invalid request for active build, got %v", err)
 	}
 }
 

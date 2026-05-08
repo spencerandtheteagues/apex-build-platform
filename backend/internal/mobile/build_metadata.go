@@ -27,6 +27,17 @@ func ApplyMobileBuildJobToProject(project *models.Project, job MobileBuildJob) {
 	if job.FailureMessage != "" {
 		metadata["last_mobile_build_failure_message"] = RedactMobileBuildSecrets(job.FailureMessage)
 	}
+	if plan := BuildMobileBuildRepairPlan(job); plan != nil {
+		metadata["last_mobile_build_repair_required"] = true
+		metadata["last_mobile_build_repair_title"] = plan.Title
+		metadata["last_mobile_build_repair_requires_credentials"] = plan.RequiresCredentialAction
+		metadata["last_mobile_build_repair_requires_source_change"] = plan.RequiresSourceChange
+	} else {
+		metadata["last_mobile_build_repair_required"] = false
+		delete(metadata, "last_mobile_build_repair_title")
+		delete(metadata, "last_mobile_build_repair_requires_credentials")
+		delete(metadata, "last_mobile_build_repair_requires_source_change")
+	}
 	if job.ArtifactURL != "" {
 		metadata["last_mobile_build_artifact_url"] = job.ArtifactURL
 		metadata["artifact_urls"] = appendUniqueMobileBuildMetadataString(mobileMetadataStringList(metadata, "artifact_urls"), job.ArtifactURL)

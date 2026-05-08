@@ -3881,6 +3881,10 @@ func (am *AgentManager) providerAssistedContractCritique(build *Build, contract 
 	if am == nil || am.aiRouter == nil || build == nil || contract == nil {
 		return nil
 	}
+	if !providerAssistedReviewAllowed(build) {
+		log.Printf("Skipping provider-assisted contract critique for build %s: provider_mode=byok and %s is not enabled", build.ID, byokCrossProviderReviewFlag)
+		return nil
+	}
 
 	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
 	if len(availableProviders) == 0 {
@@ -3925,7 +3929,7 @@ Contract:
 	defer cancel()
 
 	if am.budgetEnforcer != nil {
-		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSDForBuild(build))
+		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorizeForProject(build.UserID, build.ProjectID, build.ID, estimatedRequestCostUSDForBuild(build))
 		if preAuthErr == nil && !preAuth.Allowed {
 			am.broadcast(build.ID, &WSMessage{
 				Type:      "budget:exceeded",
@@ -7529,6 +7533,41 @@ func reviewMessageIndicatesCriticalIssue(message string) bool {
 	return false
 }
 
+// runDeterministicReviewRepairs runs the full proactive deterministic
+// repair ladder against the current generated state. It returns true (with
+// a one-line summary) when any repair landed.
+//
+// This is the convergence engine for the review→fix loop: any review
+// finding whose root cause is an objective, deterministically-fixable bug
+// (missing manifest deps, dependency-closure gaps, malformed Tailwind/
+// PostCSS config, alias setup, runnable script gaps) is patched here
+// synchronously, without consulting the LLM. Only when zero deterministic
+// progress can be made does the caller fall through to the paid LLM
+// fix_review_issues task.
+func (am *AgentManager) runDeterministicReviewRepairs(build *Build) (bool, string) {
+	if am == nil || build == nil {
+		return false, ""
+	}
+
+	summaries := make([]string, 0, 2)
+	if am.applyDeterministicPreValidationNormalization(build) {
+		summaries = append(summaries, "pre-validation normalization")
+	}
+	files := am.collectGeneratedFiles(build)
+	if repaired, summary := am.ensureGeneratedManifestDependencyClosure(build, files); repaired {
+		if strings.TrimSpace(summary) != "" {
+			summaries = append(summaries, "dependency closure: "+summary)
+		} else {
+			summaries = append(summaries, "dependency closure")
+		}
+	}
+
+	if len(summaries) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(summaries, "; ")
+}
+
 // handleReviewCompletion processes code review results and creates fix tasks for critical issues
 func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, output *TaskOutput) {
 	if output == nil {
@@ -7606,6 +7645,36 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 				},
 			})
 			am.cancelAutomatedRecoveryTasksForLoopCap(build)
+			am.checkBuildCompletion(build)
+			return
+		}
+
+		// Deterministic-first review repair (Tier 2). Run the deterministic
+		// repair ladder synchronously before spawning a paid LLM fix task.
+		// The common review-flagged failures (missing manifest deps, broken
+		// imports, malformed config) are fully repairable without consulting
+		// the LLM; that converts a multi-minute LLM cycle into a sub-second
+		// deterministic pass and removes the dominant cause of "stuck at
+		// 96%" build stalls.
+		if repaired, summary := am.runDeterministicReviewRepairs(build); repaired {
+			log.Printf("Build %s: review-flagged issues repaired deterministically (%s); skipping LLM fix task", build.ID, summary)
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"message":               "Review-flagged issues repaired deterministically. Skipping paid fix-task cycle.",
+					"phase":                 "reviewing",
+					"status":                string(BuildReviewing),
+					"deterministic_repair":  summary,
+					"quality_gate_required": true,
+					"quality_gate_active":   true,
+					"quality_gate_stage":    "review",
+				},
+			})
+			build.mu.Lock()
+			build.UpdatedAt = time.Now()
+			build.mu.Unlock()
 			am.checkBuildCompletion(build)
 			return
 		}
@@ -25964,7 +26033,7 @@ Rules:
 	// Pre-authorize spend before calling AI — catches about-to-exceed budgets
 	// using a conservative per-request estimate rather than 0.
 	if am.budgetEnforcer != nil {
-		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSDForBuild(build))
+		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorizeForProject(build.UserID, build.ProjectID, agent.BuildID, estimatedRequestCostUSDForBuild(build))
 		if preAuthErr == nil && !preAuth.Allowed {
 			am.broadcast(agent.BuildID, &WSMessage{
 				Type:      "budget:exceeded",
@@ -30366,6 +30435,7 @@ type previewManifest struct {
 
 var npmPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
 var generatedImportPathPattern = regexp.MustCompile(`(?m)(?:^|[^A-Za-z0-9_$])(?:import\s+(?:type\s+)?(?:[^'"]+\s+from\s+)?|export\s+[^'"]+\s+from\s+|import\s*\(|require\()\s*['"]([^'"]+)['"]`)
+var generatedImportPathFallbackPattern = regexp.MustCompile(`(?m)(?:\bfrom\s+['"]([^'"]+)['"]|^\s*import\s+['"]([^'"]+)['"]|\brequire\(\s*['"]([^'"]+)['"]\s*\)|\bimport\(\s*['"]([^'"]+)['"]\s*\))`)
 var integrationTemplateParamPattern = regexp.MustCompile(`\$\{[^}]+\}`)
 var integrationNamedParamPattern = regexp.MustCompile(`:[A-Za-z_][A-Za-z0-9_]*`)
 var integrationBraceParamPattern = regexp.MustCompile(`\{[^}]+\}`)
@@ -30664,6 +30734,37 @@ func packageNameFromImportPath(spec string) string {
 	return spec
 }
 
+func generatedImportSpecs(content string) []string {
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, 4)
+	add := func(spec string) {
+		spec = strings.TrimSpace(spec)
+		if spec == "" || seen[spec] {
+			return
+		}
+		seen[spec] = true
+		out = append(out, spec)
+	}
+
+	for _, match := range generatedImportPathPattern.FindAllStringSubmatch(content, -1) {
+		if len(match) == 2 {
+			add(match[1])
+		}
+	}
+	for _, match := range generatedImportPathFallbackPattern.FindAllStringSubmatch(content, -1) {
+		for i := 1; i < len(match); i++ {
+			if strings.TrimSpace(match[i]) != "" {
+				add(match[i])
+				break
+			}
+		}
+	}
+	return out
+}
+
 func localImportResolutionCandidates(importerPath string, spec string) []string {
 	spec = strings.TrimSpace(spec)
 	importerPath = filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(importerPath), "./"))
@@ -30885,11 +30986,7 @@ func validateGeneratedImportDependencies(files []GeneratedFile, prefix string, m
 			continue
 		}
 
-		for _, match := range generatedImportPathPattern.FindAllStringSubmatch(f.Content, -1) {
-			if len(match) != 2 {
-				continue
-			}
-			spec := strings.TrimSpace(match[1])
+		for _, spec := range generatedImportSpecs(f.Content) {
 			pkg := packageNameFromImportPath(spec)
 			if pkg == "" || ignorePkgs[pkg] || nodeBuiltins[pkg] {
 				continue
@@ -33571,7 +33668,7 @@ func (am *AgentManager) runFailureConsensus(
 		// Pre-authorize spend before calling AI — catches about-to-exceed budgets
 		// using a conservative per-request estimate rather than 0.
 		if am.budgetEnforcer != nil {
-			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSDForBuild(build))
+			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorizeForProject(build.UserID, build.ProjectID, build.ID, estimatedRequestCostUSDForBuild(build))
 			if preAuthErr == nil && !preAuth.Allowed {
 				cancel()
 				am.broadcast(build.ID, &WSMessage{
@@ -34025,7 +34122,7 @@ func (am *AgentManager) completeTruncatedFiles(
 		)
 
 		if am.budgetEnforcer != nil {
-			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSDForBuild(build))
+			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorizeForProject(build.UserID, build.ProjectID, build.ID, estimatedRequestCostUSDForBuild(build))
 			if preAuthErr == nil && !preAuth.Allowed {
 				log.Printf("[chunked] continuation blocked by budget cap for %s in task %s", path, task.ID)
 				remainingTruncated = append(remainingTruncated, path)
@@ -34213,7 +34310,7 @@ func (am *AgentManager) executeChunkedFileRepair(
 		prompt := am.chunkedEditor.BuildChunkPrompt(chunk, repairInstruction)
 
 		if am.budgetEnforcer != nil {
-			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSDForBuild(build))
+			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorizeForProject(build.UserID, build.ProjectID, build.ID, estimatedRequestCostUSDForBuild(build))
 			if preAuthErr == nil && !preAuth.Allowed {
 				log.Printf("[chunked] chunk repair blocked by budget cap for %s", filePath)
 				results = append(results, ChunkEditResult{

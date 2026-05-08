@@ -247,6 +247,12 @@ func TestNormalizeModelForProviderRejectsCrossProviderModel(t *testing.T) {
 	if got := normalizeModelForProvider(ai.ProviderOllama, "deepseek-v4-flash", PowerFast); got != "deepseek-v4-flash" {
 		t.Fatalf("Ollama model normalization = %q, want DeepSeek route to remain valid", got)
 	}
+	if got := normalizeModelForProvider(ai.ProviderDeepSeek, "deepseek-v4-pro", PowerMax); got != "deepseek-v4-pro" {
+		t.Fatalf("DeepSeek model normalization = %q, want DeepSeek V4 Pro", got)
+	}
+	if got := normalizeModelForProvider(ai.ProviderGLM, "glm-5.1", PowerBalanced); got != "glm-5.1" {
+		t.Fatalf("GLM model normalization = %q, want GLM 5.1", got)
+	}
 }
 
 func TestSelectBuildModelForProviderLocked_RespectsManagedOllamaOverride(t *testing.T) {

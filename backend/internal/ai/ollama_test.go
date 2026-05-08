@@ -1,8 +1,14 @@
 package ai
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestOllamaBuildMessagesSeparatesSystemAndUserPrompts(t *testing.T) {
@@ -171,5 +177,93 @@ func TestOllamaReasoningBudgetErrorIsClassifiedAsTruncation(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q missing %q", msg, want)
 		}
+	}
+}
+
+// TestOllamaCloudClientCapsConcurrentInFlightRequests verifies that the
+// Ollama Cloud concurrency semaphore caps in-flight Generate calls at the
+// configured limit. Beyond the cap, additional callers must queue rather
+// than hit the provider.
+func TestOllamaCloudClientCapsConcurrentInFlightRequests(t *testing.T) {
+	const maxConcurrent = 3
+	t.Setenv("OLLAMA_CLOUD_MAX_CONCURRENT", "3")
+
+	var (
+		inFlight     atomic.Int32
+		peakObserved atomic.Int32
+		release      = make(chan struct{})
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			peak := peakObserved.Load()
+			if current <= peak || peakObserved.CompareAndSwap(peak, current) {
+				break
+			}
+		}
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","model":"kimi-k2.6:cloud","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	client := NewOllamaCloudClient(srv.URL, "fake-key")
+	if client.concurrent == nil {
+		t.Fatal("expected cloud client to allocate concurrency semaphore")
+	}
+	if cap(client.concurrent) != maxConcurrent {
+		t.Fatalf("expected semaphore cap %d, got %d", maxConcurrent, cap(client.concurrent))
+	}
+
+	const total = 6
+	var wg sync.WaitGroup
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, _ = client.Generate(ctx, &AIRequest{ID: "test", Prompt: "hi", MaxTokens: 16})
+		}()
+	}
+
+	// Give all goroutines a chance to enter the semaphore.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && inFlight.Load() < int32(maxConcurrent) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := inFlight.Load(); got != int32(maxConcurrent) {
+		t.Fatalf("expected exactly %d concurrent in-flight, got %d", maxConcurrent, got)
+	}
+
+	close(release)
+	wg.Wait()
+
+	if peak := peakObserved.Load(); peak > int32(maxConcurrent) {
+		t.Fatalf("expected peak in-flight to never exceed %d, got %d", maxConcurrent, peak)
+	}
+}
+
+// TestOllamaCloudClientHonoursOllamaCloudMaxConcurrentZero verifies that
+// setting OLLAMA_CLOUD_MAX_CONCURRENT=0 disables the gate entirely, so
+// local benchmarks and tests aren't artificially throttled.
+func TestOllamaCloudClientHonoursOllamaCloudMaxConcurrentZero(t *testing.T) {
+	t.Setenv("OLLAMA_CLOUD_MAX_CONCURRENT", "0")
+	client := NewOllamaCloudClient("https://ollama.com/v1", "fake")
+	if client.concurrent != nil {
+		t.Fatal("expected zero limit to disable concurrency semaphore (nil channel)")
+	}
+}
+
+// TestNewOllamaClientLeavesConcurrencyUnbounded confirms that the local-only
+// constructor does not allocate a semaphore. Local Ollama runs against
+// localhost and has no provider-side concurrency cap.
+func TestNewOllamaClientLeavesConcurrencyUnbounded(t *testing.T) {
+	t.Parallel()
+	client := NewOllamaClient("http://localhost:11434", "")
+	if client.concurrent != nil {
+		t.Fatal("expected NewOllamaClient (local) to leave concurrency semaphore nil")
 	}
 }

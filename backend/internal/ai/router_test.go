@@ -27,6 +27,18 @@ func (s *routerStubClient) GetUsage() *ProviderUsage {
 	return &ProviderUsage{Provider: ProviderGPT4, LastUsed: time.Now()}
 }
 
+type fakeProviderRateLimitStore struct {
+	allow bool
+	calls int
+}
+
+func (f *fakeProviderRateLimitStore) Allow(ctx context.Context, provider AIProvider, limit int, window time.Duration) (bool, error) {
+	f.calls++
+	return f.allow, nil
+}
+
+func (f *fakeProviderRateLimitStore) Close() error { return nil }
+
 func TestSelectProviderHonorsExplicitProviderDespiteTransientHealth(t *testing.T) {
 	t.Parallel()
 
@@ -161,5 +173,128 @@ func TestGenerateCanDisableInternalFallback(t *testing.T) {
 	}
 	if fallbackCalls != 0 {
 		t.Fatalf("fallback calls = %d, want 0 when fallback is disabled", fallbackCalls)
+	}
+}
+
+func TestGenerateReroutesWhenDefaultProviderExceedsCostThreshold(t *testing.T) {
+	t.Parallel()
+
+	gptCalls := 0
+	geminiCalls := 0
+	config := DefaultRouterConfig()
+	config.CostThresholds[ProviderGPT4] = 0.000001
+	config.CostThresholds[ProviderGemini] = 10
+
+	router := &AIRouter{
+		clients: map[AIProvider]AIClient{
+			ProviderGPT4: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					gptCalls++
+					return &AIResponse{Provider: req.Provider, Content: "expensive primary"}, nil
+				},
+			},
+			ProviderGemini: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					geminiCalls++
+					return &AIResponse{Provider: req.Provider, Content: "cost-safe fallback"}, nil
+				},
+			},
+		},
+		config: config,
+		healthStatus: map[AIProvider]string{
+			ProviderGPT4:   "ok",
+			ProviderGemini: "ok",
+		},
+		healthCheck: map[AIProvider]bool{
+			ProviderGPT4:   true,
+			ProviderGemini: true,
+		},
+	}
+
+	resp, err := router.Generate(context.Background(), &AIRequest{
+		ID:         "cost-threshold-reroute",
+		Capability: CapabilityCodeGeneration,
+		Prompt:     "Build a dashboard",
+		MaxTokens:  32000,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if resp.Provider != ProviderGemini {
+		t.Fatalf("provider = %s, want %s", resp.Provider, ProviderGemini)
+	}
+	if gptCalls != 0 {
+		t.Fatalf("gpt calls = %d, want 0 when cost threshold forces pre-call reroute", gptCalls)
+	}
+	if geminiCalls != 1 {
+		t.Fatalf("gemini calls = %d, want 1", geminiCalls)
+	}
+}
+
+func TestGenerateBlocksExplicitProviderOverCostThresholdWhenFallbackDisabled(t *testing.T) {
+	t.Parallel()
+
+	gptCalls := 0
+	config := DefaultRouterConfig()
+	config.CostThresholds[ProviderGPT4] = 0.000001
+
+	router := &AIRouter{
+		clients: map[AIProvider]AIClient{
+			ProviderGPT4: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					gptCalls++
+					return &AIResponse{Provider: req.Provider, Content: "should not run"}, nil
+				},
+			},
+		},
+		config: config,
+		healthStatus: map[AIProvider]string{
+			ProviderGPT4: "ok",
+		},
+		healthCheck: map[AIProvider]bool{
+			ProviderGPT4: true,
+		},
+	}
+
+	_, err := router.Generate(context.Background(), &AIRequest{
+		ID:              "cost-threshold-disable-fallback",
+		Provider:        ProviderGPT4,
+		Capability:      CapabilityCodeGeneration,
+		Prompt:          "Build a dashboard",
+		MaxTokens:       32000,
+		DisableFallback: true,
+	})
+	if err == nil {
+		t.Fatal("expected cost threshold error")
+	}
+	if gptCalls != 0 {
+		t.Fatalf("gpt calls = %d, want 0 when cost threshold blocks pre-call", gptCalls)
+	}
+}
+
+func TestCheckRateLimitUsesSharedProviderStoreWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeProviderRateLimitStore{allow: false}
+	router := &AIRouter{
+		config: DefaultRouterConfig(),
+		rateLimits: map[AIProvider]*rateLimiter{
+			ProviderGPT4: {
+				tokens:     100,
+				maxTokens:  100,
+				lastRefill: time.Now(),
+			},
+		},
+		sharedRates: store,
+	}
+
+	if router.checkRateLimit(ProviderGPT4) {
+		t.Fatal("expected shared provider rate limiter to deny request")
+	}
+	if store.calls != 1 {
+		t.Fatalf("shared store calls = %d, want 1", store.calls)
+	}
+	if router.rateLimits[ProviderGPT4].tokens != 100 {
+		t.Fatalf("local tokens changed despite shared limiter decision: %d", router.rateLimits[ProviderGPT4].tokens)
 	}
 }

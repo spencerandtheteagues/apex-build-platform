@@ -14,6 +14,8 @@ import type {
   MobileCredentialStatus,
   MobilePlatform,
   MobileReleaseLevel,
+  MobileSubmissionJob,
+  MobileSubmissionStatus,
 } from '@/services/api'
 import MobileCredentialPanel from './MobileCredentialPanel'
 
@@ -29,8 +31,11 @@ interface MobileBuildOperationsPanelProps {
     | 'createProjectMobileBuild'
     | 'refreshProjectMobileBuild'
     | 'cancelProjectMobileBuild'
+    | 'repairProjectMobileBuild'
     | 'retryProjectMobileBuild'
     | 'getProjectMobileCredentials'
+    | 'listProjectMobileSubmissions'
+    | 'submitProjectMobileBuild'
     | 'createProjectMobileCredential'
     | 'deleteProjectMobileCredential'
     | 'startProjectMobileExpoWebPreview'
@@ -73,6 +78,32 @@ const buildStatusClasses: Record<MobileBuildStatus, string> = {
   canceled: 'border-white/10 bg-white/[0.03] text-gray-300',
   repair_pending: 'border-amber-300/20 bg-amber-300/10 text-amber-100',
   repaired_retry_pending: 'border-amber-300/20 bg-amber-300/10 text-amber-100',
+}
+
+const submissionStatusLabels: Record<MobileSubmissionStatus, string> = {
+  queued: 'Upload queued',
+  validating_credentials: 'Validating credentials',
+  uploading: 'Uploading',
+  submitted_to_store_pipeline: 'Submitted to store pipeline',
+  processing: 'Processing',
+  failed: 'Upload failed',
+  completed_upload: 'Upload completed',
+  requires_manual_review_submission: 'Manual review step required',
+  ready_for_testflight: 'Ready for TestFlight processing',
+  ready_for_google_internal_testing: 'Ready for Google internal testing',
+}
+
+const submissionStatusClasses: Record<MobileSubmissionStatus, string> = {
+  queued: 'border-cyan-300/14 bg-cyan-300/8 text-cyan-50',
+  validating_credentials: 'border-cyan-300/14 bg-cyan-300/8 text-cyan-50',
+  uploading: 'border-blue-300/14 bg-blue-300/8 text-blue-50',
+  submitted_to_store_pipeline: 'border-blue-300/14 bg-blue-300/8 text-blue-50',
+  processing: 'border-blue-300/14 bg-blue-300/8 text-blue-50',
+  failed: 'border-red-300/14 bg-red-300/8 text-red-50',
+  completed_upload: 'border-emerald-300/14 bg-emerald-300/8 text-emerald-50',
+  requires_manual_review_submission: 'border-amber-300/14 bg-amber-300/8 text-amber-50',
+  ready_for_testflight: 'border-emerald-300/14 bg-emerald-300/8 text-emerald-50',
+  ready_for_google_internal_testing: 'border-emerald-300/14 bg-emerald-300/8 text-emerald-50',
 }
 
 const releaseLevelLabels: Record<MobileReleaseLevel, string> = {
@@ -142,12 +173,64 @@ const upsertBuild = (builds: MobileBuildJob[], next: MobileBuildJob) => {
   return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
 }
 
+const upsertSubmission = (submissions: MobileSubmissionJob[], next: MobileSubmissionJob) => {
+  const merged = [next, ...submissions.filter((submission) => submission.id !== next.id)]
+  return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+}
+
+const latestSubmissionForBuild = (submissions: MobileSubmissionJob[], buildId: string) =>
+  submissions
+    .filter((submission) => submission.build_id === buildId)
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0] || null
+
 const extractCredentialsFromError = (error: unknown): MobileCredentialStatus | null => {
   const response = typeof error === 'object' && error !== null && 'response' in error
     ? (error as { response?: { data?: { credentials?: MobileCredentialStatus } } }).response
     : undefined
   return response?.data?.credentials ?? null
 }
+
+const extractMobileEntitlementMessage = (error: unknown): string | null => {
+  const response = typeof error === 'object' && error !== null && 'response' in error
+    ? (error as {
+        response?: {
+          data?: {
+            code?: string
+            suggestion?: string
+            current_plan?: string
+            required_plan?: string
+            current_usage?: number
+            monthly_limit?: number
+          }
+        }
+      }).response
+    : undefined
+  const data = response?.data
+  if (!data?.code) return null
+
+  const plan = data.current_plan ? `Current plan: ${data.current_plan}. ` : ''
+  const required = data.required_plan ? `Required plan: ${data.required_plan}. ` : ''
+  const usage = typeof data.current_usage === 'number' && typeof data.monthly_limit === 'number'
+    ? `Usage: ${data.current_usage}/${data.monthly_limit} this month. `
+    : ''
+  const suggestion = data.suggestion ? `${data.suggestion}` : ''
+
+  switch (data.code) {
+    case 'MOBILE_BUILD_PLAN_REQUIRED':
+      return `${plan}${required}${suggestion || 'Native Android/iOS builds require a mobile-enabled paid plan.'}`.trim()
+    case 'MOBILE_BUILD_QUOTA_EXCEEDED':
+      return `${plan}${usage}${suggestion || 'Monthly native mobile build quota is exhausted.'}`.trim()
+    case 'MOBILE_SUBMISSION_PLAN_REQUIRED':
+      return `${plan}${required}${suggestion || 'Store-upload workflows require Pro or higher.'}`.trim()
+    case 'MOBILE_SUBMISSION_QUOTA_EXCEEDED':
+      return `${plan}${usage}${suggestion || 'Monthly mobile store-upload quota is exhausted.'}`.trim()
+    default:
+      return null
+  }
+}
+
+const getMobileActionErrorMessage = (error: unknown, fallback: string) =>
+  extractMobileEntitlementMessage(error) || getApiErrorMessage(error, fallback)
 
 const formatPlatform = (platform: MobilePlatform) => platform === 'ios' ? 'iOS' : 'Android'
 
@@ -159,6 +242,8 @@ const latestLogMessage = (build: MobileBuildJob) => {
   return logs.length > 0 ? logs[logs.length - 1]?.message : null
 }
 
+const repairOwnerLabel = (owner: string) => owner === 'user' ? 'You' : 'Apex'
+
 export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProps> = ({
   projectId,
   mobilePlatforms,
@@ -167,6 +252,7 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
   addNotification,
 }) => {
   const [builds, setBuilds] = useState<MobileBuildJob[]>([])
+  const [submissions, setSubmissions] = useState<MobileSubmissionJob[]>([])
   const [credentials, setCredentials] = useState<MobileCredentialStatus | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [actionId, setActionId] = useState<string | null>(null)
@@ -176,13 +262,15 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
   const buildTargets = useMemo(() => buildTargetsForPlatforms(mobilePlatforms), [mobilePlatforms])
   const missingEAS = Boolean(credentials?.missing?.includes('eas_token'))
   const hasEAS = Boolean(credentials?.present?.includes('eas_token'))
+  const hasSubmissionCredentials = Boolean(credentials?.complete)
 
   const loadBuildState = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
-    const [buildResult, credentialResult] = await Promise.allSettled([
+    const [buildResult, credentialResult, submissionResult] = await Promise.allSettled([
       apiService.listProjectMobileBuilds(projectId),
       apiService.getProjectMobileCredentials(projectId),
+      apiService.listProjectMobileSubmissions(projectId),
     ])
     if (buildResult.status === 'fulfilled') {
       setBuilds(buildResult.value)
@@ -192,6 +280,11 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
     }
     if (credentialResult.status === 'fulfilled') {
       setCredentials(credentialResult.value)
+    }
+    if (submissionResult.status === 'fulfilled') {
+      setSubmissions(submissionResult.value)
+    } else {
+      setSubmissions([])
     }
     setIsLoading(false)
   }, [apiService, projectId])
@@ -226,7 +319,7 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
       addNotification({
         type: 'error',
         title: 'Native build blocked',
-        message: getApiErrorMessage(error, 'Apex could not start this native build.'),
+        message: getMobileActionErrorMessage(error, 'Apex could not start this native build.'),
       })
     } finally {
       setActionId(null)
@@ -296,7 +389,63 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
       addNotification({
         type: 'error',
         title: 'Retry blocked',
-        message: getApiErrorMessage(error, 'Unable to retry this mobile build.'),
+        message: getMobileActionErrorMessage(error, 'Unable to retry this mobile build.'),
+      })
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const handleSubmitBuild = async (build: MobileBuildJob) => {
+    setActionId(`submit-${build.id}`)
+    try {
+      const response = await apiService.submitProjectMobileBuild(projectId, build.id, {})
+      setSubmissions((current) => upsertSubmission(current, response.submission))
+      if (response.credentials) {
+        setCredentials(response.credentials)
+      }
+      addNotification({
+        type: 'success',
+        title: 'Store upload queued',
+        message: `${formatBuildTitle(build)} was handed to the gated store upload workflow.`,
+      })
+    } catch (error) {
+      const credentialStatus = extractCredentialsFromError(error)
+      if (credentialStatus) {
+        setCredentials(credentialStatus)
+      }
+      addNotification({
+        type: 'error',
+        title: 'Store upload blocked',
+        message: getMobileActionErrorMessage(error, 'Apex could not submit this mobile build to the store pipeline.'),
+      })
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const handleRepairBuild = async (build: MobileBuildJob) => {
+    setActionId(`repair-${build.id}`)
+    try {
+      const response = await apiService.repairProjectMobileBuild(projectId, build.id)
+      setBuilds((current) => upsertBuild(current, response.build))
+      if (response.credentials) {
+        setCredentials(response.credentials)
+      }
+      addNotification({
+        type: 'success',
+        title: 'Repair checks passed',
+        message: `${formatBuildTitle(response.build)} is ready for retry.`,
+      })
+    } catch (error) {
+      const credentialStatus = extractCredentialsFromError(error)
+      if (credentialStatus) {
+        setCredentials(credentialStatus)
+      }
+      addNotification({
+        type: 'error',
+        title: 'Repair blocked',
+        message: getApiErrorMessage(error, 'Apex could not mark this mobile build repaired.'),
       })
     } finally {
       setActionId(null)
@@ -489,7 +638,7 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-blue-200/80">Build Jobs</div>
-              <div className="mt-1 text-sm text-gray-400">{builds.length} recorded</div>
+              <div className="mt-1 text-sm text-gray-400">{builds.length} builds · {submissions.length} uploads</div>
             </div>
           </div>
 
@@ -506,6 +655,10 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
               {builds.slice(0, 5).map((build) => {
                 const canCancel = !terminalStatuses.has(build.status) && Boolean(build.provider_build_id)
                 const canRetry = build.status === 'failed' || build.status === 'canceled' || build.status === 'repair_pending' || build.status === 'repaired_retry_pending'
+                const canRepair = Boolean(build.repair_plan) && build.status !== 'repaired_retry_pending'
+                const existingSubmission = latestSubmissionForBuild(submissions, build.id)
+                const uploadAlreadyStarted = Boolean(existingSubmission && existingSubmission.status !== 'failed')
+                const canSubmit = build.status === 'succeeded' && (Boolean(build.provider_build_id) || Boolean(build.artifact_url)) && !uploadAlreadyStarted
                 const logMessage = latestLogMessage(build)
                 return (
                   <div key={build.id} className="rounded-2xl border border-white/8 bg-black/24 px-4 py-4" data-testid={`mobile-build-job-${build.id}`}>
@@ -534,6 +687,53 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
                     ) : logMessage ? (
                       <div className="mt-3 rounded-xl border border-white/8 bg-black/22 px-3 py-2 text-xs leading-5 text-gray-300">
                         {logMessage}
+                      </div>
+                    ) : null}
+
+                    {build.repair_plan ? (
+                      <div className="mt-3 rounded-xl border border-amber-300/14 bg-amber-300/8 px-3 py-3 text-xs leading-5 text-amber-50/90" data-testid={`mobile-build-repair-plan-${build.id}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-semibold text-amber-50">{build.repair_plan.title}</div>
+                          <div className="rounded-full border border-amber-200/15 bg-black/20 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-amber-100">
+                            {build.repair_plan.retry_recommended ? 'Retry after repair' : 'Review first'}
+                          </div>
+                        </div>
+                        <p className="mt-2 text-amber-50/80">{build.repair_plan.summary}</p>
+                        {build.repair_plan.actions?.length ? (
+                          <div className="mt-2 space-y-1.5">
+                            {build.repair_plan.actions.slice(0, 3).map((action) => (
+                              <div key={action.id} className="rounded-lg border border-white/8 bg-black/16 px-2.5 py-2">
+                                <div className="font-medium text-white/90">{repairOwnerLabel(action.owner)}: {action.label}</div>
+                                <div className="mt-0.5 text-amber-50/70">{action.description}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {existingSubmission ? (
+                      <div
+                        className={cn(
+                          'mt-3 rounded-xl border px-3 py-3 text-xs leading-5',
+                          submissionStatusClasses[existingSubmission.status] || submissionStatusClasses.queued,
+                        )}
+                        data-testid={`mobile-submission-job-${existingSubmission.id}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-semibold">
+                            {submissionStatusLabels[existingSubmission.status] || existingSubmission.status}
+                          </div>
+                          <div className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em]">
+                            {existingSubmission.track || 'store pipeline'}
+                          </div>
+                        </div>
+                        <p className="mt-1 opacity-80">
+                          Store upload is tracked separately from native build success, store metadata, review submission, and final approval.
+                        </p>
+                        {existingSubmission.failure_message ? (
+                          <p className="mt-2 text-red-50/90">{existingSubmission.failure_message}</p>
+                        ) : null}
                       </div>
                     ) : null}
 
@@ -575,6 +775,19 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
                           Retry
                         </Button>
                       ) : null}
+                      {canRepair ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void handleRepairBuild(build)}
+                          disabled={Boolean(actionId)}
+                          className="rounded-xl border border-amber-300/14 bg-amber-300/8 px-3 text-xs text-amber-50"
+                        >
+                          <ShieldCheck className="mr-2 h-3.5 w-3.5" />
+                          {actionId === `repair-${build.id}` ? 'Checking...' : 'Check repair'}
+                        </Button>
+                      ) : null}
                       {build.artifact_url ? (
                         <Button
                           type="button"
@@ -585,6 +798,32 @@ export const MobileBuildOperationsPanel: React.FC<MobileBuildOperationsPanelProp
                         >
                           <ExternalLink className="mr-2 h-3.5 w-3.5" />
                           Artifact
+                        </Button>
+                      ) : null}
+                      {canSubmit ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void handleSubmitBuild(build)}
+                          disabled={Boolean(actionId) || !hasSubmissionCredentials}
+                          title={hasSubmissionCredentials ? 'Upload through gated EAS Submit workflow' : 'Store upload requires EAS plus Apple/Google store credentials'}
+                          className="rounded-xl border border-emerald-300/14 bg-emerald-300/8 px-3 text-xs text-emerald-50"
+                        >
+                          <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                          {actionId === `submit-${build.id}` ? 'Uploading...' : 'Submit upload'}
+                        </Button>
+                      ) : null}
+                      {uploadAlreadyStarted ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled
+                          className="cursor-not-allowed rounded-xl border border-emerald-300/14 bg-emerald-300/8 px-3 text-xs text-emerald-50 opacity-70"
+                        >
+                          <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                          Upload requested
                         </Button>
                       ) : null}
                     </div>

@@ -299,6 +299,95 @@ func TestHandleReviewCompletionDoesNotTreatNegatedCriticalFindingAsBlocker(t *te
 	}
 }
 
+func TestHandleReviewCompletionSkipsLLMFixWhenDeterministicRepairLands(t *testing.T) {
+	// Tier 2 regression: when review reports critical issues but the
+	// deterministic repair ladder can patch the underlying objective bugs
+	// (here: package.json missing react-hook-form, zod, @hookform/resolvers
+	// despite App.tsx importing them), no paid LLM fix_review_issues task
+	// should be spawned. The build is driven straight to checkBuildCompletion
+	// against the patched files instead.
+	manager := &AgentManager{
+		subscribers: make(map[string][]chan *WSMessage),
+		builds:      map[string]*Build{},
+	}
+	sourceTask := &Task{ID: "review-deterministic", Type: TaskReview, Status: TaskCompleted}
+	build := &Build{
+		ID:          "review-deterministic-build",
+		Description: "Deterministic repair should pre-empt LLM fix loop",
+		Status:      BuildReviewing,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Tasks:       []*Task{sourceTask},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "fieldops",
+  "private": true,
+  "scripts": { "build": "tsc && vite build" },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/App.tsx",
+				Content: `import React from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+
+export default function App() {
+  const schema = z.object({ name: z.string() });
+  const form = useForm({ resolver: zodResolver(schema) });
+  return <div>{form.formState.isValid ? "ok" : "ready"}</div>;
+}
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+	manager.builds[build.ID] = build
+
+	manager.handleReviewCompletion(build, sourceTask, &TaskOutput{
+		Messages: []string{"Critical security vulnerability found in generated route test harness"},
+	})
+
+	for _, task := range build.Tasks {
+		if task != nil && task.Type == TaskFix {
+			t.Fatalf("expected deterministic repair to skip LLM fix_review_issues task; got fix task %+v", task)
+		}
+	}
+
+	files := manager.collectGeneratedFiles(build)
+	var manifest string
+	for _, file := range files {
+		if file.Path == "package.json" {
+			manifest = file.Content
+			break
+		}
+	}
+	if manifest == "" {
+		t.Fatalf("expected package.json in generated files after deterministic repair")
+	}
+	for _, pkg := range []string{"react-hook-form", "zod", "@hookform/resolvers"} {
+		if !strings.Contains(manifest, `"`+pkg+`"`) {
+			t.Fatalf("expected deterministic repair to add missing dep %s; got manifest:\n%s", pkg, manifest)
+		}
+	}
+}
+
 func TestHandleReviewCompletionSkipsFixTaskWhileValidationRecoveryActive(t *testing.T) {
 	manager := &AgentManager{
 		subscribers: make(map[string][]chan *WSMessage),
