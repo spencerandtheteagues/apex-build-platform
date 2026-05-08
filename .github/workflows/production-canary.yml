@@ -1,5 +1,8 @@
 name: Production Canary
 
+# Production canaries use hosted runners and can spend live product/provider
+# resources. Keep them opt-in with APEX_ENABLE_GITHUB_ACTIONS=true.
+
 on:
   schedule:
     - cron: '0 11 * * *'
@@ -23,6 +26,7 @@ concurrency:
 jobs:
   public-launch-smoke:
     name: Public Launch Smoke
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -54,6 +58,7 @@ jobs:
 
   preview-verification-canary:
     name: Preview Verification Canary
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -84,6 +89,7 @@ jobs:
 
   platform-build-canary-matrix:
     name: Platform Build Canary (${{ matrix.name }})
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -149,6 +155,7 @@ jobs:
 
   golden-fieldops-live-canary:
     name: Golden FieldOps Live Canary
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -214,7 +221,7 @@ jobs:
 
   prompt-reliability-live-matrix:
     name: Prompt Reliability Live Matrix
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_prompt_matrix == true }}
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' && github.event_name == 'workflow_dispatch' && inputs.run_prompt_matrix == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:

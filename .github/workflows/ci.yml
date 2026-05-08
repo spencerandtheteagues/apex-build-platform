@@ -1,6 +1,10 @@
 # APEX.BUILD CI Pipeline
 # Runs on every pull request and push to main
 # Includes: lint, test, build, security scanning, E2E tests
+#
+# Hosted GitHub Actions jobs are opt-in for this repo. Leave the repository
+# variable APEX_ENABLE_GITHUB_ACTIONS unset unless the account can run hosted
+# runners; local validation remains the default launch gate for free accounts.
 
 name: CI Pipeline
 
@@ -27,6 +31,7 @@ jobs:
 
   backend-lint:
     name: Backend Lint
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -47,6 +52,7 @@ jobs:
 
   backend-test:
     name: Backend Tests
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -101,6 +107,7 @@ jobs:
 
   backend-build:
     name: Backend Build
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     needs: [backend-lint, backend-test]
     steps:
@@ -133,6 +140,7 @@ jobs:
 
   frontend-lint:
     name: Frontend Lint
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -161,6 +169,7 @@ jobs:
 
   frontend-test:
     name: Frontend Tests
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -190,6 +199,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     needs: [frontend-lint, frontend-test]
     steps:
@@ -228,6 +238,7 @@ jobs:
 
   security-trivy:
     name: Trivy Security Scan
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     needs: [backend-build, frontend-build]
     steps:
@@ -251,6 +262,7 @@ jobs:
 
   security-dependency-check:
     name: Dependency Security Check
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -287,7 +299,7 @@ jobs:
     name: Build Docker Images
     runs-on: ubuntu-latest
     needs: [backend-build, frontend-build]
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
     permissions:
       contents: read
       packages: write
@@ -360,7 +372,7 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     needs: [docker-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     services:
       postgres:
         image: postgres:15-alpine
@@ -463,7 +475,7 @@ jobs:
     name: CI Summary
     runs-on: ubuntu-latest
     needs: [backend-build, frontend-build, security-trivy, security-dependency-check, docker-build]
-    if: always()
+    if: ${{ always() && vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     steps:
       - name: Check CI status
         run: |
