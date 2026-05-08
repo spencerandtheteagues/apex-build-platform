@@ -26,7 +26,7 @@ This structure fits the codebase because Apex already has:
 - power modes
 - project/storage/execution quotas
 
-It does **not** fit a truly generous free managed-AI tier yet, because the repo still has entitlement drift, incomplete ledgering, and a broken free/BYOK contract.
+It does **not** fit a generous free managed-AI tier. The launch contract is intentionally conservative: Free proves the platform with a one-time managed trial bucket, while backend, BYOK, publishing, and high-cost workflows require a paid plan.
 
 ## Recommended tier structure
 
@@ -34,18 +34,19 @@ It does **not** fit a truly generous free managed-AI tier yet, because the repo 
 
 - Price: `$0`
 - Included managed AI: one-time `$5` onboarding trial credits, non-renewing
-- After trial: BYOK-only, `fast` mode only
+- After trial: static frontend-only; no backend, BYOK, deploy, or managed-AI continuation
 - Limits:
-  - `2` active projects
-  - `500 MB` storage
+  - `3` active projects
+  - `1 GB` storage
   - `20` execution minutes/day
-  - `150` BYOK requests/month
+  - `0` recurring managed-AI requests/month
 - Allowed:
   - static frontend generation
-  - manual chat/completion
+  - prompt-to-UI exploration inside the trial bucket
   - small ephemeral previews
 - Blocked:
   - backend generation
+  - BYOK routing
   - long autonomous builds
   - deploy
   - `balanced` / `max`
@@ -61,9 +62,9 @@ It does **not** fit a truly generous free managed-AI tier yet, because the repo 
   - `fast` + `balanced`
   - backend/full-stack generation unlocked
 - Limits:
-  - `10` active projects
-  - `10 GB` storage
-  - `180` execution minutes/day
+  - unlimited projects
+  - `5 GB` storage
+  - `240` execution minutes/day
   - `1` concurrent autonomous build
 
 ### Power tier
@@ -77,9 +78,9 @@ It does **not** fit a truly generous free managed-AI tier yet, because the repo 
   - deployment unlock
   - higher build concurrency
 - Limits:
-  - `25` active projects
-  - `25 GB` storage
-  - `600` execution minutes/day
+  - unlimited projects
+  - `20 GB` storage
+  - `720` execution minutes/day
   - `3` collaborators/project
   - `3` concurrent autonomous builds
 
@@ -96,7 +97,7 @@ It does **not** fit a truly generous free managed-AI tier yet, because the repo 
 - Limits:
   - `5` seats included
   - `100 GB` storage
-  - `2400` execution minutes/day shared
+  - `1440` execution minutes/day shared
   - `10` concurrent autonomous builds
 
 ### Overage credits
@@ -122,7 +123,7 @@ It does **not** fit a truly generous free managed-AI tier yet, because the repo 
 
 | Tier / mode | Estimated revenue | Estimated variable cost | Contribution margin | Notes |
 |---|---:|---:|---:|---|
-| Free | $0 | cap at <= $1.50 / active free user / month | intentionally negative, tightly capped | only acceptable with hard trial and BYOK constraints |
+| Free | $0 | cap at <= $1.50 / active free user / month | intentionally negative, tightly capped | only acceptable with one-time trial credits and no BYOK/backend access |
 | Core paid | $24 | $7-$9 / active Builder user / month | 62%-71% | assumes moderate managed AI use and light runtime usage |
 | Power tier | $59 | $18-$22 / active Pro user / month | 63%-69% | supports premium models and longer autonomous sessions |
 | Team | $149 | $45-$55 / active Team workspace / month | 63%-70% | pooled-credit model with heavier runtime/collaboration cost |
@@ -145,8 +146,7 @@ The pricing message should be:
 ## Guardrails required for safety
 
 1. Free cannot retain backend-generation access after the trial bucket is gone.
-2. BYOK policy must be explicit:
-   - either truly free in limited flows, or clearly metered.
+2. BYOK is paid-plan-only for launch; do not advertise free BYOK.
 3. Every credit mutation must go through the ledger.
 4. One plan-definition schema must drive UI, billing APIs, and enforcement.
 5. Effective access must depend on billing status as well as subscription type.
@@ -163,12 +163,12 @@ The pricing message should be:
   - per-user monthly runtime cost
   - best conversion point by tier
 
-The largest unresolved assumption is BYOK economics. If Apex wants BYOK to feel truly "bring your own provider, no extra charge," then subscription price must absorb orchestration overhead. If Apex wants BYOK to remain monetized, that charge must be explicit, consistent, and enforced without contradicting the free-tier promise.
+The largest operating assumption is BYOK economics. For launch, BYOK is part of paid-plan value and must still surface any Apex routing/platform fee separately from the user's provider bill.
 
 ## Recommended next actions
 
 1. Change the pricing contract to the tier structure above.
-2. Fix the free/BYOK mismatch before publicly promising BYOK-free usage.
+2. Keep the paid-plan-only BYOK policy reflected in backend entitlements, UI copy, and docs.
 3. Replace the current `19/49/99` and `10/35/80` structure with `24/59/149` and `12/40/110`.
 4. Remove the `$10` top-up pack.
 5. Build a subscription-change endpoint and stop using Checkout for upgrades.

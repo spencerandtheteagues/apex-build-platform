@@ -1148,7 +1148,7 @@ Both are tracked separately in the history, so you can see every change regardle
 - GitHub export
 - $12 monthly managed AI credits included
 
-**Pro — $79/month**
+**Pro — $59/month**
 - Higher managed AI allowance with better throughput
 - Unlimited projects
 - 20 GB storage

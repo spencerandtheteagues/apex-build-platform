@@ -119,14 +119,14 @@ services:
         sync: false
       - key: STRIPE_PRICE_ENTERPRISE_ANNUAL
         sync: false
-      - key: STRIPE_PRICE_CREDITS_10
-        sync: false  # $10 → 1,000 credits top-up price ID
       - key: STRIPE_PRICE_CREDITS_25
-        sync: false  # $25 → 2,500 credits top-up price ID
+        sync: false  # Optional legacy override; code now creates dynamic $25 top-up checkout.
       - key: STRIPE_PRICE_CREDITS_50
-        sync: false  # $50 → 5,000 credits top-up price ID
+        sync: false  # Optional legacy override; code now creates dynamic $50 top-up checkout.
       - key: STRIPE_PRICE_CREDITS_100
-        sync: false  # $100 → 10,000 credits top-up price ID
+        sync: false  # Optional legacy override; code now creates dynamic $100 top-up checkout.
+      - key: STRIPE_PRICE_CREDITS_250
+        sync: false  # Optional legacy override; code now creates dynamic $250 top-up checkout.
       - key: E2B_API_KEY
         sync: false  # Set in Render dashboard after signing up at e2b.dev
       - key: R2_ACCOUNT_ID

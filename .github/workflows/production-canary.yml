@@ -32,7 +32,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: tests/e2e/package-lock.json
 
@@ -63,7 +63,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: tests/e2e/package-lock.json
 
@@ -172,7 +172,7 @@ jobs:
         if: steps.canary-creds.outputs.available == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: tests/e2e/package-lock.json
 
@@ -238,7 +238,7 @@ jobs:
         if: steps.canary-creds.outputs.available == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: tests/e2e/package-lock.json
 

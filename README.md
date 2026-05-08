@@ -248,8 +248,8 @@ Credit packs extend managed usage; they do not unlock backend/full-stack capabil
 
 | | Free | Builder | Pro | Team | Enterprise |
 |---|---|---|---|---|---|
-| **Price** | $0/mo | $24/mo | $79/mo | $149/mo | Contact |
-| **Annual** | — | $230/yr | $758/yr | $1430/yr | Negotiated |
+| **Price** | $0/mo | $24/mo | $59/mo | $149/mo | Contact |
+| **Annual** | — | $230/yr | $566/yr | $1430/yr | Negotiated |
 | **AI credits/mo** | 0 | $12 | $40 | $110 | Negotiated |
 | **Projects** | 3 | Unlimited | Unlimited | Unlimited | Unlimited |
 | **Storage** | 1 GB | 5 GB | 20 GB | 100 GB | Custom |

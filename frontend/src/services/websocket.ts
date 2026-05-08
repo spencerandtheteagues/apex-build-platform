@@ -13,7 +13,7 @@ import {
 } from '@/types'
 import { useStore } from '@/hooks/useStore'
 
-const DEFAULT_PRODUCTION_WS_URL = 'wss://apex-backend-5ypy.onrender.com/ws'
+const DEFAULT_PRODUCTION_WS_URL = 'wss://api.apex-build.dev/ws'
 
 // Collaboration event types (kebab-case, matching frontend consumers)
 export type CollaborationEvent =

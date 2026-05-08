@@ -15,9 +15,9 @@ type PlanType string
 
 const (
 	PlanFree       PlanType = "free"
-	PlanPro        PlanType = "pro"        // $19/month
-	PlanTeam       PlanType = "team"       // $49/month
-	PlanEnterprise PlanType = "enterprise" // $199/month
+	PlanPro        PlanType = "pro"        // legacy build tag; launch plan is $59/month
+	PlanTeam       PlanType = "team"       // legacy build tag; launch plan is $149/month
+	PlanEnterprise PlanType = "enterprise" // legacy build tag; sales-managed
 )
 
 // UsageType represents different usage metrics
@@ -75,8 +75,8 @@ func GetPlans() []Plan {
 			Type:          PlanPro,
 			Name:          "Pro",
 			Description:   "For individual developers",
-			MonthlyPrice:  1900,               // $19.00
-			AnnualPrice:   19000,              // $190.00 (2 months free)
+			MonthlyPrice:  5900,               // $59.00
+			AnnualPrice:   56640,              // $566.40
 			StripePriceID: "price_1234567890", // Set in Stripe
 			PopularPlan:   true,
 			Limits: map[UsageType]int{
@@ -103,8 +103,8 @@ func GetPlans() []Plan {
 			Type:         PlanTeam,
 			Name:         "Team",
 			Description:  "For small development teams",
-			MonthlyPrice: 4900,  // $49.00
-			AnnualPrice:  49000, // $490.00 (2 months free)
+			MonthlyPrice: 14900,  // $149.00
+			AnnualPrice:  143040, // $1,430.40
 			Limits: map[UsageType]int{
 				UsageAIRequests:    10000,
 				UsageCodeGen:       2000,

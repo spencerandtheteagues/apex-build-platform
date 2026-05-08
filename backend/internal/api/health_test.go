@@ -179,7 +179,7 @@ func TestPlatformTruthIncludesBackendOwnedPlansAndStack(t *testing.T) {
 		planPrices[plan.Name] = plan.MonthlyPriceCents
 	}
 	require.Equal(t, int64(2400), planPrices["Builder"])
-	require.Equal(t, int64(7900), planPrices["Pro"])
+	require.Equal(t, int64(5900), planPrices["Pro"])
 	require.Equal(t, int64(14900), planPrices["Team"])
 }
 

@@ -384,18 +384,18 @@ func getUpgradeMessage(usageType usage.UsageType, plan usage.PlanType) string {
 	case usage.PlanFree:
 		switch usageType {
 		case usage.UsageProjects:
-			return "Upgrade to Builder ($24/month) for more projects and managed AI credits, or Pro ($79/month) for higher limits."
+			return "Upgrade to Builder ($24/month) for more projects and managed AI credits, or Pro ($59/month) for higher limits."
 		case usage.UsageStorageBytes:
-			return "Upgrade to Builder ($24/month) for 5GB storage, or Pro ($79/month) for 20GB."
+			return "Upgrade to Builder ($24/month) for 5GB storage, or Pro ($59/month) for 20GB."
 		case usage.UsageAIRequests:
-			return "Upgrade to Builder ($24/month) for managed AI credits, or Pro ($79/month) for a larger monthly credit allotment."
+			return "Upgrade to Builder ($24/month) for managed AI credits, or Pro ($59/month) for a larger monthly credit allotment."
 		case usage.UsageExecutionMinutes:
-			return "Upgrade to Builder ($24/month) for longer execution time, or Pro ($79/month) for even more capacity."
+			return "Upgrade to Builder ($24/month) for longer execution time, or Pro ($59/month) for even more capacity."
 		}
 	case usage.PlanBuilder:
 		switch usageType {
 		case usage.UsageProjects, usage.UsageStorageBytes, usage.UsageAIRequests, usage.UsageExecutionMinutes:
-			return "Upgrade to Pro ($79/month) for more credits and higher limits, or Team ($149/month) for shared team capacity."
+			return "Upgrade to Pro ($59/month) for more credits and higher limits, or Team ($149/month) for shared team capacity."
 		}
 	case usage.PlanPro:
 		switch usageType {
