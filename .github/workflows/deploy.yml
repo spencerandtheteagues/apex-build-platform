@@ -1,5 +1,9 @@
 name: Deploy to Production
 
+# Render auto-deploys from main without GitHub-hosted runners. Keep these
+# verification jobs opt-in so free/no-billing GitHub accounts do not fail PRs.
+# Set repository variable APEX_ENABLE_GITHUB_ACTIONS=true to enable them.
+
 on:
   push:
     branches: [main]
@@ -16,6 +20,7 @@ jobs:
 
   verify-deployment:
     name: Verify Production Deployment
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -80,6 +85,7 @@ jobs:
 
   trigger-render-deploy:
     name: Trigger Render Backend Deploy
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:

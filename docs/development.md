@@ -80,6 +80,13 @@ Optional profiles expose Adminer, Redis Commander, and monitoring services.
 
 ## Testing
 
+### GitHub Actions on free accounts
+
+GitHub-hosted workflows are opt-in for this repository. The CI, deploy, nightly,
+and canary jobs only request hosted runners when the repository variable
+`APEX_ENABLE_GITHUB_ACTIONS` is set to `true`. Leave it unset for free/no-billing
+GitHub accounts and use the local verification commands below as the merge gate.
+
 ### Backend
 
 ```bash

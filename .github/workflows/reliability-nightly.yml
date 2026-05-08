@@ -1,5 +1,9 @@
 name: Reliability Benchmark (Nightly)
 
+# Hosted nightly benchmarks are opt-in. Leave APEX_ENABLE_GITHUB_ACTIONS unset
+# on free/no-billing GitHub accounts and run the local validation commands from
+# docs/development.md instead.
+
 on:
   schedule:
     - cron: '30 7 * * *'
@@ -21,6 +25,7 @@ concurrency:
 jobs:
   e2e-reliability:
     name: E2E Reliability Benchmark
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
