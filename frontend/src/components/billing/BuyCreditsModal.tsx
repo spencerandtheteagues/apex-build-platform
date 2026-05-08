@@ -14,10 +14,10 @@ interface CreditPack {
 }
 
 const DEFAULT_PACKS: CreditPack[] = [
-  { amountUsd: 10, creditUsd: 10, label: '$10' },
   { amountUsd: 25, creditUsd: 25, label: '$25' },
   { amountUsd: 50, creditUsd: 50, label: '$50', popular: true },
   { amountUsd: 100, creditUsd: 100, label: '$100' },
+  { amountUsd: 250, creditUsd: 250, label: '$250' },
 ]
 
 interface Props {

@@ -5,7 +5,7 @@ This repo ships an OpenAPI spec at [`backend/api/openapi.yaml`](../backend/api/o
 ## Base URLs
 
 - Local API base: `http://localhost:8080/api/v1`
-- Production API base: `https://apex-backend-5ypy.onrender.com/api/v1`
+- Production API base: `https://api.apex-build.dev/api/v1`
 
 Non-versioned health endpoints:
 

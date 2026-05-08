@@ -2,8 +2,8 @@
 
 ## Prerequisites
 
-- Go `1.23+`
-- Node.js `18+`
+- Go `1.26+`
+- Node.js `20+`
 - PostgreSQL `15+`
 - Redis `7+` for the full local stack
 - Docker for containerized local development, preview, and execution workflows

@@ -3,6 +3,19 @@
 Date: 2026-03-21
 Scope: `backend/internal/payments`, `backend/internal/handlers/payments.go`, `backend/internal/usage`, `backend/internal/ai/byok.go`, related frontend billing surfaces.
 
+## 2026-05-08 Launch Reconciliation
+
+This report is retained as the original audit record. Current launch implementation has closed or materially changed several findings:
+
+- Free/BYOK contract: resolved to paid-plan-only BYOK. Free is static/frontend trial only.
+- AI credit debits: `ReserveCredits` / `FinalizeCredits` now write immutable `CreditLedgerEntry` rows transactionally.
+- Plan-limit drift: usage limits now derive from `payments.GetAllPlans()`; usage pricing is generated from the same backend plan source.
+- Webhook ACK safety: credit/subscription webhook handlers now return errors up to `HandleWebhook`, which returns `500` so Stripe retries transient DB failures.
+- Plan changes: active subscribers use `/billing/change-plan`; Checkout remains for net-new subscriptions.
+- Delinquent entitlements: quota middleware downgrades `past_due`, `canceled`, and `inactive` states to free-tier limits.
+
+Remaining launch work is live evidence, not a second billing design: configure real Stripe price IDs, replay Stripe test webhooks, run a controlled live checkout, and verify the billing UI against production config.
+
 ## Executive Summary
 
 The Stripe integration is real and substantially farther along than the old stub billing code, but the monetization system still has four material risks:

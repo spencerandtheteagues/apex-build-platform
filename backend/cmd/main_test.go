@@ -42,7 +42,7 @@ func TestFormatConfiguredPlansForLogUsesPaymentPlanTruth(t *testing.T) {
 	for _, want := range []string{
 		"Free ($0/mo)",
 		"Builder ($24/mo)",
-		"Pro ($79/mo)",
+		"Pro ($59/mo)",
 		"Team ($149/mo)",
 		"Enterprise (contact sales)",
 	} {
@@ -50,7 +50,7 @@ func TestFormatConfiguredPlansForLogUsesPaymentPlanTruth(t *testing.T) {
 			t.Fatalf("plan log missing %q in %q", want, got)
 		}
 	}
-	for _, stale := range []string{"Builder ($19/mo)", "Pro ($49/mo)", "Team ($99/mo)"} {
+	for _, stale := range []string{"Builder ($19/mo)", "Pro ($49/mo)", "Pro ($79/mo)", "Team ($99/mo)"} {
 		if strings.Contains(got, stale) {
 			t.Fatalf("plan log contains stale price %q in %q", stale, got)
 		}

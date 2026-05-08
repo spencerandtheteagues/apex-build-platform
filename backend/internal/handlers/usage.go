@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"apex-build/internal/middleware"
+	"apex-build/internal/payments"
 	"apex-build/internal/usage"
 	"apex-build/pkg/models"
 
@@ -202,6 +203,7 @@ func (h *UsageHandlers) GetLimits(c *gin.Context) {
 		"pro":        usage.GetPlanLimits(usage.PlanPro),
 		"team":       usage.GetPlanLimits(usage.PlanTeam),
 		"enterprise": usage.GetPlanLimits(usage.PlanEnterprise),
+		"owner":      usage.GetPlanLimits(usage.PlanOwner),
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -210,30 +212,20 @@ func (h *UsageHandlers) GetLimits(c *gin.Context) {
 			"current_plan":   string(currentPlan),
 			"current_limits": usage.GetPlanLimits(currentPlan),
 			"all_plans":      allPlans,
-			"pricing": gin.H{
-				"free": gin.H{
-					"price_monthly": 0,
-					"price_yearly":  0,
-				},
-				"builder": gin.H{
-					"price_monthly": 2400,  // $24
-					"price_yearly":  23040, // $230.40
-				},
-				"pro": gin.H{
-					"price_monthly": 7900,  // $79
-					"price_yearly":  75840, // $758.40
-				},
-				"team": gin.H{
-					"price_monthly": 14900,  // $149
-					"price_yearly":  143040, // $1,430.40
-				},
-				"enterprise": gin.H{
-					"price_monthly": 0,
-					"price_yearly":  0,
-				},
-			},
+			"pricing":        usagePricingFromPaymentPlans(),
 		},
 	})
+}
+
+func usagePricingFromPaymentPlans() gin.H {
+	pricing := gin.H{}
+	for _, plan := range payments.GetAllPlans() {
+		pricing[string(plan.Type)] = gin.H{
+			"price_monthly": plan.MonthlyPriceCents,
+			"price_yearly":  plan.AnnualPriceCents,
+		}
+	}
+	return pricing
 }
 
 // RefreshUsage forces a refresh of cached usage data

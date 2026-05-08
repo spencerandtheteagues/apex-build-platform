@@ -1,5 +1,30 @@
 # Contracts
 
+## Launch Billing And Pricing Contract
+- Source of truth: `backend/internal/payments/plans.go`.
+- Producers:
+  - `/api/v1/billing/plans` and `/api/v1/platform/truth` expose `payments.GetAllPlans()`.
+  - `/api/v1/usage/limits` exposes quota limits from `usage.GetPlanLimits()` and pricing from `payments.GetAllPlans()`.
+  - Frontend billing, landing, usage, help, SEO fallback, README, Stripe runbook, and Render env comments must match the backend plan truth.
+- Launch plan defaults:
+  - Free: `$0`, one-time `$5` managed trial credits, static/frontend only, no BYOK/backend/publish.
+  - Builder: `$24/mo`, `$230.40/yr`, `$12/mo` managed credits.
+  - Pro: `$59/mo`, `$566.40/yr`, `$40/mo` managed credits.
+  - Team: `$149/mo`, `$1430.40/yr`, `$110/mo` managed credits.
+  - Credit top-ups: `$25`, `$50`, `$100`, `$250`; no `$10` pack.
+- Transport:
+  - Plan payloads keep existing fields: `monthly_price_cents`, `annual_price_cents`, `monthly_credits_usd`, `limits`, and `features`.
+  - Usage pricing payload keeps existing shape: `pricing[plan].price_monthly` and `pricing[plan].price_yearly`.
+- Consumers:
+  - `BillingSettings`, `BuyCreditsModal`, `UsageDashboard`, `Landing`, SEO `index.html`, Stripe docs, launch runbooks, and quota messages.
+- Compatibility risk:
+  - Medium; changing Pro from `$79` to `$59` requires matching Stripe live/test price IDs before production checkout.
+- Required validation:
+  - `cd backend && go test ./internal/payments ./internal/handlers ./internal/api ./cmd -run 'TestUpdatedPlanPricing|TestCreditPacksMatchPricingStructure|TestUsageLimitsPricingUsesLaunchPlanTruth|TestPlatformTruthIncludesBackendOwnedPlansAndStack|TestFormatConfiguredPlansForLogUsesPaymentPlanTruth' -count=1`
+  - `cd frontend && npm run test -- --run src/components/billing/BillingSettings.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `rg` scan for stale `$79`, `$49`, and `$10` launch claims.
+
 ## Mobile API Contract Generated Backend
 - Source of truth: `MobileAppSpec.APIContracts` normalized by `backend/internal/mobile/api_contract_manifest.go` endpoint descriptors.
 - Producers:
