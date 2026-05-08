@@ -141,6 +141,22 @@ npm test
 
 For public go-live validation, run the dedicated [launch runbook](./launch-runbook.md) after the normal release checklist passes.
 
+Render blueprint and production env validation:
+
+```bash
+node scripts/verify_render_launch_env.mjs
+```
+
+Strict production mode requires a Render API token and service IDs, checks env-var presence without printing secret values, and calls production health endpoints:
+
+```bash
+APEX_RENDER_EXPECT_PRODUCTION=1 \
+RENDER_API_KEY='replace-me' \
+RENDER_BACKEND_SERVICE_ID='replace-me' \
+RENDER_FRONTEND_SERVICE_ID='replace-me' \
+node scripts/verify_render_launch_env.mjs
+```
+
 ## Deployment-specific notes
 
 - The backend starts a bootstrap HTTP listener early so load balancer health checks succeed while deeper initialization continues.
