@@ -156,7 +156,7 @@ type RouterConfig struct {
 
 // DefaultRouterConfig returns the optimal routing configuration
 func DefaultRouterConfig() *RouterConfig {
-	return &RouterConfig{
+	config := &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
 			CapabilityCodeGeneration:        ProviderGPT4,
 			CapabilityNaturalLanguageToCode: ProviderClaude,
@@ -170,42 +170,95 @@ func DefaultRouterConfig() *RouterConfig {
 			CapabilityArchitecture:          ProviderClaude,
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
-			ProviderOllama: {ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok},
-			ProviderClaude: {ProviderGPT4, ProviderGemini, ProviderGrok, ProviderOllama},
-			ProviderGPT4:   {ProviderClaude, ProviderGemini, ProviderGrok, ProviderOllama},
-			ProviderGemini: {ProviderClaude, ProviderGPT4, ProviderGrok, ProviderOllama},
-			ProviderGrok:   {ProviderGPT4, ProviderClaude, ProviderGemini, ProviderOllama},
+			ProviderOllama:   {ProviderClaude, ProviderGPT4, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok},
+			ProviderClaude:   {ProviderGPT4, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok, ProviderOllama},
+			ProviderGPT4:     {ProviderClaude, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok, ProviderOllama},
+			ProviderGemini:   {ProviderClaude, ProviderGPT4, ProviderGLM, ProviderDeepSeek, ProviderGrok, ProviderOllama},
+			ProviderGrok:     {ProviderDeepSeek, ProviderGPT4, ProviderClaude, ProviderGemini, ProviderGLM, ProviderOllama},
+			ProviderDeepSeek: {ProviderGLM, ProviderGPT4, ProviderClaude, ProviderGemini, ProviderOllama},
+			ProviderGLM:      {ProviderDeepSeek, ProviderGemini, ProviderGPT4, ProviderClaude, ProviderOllama},
 		},
 		LoadBalancing: map[AIProvider]float64{
-			ProviderClaude: 0.30,
-			ProviderGPT4:   0.30,
-			ProviderGemini: 0.20,
-			ProviderGrok:   0.15,
-			ProviderOllama: 0.05,
+			ProviderClaude:   0.25,
+			ProviderGPT4:     0.25,
+			ProviderGemini:   0.18,
+			ProviderGrok:     0.12,
+			ProviderOllama:   0.08,
+			ProviderDeepSeek: 0.07,
+			ProviderGLM:      0.05,
 		},
 		RateLimits: map[AIProvider]int{
-			ProviderClaude: 100,  // requests per minute
-			ProviderGPT4:   80,   // requests per minute
-			ProviderGemini: 120,  // requests per minute
-			ProviderGrok:   100,  // requests per minute
-			ProviderOllama: 1000, // Local — no real limit
+			ProviderClaude:   100,  // requests per minute
+			ProviderGPT4:     80,   // requests per minute
+			ProviderGemini:   120,  // requests per minute
+			ProviderGrok:     100,  // requests per minute
+			ProviderOllama:   1000, // Local — no real limit
+			ProviderDeepSeek: 120,
+			ProviderGLM:      120,
 		},
 		CostThresholds: map[AIProvider]float64{
-			ProviderClaude: 0.10, // max cost per request
-			ProviderGPT4:   0.15, // max cost per request
-			ProviderGemini: 0.08, // max cost per request
-			ProviderGrok:   0.05, // max cost per request
-			ProviderOllama: 0.00, // Free — runs locally
+			ProviderClaude:   0.10, // max cost per request
+			ProviderGPT4:     0.15, // max cost per request
+			ProviderGemini:   0.08, // max cost per request
+			ProviderGrok:     0.05, // max cost per request
+			ProviderOllama:   0.00, // Free — runs locally
+			ProviderDeepSeek: 0.04,
+			ProviderGLM:      0.04,
 		},
 		// Enable emergency fallback for BYOK scenarios to prevent build failures
 		EnableBYOKEmergencyFallback: true,
 		// Retry local models multiple times before falling back to cloud
 		MaxRetryAttempts: map[AIProvider]int{
-			ProviderClaude: 2, // Cloud providers get fewer retries
-			ProviderGPT4:   2, // Cloud providers get fewer retries
-			ProviderGemini: 2, // Cloud providers get fewer retries
-			ProviderGrok:   2, // Cloud providers get fewer retries
-			ProviderOllama: 5, // Local model gets more retries (network/startup issues)
+			ProviderClaude:   2, // Cloud providers get fewer retries
+			ProviderGPT4:     2, // Cloud providers get fewer retries
+			ProviderGemini:   2, // Cloud providers get fewer retries
+			ProviderGrok:     2, // Cloud providers get fewer retries
+			ProviderOllama:   5, // Local model gets more retries (network/startup issues)
+			ProviderDeepSeek: 2,
+			ProviderGLM:      2,
 		},
+	}
+	applyOllamaCreditSaverTestingProfile(config)
+	return config
+}
+
+func applyOllamaCreditSaverTestingProfile(config *RouterConfig) {
+	if config == nil || !ollamaCreditSaverTestingProfileEnabled() {
+		return
+	}
+	config.DefaultProviders = map[AICapability]AIProvider{
+		CapabilityCodeGeneration:        ProviderGPT4,   // Qwen latest slot
+		CapabilityNaturalLanguageToCode: ProviderClaude, // Kimi orchestrator slot
+		CapabilityCodeReview:            ProviderDeepSeek,
+		CapabilityCodeCompletion:        ProviderGPT4,
+		CapabilityDebugging:             ProviderDeepSeek,
+		CapabilityExplanation:           ProviderClaude,
+		CapabilityRefactoring:           ProviderGPT4,
+		CapabilityTesting:               ProviderGLM,
+		CapabilityDocumentation:         ProviderClaude,
+		CapabilityArchitecture:          ProviderClaude,
+	}
+	preferred := []AIProvider{ProviderClaude, ProviderGPT4, ProviderGLM, ProviderDeepSeek, ProviderGemini, ProviderGrok, ProviderOllama}
+	config.FallbackOrder = map[AIProvider][]AIProvider{}
+	for _, provider := range preferred {
+		fallbacks := make([]AIProvider, 0, len(preferred)-1)
+		for _, fallback := range preferred {
+			if fallback != provider {
+				fallbacks = append(fallbacks, fallback)
+			}
+		}
+		config.FallbackOrder[provider] = fallbacks
+	}
+	config.LoadBalancing = map[AIProvider]float64{
+		ProviderClaude:   0.30, // Kimi K2.6 orchestration/planning
+		ProviderGPT4:     0.25, // Qwen latest coding slot
+		ProviderGLM:      0.20,
+		ProviderDeepSeek: 0.20,
+		ProviderOllama:   0.05,
+	}
+	for _, provider := range preferred {
+		config.CostThresholds[provider] = 0
+		config.RateLimits[provider] = 1000
+		config.MaxRetryAttempts[provider] = 5
 	}
 }

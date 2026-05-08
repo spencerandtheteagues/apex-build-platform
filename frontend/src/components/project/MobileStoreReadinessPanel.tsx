@@ -4,45 +4,14 @@ import { ClipboardCheck, Download, FileCheck2, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import type { File, Project } from '@/types'
-import type { MobileReadinessScorecard, MobileValidationReport } from '@/services/api'
-
-interface StoreDataSafetyDraft {
-  data_collected?: string[]
-  data_linked_to_user?: string[]
-  data_used_for_tracking?: string[]
-  privacy_notes?: string[]
-}
-
-interface StoreScreenshotTarget {
-  platform?: string
-  device?: string
-  purpose?: string
-}
-
-interface StoreReadinessPackage {
-  status?: string
-  app_name?: string
-  short_description?: string
-  full_description?: string
-  category?: string
-  release_notes?: string
-  android_package?: string
-  ios_bundle_identifier?: string
-  version?: string
-  version_code?: number
-  build_number?: string
-  data_safety_draft?: StoreDataSafetyDraft
-  screenshot_checklist?: StoreScreenshotTarget[]
-  manual_prerequisites?: string[]
-  truthful_status_notes?: string[]
-  missing_items?: string[]
-}
+import type { MobileReadinessScorecard, MobileStoreReadinessReport, MobileValidationReport, StoreReadinessPackage } from '@/services/api'
 
 interface MobileStoreReadinessPanelProps {
   project: Project
   files: File[]
   validation: MobileValidationReport | null
   scorecard: MobileReadinessScorecard | null
+  storeReadiness?: MobileStoreReadinessReport | null
   onDownloadPackage?: () => void
 }
 
@@ -91,16 +60,17 @@ export const MobileStoreReadinessPanel: React.FC<MobileStoreReadinessPanelProps>
   files,
   validation,
   scorecard,
+  storeReadiness,
   onDownloadPackage,
 }) => {
   const storeEvidence = useMemo(() => parseStorePackage(files), [files])
-  const storePackage = storeEvidence.package
+  const storePackage = storeReadiness?.package || storeEvidence.package
   const storeCheck = validation?.checks.find((check) => check.id === 'store_readiness')
   const releaseTruthCheck = validation?.checks.find((check) => check.id === 'release_truth')
   const storeCategory = scorecard?.categories.find((category) => category.id === 'store_readiness')
-  const missingItems = storePackage?.missing_items || []
-  const manualPrerequisites = storePackage?.manual_prerequisites || []
-  const truthfulNotes = storePackage?.truthful_status_notes || []
+  const missingItems = storeReadiness?.missing_items || storePackage?.missing_items || []
+  const manualPrerequisites = storeReadiness?.manual_prerequisites || storePackage?.manual_prerequisites || []
+  const truthfulNotes = storeReadiness?.truthful_status_notes || storePackage?.truthful_status_notes || []
   const statusClass = storeCheck?.status === 'passed'
     ? statusClasses.partial
     : storeCheck?.status === 'failed' || storeEvidence.error
@@ -182,9 +152,14 @@ export const MobileStoreReadinessPanel: React.FC<MobileStoreReadinessPanelProps>
                 <div className="mt-2 text-sm font-semibold text-white">
                   {formatStoreStatus(storePackage?.status || validation?.store_readiness_state)}
                 </div>
-                <div className="mt-1 text-xs text-gray-400">{storeCategory ? `${storeCategory.score}% evidence score` : 'Score pending'}</div>
+                <div className="mt-1 text-xs text-gray-400">{storeReadiness ? `${storeReadiness.score}% backend evidence score` : storeCategory ? `${storeCategory.score}% evidence score` : 'Score pending'}</div>
               </div>
             </div>
+            {storeReadiness?.summary ? (
+              <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-xs leading-5 text-gray-300">
+                {storeReadiness.summary}
+              </div>
+            ) : null}
 
             <div className="mt-5 grid gap-3 md:grid-cols-2">
               {checklistItems.map((item) => (

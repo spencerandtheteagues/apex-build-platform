@@ -1029,25 +1029,29 @@ func (o *BuildOrchestrator) CreateFileGenerationTask(buildID string, filePath st
 		return nil, err
 	}
 
-	// Find an appropriate agent for this file type
+	// Find an appropriate agent for this file type. The labelled break is
+	// required because plain `break` inside the switch only exits the switch,
+	// leaving the outer loop to keep walking and overwrite `agent` with the
+	// last matching candidate instead of the first.
 	var agent *Agent
 	build.mu.RLock()
+agentSearch:
 	for _, a := range build.Agents {
 		switch language {
 		case "typescript", "javascript", "html", "css":
 			if a.Role == RoleFrontend {
 				agent = a
-				break
+				break agentSearch
 			}
 		case "go", "python", "java", "rust":
 			if a.Role == RoleBackend {
 				agent = a
-				break
+				break agentSearch
 			}
 		case "sql":
 			if a.Role == RoleDatabase {
 				agent = a
-				break
+				break agentSearch
 			}
 		}
 	}

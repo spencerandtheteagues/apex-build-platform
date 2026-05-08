@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"apex-build/pkg/models"
 )
+
+const StoreReadinessPackagePath = "mobile/store/store-readiness.json"
 
 type StoreReadinessPackage struct {
 	Status              string                   `json:"status"`
@@ -26,6 +30,25 @@ type StoreReadinessPackage struct {
 	TruthfulStatusNotes []string                 `json:"truthful_status_notes"`
 	MissingItems        []string                 `json:"missing_items"`
 	CapabilitySummary   []StoreCapabilitySummary `json:"capability_summary"`
+}
+
+type MobileStoreReadinessReport struct {
+	Status              string                   `json:"status"`
+	PackagePath         string                   `json:"package_path"`
+	Package             *StoreReadinessPackage   `json:"package,omitempty"`
+	ValidationStatus    MobileValidationStatus   `json:"validation_status"`
+	StoreReadinessState string                   `json:"store_readiness_state,omitempty"`
+	Score               int                      `json:"score"`
+	Target              int                      `json:"target"`
+	ReadyForSubmission  bool                     `json:"ready_for_submission"`
+	Summary             string                   `json:"summary"`
+	MissingItems        []string                 `json:"missing_items,omitempty"`
+	ManualPrerequisites []string                 `json:"manual_prerequisites,omitempty"`
+	TruthfulStatusNotes []string                 `json:"truthful_status_notes,omitempty"`
+	CapabilitySummary   []StoreCapabilitySummary `json:"capability_summary,omitempty"`
+	Blockers            []string                 `json:"blockers,omitempty"`
+	Errors              []string                 `json:"errors,omitempty"`
+	Warnings            []string                 `json:"warnings,omitempty"`
 }
 
 type StoreDataSafetyDraft struct {
@@ -87,6 +110,73 @@ func StoreReadinessJSON(spec MobileAppSpec) string {
 	pkg := GenerateStoreReadinessPackage(spec)
 	encoded, _ := json.MarshalIndent(pkg, "", "  ")
 	return string(encoded) + "\n"
+}
+
+func BuildMobileStoreReadinessReport(project models.Project, files []models.File, validation MobileValidationReport, scorecard MobileReadinessScorecard) MobileStoreReadinessReport {
+	category := findStoreReadinessCategory(scorecard)
+	report := MobileStoreReadinessReport{
+		Status:              firstNonEmptyString(validation.StoreReadinessState, project.MobileStoreReadinessStatus, "not_generated"),
+		PackagePath:         StoreReadinessPackagePath,
+		ValidationStatus:    validation.Status,
+		StoreReadinessState: validation.StoreReadinessState,
+		Score:               category.Score,
+		Target:              firstNonZeroInt(category.Target, 95),
+		Summary:             "Store-readiness package has not been generated yet.",
+	}
+
+	file, ok := findStoreReadinessFile(files)
+	if !ok || strings.TrimSpace(file.Content) == "" {
+		report.Blockers = append(report.Blockers, "Generate mobile/store/store-readiness.json before store submission can be prepared.")
+		report.Errors = append(report.Errors, "Store-readiness package file is missing.")
+		return report
+	}
+
+	var pkg StoreReadinessPackage
+	if err := json.Unmarshal([]byte(file.Content), &pkg); err != nil {
+		report.Status = "invalid_package"
+		report.Summary = "Store-readiness package exists but is not valid JSON."
+		report.Blockers = append(report.Blockers, "Fix mobile/store/store-readiness.json JSON syntax.")
+		report.Errors = append(report.Errors, "store-readiness.json is not valid JSON.")
+		return report
+	}
+	report.Package = &pkg
+	report.MissingItems = append([]string(nil), pkg.MissingItems...)
+	report.ManualPrerequisites = append([]string(nil), pkg.ManualPrerequisites...)
+	report.TruthfulStatusNotes = append([]string(nil), pkg.TruthfulStatusNotes...)
+	report.CapabilitySummary = append([]StoreCapabilitySummary(nil), pkg.CapabilitySummary...)
+
+	if errs := ValidateStoreReadinessPackage(pkg); len(errs) > 0 {
+		report.Status = "invalid_package"
+		report.Summary = "Store-readiness package exists but required metadata is incomplete."
+		for _, validationErr := range errs {
+			report.Errors = append(report.Errors, fmt.Sprintf("%s: %s", validationErr.Field, validationErr.Message))
+		}
+		report.Blockers = append(report.Blockers, "Fix required store metadata before marking the package ready.")
+		return report
+	}
+
+	report.ReadyForSubmission = strings.EqualFold(strings.TrimSpace(project.MobileStoreReadinessStatus), "succeeded") &&
+		report.Score >= report.Target &&
+		validation.Status == MobileValidationPassed
+	if report.ReadyForSubmission {
+		report.Status = "ready_for_submission_workflow"
+		report.Summary = "Store-readiness evidence is complete enough to start a gated upload/submission workflow. This is not store approval."
+		return report
+	}
+
+	report.Summary = "Draft store-readiness package is valid, but native artifacts, owner-supplied assets, and store-console prerequisites remain separate gates."
+	for _, blocker := range category.Blockers {
+		if strings.TrimSpace(blocker) != "" {
+			report.Blockers = append(report.Blockers, blocker)
+		}
+	}
+	if len(report.Blockers) == 0 {
+		report.Blockers = append(report.Blockers, "Complete native build artifacts and owner-supplied store assets before submission.")
+	}
+	if validation.Status != MobileValidationPassed {
+		report.Blockers = append(report.Blockers, "Pass mobile source validation before store submission can be prepared.")
+	}
+	return report
 }
 
 func StorePrivacyDataSafetyMarkdown(spec MobileAppSpec) string {
@@ -302,4 +392,31 @@ func appendMarkdownList(lines []string, values []string) []string {
 		lines = append(lines, "- "+value)
 	}
 	return lines
+}
+
+func findStoreReadinessFile(files []models.File) (models.File, bool) {
+	for _, file := range files {
+		if normalizeProjectFilePath(file.Path) == StoreReadinessPackagePath {
+			return file, true
+		}
+	}
+	return models.File{}, false
+}
+
+func findStoreReadinessCategory(scorecard MobileReadinessScorecard) MobileReadinessCategory {
+	for _, category := range scorecard.Categories {
+		if category.ID == "store_readiness" {
+			return category
+		}
+	}
+	return MobileReadinessCategory{ID: "store_readiness", Label: "Store-readiness package", Target: 95, Status: MobileReadinessBlocked}
+}
+
+func firstNonZeroInt(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }

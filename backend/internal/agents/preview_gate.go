@@ -937,13 +937,19 @@ func previewHintsContainNoVisibleControls(hints []string) bool {
 }
 
 func buildPreviewRepairTaskInput(build *Build, result *PreviewVerificationResult, hints []string) map[string]any {
+	if result == nil {
+		return map[string]any{
+			"repair_hints": hints,
+			"action":       "fix_preview_verification",
+		}
+	}
 	input := map[string]any{
 		"failure_kind":    result.FailureKind,
 		"failure_details": result.Details,
 		"repair_hints":    hints,
 		"action":          "fix_preview_verification",
 	}
-	if result != nil && result.ScreenshotBase64 != "" && previewHintsContainVisionAdvice(hints) {
+	if result.ScreenshotBase64 != "" && previewHintsContainVisionAdvice(hints) {
 		input["screenshot_base64"] = result.ScreenshotBase64
 	}
 	// Inject repair memory so the agent can learn from previous repair strategies

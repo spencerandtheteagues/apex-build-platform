@@ -1,30 +1,69 @@
 # Contracts
 
+## Mobile API Contract Generated Backend
+- Source of truth: `MobileAppSpec.APIContracts` normalized by `backend/internal/mobile/api_contract_manifest.go` endpoint descriptors.
+- Producers:
+  - `APIContractManifestJSON` writes `mobile/docs/api-contract.json`.
+  - `apiClientTS` and `apiEndpointsTS` write Expo request/error handling and endpoint helpers in `mobile/src/api/client.ts` and `mobile/src/api/endpoints.ts`.
+  - New generated backend route source must use the same descriptors.
+  - `PrepareExpoProjectFiles` writes generated project files for export without overwriting existing project files.
+- Transport:
+  - Generated source files are stored as project `models.File` rows and exported through existing ZIP/GitHub flows.
+  - Native EAS build materialization continues to read only stored `mobile/` paths.
+- Consumers:
+  - Generated Expo app calls `/api/...` endpoints using `EXPO_PUBLIC_API_BASE_URL`.
+  - Exported monorepo consumers can run the generated backend starter independently for local mobile testing.
+  - Mobile validation reads only mobile package files and manifest; backend starter validation remains test-backed generator coverage in this slice.
+- Defaults / zero-value behavior:
+  - Mobile-only/local-only specs do not require backend route source.
+  - Full-stack backend modes generate a runnable starter backend with demo data, typed route intent, JSON error shapes, generic JSON mutation/read/delete behavior, multipart upload compatibility, and explicit auth/persistence/upload adapter seams.
+  - Generated Expo API clients preserve backend `code` values on `ApiError` for screen-level recovery logic.
+  - Existing project files are not overwritten by export preparation.
+  - Paths outside `mobile/`, `backend/`, and `docs/` remain rejected for generated mobile project export preparation.
+- Backward compatibility risk:
+  - Medium-low; generated export files are additive, but export path normalization must not allow unsafe or unrelated paths.
+- Required tests / validations:
+  - `cd backend && go test ./internal/mobile -run 'TestGenerateExpoProjectCreatesContractDrivenBackendRoutes|TestPrepareExpoProjectFilesPersistsMobileAndBackendContractFiles|TestNormalizeGeneratedMobileProjectPath' -count=1`
+  - `cd backend && MOBILE_BACKEND_HTTP_SMOKE=1 go test ./internal/mobile -run TestGeneratedMobileBackendHTTPSmoke -count=1`
+  - `cd backend && go test ./internal/mobile -count=1`
+  - `cd backend && go test ./internal/api -run 'TestDownloadProjectPreparesMobile' -count=1`
+  - `git diff --check`
+
 ## Mobile Build Job API
 - Source of truth: `backend/internal/mobile/build_service.go`, `backend/internal/mobile/build_store.go`, `backend/internal/api/mobile_builds.go`, route registration in `backend/cmd/main.go`, and frontend types in `frontend/src/services/api.ts`.
 - Producers:
   - Project owners call `POST /api/v1/projects/:id/mobile/builds` with platform/profile/release-level build intent.
-  - The API validates feature flags, platform enablement, project mobile-platform ownership, credential completeness, and then materializes stored project `mobile/` files into a temporary absolute source directory.
+  - The API validates feature flags, platform enablement, project mobile-platform ownership, plan entitlement/quota, credential completeness, and then materializes stored project `mobile/` files into a temporary absolute source directory.
+  - `requireMobileBuildEntitlement` gates native build attempts before credential/provider work: Free is source/export only, Builder can request Android native builds, Pro can request Android and iOS native builds, and Team/Enterprise/Owner bypass the small monthly attempt caps.
   - `MobileBuildService` validates feature flags, platform enablement, binary release level, provider source requirements, provider availability, and provider results.
   - `EASBuildProvider` resolves a project-scoped EAS token from `MobileCredentialVault` and invokes `eas build --non-interactive --no-wait --json` only when configured behind feature flags.
   - `MobileBuildService.RefreshBuild` and `EASBuildProvider.RefreshBuild` refresh an existing job from `eas build:view --json` by provider build ID.
   - `MobileBuildService.CancelBuild` and `EASBuildProvider.CancelBuild` cancel a non-terminal provider build through `eas build:cancel`.
   - `MobileBuildService.RetryBuild` creates a new provider job from a failed/canceled/repair-pending build after the API revalidates credentials, platform eligibility, and materialized source.
+  - `RetryProjectMobileBuild` runs source pre-retry validation for source-caused failures before calling the provider again.
+  - `BuildMobileBuildRepairPlan` derives deterministic, non-mutating repair guidance from build status and failure type.
+  - `RepairProjectMobileBuild` performs conservative, non-AI repair checks for failed/repair-pending builds: backfill missing generated Expo files without overwriting stored source, validate source-caused failures, verify required repair credentials, and mark the job `repaired_retry_pending` only when retry preconditions pass.
   - `MobileBuildPoller` refreshes active provider-backed jobs in the background only when `MOBILE_EAS_POLLING_ENABLED=true`.
   - `GormMobileBuildStore` persists restart-safe `mobile_build_jobs` rows and redacted logs/failure messages.
-  - `ApplyMobileBuildJobToProject` updates project mobile summary fields and artifact metadata after job creation, explicit refresh, cancel, and background poll results.
+  - `ApplyMobileBuildJobToProject` updates project mobile summary fields, repair summary fields, and artifact metadata after job creation, explicit refresh, cancel, and background poll results.
 - Transport:
   - `GET /api/v1/projects/:id/mobile/builds` returns `{ builds }`.
   - `POST /api/v1/projects/:id/mobile/builds` returns `{ build, credentials }` on success.
+  - Failed build responses include `build.repair_plan` when the status/failure type is repairable or needs review.
   - `GET /api/v1/projects/:id/mobile/builds/:buildId` returns `{ build }`.
   - `POST /api/v1/projects/:id/mobile/builds/:buildId/refresh` returns `{ build }` after provider refresh.
   - `POST /api/v1/projects/:id/mobile/builds/:buildId/cancel` returns `{ build }` after provider cancellation.
+  - `POST /api/v1/projects/:id/mobile/builds/:buildId/repair` returns `{ build, credentials }` after conservative repair checks mark the job retry-ready.
   - `POST /api/v1/projects/:id/mobile/builds/:buildId/retry` returns `{ build, credentials, retried_from }` after queueing a new build attempt.
+  - Repair checks blocked by missing credentials return `409 MOBILE_REPAIR_CREDENTIALS_REQUIRED` with `{ build, credentials }`.
+  - Repair checks blocked by current source validation return `409 MOBILE_REPAIR_SOURCE_VALIDATION_FAILED` with `{ build, validation }`.
+  - Source-failure retries with failing validation return `409 MOBILE_BUILD_PRE_RETRY_VALIDATION_FAILED` with `{ build, validation }`.
+  - Plan blocks return `402 MOBILE_BUILD_PLAN_REQUIRED`; monthly attempt caps return `429 MOBILE_BUILD_QUOTA_EXCEEDED`.
   - `GET /api/v1/projects/:id/mobile/builds/:buildId/logs` returns `{ build_id, logs }`.
   - `GET /api/v1/projects/:id/mobile/builds/:buildId/artifacts` returns artifact metadata only when an artifact URL exists.
 - Consumers:
-  - `frontend/src/services/api.ts` exposes typed mobile build-job methods.
-  - `frontend/src/components/project/MobileBuildOperationsPanel.tsx` lists mobile jobs, starts gated native builds, refreshes/cancels/retries jobs, and opens artifact URLs.
+  - `frontend/src/services/api.ts` exposes typed mobile build-job, repair-plan, repair-check, and submission methods.
+  - `frontend/src/components/project/MobileBuildOperationsPanel.tsx` lists mobile jobs, starts gated native builds, refreshes/cancels/repair-checks/retries jobs, opens artifact URLs, and renders repair-plan actions.
   - `Project.MobileBuildStatus` and `Project.MobileMetadata` feed the mobile readiness scorecard's native artifact category.
   - `ProjectDashboard` renders the build operations panel only for mobile projects.
 - Defaults / zero-value behavior:
@@ -32,13 +71,19 @@
   - Feature flags still default off; disabled native builds return `503 MOBILE_BUILD_DISABLED`.
   - Public HTTP requests do not accept/trust `source_path`; source is always materialized from project-owned stored files before provider validation.
   - Build credentials must be complete before provider invocation; EAS build queueing currently requires the project-scoped EAS token and missing build credentials return `409 MOBILE_CREDENTIALS_REQUIRED`.
+  - Entitlement checks run before credential checks and provider execution so free/unsupported plans cannot burn provider time or leak setup requirements that do not apply to their plan.
+  - Monthly native build attempt caps currently count `mobile_build_jobs.created_at` for the authenticated user from the start of the UTC month.
   - Store-readiness credential status is broader and still tracks Apple/App Store Connect and Google Play credentials separately from EAS queueing.
   - Startup wires `EASBuildProvider` only when `MOBILE_EAS_BUILD_ENABLED=true`; otherwise provider execution fails closed with `503 MOBILE_BUILD_PROVIDER_MISSING`.
   - `EAS_CLI_PATH` defaults to `eas`; `MOBILE_EAS_BUILD_TIMEOUT` defaults to `30m`.
   - EAS builds are queued with `--no-wait`; explicit owner-scoped refresh and cancel actions are available.
   - Retry is allowed only for `failed`, `canceled`, `repair_pending`, and `repaired_retry_pending` jobs. Active/succeeded jobs return `400 INVALID_MOBILE_BUILD_REQUEST`.
   - Background EAS status polling is separately gated by `MOBILE_EAS_POLLING_ENABLED`, defaults off, uses `MOBILE_EAS_POLL_INTERVAL` default `1m`, `MOBILE_EAS_POLL_MIN_AGE` default `30s`, and `MOBILE_EAS_POLL_BATCH_SIZE` default `10`.
-  - Automated repair and store submission remain separate future contracts.
+  - Repair plans are deterministic guidance; the repair endpoint is intentionally conservative and does not call an AI repair worker or mutate user-edited source.
+  - Source-caused repair checks may backfill missing generated files with non-overwrite export prep, but existing invalid stored source remains blocking evidence.
+  - Store submission remains a separate submission-job contract and cannot be inferred from native build success.
+  - Source pre-retry validation blocks only source-caused failure categories; credential/signing failures can retry after credential checks without being blocked by stale source validation.
+  - `PrepareExpoProjectFiles` may backfill missing generated files before pre-retry validation, but existing invalid stored source is not overwritten and will block source-failure retries.
   - Provider refresh transport failures append a redacted error log but do not mark the native build itself failed.
   - Logs and failure messages are redacted before persistence and responses.
 - Backward compatibility risk:
@@ -47,11 +92,117 @@
 - Required tests / validations:
   - `cd backend && go test ./internal/mobile -run 'TestGormMobileBuildStore|TestMobileBuildService' -count=1`
   - `cd backend && go test ./internal/api -run 'TestCreateProjectMobileBuild|TestGetProjectMobile|TestDownloadProjectPreparesMobile' -count=1`
-  - `cd frontend && npm run test -- --run src/services/api.test.ts`
+  - `cd frontend && npm run test -- --run src/services/api.test.ts src/components/project/ProjectDashboard.mobile-export.test.tsx`
   - `cd frontend && npm run typecheck`
   - `cd backend && go test ./internal/mobile ./internal/api -count=1`
   - `cd backend && go test ./... -run '^$'`
   - `git diff --check`
+
+## Mobile Submission Job API
+- Source of truth: `backend/internal/mobile/submission_service.go`, `backend/internal/mobile/eas_provider.go`, `backend/internal/api/mobile_submissions.go`, route registration in `backend/cmd/main.go`, and frontend types in `frontend/src/services/api.ts`.
+- Producers:
+  - Project owners call `POST /api/v1/projects/:id/mobile/builds/:buildId/submit` for a succeeded native build artifact.
+  - `SubmitProjectMobileBuild` validates project ownership, `target_platform=mobile_expo`, succeeded build status, Pro-or-higher store-upload entitlement/quota, submission service availability, complete mobile store credentials, valid store-readiness package, and artifact/provider build reference before queueing an upload job.
+  - `requireMobileSubmissionEntitlement` gates upload/submission attempts before credential/provider work: Free/Builder are blocked, Pro has a small monthly submission quota, Team has a larger monthly quota, and Enterprise/Owner are uncapped.
+  - `existingActiveMobileSubmissionForBuild` blocks duplicate non-failed submission jobs for the same native build before another EAS Submit call can run.
+  - `MobileSubmissionService.CreateSubmission` validates `MOBILE_BUILDER_ENABLED`, `MOBILE_EXPO_ENABLED`, `MOBILE_EAS_SUBMIT_ENABLED`, per-platform flags, provider availability, and provider result status.
+  - `EASBuildProvider.SubmitBuild` invokes `eas submit --platform <platform> --profile production --non-interactive --no-wait --id <providerBuildID>` or `--url <artifactURL>` behind the provider seam and redacts logs/errors.
+  - `GormMobileSubmissionStore` persists restart-safe `mobile_submission_jobs` rows and redacted failure/log data.
+  - `persistMobileSubmissionProjectSummary` records the latest submission summary into `Project.MobileMetadata` and updates `MobileStoreReadinessStatus` to upload/submission pipeline states without claiming review approval.
+- Transport:
+  - `GET /api/v1/projects/:id/mobile/submissions` returns `{ submissions }`.
+  - `GET /api/v1/projects/:id/mobile/submissions/:submissionId` returns `{ submission }`.
+  - `POST /api/v1/projects/:id/mobile/builds/:buildId/submit` returns `{ submission, credentials, store_readiness }` on accepted upload.
+  - Missing credentials return `409 MOBILE_SUBMISSION_CREDENTIALS_REQUIRED` with safe credential metadata.
+  - Missing/invalid store-readiness package returns `409 MOBILE_STORE_READINESS_REQUIRED` with typed store-readiness evidence.
+  - Duplicate active upload jobs return `409 MOBILE_SUBMISSION_ALREADY_EXISTS` with the existing submission job.
+  - Plan blocks return `402 MOBILE_SUBMISSION_PLAN_REQUIRED`; monthly upload caps return `429 MOBILE_SUBMISSION_QUOTA_EXCEEDED`.
+  - Disabled flags or provider absence fail closed with service-unavailable codes; provider failures return `502 MOBILE_SUBMISSION_PROVIDER_FAILED` with redacted submission data when persisted.
+- Consumers:
+  - `frontend/src/services/api.ts` exposes `listProjectMobileSubmissions` and `submitProjectMobileBuild`.
+  - `frontend/src/components/project/MobileBuildOperationsPanel.tsx` loads submission jobs, shows upload counts, and renders a `Submit upload` control only for succeeded builds with an artifact or provider build ID.
+  - Existing non-failed submission jobs render as upload status cards and replace the submit action with a disabled `Upload requested` control.
+  - `Project.MobileMetadata` and `Project.MobileStoreReadinessStatus` carry latest submission evidence for future dashboards/scorecards.
+- Defaults / zero-value behavior:
+  - `MOBILE_EAS_SUBMIT_ENABLED` defaults off, so store upload cannot run accidentally.
+  - Submission status is separate from native build status, store-readiness metadata, TestFlight/App Store/Google Play processing, manual review submission, and final approval.
+  - `Track` defaults are provider/profile owned; generated `eas.json` submit profiles remain the source for store-track details.
+  - EAS Submit upload is treated as an upload/store-pipeline handoff, not listing metadata automation or store approval.
+  - Entitlement checks run before duplicate-upload, credential, store-readiness, and provider checks so blocked plans do not start store-upload work.
+  - Monthly submission caps currently count `mobile_submission_jobs.created_at` for the authenticated user from the start of the UTC month.
+  - Duplicate upload protection ignores failed submissions so an owner can retry upload after an actual failed submission job.
+  - Logs and provider errors are redacted before persistence and frontend responses.
+- Backward compatibility risk:
+  - Medium-low; routes and migration model are additive and feature-flagged fail-closed.
+  - Frontend calls are mobile-project only and legacy web dashboards do not invoke mobile submission APIs.
+- Required tests / validations:
+  - `cd backend && go test ./internal/mobile -run 'TestMobileSubmissionService|TestEASBuildProviderSubmit' -count=1`
+  - `cd backend && go test ./internal/api -run 'TestSubmitProjectMobileBuild' -count=1`
+  - `cd frontend && npm run test -- --run src/services/api.test.ts src/components/project/ProjectDashboard.mobile-export.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `cd backend && go test ./internal/mobile ./internal/api ./internal/handlers -count=1`
+  - `cd backend && go build ./...`
+  - `git diff --check`
+
+## Ollama Credit-Saver Live Testing Profile
+- Source of truth: `backend/internal/ai/provider_emulation.go`, `backend/internal/ai/types.go`, `backend/internal/ai/ollama.go`, `backend/internal/agents/ai_adapter.go`, `scripts/ollama-credit-saver-env.sh`, and live matrix scripts.
+- Producers:
+  - Operators enable `APEX_AI_TESTING_PROFILE=ollama-credit-saver` or source `scripts/ollama-credit-saver-env.sh`.
+  - One Ollama-compatible endpoint (`OLLAMA_URL`, `OLLAMA_HOST`, or `OLLAMA_BASE_URL`) can emulate provider slots for Kimi, Qwen, GLM, and DeepSeek.
+  - `DefaultRouterConfig` switches live testing defaults toward Kimi orchestration, Qwen code generation, GLM testing, and DeepSeek review/debugging when the profile is enabled.
+  - `run_live_golden_build.mjs`, `run_live_golden_canary_matrix.sh`, and `run_live_prompt_matrix.sh` pass model overrides/profile settings into live build starts.
+- Transport:
+  - Environment variables:
+    - `KIMI_OLLAMA_MODEL` defaults to `kimi-k2.6`.
+    - `QWEN_OLLAMA_MODEL` defaults to `qwen3:latest`.
+    - `GLM_OLLAMA_MODEL` defaults to `glm-5.1`.
+    - `DEEPSEEK_OLLAMA_MODEL` defaults to `deepseek-v4-pro`.
+  - Provider slot emulation maps:
+    - Claude slot -> Kimi orchestrator model.
+    - GPT4/OpenAI slot -> Qwen latest/coder model.
+    - Gemini/GLM slot -> GLM 5.1 model.
+    - Grok/DeepSeek slot -> DeepSeek V4 Pro model.
+- Consumers:
+  - Live/golden canary scripts and AI-backed matrix tests.
+  - AI router provider selection and fallback chains.
+  - Agent model selection and provider-model override normalization.
+- Defaults / zero-value behavior:
+  - Unit tests and non-AI tests are unaffected.
+  - The credit-saver profile is opt-in for the backend but defaulted by live matrix wrapper scripts unless `APEX_SKIP_OLLAMA_CREDIT_SAVER_SOURCE=1`.
+  - At least one available Ollama-backed slot can satisfy router fallback; four slots are attempted when available.
+  - Cloud managed-provider keys are not required for the profile, reducing managed API credit burn.
+- Backward compatibility risk:
+  - Medium-low; provider routing defaults change only under explicit testing profile env vars.
+  - Existing cloud-provider routing remains unchanged outside the profile.
+- Required tests / validations:
+  - `cd backend && go test ./internal/ai -run 'TestOllama|TestProvider|TestNewAIRouter|Test.*Cost|TestRouter' -count=1`
+  - `cd backend && go test ./internal/agents -run 'TestNormalizeModelForProviderRejectsCrossProviderModel|TestSelectBuildModelForProviderLocked_RespectsManagedOllamaOverride' -count=1`
+  - `bash -n scripts/ollama-credit-saver-env.sh scripts/run_live_golden_canary_matrix.sh scripts/run_live_prompt_matrix.sh`
+  - `APEX_SKIP_OLLAMA_CREDIT_SAVER_SOURCE=1 DRY_RUN=1 scripts/run_live_golden_canary_matrix.sh`
+  - `APEX_SKIP_OLLAMA_CREDIT_SAVER_SOURCE=1 DRY_RUN=1 scripts/run_live_prompt_matrix.sh`
+
+## Deterministic Review Repair Gate
+- Source of truth: `backend/internal/agents/manager.go`, especially `handleReviewCompletion`, `runDeterministicReviewRepairs`, manifest/dependency closure helpers, and generated import scanning.
+- Producers:
+  - Review tasks emit findings through `TaskOutput.Messages`.
+  - `reviewMessageIndicatesCriticalIssue` treats affirmative critical/security findings as blockers while ignoring negated wording such as `no critical` and `non-critical`.
+  - Before spawning a paid `fix_review_issues` task, `handleReviewCompletion` runs deterministic repair helpers for objective generated-source issues such as missing dependencies, runnable script gaps, malformed generated config, and dependency closure drift.
+  - `generatedImportSpecs` extracts normal `from "pkg"` imports, side-effect imports, `require(...)`, and dynamic imports so manifest repair sees the dependency surface reliably.
+- Transport:
+  - Deterministic repair success is broadcast as build progress with `deterministic_repair` evidence and does not append a `TaskFix` LLM repair task.
+  - If no deterministic repair lands, the existing `fix_review_issues` path remains active subject to loop caps and agent assignment checks.
+- Consumers:
+  - Build completion/final validation re-checks patched files after deterministic repair.
+  - Reliability tests assert that deterministic manifest dependency repair preempts paid review-fix loops.
+- Defaults / zero-value behavior:
+  - Clean reviews do not spawn repair tasks.
+  - Validation-recovery builds skip additional review-fix loops and let final deterministic validation remain authoritative.
+  - Assignment failures for actual test/review fix tasks still fail fast instead of leaving pending unassigned tasks.
+- Backward compatibility risk:
+  - Medium-low; it narrows paid repair spawning only when deterministic source repair makes concrete progress.
+- Required tests / validations:
+  - `cd backend && go test ./internal/agents -run 'TestHandle(Test|Review)Completion|TestSchedulePostFixValidation' -count=1`
+  - `cd backend && go test ./internal/agents -count=1`
 
 ## Mobile Credential Vault API
 - Source of truth: `backend/internal/mobile/credentials.go`, `backend/internal/handlers/secrets.go`, project mobile metadata in `backend/pkg/models/models.go`, and frontend API types in `frontend/src/services/api.ts`.
@@ -87,25 +238,31 @@
   - `cd backend && go test ./... -run '^$'`
   - `git diff --check`
 
-## Mobile Store Readiness Dashboard
-- Source of truth: generated source files from `backend/internal/mobile/store_readiness.go` and `backend/internal/mobile/generator.go`, validation evidence from `GET /api/v1/projects/:id/mobile/validation`, score evidence from `GET /api/v1/projects/:id/mobile/scorecard`, and frontend rendering in `frontend/src/components/project/MobileStoreReadinessPanel.tsx`.
+## Mobile Store Readiness Report API
+- Source of truth: generated source files from `backend/internal/mobile/store_readiness.go` and `backend/internal/mobile/generator.go`, typed report assembly in `backend/internal/mobile/store_readiness.go`, API transport in `backend/internal/api/mobile_store_readiness.go`, and frontend rendering in `frontend/src/components/project/MobileStoreReadinessPanel.tsx`.
 - Producers:
   - Mobile source/export generation writes `mobile/store/store-readiness.json`, `mobile/store/privacy-data-safety.md`, `mobile/store/screenshot-checklist.md`, and `mobile/store/release-notes.md`.
   - `ValidateProjectSourcePackage` validates `store-readiness.json`, sets `MobileValidationReport.store_readiness_state`, and emits the `store_readiness` validation check.
   - `BuildMobileReadinessScorecard` emits the `store_readiness` category and blockers from generated source/validation/project state.
+  - `GetProjectMobileStoreReadiness` prepares missing generated Expo files, fetches mobile/store docs, validates source, builds a scorecard, and returns a typed `MobileStoreReadinessReport`.
 - Transport:
-  - No new HTTP endpoint in this slice.
-  - `ProjectDashboard` already consumes mobile validation and scorecard endpoints, and passes current workspace `files` into the read-only store-readiness panel.
+  - `GET /api/v1/projects/:id/mobile/store-readiness` returns `{ store_readiness }`.
+  - The report includes `summary`, `status`, `score`, `target_score`, `ready_for_submission_workflow`, `package`, `files`, `blockers`, `warnings`, and `errors`.
+  - `ProjectDashboard` consumes mobile validation, scorecard, and store-readiness endpoints together for mobile projects.
 - Consumers:
-  - `MobileStoreReadinessPanel` parses `mobile/store/store-readiness.json` from current project files when present and falls back to validation/scorecard/project fields when not present.
+  - `frontend/src/services/api.ts` exposes `getProjectMobileStoreReadiness` and typed report/package structures.
+  - `MobileStoreReadinessPanel` prefers the typed backend report and falls back to parsing `mobile/store/store-readiness.json` from current project files when the endpoint is unavailable.
   - The panel links store-readiness artifacts to ZIP export through the existing project export action.
 - Defaults / zero-value behavior:
   - Missing or invalid `store-readiness.json` is shown as missing/needs fixes; it does not mutate `Project.MobileStoreReadinessStatus`.
   - The panel must keep store metadata, screenshots, privacy answers, EAS Submit/upload, App Store review, Google Play review, and final approval as separate states.
+  - `ready_for_submission_workflow` is true only when package evidence is valid, scorecard target is met, and project store-readiness status indicates the workflow has succeeded; it is not the same as store approval.
   - Browser/Expo Web screenshots are explicitly not treated as native store proof.
 - Backward compatibility risk:
-  - Low; this is a frontend-only read path over existing generated files and existing validation/scorecard contracts.
+  - Low; the endpoint is additive and frontend has a file-based fallback.
 - Required tests / validations:
+  - `cd backend && go test ./internal/mobile -run 'TestBuildMobileStoreReadinessReport|TestGenerateStoreReadinessPackage' -count=1`
+  - `cd backend && go test ./internal/api -run 'TestGetProjectMobileStoreReadinessReturnsTypedReport' -count=1`
   - `cd frontend && npm run test -- --run src/components/project/ProjectDashboard.mobile-export.test.tsx`
   - `cd frontend && npm run test -- --run src/services/api.test.ts src/components/project/ProjectDashboard.mobile-export.test.tsx`
   - `cd frontend && npm run typecheck`

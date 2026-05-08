@@ -313,9 +313,13 @@ const runtimeConfig = (Constants.expoConfig?.extra ?? {}) as RuntimeConfig;
 const API_BASE_URL = runtimeConfig.apiBaseUrl ?? '';
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number, public details?: unknown) {
+  constructor(message: string, public status: number, public details?: unknown, public code?: string) {
     super(message);
   }
+}
+
+export function isApiError(error: unknown): error is ApiError {
+  return error instanceof ApiError;
 }
 
 export function buildPath(path: string, params: Record<string, string | number> = {}) {
@@ -350,10 +354,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     } catch {
       details = payload;
     }
-    const message = typeof details === 'object' && details && 'error' in details
-      ? String((details as { error?: unknown }).error)
-      : 'Request failed with status ' + response.status;
-    throw new ApiError(message, response.status, details);
+    const message = extractAPIErrorMessage(details, response.status);
+    const code = extractAPIErrorCode(details);
+    throw new ApiError(message, response.status, details, code);
   }
   if (!payload) return undefined as T;
   try {
@@ -361,6 +364,27 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   } catch {
     return payload as T;
   }
+}
+
+function extractAPIErrorMessage(details: unknown, status: number) {
+  if (isRecord(details) && typeof details.error === 'string' && details.error.trim()) {
+    return details.error;
+  }
+  if (isRecord(details) && typeof details.message === 'string' && details.message.trim()) {
+    return details.message;
+  }
+  return 'Request failed with status ' + status;
+}
+
+function extractAPIErrorCode(details: unknown) {
+  if (isRecord(details) && typeof details.code === 'string' && details.code.trim()) {
+    return details.code;
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 `
 }

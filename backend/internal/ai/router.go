@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"apex-build/internal/pricing"
+
 	"github.com/google/uuid"
 )
 
@@ -35,6 +37,7 @@ type AIRouter struct {
 	clients      map[AIProvider]AIClient
 	config       *RouterConfig
 	rateLimits   map[AIProvider]*rateLimiter
+	sharedRates  providerRateLimitStore
 	mu           sync.RWMutex
 	healthCheck  map[AIProvider]bool
 	healthStatus map[AIProvider]string // "ok", "no_credits", "auth_error", "timeout", "error", "unknown"
@@ -160,6 +163,7 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 		clients:      clients,
 		config:       config,
 		rateLimits:   rateLimits,
+		sharedRates:  newProviderRateLimitStoreFromEnv(),
 		healthCheck:  make(map[AIProvider]bool),
 		healthStatus: make(map[AIProvider]string),
 	}
@@ -233,6 +237,10 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 				if fallbackClient, exists := r.clients[fallbackProvider]; exists {
 					log.Printf("Rate limited for %s, using fallback %s", provider, fallbackProvider)
 					fallbackReq := r.requestForProvider(primaryReq, fallbackProvider)
+					if allowed, estimatedCost, threshold := r.providerAllowedByCost(fallbackReq, fallbackProvider); !allowed {
+						log.Printf("Skipping fallback provider %s: estimated cost %.6f exceeds threshold %.6f", fallbackProvider, estimatedCost, threshold)
+						continue
+					}
 					return r.generateWithAttemptBudget(ctx, fallbackProvider, fallbackClient, fallbackReq, len(fallbacks))
 				}
 			}
@@ -289,6 +297,11 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 				if r.checkRateLimit(fallbackProvider) && r.isHealthyOrUnknown(fallbackProvider) {
 					log.Printf("Falling back to provider %s", fallbackProvider)
 					fallbackReq := r.requestForProvider(primaryReq, fallbackProvider)
+					if allowed, estimatedCost, threshold := r.providerAllowedByCost(fallbackReq, fallbackProvider); !allowed {
+						log.Printf("Skipping fallback provider %s: estimated cost %.6f exceeds threshold %.6f", fallbackProvider, estimatedCost, threshold)
+						failedProviders = append(failedProviders, fmt.Sprintf("%s: estimated cost %.6f exceeds threshold %.6f", fallbackProvider, estimatedCost, threshold))
+						continue
+					}
 					fallbackResponse, fallbackErr := r.generateWithAttemptBudget(ctx, fallbackProvider, fallbackClient, fallbackReq, len(fallbacks)-idx)
 					if fallbackErr == nil {
 						return fallbackResponse, nil
@@ -425,8 +438,10 @@ func (r *AIRouter) generateWithAttemptBudget(
 		attemptsRemaining = 1
 	}
 
-	attemptCtx := ctx
-	cancel := func() {}
+	var (
+		attemptCtx = ctx
+		cancel     context.CancelFunc
+	)
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
 		safetyMargin := providerAttemptSafetyMargin(remaining)
@@ -486,12 +501,22 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 				knownBad = status == "no_credits" || status == "auth_error"
 			}
 			if !knownBad {
-				return requested, nil
+				if allowed, estimatedCost, threshold := r.providerAllowedByCost(req, requested); allowed {
+					return requested, nil
+				} else if req.DisableFallback {
+					return "", fmt.Errorf("estimated cost %.6f exceeds threshold %.6f for provider %s", estimatedCost, threshold, requested)
+				} else {
+					log.Printf("Provider %s estimated cost %.6f exceeds threshold %.6f; trying fallback", requested, estimatedCost, threshold)
+				}
 			}
 		}
 		if fallbacks, ok := r.config.FallbackOrder[requested]; ok {
 			for _, provider := range fallbacks {
 				if r.isAvailable(provider) && r.isHealthyOrUnknown(provider) {
+					if allowed, estimatedCost, threshold := r.providerAllowedByCost(req, provider); !allowed {
+						log.Printf("Skipping provider %s during explicit fallback: estimated cost %.6f exceeds threshold %.6f", provider, estimatedCost, threshold)
+						continue
+					}
 					return provider, nil
 				}
 			}
@@ -499,41 +524,87 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 		// Requested provider is definitively unhealthy and no fallback worked —
 		// let load balancing pick a healthy alternative rather than forcing a
 		// provider that will immediately fail.
-		return r.selectByLoadBalancing()
+		return r.selectByLoadBalancing(req)
 	}
 
 	// Start with the default provider for this capability
 	defaultProvider, exists := r.config.DefaultProviders[req.Capability]
 	if !exists {
 		// If no default, use load balancing
-		return r.selectByLoadBalancing()
+		return r.selectByLoadBalancing(req)
 	}
 
-	// Check if default provider is healthy and available
+	// Check if default provider is healthy, available, and within cost limits.
 	if r.isHealthyOrUnknown(defaultProvider) && r.isAvailable(defaultProvider) {
-		return defaultProvider, nil
+		if allowed, estimatedCost, threshold := r.providerAllowedByCost(req, defaultProvider); allowed {
+			return defaultProvider, nil
+		} else {
+			log.Printf("Default provider %s estimated cost %.6f exceeds threshold %.6f; trying fallback", defaultProvider, estimatedCost, threshold)
+		}
 	}
 
-	// If default provider is not available, try fallbacks
+	// If default provider is not available or is over threshold, try fallbacks.
 	fallbacks := r.config.FallbackOrder[defaultProvider]
 	for _, provider := range fallbacks {
 		if r.isHealthyOrUnknown(provider) && r.isAvailable(provider) {
+			if allowed, estimatedCost, threshold := r.providerAllowedByCost(req, provider); !allowed {
+				log.Printf("Skipping provider %s during fallback selection: estimated cost %.6f exceeds threshold %.6f", provider, estimatedCost, threshold)
+				continue
+			}
 			return provider, nil
 		}
 	}
 
 	// If no fallbacks work, use load balancing among healthy providers
-	return r.selectByLoadBalancing()
+	return r.selectByLoadBalancing(req)
+}
+
+func (r *AIRouter) providerAllowedByCost(req *AIRequest, provider AIProvider) (bool, float64, float64) {
+	threshold := r.costThresholdForProvider(req, provider)
+	if threshold <= 0 {
+		return true, 0, 0
+	}
+	estimatedCost := estimateRequestCostForProvider(req, provider)
+	return estimatedCost <= threshold, estimatedCost, threshold
+}
+
+func (r *AIRouter) costThresholdForProvider(req *AIRequest, provider AIProvider) float64 {
+	var threshold float64
+	if r != nil && r.config != nil && r.config.CostThresholds != nil {
+		threshold = r.config.CostThresholds[provider]
+	}
+	if req != nil && req.MaxCost > 0 && (threshold <= 0 || req.MaxCost < threshold) {
+		threshold = req.MaxCost
+	}
+	return threshold
+}
+
+func estimateRequestCostForProvider(req *AIRequest, provider AIProvider) float64 {
+	if req == nil || provider == ProviderOllama {
+		return 0
+	}
+
+	engine := pricing.Get()
+	model := strings.TrimSpace(req.Model)
+	if model == "" || (req.Provider != "" && req.Provider != provider) {
+		model = engine.DefaultModel(string(provider), req.PowerMode)
+	}
+	promptChars := len(req.Prompt) + len(req.Code)
+	return engine.EstimateCost(string(provider), model, promptChars, req.MaxTokens, req.PowerMode, false)
 }
 
 // selectByLoadBalancing selects provider based on load balancing weights
-func (r *AIRouter) selectByLoadBalancing() (AIProvider, error) {
+func (r *AIRouter) selectByLoadBalancing(req *AIRequest) (AIProvider, error) {
 	healthyProviders := []AIProvider{}
 	totalWeight := 0.0
 
 	// Collect healthy providers and their weights
 	for provider, weight := range r.config.LoadBalancing {
 		if r.isHealthyOrUnknown(provider) && r.isAvailable(provider) {
+			if allowed, estimatedCost, threshold := r.providerAllowedByCost(req, provider); !allowed {
+				log.Printf("Skipping load-balanced provider %s: estimated cost %.6f exceeds threshold %.6f", provider, estimatedCost, threshold)
+				continue
+			}
 			healthyProviders = append(healthyProviders, provider)
 			totalWeight += weight
 		}
@@ -560,6 +631,20 @@ func (r *AIRouter) selectByLoadBalancing() (AIProvider, error) {
 
 // checkRateLimit checks if a provider is within rate limits
 func (r *AIRouter) checkRateLimit(provider AIProvider) bool {
+	configuredLimit := 0
+	if r != nil && r.config != nil && r.config.RateLimits != nil {
+		configuredLimit = r.config.RateLimits[provider]
+	}
+	if configuredLimit > 0 && r.sharedRates != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		allowed, err := r.sharedRates.Allow(ctx, provider, configuredLimit, time.Minute)
+		cancel()
+		if err == nil {
+			return allowed
+		}
+		log.Printf("WARNING: provider shared rate limit check failed for %s, using local limiter: %v", provider, err)
+	}
+
 	limiter, exists := r.rateLimits[provider]
 	if !exists {
 		return true

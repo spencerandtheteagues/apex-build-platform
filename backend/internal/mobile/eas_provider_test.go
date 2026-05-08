@@ -283,6 +283,71 @@ func TestEASBuildProviderCancelRedactsRunnerFailures(t *testing.T) {
 	}
 }
 
+func TestEASBuildProviderSubmitsBuildByProviderID(t *testing.T) {
+	resolver := &fakeMobileCredentialResolver{values: map[string]string{"token": "secret-eas-token"}}
+	runner := &fakeEASCommandRunner{
+		output: `{"id":"eas-submit-123","status":"submitted"}`,
+	}
+	provider := NewEASBuildProvider(EASBuildProviderConfig{
+		CLIPath:     "/usr/local/bin/eas",
+		Credentials: resolver,
+		Runner:      runner,
+	})
+
+	result, err := provider.SubmitBuild(context.Background(), MobileSubmissionRequest{
+		ProjectID:       71,
+		UserID:          9,
+		BuildID:         "mbld_submit",
+		Platform:        MobilePlatformAndroid,
+		ProviderBuildID: "eas-build-123",
+	})
+	if err != nil {
+		t.Fatalf("expected submit result, got %v", err)
+	}
+	for _, arg := range []string{"submit", "--platform", "android", "--profile", "production", "--id", "eas-build-123", "--non-interactive", "--no-wait"} {
+		if !slices.Contains(runner.lastCommand.Args, arg) {
+			t.Fatalf("expected submit args to include %q, got %+v", arg, runner.lastCommand.Args)
+		}
+	}
+	if !slices.Contains(runner.lastCommand.Env, "EXPO_TOKEN=secret-eas-token") || !slices.Contains(runner.lastCommand.Env, "EAS_TOKEN=secret-eas-token") {
+		t.Fatalf("expected submit token env vars, got %+v", runner.lastCommand.Env)
+	}
+	if result.ProviderSubmissionID != "eas-submit-123" || result.Status != MobileSubmissionSubmittedToStorePipeline {
+		t.Fatalf("unexpected submit result %+v", result)
+	}
+	for _, line := range result.Logs {
+		if strings.Contains(line.Message, "secret-eas-token") {
+			t.Fatalf("submit result leaked token in logs: %+v", result.Logs)
+		}
+	}
+}
+
+func TestEASBuildProviderSubmitRedactsRunnerFailures(t *testing.T) {
+	resolver := &fakeMobileCredentialResolver{values: map[string]string{"token": "secret-eas-token"}}
+	runner := &fakeEASCommandRunner{
+		output: "submit failed with EXPO_TOKEN=secret-eas-token",
+		err:    errors.New("provider rejected EAS_TOKEN=secret-eas-token"),
+	}
+	provider := NewEASBuildProvider(EASBuildProviderConfig{
+		Credentials: resolver,
+		Runner:      runner,
+	})
+
+	_, err := provider.SubmitBuild(context.Background(), MobileSubmissionRequest{
+		ProjectID:       71,
+		UserID:          9,
+		BuildID:         "mbld_submit",
+		Platform:        MobilePlatformIOS,
+		ProviderBuildID: "eas-build-123",
+	})
+	if !errors.Is(err, ErrMobileBuildProviderFailed) {
+		t.Fatalf("expected provider failure, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-eas-token") {
+		t.Fatalf("expected redacted submit error, got %v", err)
+	}
+}
+
 func newEASProviderSourceDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

@@ -1,3 +1,6 @@
+//go:build legacybilling
+// +build legacybilling
+
 package billing
 
 import (
@@ -21,25 +24,25 @@ const (
 type UsageType string
 
 const (
-	UsageAIRequests   UsageType = "ai_requests"
-	UsageCodeGen      UsageType = "code_generation"
+	UsageAIRequests    UsageType = "ai_requests"
+	UsageCodeGen       UsageType = "code_generation"
 	UsageCollaborators UsageType = "collaborators"
-	UsageProjects     UsageType = "projects"
-	UsageStorage      UsageType = "storage_gb"
-	UsageExecutions   UsageType = "code_executions"
+	UsageProjects      UsageType = "projects"
+	UsageStorage       UsageType = "storage_gb"
+	UsageExecutions    UsageType = "code_executions"
 )
 
 // Plan represents a subscription plan
 type Plan struct {
-	Type           PlanType           `json:"type"`
-	Name           string             `json:"name"`
-	Description    string             `json:"description"`
-	MonthlyPrice   int64              `json:"monthly_price"` // in cents
-	AnnualPrice    int64              `json:"annual_price"`  // in cents
-	StripePriceID  string             `json:"stripe_price_id"`
-	Limits         map[UsageType]int  `json:"limits"`
-	Features       []string           `json:"features"`
-	PopularPlan    bool               `json:"popular_plan"`
+	Type          PlanType          `json:"type"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description"`
+	MonthlyPrice  int64             `json:"monthly_price"` // in cents
+	AnnualPrice   int64             `json:"annual_price"`  // in cents
+	StripePriceID string            `json:"stripe_price_id"`
+	Limits        map[UsageType]int `json:"limits"`
+	Features      []string          `json:"features"`
+	PopularPlan   bool              `json:"popular_plan"`
 }
 
 // GetPlans returns all available subscription plans
@@ -52,12 +55,12 @@ func GetPlans() []Plan {
 			MonthlyPrice: 0,
 			AnnualPrice:  0,
 			Limits: map[UsageType]int{
-				UsageAIRequests:   100,
-				UsageCodeGen:      20,
+				UsageAIRequests:    100,
+				UsageCodeGen:       20,
 				UsageCollaborators: 1,
-				UsageProjects:     3,
-				UsageStorage:      1,
-				UsageExecutions:   50,
+				UsageProjects:      3,
+				UsageStorage:       1,
+				UsageExecutions:    50,
 			},
 			Features: []string{
 				"3 Projects",
@@ -72,17 +75,17 @@ func GetPlans() []Plan {
 			Type:          PlanPro,
 			Name:          "Pro",
 			Description:   "For individual developers",
-			MonthlyPrice:  1900, // $19.00
-			AnnualPrice:   19000, // $190.00 (2 months free)
+			MonthlyPrice:  1900,               // $19.00
+			AnnualPrice:   19000,              // $190.00 (2 months free)
 			StripePriceID: "price_1234567890", // Set in Stripe
 			PopularPlan:   true,
 			Limits: map[UsageType]int{
-				UsageAIRequests:   2000,
-				UsageCodeGen:      500,
+				UsageAIRequests:    2000,
+				UsageCodeGen:       500,
 				UsageCollaborators: 3,
-				UsageProjects:     25,
-				UsageStorage:      10,
-				UsageExecutions:   1000,
+				UsageProjects:      25,
+				UsageStorage:       10,
+				UsageExecutions:    1000,
 			},
 			Features: []string{
 				"25 Projects",
@@ -100,15 +103,15 @@ func GetPlans() []Plan {
 			Type:         PlanTeam,
 			Name:         "Team",
 			Description:  "For small development teams",
-			MonthlyPrice: 4900, // $49.00
+			MonthlyPrice: 4900,  // $49.00
 			AnnualPrice:  49000, // $490.00 (2 months free)
 			Limits: map[UsageType]int{
-				UsageAIRequests:   10000,
-				UsageCodeGen:      2000,
+				UsageAIRequests:    10000,
+				UsageCodeGen:       2000,
 				UsageCollaborators: 15,
-				UsageProjects:     100,
-				UsageStorage:      100,
-				UsageExecutions:   5000,
+				UsageProjects:      100,
+				UsageStorage:       100,
+				UsageExecutions:    5000,
 			},
 			Features: []string{
 				"100 Projects",
@@ -127,15 +130,15 @@ func GetPlans() []Plan {
 			Type:         PlanEnterprise,
 			Name:         "Enterprise",
 			Description:  "For large organizations",
-			MonthlyPrice: 19900, // $199.00
+			MonthlyPrice: 19900,  // $199.00
 			AnnualPrice:  199000, // $1,990.00 (2 months free)
 			Limits: map[UsageType]int{
-				UsageAIRequests:   100000,
-				UsageCodeGen:      20000,
-				UsageCollaborators: -1, // Unlimited
-				UsageProjects:     -1,  // Unlimited
-				UsageStorage:      1000, // 1TB
-				UsageExecutions:   50000,
+				UsageAIRequests:    100000,
+				UsageCodeGen:       20000,
+				UsageCollaborators: -1,   // Unlimited
+				UsageProjects:      -1,   // Unlimited
+				UsageStorage:       1000, // 1TB
+				UsageExecutions:    50000,
 			},
 			Features: []string{
 				"Unlimited Projects",
@@ -261,10 +264,10 @@ func (s *SimpleBillingService) GetPricing() map[string]interface{} {
 	plans := GetPlans()
 
 	return map[string]interface{}{
-		"plans": plans,
-		"currency": "usd",
-		"tax_inclusive": false,
-		"trial_days": 14,
+		"plans":           plans,
+		"currency":        "usd",
+		"tax_inclusive":   false,
+		"trial_days":      14,
 		"billing_enabled": false, // Indicates this is the simple implementation
 	}
 }

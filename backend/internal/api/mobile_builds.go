@@ -64,6 +64,9 @@ func (s *Server) CreateProjectMobileBuild(c *gin.Context) {
 		s.writeMobileBuildError(c, fmt.Errorf("%w: platform %q is not enabled for this project", mobile.ErrMobileBuildInvalidRequest, req.Platform), nil)
 		return
 	}
+	if !requireMobileBuildEntitlement(c, s.db.DB, uid, req.Platform) {
+		return
+	}
 
 	credentials, err := mobile.NewMobileCredentialVault(s.db.DB, nil).BuildStatus(c.Request.Context(), uid, project, req.Platform, req.ReleaseLevel)
 	if err != nil {
@@ -198,6 +201,9 @@ func (s *Server) RetryProjectMobileBuild(c *gin.Context) {
 		s.writeMobileBuildError(c, fmt.Errorf("%w: platform %q is not enabled for this project", mobile.ErrMobileBuildInvalidRequest, job.Platform), &job)
 		return
 	}
+	if !requireMobileBuildEntitlement(c, s.db.DB, job.UserID, job.Platform) {
+		return
+	}
 
 	credentials, err := mobile.NewMobileCredentialVault(s.db.DB, nil).BuildStatus(c.Request.Context(), job.UserID, project, job.Platform, job.ReleaseLevel)
 	if err != nil {
@@ -222,6 +228,17 @@ func (s *Server) RetryProjectMobileBuild(c *gin.Context) {
 		defer materialized.Cleanup()
 	}
 
+	validation, err := s.validateMobileSourceBeforeRetry(c, project, job)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":      err.Error(),
+			"code":       "MOBILE_BUILD_PRE_RETRY_VALIDATION_FAILED",
+			"build":      mobile.AttachMobileBuildRepairPlan(job),
+			"validation": validation,
+		})
+		return
+	}
+
 	retry, err := s.mobile.RetryBuild(c.Request.Context(), job.ID, materialized.MobileDir)
 	if retry.ID != "" {
 		if persistErr := s.persistMobileBuildProjectSummary(c, project, retry); persistErr != nil && err == nil {
@@ -235,6 +252,80 @@ func (s *Server) RetryProjectMobileBuild(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"build": retry, "credentials": credentials, "retried_from": job.ID})
+}
+
+func (s *Server) RepairProjectMobileBuild(c *gin.Context) {
+	job, project, ok := s.requireProjectMobileBuildWithProject(c)
+	if !ok {
+		return
+	}
+	plan := mobile.BuildMobileBuildRepairPlan(job)
+	if plan == nil {
+		s.writeMobileBuildError(c, fmt.Errorf("%w: build status %q does not have a repair plan", mobile.ErrMobileBuildInvalidRequest, job.Status), &job)
+		return
+	}
+
+	vault := mobile.NewMobileCredentialVault(s.db.DB, nil)
+	credentials, err := vault.RepairStatus(c.Request.Context(), job.UserID, project, job)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify mobile repair credentials", "code": "MOBILE_REPAIR_CREDENTIAL_STATUS_FAILED"})
+		return
+	}
+	if plan.RequiresCredentialAction && !credentials.Complete {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "Required mobile repair credentials are missing",
+			"code":        "MOBILE_REPAIR_CREDENTIALS_REQUIRED",
+			"build":       mobile.AttachMobileBuildRepairPlan(job),
+			"credentials": credentials,
+			"repair_plan": plan,
+		})
+		return
+	}
+
+	var validation mobile.MobileValidationReport
+	if plan.RequiresSourceChange || mobile.MobileBuildFailureRequiresSourcePreRetryValidation(plan.FailureType) {
+		if err := mobile.PrepareExpoProjectFiles(c.Request.Context(), s.db.DB, project); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare mobile repair files", "code": "MOBILE_REPAIR_PREPARE_FAILED"})
+			return
+		}
+		files, err := s.fetchMobileReadinessFiles(c, project.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch mobile repair files", "code": "MOBILE_REPAIR_FILES_FAILED"})
+			return
+		}
+		validation = mobile.ValidateProjectSourcePackage(project, files)
+		if err := mobile.ValidateMobileBuildPreRetrySource(job, validation); err != nil {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":       err.Error(),
+				"code":        "MOBILE_REPAIR_SOURCE_VALIDATION_FAILED",
+				"build":       mobile.AttachMobileBuildRepairPlan(job),
+				"credentials": credentials,
+				"repair_plan": plan,
+				"validation":  validation,
+			})
+			return
+		}
+	}
+
+	repaired, err := s.mobile.MarkBuildRepaired(c.Request.Context(), job.ID, "Mobile build repair checks passed; retry is now available as a new provider attempt.")
+	if repaired.ID != "" {
+		if persistErr := s.persistMobileBuildProjectSummary(c, project, repaired); persistErr != nil && err == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist mobile build repair status", "code": "MOBILE_BUILD_STATUS_PERSIST_FAILED"})
+			return
+		}
+	}
+	if err != nil {
+		s.writeMobileBuildError(c, err, &repaired)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build":       repaired,
+		"credentials": credentials,
+		"repair_plan": mobile.BuildMobileBuildRepairPlan(repaired),
+		"repaired":    true,
+		"validation":  validation,
+	})
 }
 
 func (s *Server) GetProjectMobileBuildLogs(c *gin.Context) {
@@ -261,6 +352,20 @@ func (s *Server) GetProjectMobileBuildArtifacts(c *gin.Context) {
 		"profile":       job.Profile,
 		"release_level": job.ReleaseLevel,
 	})
+}
+
+func (s *Server) validateMobileSourceBeforeRetry(c *gin.Context, project models.Project, job mobile.MobileBuildJob) (mobile.MobileValidationReport, error) {
+	var files []models.File
+	if err := s.db.DB.WithContext(c.Request.Context()).
+		Where("project_id = ? AND type <> ? AND (path LIKE ? OR path LIKE ? OR path LIKE ? OR path = ?)", project.ID, "directory", "mobile/%", "/mobile/%", "backend/%", "docs/mobile-backend-routes.md").
+		Find(&files).Error; err != nil {
+		return mobile.MobileValidationReport{}, err
+	}
+	validation := mobile.ValidateProjectSourcePackage(project, files)
+	if err := mobile.ValidateMobileBuildPreRetrySource(job, validation); err != nil {
+		return validation, err
+	}
+	return validation, nil
 }
 
 func (s *Server) requireProjectMobileBuild(c *gin.Context) (mobile.MobileBuildJob, bool) {
@@ -345,6 +450,9 @@ func (s *Server) writeMobileBuildError(c *gin.Context, err error, job *mobile.Mo
 	case errors.Is(err, mobile.ErrMobileBuildProviderFailed):
 		status = http.StatusBadGateway
 		body["code"] = "MOBILE_BUILD_PROVIDER_FAILED"
+	case errors.Is(err, mobile.ErrMobileBuildPreRetryFailed):
+		status = http.StatusConflict
+		body["code"] = "MOBILE_BUILD_PRE_RETRY_VALIDATION_FAILED"
 	default:
 		body["code"] = "MOBILE_BUILD_FAILED"
 	}

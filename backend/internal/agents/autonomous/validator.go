@@ -630,11 +630,11 @@ func truncateOutput(s string, maxLen int) string {
 // ValidationResult contains the validation outcome
 type ValidationResult struct {
 	Valid       bool              `json:"valid"`
-	Score       int               `json:"score"`        // 0-100
-	Summary     string            `json:"summary"`      // Overall summary
-	Issues      []ValidationIssue `json:"issues"`       // Specific issues found
-	Suggestions []string          `json:"suggestions"`  // Improvement suggestions
-	Fixes       []SuggestedFix    `json:"fixes"`        // Specific fixes to apply
+	Score       int               `json:"score"`       // 0-100
+	Summary     string            `json:"summary"`     // Overall summary
+	Issues      []ValidationIssue `json:"issues"`      // Specific issues found
+	Suggestions []string          `json:"suggestions"` // Improvement suggestions
+	Fixes       []SuggestedFix    `json:"fixes"`       // Specific fixes to apply
 }
 
 // ValidationIssue represents a specific problem found
@@ -651,16 +651,16 @@ type ValidationIssue struct {
 type IssueType string
 
 const (
-	IssueSyntaxError      IssueType = "syntax_error"
-	IssueMissingImport    IssueType = "missing_import"
-	IssueUndefinedVar     IssueType = "undefined_variable"
-	IssueTypeError        IssueType = "type_error"
-	IssueMissingFile      IssueType = "missing_file"
-	IssueIncomplete       IssueType = "incomplete_implementation"
-	IssuePlaceholder      IssueType = "placeholder_code"
-	IssueSecurityRisk     IssueType = "security_risk"
-	IssueBestPractice     IssueType = "best_practice"
-	IssueTestFailure      IssueType = "test_failure"
+	IssueSyntaxError       IssueType = "syntax_error"
+	IssueMissingImport     IssueType = "missing_import"
+	IssueUndefinedVar      IssueType = "undefined_variable"
+	IssueTypeError         IssueType = "type_error"
+	IssueMissingFile       IssueType = "missing_file"
+	IssueIncomplete        IssueType = "incomplete_implementation"
+	IssuePlaceholder       IssueType = "placeholder_code"
+	IssueSecurityRisk      IssueType = "security_risk"
+	IssueBestPractice      IssueType = "best_practice"
+	IssueTestFailure       IssueType = "test_failure"
 	IssueDependencyMissing IssueType = "dependency_missing"
 )
 
@@ -676,13 +676,13 @@ const (
 
 // SuggestedFix contains a specific fix to apply
 type SuggestedFix struct {
-	File       string `json:"file"`
-	Type       string `json:"type"` // replace, insert, delete
-	Search     string `json:"search,omitempty"`
-	Replace    string `json:"replace,omitempty"`
-	Line       int    `json:"line,omitempty"`
-	Content    string `json:"content,omitempty"`
-	Reason     string `json:"reason"`
+	File    string `json:"file"`
+	Type    string `json:"type"` // replace, insert, delete
+	Search  string `json:"search,omitempty"`
+	Replace string `json:"replace,omitempty"`
+	Line    int    `json:"line,omitempty"`
+	Content string `json:"content,omitempty"`
+	Reason  string `json:"reason"`
 }
 
 // ValidateOutput validates the generated output
@@ -905,21 +905,9 @@ func (v *Validator) validateJavaScriptSyntax(filePath string, content string) []
 	}
 
 	// Check for common import issues
-	if strings.Contains(content, "import ") {
-		// Check for imports from undefined packages
-		importPattern := regexp.MustCompile(`import\s+(?:[\w\s{},*]+\s+from\s+)?['"]([^'"]+)['"]`)
-		matches := importPattern.FindAllStringSubmatch(content, -1)
-
-		for _, match := range matches {
-			if len(match) > 1 {
-				pkg := match[1]
-				// Check for relative imports that might not exist
-				if strings.HasPrefix(pkg, ".") {
-					// Relative import - could validate file exists
-				}
-			}
-		}
-	}
+	// Note: relative-import existence validation lived here as a no-op TODO
+	// (empty `if strings.HasPrefix(pkg, ".") {}` block). Removed pending real
+	// implementation — caller code does not depend on it today.
 
 	// Check for console.log in production code
 	if strings.Contains(content, "console.log(") {
@@ -1033,8 +1021,8 @@ Focus on:
 5. Logic errors`, codeContent.String())
 
 	response, err := v.ai.Analyze(ctx, codeContent.String(), prompt, AIOptions{
-		MaxTokens:   2000,
-		Temperature: 0.2,
+		MaxTokens:    2000,
+		Temperature:  0.2,
 		SystemPrompt: "You are a code reviewer. Identify issues and output valid JSON only.",
 	})
 	if err != nil {

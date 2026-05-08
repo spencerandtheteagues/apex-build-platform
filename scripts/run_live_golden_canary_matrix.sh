@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+APEX_LIVE_TEST_MODEL_PROFILE="${APEX_LIVE_TEST_MODEL_PROFILE:-ollama-credit-saver}"
+if [[ "$APEX_LIVE_TEST_MODEL_PROFILE" == "ollama-credit-saver" && "${APEX_SKIP_OLLAMA_CREDIT_SAVER_SOURCE:-0}" != "1" && -f scripts/ollama-credit-saver-env.sh ]]; then
+  # shellcheck disable=SC1091
+  source scripts/ollama-credit-saver-env.sh
+fi
+
 BASE_URL="${BASE_URL:-https://api.apex-build.dev/api/v1}"
 PROMPT_FILE="${PROMPT_FILE:-prompts/golden/apex-fieldops-ai.md}"
 POWER_MODES="${POWER_MODES:-balanced max}"
@@ -27,6 +33,7 @@ fi
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "GOLDEN_CANARY_DRY_RUN"
   echo "BASE_URL=$BASE_URL"
+  echo "APEX_LIVE_TEST_MODEL_PROFILE=${APEX_LIVE_TEST_MODEL_PROFILE:-}"
   echo "PROMPT_FILE=$PROMPT_FILE"
   echo "POWER_MODES=$POWER_MODES"
   echo "ARTIFACT_ROOT=$ARTIFACT_ROOT"

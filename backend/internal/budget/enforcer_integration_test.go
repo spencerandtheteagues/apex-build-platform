@@ -21,16 +21,18 @@ func integrationDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open postgres: %v", err)
 	}
-	if err := db.AutoMigrate(&BudgetCap{}, &spend.SpendEvent{}); err != nil {
+	if err := db.AutoMigrate(&BudgetCap{}, &BudgetReservation{}, &spend.SpendEvent{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	// Budget integration tests use user IDs >= 1000 to avoid collision with
 	// the spend package's integration tests (user IDs < 100) when both run in
 	// parallel against the same database.
 	db.Exec("DELETE FROM spend_events WHERE user_id >= 1000")
+	db.Exec("DELETE FROM budget_reservations WHERE user_id >= 1000")
 	db.Exec("DELETE FROM budget_caps WHERE user_id >= 1000")
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM spend_events WHERE user_id >= 1000")
+		db.Exec("DELETE FROM budget_reservations WHERE user_id >= 1000")
 		db.Exec("DELETE FROM budget_caps WHERE user_id >= 1000")
 	})
 	return db

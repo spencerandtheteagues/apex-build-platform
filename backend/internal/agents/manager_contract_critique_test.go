@@ -75,6 +75,73 @@ func TestProviderAssistedContractCritiqueReturnsVerificationReport(t *testing.T)
 	}
 }
 
+func TestProviderAssistedContractCritiqueSkipsBYOKByDefault(t *testing.T) {
+	t.Setenv(byokCrossProviderReviewFlag, "")
+	router := &contractCritiqueRouter{
+		stubAIRouter: stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
+			hasConfiguredProvider: true,
+		},
+		content: `{"summary":"should not run","warnings":[],"blockers":[],"confidence":0.9}`,
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		ctx:      context.Background(),
+	}
+	build := &Build{
+		ID:           "build-byok-contract-critique",
+		UserID:       7,
+		ProviderMode: "byok",
+	}
+	contract := &BuildContract{ID: "contract-byok-critique", BuildID: build.ID}
+
+	if report := am.providerAssistedContractCritique(build, contract); report != nil {
+		t.Fatalf("expected BYOK critique to be skipped by default, got %+v", report)
+	}
+	if router.calls != 0 {
+		t.Fatalf("provider critique calls = %d, want 0", router.calls)
+	}
+}
+
+func TestProviderAssistedTaskVerificationSkipsBYOKByDefault(t *testing.T) {
+	t.Setenv(byokCrossProviderReviewFlag, "")
+	router := &taskRoutingRouter{
+		stubAIRouter: stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderGPT4, ai.ProviderGrok},
+			hasConfiguredProvider: true,
+		},
+		verifyContent: `{"summary":"should not run","warnings":[],"blockers":[],"confidence":0.9}`,
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		ctx:      context.Background(),
+	}
+	build := &Build{
+		ID:           "build-byok-task-critique",
+		UserID:       55,
+		ProviderMode: "byok",
+	}
+	task := &Task{ID: "task-byok-critique", Type: TaskGenerateAPI}
+	candidate := &taskGenerationCandidate{
+		Provider:     ai.ProviderGPT4,
+		VerifyPassed: true,
+		Output: &TaskOutput{Files: []GeneratedFile{
+			{Path: "app/api/health/route.ts", Content: "export function GET(){ return Response.json({ ok: true }) }", Language: "typescript"},
+		}},
+	}
+
+	report := am.providerAssistedTaskVerification(build, task, candidate)
+	if report == nil {
+		t.Fatal("expected skipped verification report")
+	}
+	if report.Status != VerificationPassed || !containsString(report.ChecksRun, "provider_critique_skipped_byok_privacy_policy") {
+		t.Fatalf("expected BYOK privacy skip report, got %+v", report)
+	}
+	if router.verifyCalls != 0 {
+		t.Fatalf("provider task verification calls = %d, want 0", router.verifyCalls)
+	}
+}
+
 func TestProviderAssistedContractCritiqueTimesOutAndReturnsNil(t *testing.T) {
 	router := &blockingContractCritiqueRouter{
 		stubAIRouter: stubAIRouter{
@@ -453,6 +520,7 @@ type taskRoutingRouter struct {
 	lastProvider         ai.AIProvider
 	lastPrompt           string
 	lastOpt              GenerateOptions
+	verifyCalls          int
 }
 
 func (r *taskRoutingRouter) Generate(_ context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (*ai.AIResponse, error) {
@@ -463,6 +531,7 @@ func (r *taskRoutingRouter) Generate(_ context.Context, provider ai.AIProvider, 
 	case strings.Contains(prompt, "Choose the better build candidate"):
 		return &ai.AIResponse{Content: r.judgeContent}, nil
 	case strings.Contains(prompt, "Review this AI-generated task result"):
+		r.verifyCalls++
 		return &ai.AIResponse{Content: r.verifyContent}, nil
 	case r.generationByProvider != nil:
 		if content, ok := r.generationByProvider[provider]; ok {

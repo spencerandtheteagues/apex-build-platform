@@ -139,6 +139,9 @@ func (am *AgentManager) providerAssistedTaskVerification(build *Build, task *Tas
 	if am == nil || am.aiRouter == nil || build == nil || task == nil || candidate == nil || candidate.Output == nil {
 		return nil
 	}
+	if !providerAssistedReviewAllowed(build) {
+		return skippedTaskProviderVerificationReport(build, task, "provider_critique_skipped_byok_privacy_policy")
+	}
 
 	if skip, reason := skipRecursiveProviderCritiqueForTask(task, candidate.Output); skip {
 		return skippedTaskProviderVerificationReport(build, task, reason)
@@ -542,7 +545,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	}
 
 	if am.budgetEnforcer != nil {
-		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSDForBuild(build))
+		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorizeForProject(build.UserID, build.ProjectID, agent.BuildID, estimatedRequestCostUSDForBuild(build))
 		if preAuthErr == nil && !preAuth.Allowed {
 			am.broadcast(agent.BuildID, &WSMessage{
 				Type:      "budget:exceeded",
@@ -664,15 +667,24 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	trackLikelyTruncatedSourceFiles(output)
 	output.Metrics["truncation_preflight_detected"] = len(output.TruncatedFiles)
 
-	candidateAgent := *agent
-	candidateAgent.Provider = providerUsed
-	candidateAgent.Model = modelUsed
+	// Build a fresh Agent value rather than copying *agent — Agent embeds a
+	// sync.RWMutex and copying it would silently produce a separate lock.
+	// The truncation and chunked-repair helpers only read Provider/Model/
+	// BuildID/ID/Role/Status, so a literal with those fields is sufficient.
+	candidateAgent := &Agent{
+		ID:       agent.ID,
+		Role:     agent.Role,
+		Provider: providerUsed,
+		Model:    modelUsed,
+		Status:   agent.Status,
+		BuildID:  agent.BuildID,
+	}
 	if len(output.TruncatedFiles) > 0 {
-		am.completeTruncatedFiles(ctx, task, build, &candidateAgent, output)
+		am.completeTruncatedFiles(ctx, task, build, candidateAgent, output)
 	}
 	if am.isCodeGenerationTask(task.Type) {
 		if rawHints := cloneTaskInputForSnapshot(task)["repair_hints"]; rawHints != nil {
-			am.applyChunkedRepairToLargeFiles(ctx, task, build, &candidateAgent, output)
+			am.applyChunkedRepairToLargeFiles(ctx, task, build, candidateAgent, output)
 		}
 	}
 

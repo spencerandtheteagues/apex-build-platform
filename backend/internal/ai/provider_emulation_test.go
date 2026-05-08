@@ -102,3 +102,55 @@ func TestNewAIRouterAddsOllamaEmulatedProviderSlots(t *testing.T) {
 		t.Fatalf("expected emulated gpt4 slot to report gpt4, got %s", got)
 	}
 }
+
+func TestOllamaCreditSaverTestingProfileEmulatesOpenModelSlots(t *testing.T) {
+	t.Setenv("APEX_AI_TESTING_PROFILE", "ollama-credit-saver")
+	t.Setenv("OLLAMA_URL", "http://127.0.0.1:11434")
+	t.Setenv("KIMI_OLLAMA_MODEL", "kimi-k2.6")
+	t.Setenv("QWEN_OLLAMA_MODEL", "qwen3:latest")
+	t.Setenv("GLM_OLLAMA_MODEL", "glm-5.1")
+	t.Setenv("DEEPSEEK_OLLAMA_MODEL", "deepseek-v4-pro")
+
+	router := NewAIRouter("", "", "", "", "http://127.0.0.1:11434", "")
+
+	for _, provider := range []AIProvider{ProviderOllama, ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok, ProviderDeepSeek, ProviderGLM} {
+		if _, ok := router.clients[provider]; !ok {
+			t.Fatalf("expected %s slot to be configured in ollama credit-saver profile", provider)
+		}
+		if threshold := router.config.CostThresholds[provider]; threshold != 0 {
+			t.Fatalf("expected %s cost threshold disabled for ollama credit-saver profile, got %f", provider, threshold)
+		}
+	}
+
+	if got := router.config.DefaultProviders[CapabilityArchitecture]; got != ProviderClaude {
+		t.Fatalf("expected Kimi-backed claude slot to orchestrate architecture, got %s", got)
+	}
+	if got := router.config.DefaultProviders[CapabilityCodeGeneration]; got != ProviderGPT4 {
+		t.Fatalf("expected Qwen-backed gpt4 slot for code generation, got %s", got)
+	}
+	if got := router.config.DefaultProviders[CapabilityTesting]; got != ProviderGLM {
+		t.Fatalf("expected GLM slot for testing, got %s", got)
+	}
+}
+
+func TestOllamaClientRespectsDocumentedModelOverrideEnv(t *testing.T) {
+	t.Setenv("OLLAMA_MODEL_BALANCED", "kimi-k2.6")
+
+	client := NewOllamaClient("http://127.0.0.1:11434", "")
+	got := client.getModel(&AIRequest{Capability: CapabilityCodeGeneration, PowerMode: "balanced"})
+	if got != "kimi-k2.6" {
+		t.Fatalf("expected OLLAMA_MODEL_BALANCED override, got %q", got)
+	}
+}
+
+func TestDeepSeekAndGLMEmulationStillHonorPlainOllamaURL(t *testing.T) {
+	t.Setenv("OLLAMA_URL", "http://127.0.0.1:11434")
+
+	emulations := configuredOllamaEmulations()
+	if got := emulations[ProviderDeepSeek].URL; got != "http://127.0.0.1:11434" {
+		t.Fatalf("expected DeepSeek emulation to use OLLAMA_URL, got %q", got)
+	}
+	if got := emulations[ProviderGLM].URL; got != "http://127.0.0.1:11434" {
+		t.Fatalf("expected GLM emulation to use OLLAMA_URL, got %q", got)
+	}
+}

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { cn, formatFileSize, formatRelativeTime, getFileIcon } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { AIUsage, Execution, File } from '@/types'
-import type { MobileReadinessScorecard, MobileValidationReport, MobileValidationStatus } from '@/services/api'
+import type { MobileReadinessScorecard, MobileStoreReadinessReport, MobileValidationReport, MobileValidationStatus } from '@/services/api'
 import { Badge, Button, Loading } from '@/components/ui'
 import MobileBuildOperationsPanel from './MobileBuildOperationsPanel'
 import MobileStoreReadinessPanel from './MobileStoreReadinessPanel'
@@ -110,6 +110,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const [isLoading, setIsLoading] = useState(false)
   const [mobileValidation, setMobileValidation] = useState<MobileValidationReport | null>(null)
   const [mobileScorecard, setMobileScorecard] = useState<MobileReadinessScorecard | null>(null)
+  const [mobileStoreReadiness, setMobileStoreReadiness] = useState<MobileStoreReadinessReport | null>(null)
   const [isMobileValidationLoading, setIsMobileValidationLoading] = useState(false)
 
   const {
@@ -142,6 +143,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     if (!currentProjectId || !isMobileProject) {
       setMobileValidation(null)
       setMobileScorecard(null)
+      setMobileStoreReadiness(null)
       setIsMobileValidationLoading(false)
       return
     }
@@ -151,8 +153,9 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     void Promise.allSettled([
       apiService.getProjectMobileValidation(currentProjectId),
       apiService.getProjectMobileScorecard(currentProjectId),
+      apiService.getProjectMobileStoreReadiness(currentProjectId),
     ])
-      .then(([validationResult, scorecardResult]) => {
+      .then(([validationResult, scorecardResult, storeReadinessResult]) => {
         if (!cancelled) {
           if (validationResult.status === 'fulfilled') {
             setMobileValidation(validationResult.value)
@@ -176,6 +179,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
               blockers: ['Unable to load mobile readiness scorecard.'],
             })
           }
+          setMobileStoreReadiness(storeReadinessResult.status === 'fulfilled' ? storeReadinessResult.value : null)
         }
       })
       .finally(() => {
@@ -632,6 +636,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             files={files || []}
             validation={mobileValidation}
             scorecard={mobileScorecard}
+            storeReadiness={mobileStoreReadiness}
             onDownloadPackage={handleDownload}
           />
         </>

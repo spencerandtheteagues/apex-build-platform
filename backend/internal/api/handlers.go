@@ -33,16 +33,17 @@ import (
 
 // Server represents the API server
 type Server struct {
-	db        *db.Database
-	auth      *auth.AuthService
-	aiRouter  *ai.AIRouter
-	byok      *ai.BYOKManager
-	usage     *usage.Tracker
-	readiness *startup.Registry
-	storage   storage.Provider
-	cache     func() cache.Status
-	email     *email.Service
-	mobile    *mobile.MobileBuildService
+	db           *db.Database
+	auth         *auth.AuthService
+	aiRouter     *ai.AIRouter
+	byok         *ai.BYOKManager
+	usage        *usage.Tracker
+	readiness    *startup.Registry
+	storage      storage.Provider
+	cache        func() cache.Status
+	email        *email.Service
+	mobile       *mobile.MobileBuildService
+	mobileSubmit *mobile.MobileSubmissionService
 }
 
 // NewServer creates a new API server
@@ -74,6 +75,10 @@ func (s *Server) SetCacheStatusProvider(provider func() cache.Status) {
 
 func (s *Server) SetMobileBuildService(service *mobile.MobileBuildService) {
 	s.mobile = service
+}
+
+func (s *Server) SetMobileSubmissionService(service *mobile.MobileSubmissionService) {
+	s.mobileSubmit = service
 }
 
 // Health endpoint - Returns quickly for load balancer health checks
@@ -1071,7 +1076,16 @@ func (s *Server) GetProjectMobileValidation(c *gin.Context) {
 	}
 
 	var files []models.File
-	if err := s.db.DB.Where("project_id = ? AND (path LIKE ? OR path LIKE ?)", project.ID, "mobile/%", "/mobile/%").Find(&files).Error; err != nil {
+	if err := s.db.DB.Where(
+		"project_id = ? AND (path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path = ? OR path = ?)",
+		project.ID,
+		"mobile/%",
+		"/mobile/%",
+		"backend/%",
+		"/backend/%",
+		"docs/mobile-backend-routes.md",
+		"/docs/mobile-backend-routes.md",
+	).Find(&files).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch mobile files"})
 		return
 	}
@@ -1104,7 +1118,16 @@ func (s *Server) GetProjectMobileScorecard(c *gin.Context) {
 	}
 
 	var files []models.File
-	if err := s.db.DB.Where("project_id = ? AND (path LIKE ? OR path LIKE ?)", project.ID, "mobile/%", "/mobile/%").Find(&files).Error; err != nil {
+	if err := s.db.DB.Where(
+		"project_id = ? AND (path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path = ? OR path = ?)",
+		project.ID,
+		"mobile/%",
+		"/mobile/%",
+		"backend/%",
+		"/backend/%",
+		"docs/mobile-backend-routes.md",
+		"/docs/mobile-backend-routes.md",
+	).Find(&files).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch mobile files"})
 		return
 	}

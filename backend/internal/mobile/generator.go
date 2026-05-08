@@ -80,6 +80,7 @@ func GenerateExpoProject(spec MobileAppSpec, options ExpoGeneratorOptions) ([]So
 		sourceFile("mobile/src/permissions/nativeCapabilities.ts", nativeCapabilitiesTS(spec), "typescript"),
 		sourceFile("mobile/src/theme/theme.ts", themeTS(), "typescript"),
 	}
+	files = append(files, backendContractSourceFiles(spec)...)
 	if errs := ValidateGeneratedExpoFiles(files, dependencies, DefaultNativeCapabilityRegistry()); len(errs) > 0 {
 		return nil, errs
 	}
@@ -186,6 +187,9 @@ func ValidateGeneratedExpoFiles(files []SourceFile, dependencies map[string]stri
 	errs := ValidateExpoDependencyPolicy(dependencies, registry)
 	blocked := []string{"window.", "document.", "localStorage", "sessionStorage", "process.env."}
 	for _, file := range files {
+		if !strings.HasPrefix(filepath.ToSlash(file.Path), "mobile/") {
+			continue
+		}
 		ext := strings.ToLower(filepath.Ext(file.Path))
 		if ext != ".ts" && ext != ".tsx" && ext != ".js" && ext != ".jsx" {
 			continue

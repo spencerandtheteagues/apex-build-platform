@@ -205,23 +205,10 @@ func main() {
 		})
 	}
 
-	// One-shot admin promotion: ADMIN_PROMOTE_EMAIL may be a comma-separated list.
-	// Grants is_admin + is_super_admin to each email on startup.
-	// Clear the env var after the deploy so it doesn't re-fire unnecessarily.
-	for _, promoteEmail := range strings.Split(os.Getenv("ADMIN_PROMOTE_EMAIL"), ",") {
-		promoteEmail = strings.TrimSpace(promoteEmail)
-		if promoteEmail == "" {
-			continue
-		}
-		res := database.DB.Exec(
-			`UPDATE users SET is_admin = true, is_super_admin = true WHERE email = ?`,
-			promoteEmail,
-		)
-		if res.Error != nil {
-			log.Printf("WARNING: admin promotion for %s failed: %v", promoteEmail, res.Error)
-		} else {
-			log.Printf("ADMIN_PROMOTE: granted is_admin+is_super_admin to %s (%d row(s) updated)", promoteEmail, res.RowsAffected)
-		}
+	// One-shot admin promotion. In production/staging this intentionally fails
+	// closed unless guarded by a short-lived token and expiry.
+	if err := runAdminPromotions(database.DB, time.Now().UTC()); err != nil {
+		log.Fatalf("CRITICAL: admin promotion refused: %v", err)
 	}
 
 	// Initialize authentication service with validated JWT secret
@@ -384,7 +371,7 @@ func main() {
 	// Initialize Spend Tracker (S2: Real-Time Spend Dashboard)
 	spendTracker := spend.NewSpendTracker(database.GetDB())
 	spendHandler := handlers.NewSpendHandler(spendTracker)
-	if err := database.GetDB().AutoMigrate(&spend.SpendEvent{}, &budget.BudgetCap{}); err != nil {
+	if err := database.GetDB().AutoMigrate(&spend.SpendEvent{}, &budget.BudgetCap{}, &budget.BudgetReservation{}); err != nil {
 		log.Printf("WARNING: Spend/budget migrations completed with warnings: %v", err)
 		startupRegistry.MarkDegraded("spend_tracking", startup.TierOptional, "Spend tracking migrations completed with warnings", map[string]any{
 			"error": err.Error(),
@@ -404,6 +391,7 @@ func main() {
 	// Wire budget enforcer into agent manager so each AI Generate call is
 	// pre-authorized with a real estimated cost rather than 0.
 	agentManager.SetBudgetEnforcer(budgetEnforcer)
+	aiAdapter.SetBudgetEnforcer(budgetEnforcer)
 
 	// Initialize Protected Paths Handler (A3)
 	protectedPathsHandler := handlers.NewProtectedPathsHandler(database.GetDB())
@@ -616,7 +604,7 @@ func main() {
 
 	if stripeSecretKey != "" && stripeSecretKey != "sk_test_xxx" {
 		log.Println("Stripe Payment Integration initialized")
-		log.Printf("   - Plans: Free, Builder ($19/mo), Pro ($49/mo), Team ($99/mo), Enterprise (contact sales)")
+		log.Printf("   - Plans: %s", formatConfiguredPlansForLog(payments.GetAllPlans()))
 		startupRegistry.MarkReady("payments", startup.TierOptional, "Stripe payment integration initialized", map[string]any{
 			"enabled": true,
 		})
@@ -994,11 +982,7 @@ func main() {
 		executionHandler.SetUsageTracker(usageTracker)
 	}
 	log.Println("Usage Tracking & Quota Enforcement initialized (projects, storage, AI, execution)")
-	log.Println("   - Free: 3 projects, 100MB storage, 1000 AI/month, 10 exec min/day")
-	log.Println("   - Builder ($19/mo): unlimited projects, 5GB storage, credit-based AI, 240 exec min/day")
-	log.Println("   - Pro ($49/mo): unlimited projects, 20GB storage, credit-based AI, 720 exec min/day")
-	log.Println("   - Team ($99/mo): unlimited projects, 100GB storage, credit-based AI, 1440 exec min/day")
-	log.Println("   - Enterprise: unlimited")
+	log.Printf("   - Active plans: %s", formatConfiguredPlansForLog(payments.GetAllPlans()))
 
 	// Initialize Prometheus Metrics and Business Metrics Collector
 	metricsEnabled := getEnv("ENABLE_METRICS", "true") == "true"
@@ -1028,12 +1012,15 @@ func main() {
 	server.SetCacheStatusProvider(redisCache.Status)
 	mobileFlags := mobile.LoadFeatureFlagsFromEnv()
 	var mobileBuildProvider mobile.MobileBuildProvider
-	if mobileFlags.MobileEASBuildEnabled {
-		mobileBuildProvider = mobile.NewEASBuildProvider(mobile.EASBuildProviderConfig{
+	var mobileSubmitProvider mobile.MobileSubmissionProvider
+	if mobileFlags.MobileEASBuildEnabled || mobileFlags.MobileEASSubmitEnabled {
+		easProvider := mobile.NewEASBuildProvider(mobile.EASBuildProviderConfig{
 			CLIPath:     getEnv("EAS_CLI_PATH", "eas"),
 			Timeout:     getEnvDuration("MOBILE_EAS_BUILD_TIMEOUT", 30*time.Minute),
 			Credentials: mobile.NewMobileCredentialVault(database.GetDB(), secretsManager),
 		})
+		mobileBuildProvider = easProvider
+		mobileSubmitProvider = easProvider
 	}
 	mobileBuildService := mobile.NewMobileBuildService(
 		mobileFlags,
@@ -1041,6 +1028,11 @@ func main() {
 		mobile.NewGormMobileBuildStore(database.GetDB()),
 	)
 	server.SetMobileBuildService(mobileBuildService)
+	server.SetMobileSubmissionService(mobile.NewMobileSubmissionService(
+		mobileFlags,
+		mobileSubmitProvider,
+		mobile.NewGormMobileSubmissionStore(database.GetDB()),
+	))
 	var mobileBuildPollerCancel context.CancelFunc
 	if mobileFlags.MobileEASBuildEnabled && mobileFlags.MobileEASPollingEnabled && mobileBuildProvider != nil {
 		mobileBuildPollerCtx, cancel := context.WithCancel(context.Background())
@@ -1272,7 +1264,7 @@ func loadConfig() *AppConfig {
 		OpenAIAPIKey:  getEnvAny([]string{"OPENAI_API_KEY", "CHATGPT_API_KEY", "GPT_API_KEY", "OPENAI_PLATFORM_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN", "OPENAI_SECRET_KEY"}, ""),
 		GeminiAPIKey:  getEnvAny([]string{"GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GOOGLE_GEMINI_API_KEY"}, ""),
 		GrokAPIKey:    getEnv("XAI_API_KEY", ""),
-		OllamaBaseURL: getEnv("OLLAMA_BASE_URL", ""),
+		OllamaBaseURL: getEnvAny([]string{"OLLAMA_BASE_URL", "OLLAMA_URL", "OLLAMA_HOST"}, ""),
 		OllamaAPIKey:  getEnv("OLLAMA_API_KEY", ""),
 		JWTSecret:     jwtSecret,
 		Port:          getEnv("PORT", "8080"),
@@ -1493,6 +1485,7 @@ func setupRoutes(
 	router.GET("/health", server.Health)
 	router.GET("/health/deep", server.DeepHealth)
 	router.GET("/health/features", server.FeatureReadiness)
+	router.GET("/platform/truth", server.PlatformTruth)
 	router.GET("/ready", server.DeepHealth) // Kubernetes readiness probe
 
 	// API documentation endpoint
@@ -1550,6 +1543,7 @@ func setupRoutes(
 		v1.GET("/health", server.Health)
 		v1.GET("/health/deep", server.DeepHealth)
 		v1.GET("/health/features", server.FeatureReadiness)
+		v1.GET("/platform/truth", server.PlatformTruth)
 
 		// Authentication routes (no auth required, but rate limited)
 		// SECURITY: Stricter rate limit (10 req/min) to prevent brute force attacks
@@ -1623,12 +1617,17 @@ func setupRoutes(
 				projects.GET("/:id/download", server.DownloadProject)
 				projects.GET("/:id/mobile/validation", server.GetProjectMobileValidation)
 				projects.GET("/:id/mobile/scorecard", server.GetProjectMobileScorecard)
+				projects.GET("/:id/mobile/store-readiness", server.GetProjectMobileStoreReadiness)
+				projects.GET("/:id/mobile/submissions", server.ListProjectMobileSubmissions)
+				projects.GET("/:id/mobile/submissions/:submissionId", server.GetProjectMobileSubmission)
 				projects.GET("/:id/mobile/builds", server.ListProjectMobileBuilds)
 				projects.POST("/:id/mobile/builds", server.CreateProjectMobileBuild)
 				projects.GET("/:id/mobile/builds/:buildId", server.GetProjectMobileBuild)
 				projects.POST("/:id/mobile/builds/:buildId/refresh", server.RefreshProjectMobileBuild)
 				projects.POST("/:id/mobile/builds/:buildId/cancel", server.CancelProjectMobileBuild)
+				projects.POST("/:id/mobile/builds/:buildId/repair", server.RepairProjectMobileBuild)
 				projects.POST("/:id/mobile/builds/:buildId/retry", server.RetryProjectMobileBuild)
+				projects.POST("/:id/mobile/builds/:buildId/submit", server.SubmitProjectMobileBuild)
 				projects.GET("/:id/mobile/builds/:buildId/logs", server.GetProjectMobileBuildLogs)
 				projects.GET("/:id/mobile/builds/:buildId/artifacts", server.GetProjectMobileBuildArtifacts)
 
@@ -2043,6 +2042,36 @@ func previewRuntimeVerificationEnabled(environment, explicitSetting, chromePath 
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(environment), "production") && strings.TrimSpace(chromePath) != ""
+}
+
+func formatConfiguredPlansForLog(plans []payments.Plan) string {
+	entries := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		if plan.Type == payments.PlanOwner {
+			continue
+		}
+		entries = append(entries, plan.Name+" ("+formatPlanPriceForLog(plan)+")")
+	}
+	return strings.Join(entries, ", ")
+}
+
+func formatPlanPriceForLog(plan payments.Plan) string {
+	if plan.MonthlyPriceCents <= 0 {
+		if plan.IsEnterprise || plan.Type == payments.PlanEnterprise {
+			return "contact sales"
+		}
+		return "$0/mo"
+	}
+	return formatCentsForLog(plan.MonthlyPriceCents) + "/mo"
+}
+
+func formatCentsForLog(cents int64) string {
+	dollars := cents / 100
+	remainder := cents % 100
+	if remainder == 0 {
+		return "$" + strconv.FormatInt(dollars, 10)
+	}
+	return "$" + strconv.FormatInt(dollars, 10) + "." + strconv.FormatInt(remainder/10, 10) + strconv.FormatInt(remainder%10, 10)
 }
 
 func getStatusIcon(enabled bool) string {

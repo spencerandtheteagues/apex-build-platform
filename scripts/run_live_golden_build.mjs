@@ -11,6 +11,8 @@ const promptPath = process.argv[2] || process.env.PROMPT_FILE || ''
 const prompt = promptPath ? fs.readFileSync(promptPath, 'utf8') : process.env.PROMPT || ''
 const mode = process.env.MODE || 'full'
 const powerMode = process.env.POWER_MODE || 'balanced'
+const providerMode = process.env.PROVIDER_MODE || process.env.APEX_PROVIDER_MODE || 'platform'
+const modelProfile = process.env.APEX_LIVE_TEST_MODEL_PROFILE || process.env.APEX_AI_TESTING_PROFILE || ''
 const projectName = process.env.PROJECT_NAME || `golden-${powerMode}-${Date.now()}`
 const pollSeconds = Number(process.env.POLL_SECONDS || 15)
 const maxPolls = Number(process.env.MAX_POLLS || 240)
@@ -250,6 +252,25 @@ function writeArtifact(name, data) {
   const file = path.join(artifactDir, name)
   fs.writeFileSync(file, typeof data === 'string' ? data : JSON.stringify(data, null, 2))
   return file
+}
+
+function providerModelOverrides() {
+  const raw = process.env.PROVIDER_MODEL_OVERRIDES_JSON || process.env.APEX_PROVIDER_MODEL_OVERRIDES_JSON || ''
+  if (raw.trim()) {
+    try {
+      return JSON.parse(raw)
+    } catch (error) {
+      throw new Error(`Invalid PROVIDER_MODEL_OVERRIDES_JSON: ${error.message}`)
+    }
+  }
+  if (!/^(ollama-credit-saver|ollama|credit-saver)$/i.test(modelProfile.trim())) {
+    return undefined
+  }
+  return {
+    ollama: process.env.KIMI_OLLAMA_MODEL || process.env.OLLAMA_MODEL_DEFAULT || 'kimi-k2.6',
+    deepseek: process.env.DEEPSEEK_OLLAMA_MODEL || 'deepseek-v4-pro',
+    glm: process.env.GLM_OLLAMA_MODEL || 'glm-5.1',
+  }
 }
 
 function normalizeText(value) {
@@ -593,9 +614,13 @@ async function startBuild() {
     prompt,
     mode,
     power_mode: powerMode,
-    provider_mode: 'platform',
+    provider_mode: providerMode,
     require_preview_ready: true,
     project_name: projectName,
+  }
+  const overrides = providerModelOverrides()
+  if (overrides && Object.keys(overrides).length > 0) {
+    payload.provider_model_overrides = overrides
   }
   const data = await request('/build/start', { method: 'POST', body: payload })
   buildPollToken = typeof data?.poll_token === 'string' ? data.poll_token : ''

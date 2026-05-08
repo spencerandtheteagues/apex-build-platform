@@ -2,6 +2,9 @@
 // Fixes memory leaks with proper context cancellation, subscriber cleanup,
 // TTL-based eviction, and periodic cleanup goroutines
 
+//go:build experimental
+// +build experimental
+
 package agents
 
 import (

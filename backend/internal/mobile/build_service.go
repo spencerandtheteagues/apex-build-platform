@@ -62,6 +62,7 @@ var (
 	ErrMobileBuildInvalidRequest   = errors.New("invalid mobile build request")
 	ErrMobileBuildProviderMissing  = errors.New("mobile build provider is not configured")
 	ErrMobileBuildProviderFailed   = errors.New("mobile build provider failed")
+	ErrMobileBuildPreRetryFailed   = errors.New("mobile build pre-retry validation failed")
 	ErrMobileBuildJobNotFound      = errors.New("mobile build job not found")
 	ErrMobileBuildJobExists        = errors.New("mobile build job already exists")
 )
@@ -97,6 +98,7 @@ type MobileBuildJob struct {
 	CommitRef       string                 `json:"commit_ref,omitempty"`
 	FailureType     MobileBuildFailureType `json:"failure_type,omitempty"`
 	FailureMessage  string                 `json:"failure_message,omitempty"`
+	RepairPlan      *MobileBuildRepairPlan `json:"repair_plan,omitempty" gorm:"-"`
 	Logs            []MobileBuildLogLine   `json:"logs,omitempty"`
 	CreatedAt       time.Time              `json:"created_at"`
 	UpdatedAt       time.Time              `json:"updated_at"`
@@ -238,6 +240,7 @@ func (s *MobileBuildService) CreateBuild(ctx context.Context, req MobileBuildReq
 			Message:   job.FailureMessage,
 		})
 		job.UpdatedAt = s.now()
+		job = AttachMobileBuildRepairPlan(job)
 		if updateErr := s.store.Update(ctx, job); updateErr != nil {
 			return job, updateErr
 		}
@@ -254,11 +257,12 @@ func (s *MobileBuildService) CreateBuild(ctx context.Context, req MobileBuildReq
 		job.FailureType = ClassifyMobileBuildFailure(job.FailureMessage)
 	}
 	job.UpdatedAt = s.now()
+	job = AttachMobileBuildRepairPlan(job)
 	if err := s.store.Update(ctx, job); err != nil {
 		return job, err
 	}
 
-	return job, nil
+	return AttachMobileBuildRepairPlan(job), nil
 }
 
 func (s *MobileBuildService) ValidateRequest(req MobileBuildRequest) error {
@@ -288,7 +292,11 @@ func (s *MobileBuildService) GetBuild(ctx context.Context, id string) (MobileBui
 	if s == nil || s.store == nil {
 		return MobileBuildJob{}, false, ErrMobileBuildJobNotFound
 	}
-	return s.store.Get(ctx, id)
+	job, ok, err := s.store.Get(ctx, id)
+	if err != nil || !ok {
+		return job, ok, err
+	}
+	return AttachMobileBuildRepairPlan(job), true, nil
 }
 
 func (s *MobileBuildService) RefreshBuild(ctx context.Context, id string) (MobileBuildJob, error) {
@@ -341,7 +349,7 @@ func (s *MobileBuildService) RefreshBuild(ctx context.Context, id string) (Mobil
 	if err := s.store.Update(ctx, job); err != nil {
 		return job, err
 	}
-	return job, nil
+	return AttachMobileBuildRepairPlan(job), nil
 }
 
 func (s *MobileBuildService) CancelBuild(ctx context.Context, id string) (MobileBuildJob, error) {
@@ -400,7 +408,7 @@ func (s *MobileBuildService) CancelBuild(ctx context.Context, id string) (Mobile
 	if err := s.store.Update(ctx, job); err != nil {
 		return job, err
 	}
-	return job, nil
+	return AttachMobileBuildRepairPlan(job), nil
 }
 
 func (s *MobileBuildService) RetryBuild(ctx context.Context, id string, sourcePath string) (MobileBuildJob, error) {
@@ -434,11 +442,56 @@ func (s *MobileBuildService) RetryBuild(ctx context.Context, id string, sourcePa
 	})
 }
 
+func (s *MobileBuildService) MarkBuildRepaired(ctx context.Context, id string, message string) (MobileBuildJob, error) {
+	if s == nil {
+		return MobileBuildJob{}, fmt.Errorf("%w: service is nil", ErrMobileBuildInvalidRequest)
+	}
+	if s.store == nil {
+		return MobileBuildJob{}, ErrMobileBuildJobNotFound
+	}
+	job, exists, err := s.store.Get(ctx, id)
+	if err != nil {
+		return MobileBuildJob{}, err
+	}
+	if !exists {
+		return MobileBuildJob{}, ErrMobileBuildJobNotFound
+	}
+	if !mobileBuildStatusNeedsRepairPlan(job.Status) {
+		return job, fmt.Errorf("%w: build status %q cannot be marked repaired", ErrMobileBuildInvalidRequest, job.Status)
+	}
+	if job.FailureType == "" {
+		job.FailureType = ClassifyMobileBuildFailure(job.FailureMessage)
+	}
+	now := s.now()
+	job.Status = MobileBuildRepairedRetryPending
+	job.UpdatedAt = now
+	if strings.TrimSpace(message) == "" {
+		message = "Mobile build repair checks passed; the build can be retried as a new provider attempt."
+	}
+	job.Logs = append(job.Logs, MobileBuildLogLine{
+		Timestamp: now,
+		Level:     "info",
+		Message:   RedactMobileBuildSecrets(message),
+	})
+	job = AttachMobileBuildRepairPlan(job)
+	if err := s.store.Update(ctx, job); err != nil {
+		return job, err
+	}
+	return AttachMobileBuildRepairPlan(job), nil
+}
+
 func (s *MobileBuildService) ListProjectBuilds(ctx context.Context, projectID uint) ([]MobileBuildJob, error) {
 	if s == nil || s.store == nil {
 		return nil, nil
 	}
-	return s.store.ListByProject(ctx, projectID)
+	jobs, err := s.store.ListByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range jobs {
+		jobs[i] = AttachMobileBuildRepairPlan(jobs[i])
+	}
+	return jobs, nil
 }
 
 func (s *MobileBuildService) RefreshPollableBuilds(ctx context.Context, limit int, minAge time.Duration) ([]MobileBuildJob, []error) {
@@ -523,7 +576,7 @@ func applyMobileBuildProviderResult(job MobileBuildJob, result MobileBuildProvid
 	}
 	job.Logs = append(job.Logs, redactMobileBuildLogLines(result.Logs, func() time.Time { return now })...)
 	job.UpdatedAt = now
-	return job
+	return AttachMobileBuildRepairPlan(job)
 }
 
 func NormalizeMobileBuildRequest(req MobileBuildRequest) MobileBuildRequest {

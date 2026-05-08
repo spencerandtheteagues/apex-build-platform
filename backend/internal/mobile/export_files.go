@@ -30,9 +30,9 @@ func PrepareExpoProjectFiles(ctx context.Context, db *gorm.DB, project models.Pr
 	}
 
 	for _, file := range files {
-		path, ok := normalizeGeneratedMobilePath(file.Path)
+		path, ok := normalizeGeneratedMobileProjectExportPath(file.Path)
 		if !ok {
-			return fmt.Errorf("generated Expo project produced unsafe path %q", file.Path)
+			return fmt.Errorf("generated mobile project produced unsafe path %q", file.Path)
 		}
 
 		var existing models.File
@@ -167,4 +167,20 @@ func normalizeGeneratedMobilePath(path string) (string, bool) {
 		return "", false
 	}
 	return cleaned, true
+}
+
+func normalizeGeneratedMobileProjectExportPath(path string) (string, bool) {
+	cleaned := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(path), "/")))
+	if cleaned == "." || cleaned == "" {
+		return "", false
+	}
+	if strings.HasPrefix(cleaned, "../") || cleaned == ".." || strings.Contains(cleaned, "/../") {
+		return "", false
+	}
+	for _, prefix := range []string{"mobile/", "backend/", "docs/"} {
+		if strings.HasPrefix(cleaned, prefix) {
+			return cleaned, true
+		}
+	}
+	return "", false
 }

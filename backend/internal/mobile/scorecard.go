@@ -40,7 +40,7 @@ type MobileReadinessCategory struct {
 
 func BuildMobileReadinessScorecard(project models.Project, files []models.File, validation MobileValidationReport) MobileReadinessScorecard {
 	const targetScore = 95
-	fileMap := mobileFileMap(files)
+	fileMap := mobileProjectFileMap(files)
 	categories := []MobileReadinessCategory{
 		scoreTargetMetadata(project, fileMap, targetScore),
 		scoreSourceGeneration(fileMap, validation, targetScore),
