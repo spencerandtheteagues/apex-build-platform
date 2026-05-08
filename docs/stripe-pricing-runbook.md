@@ -64,7 +64,54 @@ Example local placement is documented in:
 1. Update the Stripe recurring prices in the dashboard.
 2. Copy the new price IDs into Render and any local/staging env files.
 3. Redeploy the backend.
-4. Open Billing in the app and confirm Builder/Pro/Team checkout buttons redirect successfully.
-5. Confirm the returned subscription plan matches the selected Stripe price.
-6. Confirm credit top-up checkout still works for `$25`, `$50`, `$100`, and `$250`.
+4. Run the launch verifier in strict mode:
 
+```bash
+APEX_API_URL=https://api.apex-build.dev \
+APEX_FRONTEND_URL=https://apex-build.dev \
+APEX_STRIPE_EXPECT_LIVE=1 \
+APEX_STRIPE_REGISTER_SMOKE_USER=1 \
+node scripts/verify_stripe_launch.mjs
+```
+
+5. Create checkout sessions through the app API without completing payment:
+
+```bash
+APEX_API_URL=https://api.apex-build.dev \
+APEX_FRONTEND_URL=https://apex-build.dev \
+APEX_STRIPE_EXPECT_LIVE=1 \
+APEX_STRIPE_REGISTER_SMOKE_USER=1 \
+APEX_STRIPE_RUN_CHECKOUT=1 \
+APEX_STRIPE_CHECKOUT_PLAN=builder \
+APEX_STRIPE_CHECKOUT_CYCLE=monthly \
+APEX_STRIPE_RUN_CREDIT_CHECKOUT=1 \
+APEX_STRIPE_CREDIT_AMOUNT=25 \
+node scripts/verify_stripe_launch.mjs
+```
+
+6. Open Billing in the app and confirm Builder/Pro/Team checkout buttons redirect successfully.
+7. Confirm the returned subscription plan matches the selected Stripe price after a controlled test checkout.
+8. Confirm credit top-up checkout still works for `$25`, `$50`, `$100`, and `$250`.
+
+## Webhook Replay Evidence
+
+Local handler tests prove duplicate replay does not double-credit users, but public signup still needs Stripe-delivered event proof.
+
+Use events from controlled test checkout sessions, then resend them from Stripe Dashboard or the Stripe CLI:
+
+```bash
+stripe events resend evt_... --webhook-endpoint we_...
+stripe events resend evt_... --webhook-endpoint we_...
+```
+
+Capture evidence for:
+
+- `checkout.session.completed` subscription checkout
+- `checkout.session.completed` credit purchase
+- `invoice.paid`
+- `invoice.payment_failed`
+- `customer.subscription.updated` plan change
+- `customer.subscription.deleted`
+- duplicate delivery of the credit purchase and invoice paid event IDs
+
+Do not rely on generic `stripe trigger` events alone for final launch evidence; generated trigger payloads may not contain Apex user/customer metadata and can fail for the wrong reason.

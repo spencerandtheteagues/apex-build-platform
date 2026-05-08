@@ -26,6 +26,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Production preview sandbox fallback now degrades `preview_service` instead of being treated as launch-ready.
 - Launch and preview Playwright smoke checks now assert runtime launch readiness when `PLAYWRIGHT_EXPECT_LAUNCH_READY=1`.
 - Local Stripe webhook replay coverage now proves duplicate subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and subscription deletion delivery does not double-credit or corrupt billing state.
+- Stripe launch verification is now scripted through `scripts/verify_stripe_launch.mjs` for production payments readiness, authenticated billing config, paid price IDs, and opt-in checkout-session probes.
 
 ## Launch Blockers Still Open
 

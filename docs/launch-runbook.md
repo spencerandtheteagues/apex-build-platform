@@ -51,6 +51,31 @@ PLAYWRIGHT_EXPECT_LAUNCH_READY=1 \
 npm run test:launch
 ```
 
+### 2. Stripe launch verification
+
+From the repo root, check production billing readiness, authenticated billing config, self-serve price IDs, and optionally create Stripe checkout sessions without completing payment.
+
+```bash
+APEX_API_URL=https://api.apex-build.dev \
+APEX_FRONTEND_URL=https://apex-build.dev \
+APEX_STRIPE_EXPECT_LIVE=1 \
+APEX_STRIPE_REGISTER_SMOKE_USER=1 \
+node scripts/verify_stripe_launch.mjs
+```
+
+Optional checkout-session probe:
+
+```bash
+APEX_API_URL=https://api.apex-build.dev \
+APEX_FRONTEND_URL=https://apex-build.dev \
+APEX_STRIPE_EXPECT_LIVE=1 \
+APEX_STRIPE_REGISTER_SMOKE_USER=1 \
+APEX_STRIPE_RUN_CHECKOUT=1 \
+APEX_STRIPE_CHECKOUT_PLAN=builder \
+APEX_STRIPE_RUN_CREDIT_CHECKOUT=1 \
+node scripts/verify_stripe_launch.mjs
+```
+
 Optional authenticated step:
 
 ```bash
@@ -64,7 +89,7 @@ PLAYWRIGHT_LAUNCH_PASSWORD='replace-me' \
 npm run test:launch
 ```
 
-### 2. Platform build smoke
+### 3. Platform build smoke
 
 Runs a sacrificial end-to-end app build with preview readiness enforced and asserts the completed-build detail agrees with the live build status.
 
@@ -100,7 +125,7 @@ LOGIN_PASSWORD='replace-me' \
 ./scripts/run_platform_build_smoke.sh
 ```
 
-### 3. Platform canary matrix
+### 4. Platform canary matrix
 
 Runs the production-critical matrix instead of a single build:
 
@@ -135,12 +160,13 @@ Run these after the automated checks pass:
 2. Create a real user account and confirm legal acceptance is visible during signup.
 3. Confirm Stripe checkout opens for the intended paid plan and returns to the app correctly.
 4. Confirm Stripe billing portal opens and returns to the app correctly.
-5. Complete one free frontend-only build and confirm it finishes cleanly.
-6. Complete one paid full-stack build and confirm:
+5. Replay real Stripe test webhook events for subscription checkout, credit purchase, invoice paid, invoice failed, plan change, subscription deletion, and duplicate delivery of credit-granting event IDs.
+6. Complete one free frontend-only build and confirm it finishes cleanly.
+7. Complete one paid full-stack build and confirm:
    - staged progress is visible
    - frontend/UI appears before backend completion work
    - the build reaches a truthful terminal state
-7. Force one recoverable failed build and confirm `Restart Failed Build` creates visible new work.
+8. Force one recoverable failed build and confirm `Restart Failed Build` creates visible new work.
 
 ## Hold Criteria
 
