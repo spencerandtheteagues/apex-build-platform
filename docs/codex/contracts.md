@@ -54,6 +54,29 @@
   - `cd tests/e2e && npx tsc --noEmit`
   - `git diff --check`
 
+## Stripe Webhook Replay Contract
+- Source of truth: `backend/internal/payments/stripe.go` normalizes Stripe payloads into `payments.WebhookEvent`; `backend/internal/handlers/payments.go` applies subscription, invoice, and credit side effects; `backend/internal/payments/bootstrap.go` owns `ApplyCreditGrant`.
+- Producers:
+  - Stripe sends `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, and `invoice.payment_failed`.
+  - `StripeService.HandleWebhook` verifies signatures when `STRIPE_WEBHOOK_SECRET` is configured and maps Stripe objects into internal event fields.
+  - `PaymentHandlers.HandleWebhook` dispatches normalized events to the concrete subscription/credit handlers.
+- Transport:
+  - Credit-mutating events write one `processed_stripe_events` row keyed by `stripe_event_id` before mutating user balance.
+  - Credit purchases create `credit_purchase` ledger entries; recurring invoice credits create `monthly_allocation` ledger entries with invoice and plan context.
+  - Subscription checkout, plan change, deletion, and failed invoice events are overwrite-idempotent user metadata/status updates and do not create credit ledger rows.
+- Consumers:
+  - Billing subscription state, usage/credit balance surfaces, credit ledger/audit views, startup billing readiness, and launch runbooks.
+- Defaults / zero-value behavior:
+  - Missing or invalid credit-purchase metadata is logged and ignored without retry to avoid wedging bad Stripe payloads.
+  - User lookup failures and database write failures return handler errors so Stripe retries delivery.
+  - Duplicate `stripe_event_id` deliveries must return success without a second ledger row or second credit-balance increment.
+- Backward compatibility risk:
+  - Medium; billing side effects are production-critical, but this contract is covered through additive tests around existing behavior rather than changing webhook payload shape.
+- Required tests / validations:
+  - `cd backend && go test ./internal/handlers -run 'TestHandle(SubscriptionCheckoutReplay|CreditPurchaseCompletedReplay|InvoicePaidReplay|SubscriptionPlanChangeAndDeletionReplay|InvoicePaymentFailedReplay)|TestApplyCredit' -count=1`
+  - `cd backend && go test ./internal/handlers -count=1`
+  - Live Stripe CLI/dashboard replay remains required after test/live price IDs and webhook secrets are configured.
+
 ## Mobile API Contract Generated Backend
 - Source of truth: `MobileAppSpec.APIContracts` normalized by `backend/internal/mobile/api_contract_manifest.go` endpoint descriptors.
 - Producers:

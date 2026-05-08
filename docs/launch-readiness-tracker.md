@@ -25,11 +25,12 @@ This tracker reconciles the master launch plan with the current repository state
 - Execution and preview startup readiness now add `launch_ready`, safe runtime-config booleans, missing-env hints, issue codes, and recommended fixes to `/health/features`.
 - Production preview sandbox fallback now degrades `preview_service` instead of being treated as launch-ready.
 - Launch and preview Playwright smoke checks now assert runtime launch readiness when `PLAYWRIGHT_EXPECT_LAUNCH_READY=1`.
+- Local Stripe webhook replay coverage now proves duplicate subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and subscription deletion delivery does not double-credit or corrupt billing state.
 
 ## Launch Blockers Still Open
 
 - Configure real Stripe live/test price IDs matching the current launch contract and confirm `/health/features` no longer reports `payments` degraded.
-- Replay Stripe test webhooks for subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and duplicate event delivery.
+- Replay real Stripe test webhooks through the configured webhook endpoint for subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and duplicate event delivery.
 - Run a controlled live checkout and billing portal flow before enabling broad public signup.
 - Confirm Render production has `DATABASE_URL`, `REDIS_URL`, JWT secrets, `SECRETS_MASTER_KEY`, Stripe secrets, provider keys, remote Docker/preview env, and current frontend/backend URLs.
 - Redeploy production and confirm `/health/features` shows `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and runtime browser proof ready.
