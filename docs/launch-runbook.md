@@ -161,6 +161,26 @@ LOGIN_PASSWORD='replace-me' \
 ./scripts/run_platform_canary_matrix.sh
 ```
 
+### 6. Mobile external-provider evidence
+
+From the repo root, verify the public launch posture still treats native mobile build and store-upload paths as gated:
+
+```bash
+node scripts/verify_mobile_external_readiness.mjs
+```
+
+Strict native/store evidence check after a real mobile project has EAS, Apple, Google Play, and signing credentials plus provider history:
+
+```bash
+APEX_API_URL=https://api.apex-build.dev \
+APEX_MOBILE_EXPECT_NATIVE_READY=1 \
+APEX_AUTH_TOKEN='replace-me' \
+APEX_MOBILE_PROJECT_ID='replace-me' \
+node scripts/verify_mobile_external_readiness.mjs
+```
+
+Do not make native build, TestFlight, Google Play, or store-approval claims public unless the strict check has real project evidence and manual store-console review remains accurately separated.
+
 ## Scheduled Production Canary
 
 GitHub Actions now includes `.github/workflows/production-canary.yml`:

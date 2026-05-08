@@ -223,6 +223,22 @@ Required next:
 - This branch does not yet automate App Store Connect or Google Play listing metadata/screenshots/release notes beyond generating and exporting drafts/checklists.
 - Public product copy must not claim native mobile binary generation until the EAS path is deployed, credential-gated, live-validated, and surfaced honestly in the UI.
 
+Use the repo-root verifier to keep that claim honest:
+
+```bash
+node scripts/verify_mobile_external_readiness.mjs
+```
+
+Strict native/store evidence requires a real authenticated mobile project with complete credentials, a submission-ready store package, a succeeded native build with provider/artifact evidence, and a store-upload submission job:
+
+```bash
+APEX_API_URL=https://api.apex-build.dev \
+APEX_MOBILE_EXPECT_NATIVE_READY=1 \
+APEX_AUTH_TOKEN='replace-me' \
+APEX_MOBILE_PROJECT_ID='replace-me' \
+node scripts/verify_mobile_external_readiness.mjs
+```
+
 ## Official Reference Notes
 
 - Expo documents EAS Build as the hosted service for Android/iOS binaries for Expo and React Native projects: https://docs.expo.dev/build/introduction/
