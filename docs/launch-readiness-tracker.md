@@ -28,6 +28,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Local Stripe webhook replay coverage now proves duplicate subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and subscription deletion delivery does not double-credit or corrupt billing state.
 - Stripe launch verification is now scripted through `scripts/verify_stripe_launch.mjs` for production payments readiness, authenticated billing config, paid price IDs, and opt-in checkout-session probes.
 - Render launch environment verification is now scripted through `scripts/verify_render_launch_env.mjs` for blueprint checks, optional Render API env-var presence, and strict live health/readiness checks.
+- Mobile external-provider readiness is now scripted through `scripts/verify_mobile_external_readiness.mjs` to keep native build/store-upload claims gated until real project evidence exists.
 
 ## Launch Blockers Still Open
 
@@ -38,7 +39,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Redeploy production and confirm `/health/features` shows `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and runtime browser proof ready.
 - Run production canary matrix against `https://apex-build.dev` and `https://api.apex-build.dev`.
 - Verify free frontend build, paid full-stack build, preview proof, export/deploy handoff, billing upgrade/downgrade, credit top-up, and failed-build restart in production.
-- Live-validate EAS Build/Submit, Apple, and Google Play credentials before making native mobile build/store claims public.
+- Run strict mobile external-provider readiness verification with a real mobile project, EAS Build/Submit history, Apple credentials, Google Play credentials, and store-readiness evidence before making native mobile build/store claims public.
 
 ## Evidence Required For Public Launch
 
@@ -49,6 +50,7 @@ This tracker reconciles the master launch plan with the current repository state
 - `APEX_RENDER_EXPECT_PRODUCTION=1 RENDER_API_KEY=... RENDER_BACKEND_SERVICE_ID=... RENDER_FRONTEND_SERVICE_ID=... node scripts/verify_render_launch_env.mjs`
 - Production platform build canary matrix: free-fast, paid-balanced, paid-max.
 - Stripe webhook replay and controlled live checkout evidence.
+- Strict mobile external-provider evidence with `APEX_MOBILE_EXPECT_NATIVE_READY=1`.
 - Screenshot/console evidence for generated preview readiness.
 - Rollback drill and support/incident checklist reviewed.
 
