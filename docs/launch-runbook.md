@@ -144,6 +144,7 @@ Do not open the product to customers if any of these are true:
 - `/health` is not `200`
 - `/health/features` is not `200`
 - `/health/features` reports `redis_cache` degraded because of an allowlist or external Redis connection error
+- `/health/features` reports `payments` degraded because Stripe secrets, webhook secret, or self-serve plan price IDs are missing/placeholders
 - billing plans return placeholder Stripe price IDs
 - the platform build smoke does not reach a clean terminal result
 - restart recovery acknowledges the action but does not create new execution

@@ -21,10 +21,11 @@ This tracker reconciles the master launch plan with the current repository state
 - GitHub CI, production canary, and nightly reliability workflows now use Node `20`.
 - Production API/WebSocket docs and fallback WebSocket URL point at `api.apex-build.dev`.
 - Billing audit now marks old findings as reconciled where current code has closed them.
+- Billing launch readiness now reports missing Stripe secret, webhook secret, and self-serve plan price ID configuration through startup health and `/billing/config-status`.
 
 ## Launch Blockers Still Open
 
-- Configure real Stripe live/test price IDs matching the current launch contract.
+- Configure real Stripe live/test price IDs matching the current launch contract and confirm `/health/features` no longer reports `payments` degraded.
 - Replay Stripe test webhooks for subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and duplicate event delivery.
 - Run a controlled live checkout and billing portal flow before enabling broad public signup.
 - Confirm Render production has `DATABASE_URL`, `REDIS_URL`, JWT secrets, `SECRETS_MASTER_KEY`, Stripe secrets, provider keys, remote Docker/preview env, and current frontend/backend URLs.

@@ -601,19 +601,16 @@ func main() {
 	// SECURITY: Use validated key from secretsConfig
 	stripeSecretKey := secretsConfig.StripeSecretKey
 	paymentHandler := handlers.NewPaymentHandlers(database.GetDB(), stripeSecretKey)
+	billingLaunchStatus := payments.EvaluateBillingLaunchConfig(stripeSecretKey, secretsConfig.StripeWebhookSecret)
 
-	if stripeSecretKey != "" && stripeSecretKey != "sk_test_xxx" {
-		log.Println("Stripe Payment Integration initialized")
+	if billingLaunchStatus.Ready {
+		log.Println("Stripe Payment Integration initialized and launch-ready")
 		log.Printf("   - Plans: %s", formatConfiguredPlansForLog(payments.GetAllPlans()))
-		startupRegistry.MarkReady("payments", startup.TierOptional, "Stripe payment integration initialized", map[string]any{
-			"enabled": true,
-		})
+		startupRegistry.MarkReady("payments", startup.TierOptional, "Stripe payment integration launch-ready", billingLaunchReadinessDetails(billingLaunchStatus))
 	} else {
-		log.Println("WARNING: Stripe not configured - payment features disabled")
-		log.Println("   Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET to enable")
-		startupRegistry.MarkDegraded("payments", startup.TierOptional, "Stripe not configured; payment features disabled", map[string]any{
-			"enabled": false,
-		})
+		log.Println("WARNING: Stripe billing launch configuration incomplete")
+		log.Println("   Set STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and self-serve plan STRIPE_PRICE_* values before public launch")
+		startupRegistry.MarkDegraded("payments", startup.TierOptional, "Stripe billing launch configuration incomplete", billingLaunchReadinessDetails(billingLaunchStatus))
 	}
 
 	// Log available plans
@@ -2072,6 +2069,19 @@ func formatCentsForLog(cents int64) string {
 		return "$" + strconv.FormatInt(dollars, 10)
 	}
 	return "$" + strconv.FormatInt(dollars, 10) + "." + strconv.FormatInt(remainder/10, 10) + strconv.FormatInt(remainder%10, 10)
+}
+
+func billingLaunchReadinessDetails(status payments.BillingLaunchConfigStatus) map[string]any {
+	return map[string]any{
+		"enabled":                       status.StripeConfigured,
+		"ready":                         status.Ready,
+		"stripe_configured":             status.StripeConfigured,
+		"webhook_configured":            status.WebhookConfigured,
+		"required_price_ids_configured": status.RequiredPriceIDsConfigured,
+		"missing_env":                   status.MissingEnv,
+		"placeholder_env":               status.PlaceholderEnv,
+		"issues":                        status.Issues,
+	}
 }
 
 func getStatusIcon(enabled bool) string {
