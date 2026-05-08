@@ -47,6 +47,7 @@ cd tests/e2e
 PLAYWRIGHT_BASE_URL=https://apex-build.dev \
 PLAYWRIGHT_API_URL=https://api.apex-build.dev \
 PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 \
+PLAYWRIGHT_EXPECT_LAUNCH_READY=1 \
 npm run test:launch
 ```
 
@@ -57,6 +58,7 @@ cd tests/e2e
 PLAYWRIGHT_BASE_URL=https://apex-build.dev \
 PLAYWRIGHT_API_URL=https://api.apex-build.dev \
 PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 \
+PLAYWRIGHT_EXPECT_LAUNCH_READY=1 \
 PLAYWRIGHT_LAUNCH_USERNAME='launch-smoke-user' \
 PLAYWRIGHT_LAUNCH_PASSWORD='replace-me' \
 npm run test:launch

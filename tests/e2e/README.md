@@ -19,6 +19,7 @@ Environment overrides:
 - `PLAYWRIGHT_API_URL` (default `http://localhost:8080`)
 - `PLAYWRIGHT_INCLUDE_FIREFOX=true` to include Firefox locally
 - `PLAYWRIGHT_EXPECT_LIVE_STRIPE=1` to require non-placeholder paid Stripe price IDs during the launch smoke
+- `PLAYWRIGHT_EXPECT_LAUNCH_READY=1` to require launch-ready execution, preview, and runtime browser proof in `/health/features`
 - `PLAYWRIGHT_LAUNCH_USERNAME` / `PLAYWRIGHT_LAUNCH_PASSWORD` to enable the optional authenticated launch smoke step
 
 ## Launch smoke
@@ -39,6 +40,7 @@ cd tests/e2e
 PLAYWRIGHT_BASE_URL=https://apex-build.dev \
 PLAYWRIGHT_API_URL=https://api.apex-build.dev \
 PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 \
+PLAYWRIGHT_EXPECT_LAUNCH_READY=1 \
 npm run test:launch
 ```
 

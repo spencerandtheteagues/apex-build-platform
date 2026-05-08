@@ -28,6 +28,11 @@ const pvPassword = process.env.PLAYWRIGHT_PV_PASSWORD?.trim() || ''
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+function findReadinessService(body: any, name: string): any | undefined {
+  const services = Array.isArray(body?.services) ? body.services : []
+  return services.find((service: any) => service?.name === name)
+}
+
 async function registerAndLogin(request: any, suffix: string): Promise<string> {
   const stamp = Date.now()
   const username = `pvtest${suffix}${stamp}`
@@ -95,10 +100,11 @@ test.describe('Preview verification — canary', () => {
     const body = await res.json()
     expect(body.ready).toBeTruthy()
 
-    // preview_service must be present (degraded is acceptable, unavailable is not)
-    const components = body.components as Record<string, any> | undefined
-    if (components && 'preview_service' in components) {
-      expect(['healthy', 'degraded']).toContain(components['preview_service'].status)
+    const previewService = findReadinessService(body, 'preview_service')
+    expect(previewService, 'preview_service readiness service must be registered').toBeTruthy()
+    expect(['ready', 'degraded']).toContain(previewService?.state)
+    if (Object.prototype.hasOwnProperty.call(previewService?.details ?? {}, 'launch_ready')) {
+      expect(previewService?.details?.launch_ready, JSON.stringify(previewService, null, 2)).not.toBe(false)
     }
   })
 })
@@ -165,11 +171,11 @@ test.describe('Preview verification — gate registration canary', () => {
 
     // The gate is always active when the preview server starts; verify
     // the feature report does not indicate a hard failure on the preview surface.
-    const services = body.services as Record<string, any> | undefined
-    if (services) {
-      const previewSvc = services['preview'] || services['preview_service']
-      if (previewSvc) {
-        expect(previewSvc.status ?? 'healthy').not.toBe('unavailable')
+    const previewSvc = findReadinessService(body, 'preview_service')
+    if (previewSvc) {
+      expect(previewSvc.state ?? 'ready').not.toBe('failed')
+      if (Object.prototype.hasOwnProperty.call(previewSvc?.details ?? {}, 'launch_ready')) {
+        expect(previewSvc.details.launch_ready, JSON.stringify(previewSvc, null, 2)).not.toBe(false)
       }
     }
   })
@@ -193,11 +199,13 @@ test.describe('Preview verification — runtime boot canary', () => {
     // The startup registry always registers preview_runtime_verify as an
     // optional service (enabled=true when APEX_PREVIEW_RUNTIME_VERIFY=true,
     // degraded otherwise).  Confirm it is present and not in a failed state.
-    const services: any[] = body.services ?? []
-    const rvService = services.find((s: any) => s.name === 'preview_runtime_verify')
+    const rvService = findReadinessService(body, 'preview_runtime_verify')
     if (rvService) {
       // allowed states: ready | degraded (degraded = disabled but not broken)
       expect(['ready', 'degraded']).toContain(rvService.state)
+      if (rvService.details?.enabled === true) {
+        expect(rvService.details.browser_proof, JSON.stringify(rvService, null, 2)).toBe(true)
+      }
     }
   })
 

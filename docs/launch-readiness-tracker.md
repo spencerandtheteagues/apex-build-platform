@@ -24,6 +24,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Billing launch readiness now reports missing Stripe secret, webhook secret, and self-serve plan price ID configuration through startup health and `/billing/config-status`.
 - Execution and preview startup readiness now add `launch_ready`, safe runtime-config booleans, missing-env hints, issue codes, and recommended fixes to `/health/features`.
 - Production preview sandbox fallback now degrades `preview_service` instead of being treated as launch-ready.
+- Launch and preview Playwright smoke checks now assert runtime launch readiness when `PLAYWRIGHT_EXPECT_LAUNCH_READY=1`.
 
 ## Launch Blockers Still Open
 
@@ -40,7 +41,7 @@ This tracker reconciles the master launch plan with the current repository state
 
 - `cd backend && go test ./... -timeout 12m`
 - `cd frontend && npm run typecheck && npm run test -- --run && npm run lint && npm run build`
-- `cd tests/e2e && npm run test:launch -- --project=chromium`
+- `cd tests/e2e && PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 PLAYWRIGHT_EXPECT_LAUNCH_READY=1 npm run test:launch -- --project=chromium`
 - `cd tests/e2e && npm run test:preview-verify -- --project=chromium`
 - Production platform build canary matrix: free-fast, paid-balanced, paid-max.
 - Stripe webhook replay and controlled live checkout evidence.
