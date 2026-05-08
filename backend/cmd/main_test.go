@@ -57,6 +57,130 @@ func TestFormatConfiguredPlansForLogUsesPaymentPlanTruth(t *testing.T) {
 	}
 }
 
+func TestExecutionLaunchReadinessDetailsFlagsMissingRequiredSandbox(t *testing.T) {
+	t.Setenv("E2B_API_KEY", "")
+	t.Setenv("APEX_EXECUTION_DOCKER_HOST", "")
+	t.Setenv("APEX_EXECUTION_DOCKER_SOCKET", "")
+	t.Setenv("EXECUTION_DOCKER_SOCKET", "")
+	t.Setenv("APEX_EXECUTION_DOCKER_CONTEXT", "")
+	t.Setenv("APEX_PREVIEW_DOCKER_HOST", "")
+	t.Setenv("APEX_PREVIEW_DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+
+	details := executionLaunchReadinessDetails(map[string]interface{}{
+		"execution_enabled":    false,
+		"container_required":   true,
+		"container_available":  false,
+		"e2b_available":        false,
+		"sandbox_v2_available": false,
+	}, true)
+
+	if details["launch_ready"] != false {
+		t.Fatalf("launch_ready = %v, want false", details["launch_ready"])
+	}
+	if !stringSliceContains(details["issues"], "required_execution_sandbox_unavailable") {
+		t.Fatalf("issues = %#v, want required_execution_sandbox_unavailable", details["issues"])
+	}
+	if !stringSliceContains(details["missing_env"], "E2B_API_KEY") ||
+		!stringSliceContains(details["missing_env"], "APEX_EXECUTION_DOCKER_HOST") {
+		t.Fatalf("missing_env = %#v, want E2B_API_KEY and APEX_EXECUTION_DOCKER_HOST", details["missing_env"])
+	}
+}
+
+func TestExecutionLaunchReadinessDetailsAllowsManagedE2B(t *testing.T) {
+	t.Setenv("E2B_API_KEY", "configured")
+
+	details := executionLaunchReadinessDetails(map[string]interface{}{
+		"execution_enabled":    true,
+		"container_required":   false,
+		"container_available":  true,
+		"e2b_available":        true,
+		"sandbox_v2_available": false,
+	}, true)
+
+	if details["launch_ready"] != true {
+		t.Fatalf("launch_ready = %v, want true", details["launch_ready"])
+	}
+	if _, ok := details["issues"]; ok {
+		t.Fatalf("issues = %#v, want none", details["issues"])
+	}
+}
+
+func TestPreviewLaunchReadinessDetailsFlagsSandboxFallback(t *testing.T) {
+	t.Setenv("APEX_PREVIEW_BACKEND_RUNTIME", "container")
+	t.Setenv("APEX_PREVIEW_DOCKER_HOST", "")
+	t.Setenv("APEX_PREVIEW_DOCKER_SOCKET", "")
+	t.Setenv("APEX_PREVIEW_DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+
+	details := previewLaunchReadinessDetails(map[string]interface{}{
+		"sandbox_required": true,
+		"sandbox_ready":    true,
+		"sandbox_degraded": true,
+		"server_runner": map[string]interface{}{
+			"available": true,
+			"runtime":   "host",
+		},
+	}, true)
+
+	if details["launch_ready"] != false {
+		t.Fatalf("launch_ready = %v, want false", details["launch_ready"])
+	}
+	if !stringSliceContains(details["issues"], "preview_sandbox_fallback") ||
+		!stringSliceContains(details["issues"], "preview_backend_container_runtime_unavailable") {
+		t.Fatalf("issues = %#v, want fallback and backend runtime issues", details["issues"])
+	}
+	if !stringSliceContains(details["missing_env"], "APEX_PREVIEW_DOCKER_HOST") {
+		t.Fatalf("missing_env = %#v, want APEX_PREVIEW_DOCKER_HOST", details["missing_env"])
+	}
+	serverRunner, ok := details["server_runner"].(map[string]interface{})
+	if !ok || serverRunner["reason"] == "" {
+		t.Fatalf("server_runner = %#v, want fallback reason", details["server_runner"])
+	}
+}
+
+func TestPreviewLaunchReadinessDetailsAllowsContainerRuntime(t *testing.T) {
+	t.Setenv("APEX_PREVIEW_BACKEND_RUNTIME", "container")
+	t.Setenv("APEX_PREVIEW_DOCKER_HOST", "ssh://apex-preview-runner")
+
+	details := previewLaunchReadinessDetails(map[string]interface{}{
+		"sandbox_required": true,
+		"sandbox_ready":    true,
+		"sandbox_degraded": false,
+		"server_runner": map[string]interface{}{
+			"available": true,
+			"runtime":   "container",
+		},
+	}, true)
+
+	if details["launch_ready"] != true {
+		t.Fatalf("launch_ready = %v, want true", details["launch_ready"])
+	}
+	if _, ok := details["issues"]; ok {
+		t.Fatalf("issues = %#v, want none", details["issues"])
+	}
+}
+
+func stringSliceContains(value any, want string) bool {
+	switch items := value.(type) {
+	case []string:
+		for _, item := range items {
+			if item == want {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range items {
+			if item == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestAdminPromotionGuardRequiresStrongShortLivedTokenInProduction(t *testing.T) {
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
 	validToken := strings.Repeat("a", adminPromotionTokenMinLength)

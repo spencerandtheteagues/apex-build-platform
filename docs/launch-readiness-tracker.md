@@ -22,6 +22,8 @@ This tracker reconciles the master launch plan with the current repository state
 - Production API/WebSocket docs and fallback WebSocket URL point at `api.apex-build.dev`.
 - Billing audit now marks old findings as reconciled where current code has closed them.
 - Billing launch readiness now reports missing Stripe secret, webhook secret, and self-serve plan price ID configuration through startup health and `/billing/config-status`.
+- Execution and preview startup readiness now add `launch_ready`, safe runtime-config booleans, missing-env hints, issue codes, and recommended fixes to `/health/features`.
+- Production preview sandbox fallback now degrades `preview_service` instead of being treated as launch-ready.
 
 ## Launch Blockers Still Open
 
@@ -29,6 +31,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Replay Stripe test webhooks for subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and duplicate event delivery.
 - Run a controlled live checkout and billing portal flow before enabling broad public signup.
 - Confirm Render production has `DATABASE_URL`, `REDIS_URL`, JWT secrets, `SECRETS_MASTER_KEY`, Stripe secrets, provider keys, remote Docker/preview env, and current frontend/backend URLs.
+- Redeploy production and confirm `/health/features` shows `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and runtime browser proof ready.
 - Run production canary matrix against `https://apex-build.dev` and `https://api.apex-build.dev`.
 - Verify free frontend build, paid full-stack build, preview proof, export/deploy handoff, billing upgrade/downgrade, credit top-up, and failed-build restart in production.
 - Live-validate EAS Build/Submit, Apple, and Google Play credentials before making native mobile build/store claims public.

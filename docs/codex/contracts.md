@@ -27,6 +27,31 @@
   - `cd frontend && npm run typecheck`
   - `rg` scan for stale `$79`, `$49`, and `$10` launch claims.
 
+## Runtime Launch Readiness Contract
+- Source of truth: startup registration in `backend/cmd/main.go`, execution sandbox status from `backend/internal/handlers/execution.go`, and preview feature status from `backend/internal/handlers/preview.go`.
+- Producers:
+  - `code_execution` startup service enriches `GetSandboxStatus()` with `launch_ready`, `force_container`, `runtime_config`, `missing_env`, `issues`, and `recommended_fix`.
+  - `preview_service` startup service enriches `PreviewHandler.FeatureStatus()` with `launch_ready`, `force_container`, `runtime_config`, `missing_env`, `issues`, and `recommended_fix`.
+  - `preview_runtime_verify` separately reports browser proof availability for runtime Vite verification.
+- Transport:
+  - `/health/features`, `/ready`, `/health`, and `/api/v1/platform/truth` expose the startup readiness summary.
+  - Runtime-config details expose boolean presence only; secret values and host values are not serialized.
+- Consumers:
+  - Launch runbook and operational checks use `details.launch_ready` for `code_execution` and `preview_service` as hold criteria.
+  - Builder platform-readiness UI treats degraded optional services as warnings while preserving critical-service readiness semantics.
+- Defaults / zero-value behavior:
+  - Non-production without forced containers can remain launch-ready for local development.
+  - Production or forced execution requires E2B, Docker, sandbox-v2, or another container-capable runtime to be available.
+  - Production or forced preview treats sandbox fallback as degraded even when fallback preview behavior remains available.
+  - `APEX_PREVIEW_BACKEND_RUNTIME=container` requires the backend preview runner to actually use the container runtime; `e2b` requires the E2B runtime.
+- Backward compatibility risk:
+  - Low; response changes are additive details on existing startup service records. Service state can now correctly degrade for production preview fallback.
+- Required tests / validations:
+  - `cd backend && go test ./cmd -run 'TestExecutionLaunchReadinessDetails|TestPreviewLaunchReadinessDetails|TestResolvePreviewRuntimeVerify|TestPreviewRuntimeVerificationEnabled' -count=1`
+  - `cd backend && go test ./cmd ./internal/api -run 'TestExecutionLaunchReadinessDetails|TestPreviewLaunchReadinessDetails|TestFeatureReadiness|TestPlatformTruth' -count=1`
+  - `cd backend && go test ./... -timeout 12m`
+  - `git diff --check`
+
 ## Mobile API Contract Generated Backend
 - Source of truth: `MobileAppSpec.APIContracts` normalized by `backend/internal/mobile/api_contract_manifest.go` endpoint descriptors.
 - Producers:
