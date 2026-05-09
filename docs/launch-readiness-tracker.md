@@ -7,7 +7,7 @@ This tracker reconciles the master launch plan with the current repository state
 ## Current Branch State
 
 - Branch: `main`
-- Local status after push: clean and even with `origin/main` at `2358a30`.
+- Local status after push: clean and even with `origin/main` at `1b5286e`.
 - Push dependency: do not store GitHub, Render, Stripe, provider, or customer secrets in repo files, docs, remotes, or logs.
 
 ## Closed In This Batch
@@ -45,7 +45,7 @@ This tracker reconciles the master launch plan with the current repository state
 
 ## Latest Live Read
 
-- 2026-05-09 03:22 UTC: Render backend deploy `dep-d7vadhlbbn2s73bi4dc0` is live on `main` commit `2358a30`.
+- 2026-05-09 03:22 UTC: Render backend deploy `dep-d7vadhlbbn2s73bi4dc0` is live on code commit `2358a30`; repo docs were then updated at `1b5286e`.
 - Public `/health` is healthy and ready with startup `2026-05-09T03:25:29.548635607Z` after the final deploy.
 - Strict Render launch verification passed: Render env-var presence was verified without printing secret values, Redis was ready, `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and `preview_runtime_verify` was browser-proof ready.
 - Mobile external readiness verifier passed its launch-safe default gate: native EAS builds and store submission remain gated until real project/provider/store evidence exists.
