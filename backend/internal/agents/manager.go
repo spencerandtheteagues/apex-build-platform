@@ -33443,8 +33443,9 @@ func (am *AgentManager) isNonRetriableAIError(err error) bool {
 }
 
 // isProviderLevelFailure returns true when the error is caused by the specific AI
-// provider being unavailable, rate-limited, or misconfigured — situations where
-// trying a *different* provider immediately may succeed without burning a retry slot.
+// provider being unavailable, rate-limited, too expensive for the request, or
+// misconfigured — situations where trying a different provider immediately may
+// succeed without burning a retry slot.
 func isProviderLevelFailure(err error) bool {
 	if err == nil {
 		return false
@@ -33481,6 +33482,7 @@ func isProviderLevelFailureMessage(errorMsg string) bool {
 		strings.Contains(msg, "invalid api key") ||
 		strings.Contains(msg, "incorrect api key") ||
 		strings.Contains(msg, "api_error") ||
+		(strings.Contains(msg, "estimated cost") && strings.Contains(msg, "exceeds threshold")) ||
 		strings.Contains(msg, "status 5") ||
 		strings.Contains(msg, "status 429") ||
 		strings.Contains(msg, "status 401") ||
