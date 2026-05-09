@@ -109,6 +109,17 @@ node scripts/verify_render_launch_env.mjs
 
 The strict check also calls production `/health` and `/health/features`, and fails if Redis, code execution, preview runtime, or browser proof readiness is not launch-ready.
 
+If GitHub-hosted deploy jobs are disabled for a free/no-billing account, trigger Render locally and wait for public launch readiness:
+
+```bash
+APEX_RENDER_WAIT_DEPLOY=1 \
+APEX_RENDER_EXPECT_LAUNCH_READY=1 \
+RENDER_API_KEY='replace-me' \
+RENDER_BACKEND_SERVICE_ID='replace-me' \
+RENDER_FRONTEND_SERVICE_ID='replace-me' \
+node scripts/trigger_render_deploy.mjs
+```
+
 ### 4. Platform build smoke
 
 Runs a sacrificial end-to-end app build with preview readiness enforced and asserts the completed-build detail agrees with the live build status.

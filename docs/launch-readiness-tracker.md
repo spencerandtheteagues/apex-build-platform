@@ -46,7 +46,7 @@ This tracker reconciles the master launch plan with the current repository state
 
 - 2026-05-09 02:13 UTC: PR #13 was merged to `main` at `7abdd77`, but GitHub CI/deploy runs were skipped by the free-account `APEX_ENABLE_GITHUB_ACTIONS` guard and production had not redeployed yet.
 - Public `/health` was healthy, but `startup.started_at` was still `2026-05-06T01:38:14Z`, `/api/v1/platform/truth` returned `404`, and strict live Render verification failed because `code_execution.details.launch_ready` and `preview_service.details.launch_ready` were not present/true on the deployed backend.
-- Next action: trigger the Render backend/frontend deploy from the Render dashboard or API, then rerun `APEX_RENDER_CHECK_LIVE=1 node scripts/verify_render_launch_env.mjs` and `APEX_MOBILE_CHECK_LIVE=1 node scripts/verify_mobile_external_readiness.mjs`.
+- Next action: trigger the Render backend/frontend deploy from the Render dashboard/API, or run `APEX_RENDER_WAIT_DEPLOY=1 APEX_RENDER_EXPECT_LAUNCH_READY=1 node scripts/trigger_render_deploy.mjs` with Render credentials, then rerun `APEX_RENDER_CHECK_LIVE=1 node scripts/verify_render_launch_env.mjs` and `APEX_MOBILE_CHECK_LIVE=1 node scripts/verify_mobile_external_readiness.mjs`.
 
 ## Evidence Required For Public Launch
 

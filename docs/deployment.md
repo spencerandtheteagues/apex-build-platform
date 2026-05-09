@@ -157,6 +157,26 @@ RENDER_FRONTEND_SERVICE_ID='replace-me' \
 node scripts/verify_render_launch_env.mjs
 ```
 
+When GitHub Actions are disabled for a free/no-billing account, trigger Render directly from a local shell instead of using the hosted deploy workflow:
+
+```bash
+RENDER_API_KEY='replace-me' \
+RENDER_BACKEND_SERVICE_ID='replace-me' \
+RENDER_FRONTEND_SERVICE_ID='replace-me' \
+node scripts/trigger_render_deploy.mjs
+```
+
+To trigger both services, wait for Render to mark the deploys live, and require the public launch readiness fields after deployment:
+
+```bash
+APEX_RENDER_WAIT_DEPLOY=1 \
+APEX_RENDER_EXPECT_LAUNCH_READY=1 \
+RENDER_API_KEY='replace-me' \
+RENDER_BACKEND_SERVICE_ID='replace-me' \
+RENDER_FRONTEND_SERVICE_ID='replace-me' \
+node scripts/trigger_render_deploy.mjs
+```
+
 ## Deployment-specific notes
 
 - The backend starts a bootstrap HTTP listener early so load balancer health checks succeed while deeper initialization continues.
