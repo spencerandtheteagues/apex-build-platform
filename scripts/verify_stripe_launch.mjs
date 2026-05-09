@@ -108,7 +108,33 @@ const requestJSON = async (url, options = {}) => {
   return { response, body }
 }
 
-const authHeaders = (token) => ({ authorization: `Bearer ${token}` })
+const cookieHeaderFromResponse = (response) => {
+  const getSetCookie = response.headers?.getSetCookie
+  const setCookieValues = typeof getSetCookie === 'function'
+    ? getSetCookie.call(response.headers)
+    : [response.headers.get('set-cookie')].filter(Boolean)
+  return setCookieValues
+    .flatMap((value) => String(value).split(/,(?=\s*[^;,]+=)/))
+    .map((value) => value.split(';')[0]?.trim())
+    .filter(Boolean)
+    .join('; ')
+}
+
+const extractAccessToken = (body) =>
+  trim(body?.data?.access_token) ||
+  trim(body?.data?.tokens?.access_token) ||
+  trim(body?.tokens?.access_token) ||
+  trim(body?.access_token)
+
+const authHeaders = (auth) => {
+  if (auth?.token) {
+    return { authorization: `Bearer ${auth.token}` }
+  }
+  if (auth?.cookie) {
+    return { cookie: auth.cookie }
+  }
+  return {}
+}
 
 const paidSelfServePlans = ['builder', 'pro', 'team']
 
@@ -153,16 +179,17 @@ const authenticate = async () => {
   const password = trim(env.APEX_STRIPE_PASSWORD)
 
   if ((username || email) && password) {
-    const { body } = await requestJSON(`${apiV1Base}/auth/login`, {
+    const { response, body } = await requestJSON(`${apiV1Base}/auth/login`, {
       method: 'POST',
       body: JSON.stringify({ username, email, password }),
     })
-    const token = body?.data?.access_token
-    if (!token) {
-      throw new Error('login succeeded but response did not include data.access_token')
+    const token = extractAccessToken(body)
+    const cookie = cookieHeaderFromResponse(response)
+    if (!token && !cookie) {
+      throw new Error('login succeeded but response did not include a bearer token or session cookie')
     }
     ok(`authenticated existing smoke user ${username || email}`)
-    return { token, username: username || email, email }
+    return { token, cookie, username: username || email, email }
   }
 
   if (!registerSmokeUser) {
@@ -173,7 +200,7 @@ const authenticate = async () => {
   const generatedUsername = `stripe-smoke-${stamp}`
   const generatedEmail = `stripe-smoke-${stamp}@example.com`
   const generatedPassword = `StripeSmoke!${stamp}aA1`
-  const { body } = await requestJSON(`${apiV1Base}/auth/register`, {
+  const { response, body } = await requestJSON(`${apiV1Base}/auth/register`, {
     method: 'POST',
     body: JSON.stringify({
       username: generatedUsername,
@@ -183,17 +210,18 @@ const authenticate = async () => {
       accept_legal_terms: true,
     }),
   })
-  const token = body?.data?.access_token
-  if (!token) {
-    throw new Error('registration succeeded but response did not include data.access_token')
+  const token = extractAccessToken(body)
+  const cookie = cookieHeaderFromResponse(response)
+  if (!token && !cookie) {
+    throw new Error('registration succeeded but response did not include a bearer token or session cookie')
   }
   ok(`registered throwaway smoke user ${generatedUsername}`)
-  return { token, username: generatedUsername, email: generatedEmail }
+  return { token, cookie, username: generatedUsername, email: generatedEmail }
 }
 
-const validateConfigStatus = async (token) => {
+const validateConfigStatus = async (auth) => {
   const { body } = await requestJSON(`${apiV1Base}/billing/config-status`, {
-    headers: authHeaders(token),
+    headers: authHeaders(auth),
   })
   const status = body?.data
   if (!status) {
@@ -222,9 +250,9 @@ const validateConfigStatus = async (token) => {
   }
 }
 
-const validatePlans = async (token) => {
+const validatePlans = async (auth) => {
   const { body } = await requestJSON(`${apiV1Base}/billing/plans`, {
-    headers: authHeaders(token),
+    headers: authHeaders(auth),
   })
   const plans = body?.data?.plans
   if (!Array.isArray(plans)) {
@@ -252,7 +280,18 @@ const validatePlans = async (token) => {
   return plans
 }
 
-const createSubscriptionCheckout = async (token, plans) => {
+const fetchCSRFToken = async (auth) => {
+  const { body } = await requestJSON(`${apiV1Base}/csrf-token`, {
+    headers: authHeaders(auth),
+  })
+  const token = trim(body?.token) || trim(body?.data?.token)
+  if (!token) {
+    throw new Error('/csrf-token did not return token')
+  }
+  return token
+}
+
+const createSubscriptionCheckout = async (auth, plans) => {
   if (!paidSelfServePlans.includes(checkoutPlan)) {
     throw new Error(`APEX_STRIPE_CHECKOUT_PLAN must be one of ${paidSelfServePlans.join(', ')}`)
   }
@@ -266,9 +305,13 @@ const createSubscriptionCheckout = async (token, plans) => {
     throw new Error(`cannot create checkout for ${checkoutPlan}/${checkoutCycle}; price ID is missing or placeholder`)
   }
 
+  const csrfToken = await fetchCSRFToken(auth)
   const { body } = await requestJSON(`${apiV1Base}/billing/checkout`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: {
+      ...authHeaders(auth),
+      'x-csrf-token': csrfToken,
+    },
     body: JSON.stringify({
       price_id: priceID,
       success_url: `${frontendURL.replace(/\/+$/, '')}/billing?launch_stripe=success`,
@@ -282,10 +325,14 @@ const createSubscriptionCheckout = async (token, plans) => {
   ok(`created ${checkoutPlan}/${checkoutCycle} subscription checkout session`)
 }
 
-const createCreditCheckout = async (token) => {
+const createCreditCheckout = async (auth) => {
+  const csrfToken = await fetchCSRFToken(auth)
   const { body } = await requestJSON(`${apiV1Base}/billing/credits/purchase`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: {
+      ...authHeaders(auth),
+      'x-csrf-token': csrfToken,
+    },
     body: JSON.stringify({ amount_usd: creditAmount }),
   })
   const checkoutURL = trim(body?.data?.checkout_url)
@@ -308,17 +355,17 @@ try {
       note(message)
     }
   } else {
-    await validateConfigStatus(auth.token)
-    const plans = await validatePlans(auth.token)
+    await validateConfigStatus(auth)
+    const plans = await validatePlans(auth)
 
     if (runSubscriptionCheckout) {
-      await createSubscriptionCheckout(auth.token, plans)
+      await createSubscriptionCheckout(auth, plans)
     } else {
       note('subscription checkout creation skipped; set APEX_STRIPE_RUN_CHECKOUT=1 to create a non-paid checkout session')
     }
 
     if (runCreditCheckout) {
-      await createCreditCheckout(auth.token)
+      await createCreditCheckout(auth)
     } else {
       note('credit checkout creation skipped; set APEX_STRIPE_RUN_CREDIT_CHECKOUT=1 to create a non-paid credit checkout session')
     }

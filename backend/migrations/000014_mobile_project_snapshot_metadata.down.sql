@@ -1,0 +1,53 @@
+DROP INDEX IF EXISTS idx_mobile_submission_jobs_provider_submission_id;
+DROP INDEX IF EXISTS idx_mobile_submission_jobs_status;
+DROP INDEX IF EXISTS idx_mobile_submission_jobs_platform;
+DROP INDEX IF EXISTS idx_mobile_submission_jobs_build_id;
+DROP INDEX IF EXISTS idx_mobile_submission_jobs_user_id;
+DROP INDEX IF EXISTS idx_mobile_submission_jobs_project_id;
+
+DROP TABLE IF EXISTS mobile_submission_jobs;
+
+DROP INDEX IF EXISTS idx_completed_builds_target_platform;
+DROP INDEX IF EXISTS idx_projects_ios_bundle_identifier;
+DROP INDEX IF EXISTS idx_projects_android_package;
+DROP INDEX IF EXISTS idx_projects_target_platform;
+
+ALTER TABLE IF EXISTS completed_builds
+    DROP COLUMN IF EXISTS mobile_metadata,
+    DROP COLUMN IF EXISTS mobile_spec_json,
+    DROP COLUMN IF EXISTS version_code,
+    DROP COLUMN IF EXISTS build_number,
+    DROP COLUMN IF EXISTS app_version,
+    DROP COLUMN IF EXISTS app_display_name,
+    DROP COLUMN IF EXISTS ios_bundle_identifier,
+    DROP COLUMN IF EXISTS android_package,
+    DROP COLUMN IF EXISTS mobile_capabilities,
+    DROP COLUMN IF EXISTS mobile_release_level,
+    DROP COLUMN IF EXISTS mobile_framework,
+    DROP COLUMN IF EXISTS mobile_platforms,
+    DROP COLUMN IF EXISTS target_platform;
+
+ALTER TABLE IF EXISTS projects
+    DROP COLUMN IF EXISTS mobile_metadata,
+    DROP COLUMN IF EXISTS store_metadata_draft_ref,
+    DROP COLUMN IF EXISTS permission_manifest,
+    DROP COLUMN IF EXISTS splash_asset_ref,
+    DROP COLUMN IF EXISTS icon_asset_ref,
+    DROP COLUMN IF EXISTS version_code,
+    DROP COLUMN IF EXISTS build_number,
+    DROP COLUMN IF EXISTS app_version,
+    DROP COLUMN IF EXISTS app_display_name,
+    DROP COLUMN IF EXISTS ios_bundle_identifier,
+    DROP COLUMN IF EXISTS android_package,
+    DROP COLUMN IF EXISTS eas_project_id,
+    DROP COLUMN IF EXISTS generated_mobile_client_path,
+    DROP COLUMN IF EXISTS generated_backend_url,
+    DROP COLUMN IF EXISTS mobile_store_readiness_status,
+    DROP COLUMN IF EXISTS mobile_build_status,
+    DROP COLUMN IF EXISTS mobile_preview_status,
+    DROP COLUMN IF EXISTS mobile_dependency_policy,
+    DROP COLUMN IF EXISTS mobile_capabilities,
+    DROP COLUMN IF EXISTS mobile_release_level,
+    DROP COLUMN IF EXISTS mobile_framework,
+    DROP COLUMN IF EXISTS mobile_platforms,
+    DROP COLUMN IF EXISTS target_platform;
