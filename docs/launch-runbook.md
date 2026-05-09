@@ -76,6 +76,21 @@ APEX_STRIPE_RUN_CREDIT_CHECKOUT=1 \
 node scripts/verify_stripe_launch.mjs
 ```
 
+Optional billing portal probe for an account that already has a Stripe customer:
+
+```bash
+APEX_API_URL=https://api.apex-build.dev \
+APEX_FRONTEND_URL=https://apex-build.dev \
+APEX_STRIPE_EXPECT_LIVE=1 \
+APEX_STRIPE_USERNAME='paid-canary-username' \
+APEX_STRIPE_EMAIL='paid-canary@example.com' \
+APEX_STRIPE_PASSWORD='replace-me' \
+APEX_STRIPE_RUN_PORTAL=1 \
+node scripts/verify_stripe_launch.mjs
+```
+
+The verifier also checks that the public webhook endpoint rejects an invalid Stripe signature. This is non-mutating and does not replace real Stripe dashboard or CLI event replay.
+
 Optional authenticated step:
 
 ```bash
@@ -202,6 +217,7 @@ GitHub Actions now includes `.github/workflows/production-canary.yml`:
 - the Stripe verifier reuses `APEX_CANARY_USERNAME`/`APEX_CANARY_EMAIL` plus `APEX_CANARY_PASSWORD` when configured, otherwise it registers a throwaway smoke user
 - `Launch Verification Scripts` runs strict Render env verification only when `RENDER_API_KEY`, `RENDER_BACKEND_SERVICE_ID`, and `RENDER_FRONTEND_SERVICE_ID` secrets are configured
 - workflow dispatch input `run_checkout_probes=true` creates non-paid Stripe subscription and credit checkout sessions from the verifier
+- the Stripe verifier checks invalid webhook signatures are rejected; billing portal probes remain manual because they require an existing Stripe customer
 - workflow dispatch input `run_mobile_external_strict=true` requires `APEX_MOBILE_CANARY_TOKEN` and `APEX_MOBILE_CANARY_PROJECT_ID`, then proves strict native/store evidence for that project
 - `Preview Verification Canary` runs preview readiness coverage against production
 - `Platform Build Canary (free-fast / paid-balanced / paid-max)` runs the build matrix against production

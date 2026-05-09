@@ -33,6 +33,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Render backend Docker builds now compile the full `backend/cmd` package so deployment includes startup launch-readiness and admin-promotion files.
 - Production file migration `000014_mobile_project_snapshot_metadata` adds the mobile project/snapshot columns and `mobile_submission_jobs` table that production file migrations were missing.
 - Stripe launch verification now supports deployed cookie-session auth and CSRF-protected checkout probes.
+- Stripe launch verification now includes a non-mutating live webhook invalid-signature rejection check and an opt-in billing portal probe for existing Stripe customer accounts.
 - Provider cost-threshold skips are classified as provider-level failures so build orchestration can immediately try a cheaper available provider instead of failing the build.
 
 ## Launch Blockers Still Open
@@ -49,7 +50,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Public `/health` is healthy and ready with startup `2026-05-09T03:25:29.548635607Z` after the final deploy.
 - Strict Render launch verification passed: Render env-var presence was verified without printing secret values, Redis was ready, `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and `preview_runtime_verify` was browser-proof ready.
 - Mobile external readiness verifier passed its launch-safe default gate: native EAS builds and store submission remain gated until real project/provider/store evidence exists.
-- Stripe launch verifier passed strict production readiness and created non-paid checkout sessions for Builder monthly and `$25` credits. Live webhook replay and controlled paid checkout remain external evidence gaps.
+- Stripe launch verifier passed strict production readiness, verified invalid webhook signatures are rejected, and created non-paid checkout sessions for Builder monthly and `$25` credits. Real Stripe event replay and controlled paid checkout remain external evidence gaps.
 - Playwright production launch smoke passed `5 passed / 1 skipped` and preview verification smoke passed `3 passed / 4 skipped`.
 - Production free frontend platform smoke completed build `a04e49ec-d18e-4202-b8ce-56a5ed85b88a` with `ASSERTIONS_PASSED profile=free_frontend power_mode=fast`.
 
@@ -62,7 +63,7 @@ This tracker reconciles the master launch plan with the current repository state
 - `APEX_RENDER_EXPECT_PRODUCTION=1 RENDER_API_KEY=... RENDER_BACKEND_SERVICE_ID=... RENDER_FRONTEND_SERVICE_ID=... node scripts/verify_render_launch_env.mjs`
 - Production canary `Launch Verification Scripts` job passing with strict Render secrets configured.
 - Production platform build canary matrix: free-fast passed on 2026-05-09; paid-balanced and paid-max remain.
-- Stripe webhook replay and controlled live checkout evidence.
+- Stripe webhook invalid-signature rejection check in `scripts/verify_stripe_launch.mjs`; real Stripe event replay and controlled live checkout evidence still required.
 - Strict mobile external-provider evidence with `APEX_MOBILE_EXPECT_NATIVE_READY=1`.
 - Screenshot/console evidence for generated preview readiness.
 - Rollback drill and support/incident checklist reviewed.

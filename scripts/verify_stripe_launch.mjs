@@ -24,8 +24,11 @@ Environment:
   APEX_STRIPE_RUN_CHECKOUT=1           Create a subscription checkout session. Does not complete payment.
   APEX_STRIPE_CHECKOUT_PLAN=builder    builder | pro | team. Default: builder.
   APEX_STRIPE_CHECKOUT_CYCLE=monthly   monthly | annual. Default: monthly.
+  APEX_STRIPE_RUN_PORTAL=1             Create a billing portal session for an existing Stripe customer.
   APEX_STRIPE_RUN_CREDIT_CHECKOUT=1    Create a credit top-up checkout session. Does not complete payment.
   APEX_STRIPE_CREDIT_AMOUNT=25         One of the supported credit top-up amounts. Default: 25.
+  APEX_STRIPE_SKIP_WEBHOOK_REJECT_CHECK=1
+                                       Skip the non-mutating live webhook invalid-signature rejection check.
   APEX_FRONTEND_URL                    Redirect base for checkout probes. Default: https://apex-build.dev
 `
 
@@ -57,7 +60,9 @@ const { apiOrigin, apiV1Base } = normalizeTargets(env.APEX_API_URL || env.PLAYWR
 const expectLive = boolEnv('APEX_STRIPE_EXPECT_LIVE') || boolEnv('PLAYWRIGHT_EXPECT_LIVE_STRIPE')
 const registerSmokeUser = boolEnv('APEX_STRIPE_REGISTER_SMOKE_USER')
 const runSubscriptionCheckout = boolEnv('APEX_STRIPE_RUN_CHECKOUT')
+const runPortal = boolEnv('APEX_STRIPE_RUN_PORTAL')
 const runCreditCheckout = boolEnv('APEX_STRIPE_RUN_CREDIT_CHECKOUT')
+const skipWebhookRejectCheck = boolEnv('APEX_STRIPE_SKIP_WEBHOOK_REJECT_CHECK')
 const frontendURL = trim(env.APEX_FRONTEND_URL) || trim(env.PLAYWRIGHT_BASE_URL) || 'https://apex-build.dev'
 const checkoutPlan = trim(env.APEX_STRIPE_CHECKOUT_PLAN) || 'builder'
 const checkoutCycle = trim(env.APEX_STRIPE_CHECKOUT_CYCLE) || 'monthly'
@@ -106,6 +111,18 @@ const requestJSON = async (url, options = {}) => {
     throw new Error(`${method} ${url} returned ${response.status}: ${truncate(body || text)}`)
   }
   return { response, body }
+}
+
+const requestText = async (url, options = {}) => {
+  const method = options.method || 'GET'
+  const headers = {
+    accept: 'application/json',
+    ...(options.body ? { 'content-type': 'application/json' } : {}),
+    ...(options.headers || {}),
+  }
+  const response = await fetch(url, { ...options, headers })
+  const text = await response.text()
+  return { response, text, method }
 }
 
 const cookieHeaderFromResponse = (response) => {
@@ -325,6 +342,25 @@ const createSubscriptionCheckout = async (auth, plans) => {
   ok(`created ${checkoutPlan}/${checkoutCycle} subscription checkout session`)
 }
 
+const createBillingPortal = async (auth) => {
+  const csrfToken = await fetchCSRFToken(auth)
+  const { body } = await requestJSON(`${apiV1Base}/billing/portal`, {
+    method: 'POST',
+    headers: {
+      ...authHeaders(auth),
+      'x-csrf-token': csrfToken,
+    },
+    body: JSON.stringify({
+      return_url: `${frontendURL.replace(/\/+$/, '')}/billing?launch_portal=return`,
+    }),
+  })
+  const portalURL = trim(body?.data?.portal_url)
+  if (!portalURL || !portalURL.includes('stripe.com')) {
+    throw new Error(`/billing/portal did not return a Stripe portal_url: ${truncate(body)}`)
+  }
+  ok('created billing portal session')
+}
+
 const createCreditCheckout = async (auth) => {
   const csrfToken = await fetchCSRFToken(auth)
   const { body } = await requestJSON(`${apiV1Base}/billing/credits/purchase`, {
@@ -342,14 +378,38 @@ const createCreditCheckout = async (auth) => {
   ok(`created $${creditAmount} credit checkout session`)
 }
 
+const validateWebhookRejectsInvalidSignature = async () => {
+  const payload = JSON.stringify({
+    id: `evt_launch_invalid_signature_${Date.now()}`,
+    type: 'checkout.session.completed',
+    data: { object: { id: 'cs_launch_invalid_signature' } },
+  })
+  const { response, text } = await requestText(`${apiV1Base}/billing/webhook`, {
+    method: 'POST',
+    headers: {
+      'stripe-signature': `t=${Math.floor(Date.now() / 1000)},v1=invalid-launch-signature`,
+    },
+    body: payload,
+  })
+  if (response.status !== 400) {
+    throw new Error(`/billing/webhook invalid-signature probe returned ${response.status}, expected 400: ${truncate(text)}`)
+  }
+  ok('/billing/webhook rejects invalid signatures')
+}
+
 try {
   console.log(`[info] API origin: ${apiOrigin}`)
   await validatePaymentsReadiness()
+  if (!skipWebhookRejectCheck) {
+    await validateWebhookRejectsInvalidSignature()
+  } else {
+    note('webhook invalid-signature rejection check skipped')
+  }
 
   const auth = await authenticate()
   if (!auth) {
     const message = 'protected billing checks skipped; set APEX_STRIPE_USERNAME/APEX_STRIPE_PASSWORD or APEX_STRIPE_REGISTER_SMOKE_USER=1'
-    if (expectLive || runSubscriptionCheckout || runCreditCheckout) {
+    if (expectLive || runSubscriptionCheckout || runPortal || runCreditCheckout) {
       fail(message)
     } else {
       note(message)
@@ -362,6 +422,12 @@ try {
       await createSubscriptionCheckout(auth, plans)
     } else {
       note('subscription checkout creation skipped; set APEX_STRIPE_RUN_CHECKOUT=1 to create a non-paid checkout session')
+    }
+
+    if (runPortal) {
+      await createBillingPortal(auth)
+    } else {
+      note('billing portal creation skipped; set APEX_STRIPE_RUN_PORTAL=1 with an existing Stripe customer account')
     }
 
     if (runCreditCheckout) {
