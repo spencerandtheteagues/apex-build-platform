@@ -217,7 +217,8 @@ GitHub Actions now includes `.github/workflows/production-canary.yml`:
 - the Stripe verifier reuses `APEX_CANARY_USERNAME`/`APEX_CANARY_EMAIL` plus `APEX_CANARY_PASSWORD` when configured, otherwise it registers a throwaway smoke user
 - `Launch Verification Scripts` runs strict Render env verification only when `RENDER_API_KEY`, `RENDER_BACKEND_SERVICE_ID`, and `RENDER_FRONTEND_SERVICE_ID` secrets are configured
 - workflow dispatch input `run_checkout_probes=true` creates non-paid Stripe subscription and credit checkout sessions from the verifier
-- the Stripe verifier checks invalid webhook signatures are rejected; billing portal probes remain manual because they require an existing Stripe customer
+- workflow dispatch input `run_portal_probe=true` creates a billing portal session for the configured canary Stripe customer
+- the Stripe verifier checks invalid webhook signatures are rejected; real webhook event replay still remains a Stripe dashboard or CLI step
 - workflow dispatch input `run_mobile_external_strict=true` requires `APEX_MOBILE_CANARY_TOKEN` and `APEX_MOBILE_CANARY_PROJECT_ID`, then proves strict native/store evidence for that project
 - `Preview Verification Canary` runs preview readiness coverage against production
 - `Platform Build Canary (free-fast / paid-balanced / paid-max)` runs the build matrix against production

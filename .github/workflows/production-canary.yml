@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_portal_probe:
+        description: Create a Stripe billing portal session for the configured canary customer
+        required: false
+        default: false
+        type: boolean
       run_mobile_external_strict:
         description: Require strict mobile native/store evidence for a configured canary project
         required: false
@@ -91,6 +96,7 @@ jobs:
           APEX_STRIPE_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           APEX_STRIPE_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
           RUN_CHECKOUT_PROBES: ${{ github.event_name == 'workflow_dispatch' && inputs.run_checkout_probes == true && 'true' || 'false' }}
+          RUN_PORTAL_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_portal_probe == true && 'true' || 'false' }}
         run: |
           if [[ "$RUN_CHECKOUT_PROBES" == "true" ]]; then
             export APEX_STRIPE_RUN_CHECKOUT=1
@@ -98,6 +104,15 @@ jobs:
             export APEX_STRIPE_CHECKOUT_PLAN=builder
             export APEX_STRIPE_CHECKOUT_CYCLE=monthly
             export APEX_STRIPE_CREDIT_AMOUNT=25
+          fi
+
+          if [[ "$RUN_PORTAL_PROBE" == "true" ]]; then
+            if [[ -z "$APEX_STRIPE_PASSWORD" || ( -z "$APEX_STRIPE_USERNAME" && -z "$APEX_STRIPE_EMAIL" ) ]]; then
+              echo "::error::APEX_CANARY_USERNAME or APEX_CANARY_EMAIL plus APEX_CANARY_PASSWORD are required when run_portal_probe is true."
+              exit 1
+            fi
+            export APEX_STRIPE_REGISTER_SMOKE_USER=0
+            export APEX_STRIPE_RUN_PORTAL=1
           fi
 
           node scripts/verify_stripe_launch.mjs

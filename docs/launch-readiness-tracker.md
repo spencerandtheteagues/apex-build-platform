@@ -34,6 +34,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Production file migration `000014_mobile_project_snapshot_metadata` adds the mobile project/snapshot columns and `mobile_submission_jobs` table that production file migrations were missing.
 - Stripe launch verification now supports deployed cookie-session auth and CSRF-protected checkout probes.
 - Stripe launch verification now includes a non-mutating live webhook invalid-signature rejection check and an opt-in billing portal probe for existing Stripe customer accounts.
+- Production canary workflow now has a manual `run_portal_probe` input for the configured canary Stripe customer.
 - Provider cost-threshold skips are classified as provider-level failures so build orchestration can immediately try a cheaper available provider instead of failing the build.
 
 ## Launch Blockers Still Open
