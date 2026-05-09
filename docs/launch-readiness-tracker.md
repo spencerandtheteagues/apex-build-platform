@@ -42,6 +42,12 @@ This tracker reconciles the master launch plan with the current repository state
 - Verify free frontend build, paid full-stack build, preview proof, export/deploy handoff, billing upgrade/downgrade, credit top-up, and failed-build restart in production.
 - Run strict mobile external-provider readiness verification with a real mobile project, EAS Build/Submit history, Apple credentials, Google Play credentials, and store-readiness evidence before making native mobile build/store claims public.
 
+## Latest Live Read
+
+- 2026-05-09 02:13 UTC: PR #13 was merged to `main` at `7abdd77`, but GitHub CI/deploy runs were skipped by the free-account `APEX_ENABLE_GITHUB_ACTIONS` guard and production had not redeployed yet.
+- Public `/health` was healthy, but `startup.started_at` was still `2026-05-06T01:38:14Z`, `/api/v1/platform/truth` returned `404`, and strict live Render verification failed because `code_execution.details.launch_ready` and `preview_service.details.launch_ready` were not present/true on the deployed backend.
+- Next action: trigger the Render backend/frontend deploy from the Render dashboard or API, then rerun `APEX_RENDER_CHECK_LIVE=1 node scripts/verify_render_launch_env.mjs` and `APEX_MOBILE_CHECK_LIVE=1 node scripts/verify_mobile_external_readiness.mjs`.
+
 ## Evidence Required For Public Launch
 
 - `cd backend && go test ./... -timeout 12m`
