@@ -185,9 +185,17 @@ Do not make native build, TestFlight, Google Play, or store-approval claims publ
 
 GitHub Actions now includes `.github/workflows/production-canary.yml`:
 
-- `Public Launch Smoke` runs the Playwright launch smoke against `apex-build.dev`
-- `Free Frontend Build Canary` runs the sacrificial free-tier preview build against production
+- the whole workflow remains opt-in with repository variable `APEX_ENABLE_GITHUB_ACTIONS=true` so hosted runners are not requested on the free/no-billing account by default
+- `Public Launch Smoke` runs the Playwright launch smoke against `apex-build.dev` with `PLAYWRIGHT_EXPECT_LIVE_STRIPE=1` and `PLAYWRIGHT_EXPECT_LAUNCH_READY=1`
+- `Launch Verification Scripts` runs the Stripe, Render, and mobile external-readiness verifiers against production
+- the Stripe verifier reuses `APEX_CANARY_USERNAME`/`APEX_CANARY_EMAIL` plus `APEX_CANARY_PASSWORD` when configured, otherwise it registers a throwaway smoke user
+- `Launch Verification Scripts` runs strict Render env verification only when `RENDER_API_KEY`, `RENDER_BACKEND_SERVICE_ID`, and `RENDER_FRONTEND_SERVICE_ID` secrets are configured
+- workflow dispatch input `run_checkout_probes=true` creates non-paid Stripe subscription and credit checkout sessions from the verifier
+- workflow dispatch input `run_mobile_external_strict=true` requires `APEX_MOBILE_CANARY_TOKEN` and `APEX_MOBILE_CANARY_PROJECT_ID`, then proves strict native/store evidence for that project
+- `Preview Verification Canary` runs preview readiness coverage against production
 - `Platform Build Canary (free-fast / paid-balanced / paid-max)` runs the build matrix against production
+- `Golden FieldOps Live Canary` runs the balanced/max golden prompt when canary credentials exist
+- `Prompt Reliability Live Matrix` remains manual through `run_prompt_matrix=true`
 - set `APEX_CANARY_USERNAME` as well when the paid canary account authenticates more reliably by username than email
 
 Treat any failure in that workflow as a customer-facing reliability regression until explained.

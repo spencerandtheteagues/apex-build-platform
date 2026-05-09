@@ -13,6 +13,16 @@ on:
         required: false
         default: false
         type: boolean
+      run_checkout_probes:
+        description: Create non-paid Stripe checkout sessions in the launch verifier
+        required: false
+        default: false
+        type: boolean
+      run_mobile_external_strict:
+        description: Require strict mobile native/store evidence for a configured canary project
+        required: false
+        default: false
+        type: boolean
       prompt_matrix_power_modes:
         description: Space-separated power modes for the prompt matrix
         required: false
@@ -54,7 +64,86 @@ jobs:
           PLAYWRIGHT_BASE_URL: https://apex-build.dev
           PLAYWRIGHT_API_URL: https://api.apex-build.dev
           PLAYWRIGHT_EXPECT_LIVE_STRIPE: '1'
+          PLAYWRIGHT_EXPECT_LAUNCH_READY: '1'
         run: npm run test:launch -- --project=chromium
+
+  launch-verifier-suite:
+    name: Launch Verification Scripts
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Stripe launch verifier
+        env:
+          APEX_API_URL: https://api.apex-build.dev
+          APEX_FRONTEND_URL: https://apex-build.dev
+          APEX_STRIPE_EXPECT_LIVE: '1'
+          APEX_STRIPE_REGISTER_SMOKE_USER: '1'
+          APEX_STRIPE_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
+          APEX_STRIPE_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
+          APEX_STRIPE_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+          RUN_CHECKOUT_PROBES: ${{ github.event_name == 'workflow_dispatch' && inputs.run_checkout_probes == true && 'true' || 'false' }}
+        run: |
+          if [[ "$RUN_CHECKOUT_PROBES" == "true" ]]; then
+            export APEX_STRIPE_RUN_CHECKOUT=1
+            export APEX_STRIPE_RUN_CREDIT_CHECKOUT=1
+            export APEX_STRIPE_CHECKOUT_PLAN=builder
+            export APEX_STRIPE_CHECKOUT_CYCLE=monthly
+            export APEX_STRIPE_CREDIT_AMOUNT=25
+          fi
+
+          node scripts/verify_stripe_launch.mjs
+
+      - name: Run Render launch verifier
+        env:
+          APEX_API_URL: https://api.apex-build.dev
+          APEX_RENDER_CHECK_LIVE: '1'
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_BACKEND_SERVICE_ID: ${{ secrets.RENDER_BACKEND_SERVICE_ID }}
+          RENDER_FRONTEND_SERVICE_ID: ${{ secrets.RENDER_FRONTEND_SERVICE_ID }}
+        run: |
+          node scripts/verify_render_launch_env.mjs
+
+          if [[ -n "$RENDER_API_KEY" && -n "$RENDER_BACKEND_SERVICE_ID" && -n "$RENDER_FRONTEND_SERVICE_ID" ]]; then
+            APEX_RENDER_EXPECT_PRODUCTION=1 node scripts/verify_render_launch_env.mjs
+          else
+            echo "::warning::Skipping strict Render launch env verification because Render secrets are not configured."
+          fi
+
+      - name: Run mobile external-readiness verifier
+        env:
+          APEX_API_URL: https://api.apex-build.dev
+          APEX_MOBILE_CHECK_LIVE: '1'
+          APEX_AUTH_TOKEN: ${{ secrets.APEX_MOBILE_CANARY_TOKEN }}
+          APEX_MOBILE_PROJECT_ID: ${{ secrets.APEX_MOBILE_CANARY_PROJECT_ID }}
+          RUN_MOBILE_EXTERNAL_STRICT: ${{ github.event_name == 'workflow_dispatch' && inputs.run_mobile_external_strict == true && 'true' || 'false' }}
+        run: |
+          node scripts/verify_mobile_external_readiness.mjs
+
+          if [[ "$RUN_MOBILE_EXTERNAL_STRICT" == "true" ]]; then
+            missing=0
+            if [[ -z "$APEX_AUTH_TOKEN" ]]; then
+              echo "::error::APEX_MOBILE_CANARY_TOKEN is required when run_mobile_external_strict is true."
+              missing=1
+            fi
+            if [[ -z "$APEX_MOBILE_PROJECT_ID" ]]; then
+              echo "::error::APEX_MOBILE_CANARY_PROJECT_ID is required when run_mobile_external_strict is true."
+              missing=1
+            fi
+            if [[ "$missing" -ne 0 ]]; then
+              exit 1
+            fi
+
+            APEX_MOBILE_EXPECT_NATIVE_READY=1 node scripts/verify_mobile_external_readiness.mjs
+          fi
 
   preview-verification-canary:
     name: Preview Verification Canary
