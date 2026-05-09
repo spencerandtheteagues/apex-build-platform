@@ -29,6 +29,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Stripe launch verification is now scripted through `scripts/verify_stripe_launch.mjs` for production payments readiness, authenticated billing config, paid price IDs, and opt-in checkout-session probes.
 - Render launch environment verification is now scripted through `scripts/verify_render_launch_env.mjs` for blueprint checks, optional Render API env-var presence, and strict live health/readiness checks.
 - Mobile external-provider readiness is now scripted through `scripts/verify_mobile_external_readiness.mjs` to keep native build/store-upload claims gated until real project evidence exists.
+- Production canary now runs the Stripe, Render, and mobile launch verifier scripts when `APEX_ENABLE_GITHUB_ACTIONS=true`; public launch smoke also enforces runtime launch readiness.
 
 ## Launch Blockers Still Open
 
@@ -37,7 +38,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Run a controlled live checkout and billing portal flow before enabling broad public signup.
 - Run strict Render launch env verification and confirm production has `DATABASE_URL`, `REDIS_URL`, JWT secrets, `SECRETS_MASTER_KEY`, Stripe secrets, provider keys, remote Docker/preview env, and current frontend/backend URLs.
 - Redeploy production and confirm `/health/features` shows `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and runtime browser proof ready.
-- Run production canary matrix against `https://apex-build.dev` and `https://api.apex-build.dev`.
+- Enable `APEX_ENABLE_GITHUB_ACTIONS=true` and run the production canary workflow against `https://apex-build.dev` and `https://api.apex-build.dev`.
 - Verify free frontend build, paid full-stack build, preview proof, export/deploy handoff, billing upgrade/downgrade, credit top-up, and failed-build restart in production.
 - Run strict mobile external-provider readiness verification with a real mobile project, EAS Build/Submit history, Apple credentials, Google Play credentials, and store-readiness evidence before making native mobile build/store claims public.
 
@@ -48,6 +49,7 @@ This tracker reconciles the master launch plan with the current repository state
 - `cd tests/e2e && PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 PLAYWRIGHT_EXPECT_LAUNCH_READY=1 npm run test:launch -- --project=chromium`
 - `cd tests/e2e && npm run test:preview-verify -- --project=chromium`
 - `APEX_RENDER_EXPECT_PRODUCTION=1 RENDER_API_KEY=... RENDER_BACKEND_SERVICE_ID=... RENDER_FRONTEND_SERVICE_ID=... node scripts/verify_render_launch_env.mjs`
+- Production canary `Launch Verification Scripts` job passing with strict Render secrets configured.
 - Production platform build canary matrix: free-fast, paid-balanced, paid-max.
 - Stripe webhook replay and controlled live checkout evidence.
 - Strict mobile external-provider evidence with `APEX_MOBILE_EXPECT_NATIVE_READY=1`.
