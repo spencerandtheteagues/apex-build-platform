@@ -30,7 +30,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags="-s -w -X main.BuildDate=${BUILD_DATE} -X main.Version=${VERSION} -X main.CommitHash=${COMMIT_HASH}" \
     -a -installsuffix cgo \
     -o apex-build-server \
-    ./cmd/main.go
+    ./cmd
 
 # Production stage
 FROM alpine:latest

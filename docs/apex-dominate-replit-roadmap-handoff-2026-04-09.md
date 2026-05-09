@@ -475,7 +475,7 @@ Key files:
 
 These slices were verified locally with focused build/test runs during implementation:
 
-- `go build ./cmd/main.go`
+- `go build ./...`
 - targeted `./internal/preview` tests for screenshot/vision/canary behavior
 - targeted `./internal/agents` tests for:
   - preview gate warning preservation and screenshot propagation

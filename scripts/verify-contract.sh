@@ -4,8 +4,8 @@
 
 set -euo pipefail
 
-API_BASE="${API_BASE:-https://apex-backend-5ypy.onrender.com/api/v1}"
-WS_BASE="${WS_BASE:-wss://apex-backend-5ypy.onrender.com}"
+API_BASE="${API_BASE:-https://api.apex-build.dev/api/v1}"
+WS_BASE="${WS_BASE:-wss://api.apex-build.dev}"
 TIMEOUT="${TIMEOUT:-10}"
 VERBOSE="${VERBOSE:-0}"
 

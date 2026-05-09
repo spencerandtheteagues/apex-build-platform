@@ -322,7 +322,7 @@ cp .env.example .env
 # Edit .env with database credentials and at least one AI provider key
 
 # Backend
-cd backend && go mod download && go run ./cmd/main.go
+cd backend && go mod download && go run ./cmd
 
 # Frontend (new terminal)
 cd frontend && npm install && npm run dev
@@ -354,7 +354,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ### Verification
 
 ```bash
-cd backend && go build ./cmd/main.go && go test ./...
+cd backend && go build ./... && go test ./...
 cd frontend && npm run typecheck && npm run build
 ```
 

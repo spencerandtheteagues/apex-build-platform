@@ -102,7 +102,7 @@ jobs:
       - name: Start backend
         working-directory: backend
         run: |
-          nohup go run ./cmd/main.go > /tmp/apex-backend.log 2>&1 &
+          nohup go run ./cmd > /tmp/apex-backend.log 2>&1 &
           echo $! > /tmp/apex-backend.pid
 
       - name: Wait for backend health

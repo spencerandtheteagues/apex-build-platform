@@ -10,7 +10,7 @@ primary_region = 'sjc'
 
 [build.args]
   BP_GO_BUILD_FLAGS = "-ldflags '-s -w'"
-  BP_GO_TARGETS = "./cmd/main.go"
+  BP_GO_TARGETS = "./cmd"
 
 [env]
   PORT = "8080"

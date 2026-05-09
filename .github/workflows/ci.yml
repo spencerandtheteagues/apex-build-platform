@@ -125,7 +125,7 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
             -ldflags="-w -s -X main.Version=${{ github.sha }}" \
-            -o apex-server ./cmd/main.go
+            -o apex-server ./cmd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

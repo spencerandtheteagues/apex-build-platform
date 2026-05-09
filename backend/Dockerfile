@@ -43,7 +43,7 @@ RUN go build \
     -X main.BuildTime=${BUILD_TIME} \
     -X main.CommitSHA=${COMMIT_SHA}" \
     -a -installsuffix cgo \
-    -o /app/apex-server ./cmd/main.go
+    -o /app/apex-server ./cmd
 
 # ==================================================
 # Stage 2: Production Runtime

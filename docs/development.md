@@ -51,7 +51,7 @@ Backend:
 
 ```bash
 cd backend
-go run ./cmd/main.go
+go run ./cmd
 ```
 
 Frontend:
@@ -94,7 +94,7 @@ cd backend
 go test ./...
 go test -race ./...
 go vet ./...
-go build ./cmd/main.go
+go build ./...
 ```
 
 ### Frontend
