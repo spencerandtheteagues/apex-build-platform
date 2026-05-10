@@ -755,6 +755,22 @@ function absolutePreviewURL(url) {
   return `${origin}${url.startsWith('/') ? url : `/${url}`}`
 }
 
+function looksLikePlaceholderPreviewText(text) {
+  const lower = String(text || '').trim().toLowerCase()
+  if (!lower) return false
+  const visibleLength = lower.length
+  const genericKpis = ['kpi 1', 'kpi 2', 'kpi 3'].filter(label => lower.includes(label)).length
+  if (genericKpis >= 2 && (lower.match(/\bvalue\b/g) || []).length >= 2 && visibleLength < 320) {
+    return true
+  }
+  const placeholderSections = ['activity feed', 'projects board', 'client cards', 'settings panel']
+    .filter(label => lower.includes(label)).length
+  if (placeholderSections >= 3 && visibleLength < 260 && !/[$%]|\bcompleted\b|\bactive\b/i.test(text)) {
+    return true
+  }
+  return /lorem ipsum|coming soon|placeholder content|replace this|\btodo\b/i.test(text) && visibleLength < 360
+}
+
 async function verifyPreview(url) {
   const browser = await chromium.launch({ headless: true })
   const context = await browser.newContext({
@@ -867,6 +883,9 @@ async function verifyPreview(url) {
       !/open jobs|pending estimate|launch estimate swarm|recommended final quote/i.test(bodyText)
     if (shellOnlyNav || /future patches|real ui screens will be routed here|routes will be added later/i.test(bodyText)) {
       throw new Error(`preview rendered only an app shell instead of working screen content: ${bodyText.slice(0, 500)}`)
+    }
+    if (looksLikePlaceholderPreviewText(bodyText)) {
+      throw new Error(`preview rendered placeholder dashboard content instead of concrete seeded data: ${bodyText.slice(0, 500)}`)
     }
     if (requireFieldOpsGolden) {
       await verifyFieldOpsGoldenFlow(page)

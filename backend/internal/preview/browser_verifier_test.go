@@ -102,6 +102,20 @@ func TestLooksLikeShellOnlyPreview(t *testing.T) {
 	}
 }
 
+func TestLooksLikePlaceholderPreview(t *testing.T) {
+	t.Parallel()
+
+	placeholder := "SignalRoom Dashboard KPI 1 Value KPI 2 Value KPI 3 Value Activity Feed Projects Board Client Cards Settings Panel Navigation Dashboard Clients Settings"
+	if !looksLikePlaceholderPreview(placeholder, len(placeholder)) {
+		t.Fatal("expected generic KPI/skeleton dashboard to fail placeholder preview heuristic")
+	}
+
+	realDashboard := "SignalRoom Dashboard Revenue $128,400 Conversion 18% Active Projects 24 Activity Feed Nova Supply approved contract Projects Board Atlas redesign completed Client Cards Meridian Health active Settings Panel Notifications enabled"
+	if looksLikePlaceholderPreview(realDashboard, len(realDashboard)) {
+		t.Fatal("expected concrete seeded dashboard to pass placeholder preview heuristic")
+	}
+}
+
 // ── BrowserVerifier.Available / skipped ──────────────────────────────────────
 
 func TestBrowserVerifier_Skipped_WhenChromePathEmpty(t *testing.T) {

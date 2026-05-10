@@ -498,6 +498,24 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		}
 	}
 
+	if looksLikePlaceholderPreview(mount.Snippet, mount.VisibleText) {
+		return &BrowserPageLoadResult{
+			Passed:      false,
+			FailureKind: "placeholder_preview",
+			Details:     fmt.Sprintf("app rendered placeholder dashboard content instead of concrete seed data: %q", mount.Snippet),
+			RepairHints: []string{
+				"Replace generic KPI labels, Value text, skeleton rows, and placeholder cards with concrete, domain-specific seeded content.",
+				"The first preview screen must show usable dashboard data, named records, statuses, and actions instead of a loading-only or template-only shell.",
+				"Keep loading and empty states available as alternate states, but do not make the initial loaded preview render as skeleton placeholders.",
+			},
+			Duration:       time.Since(start),
+			JSErrors:       capturedJS,
+			ConsoleErrors:  capturedConsole,
+			VisibleText:    mount.VisibleText,
+			ScreenshotData: screenshotData,
+		}
+	}
+
 	return &BrowserPageLoadResult{
 		Passed:          true,
 		Duration:        time.Since(start),
@@ -558,6 +576,55 @@ func looksLikeShellOnlyPreview(text string, visibleText int) bool {
 		!strings.Contains(lower, "pending estimate") &&
 		!strings.Contains(lower, "launch estimate swarm") &&
 		!strings.Contains(lower, "recommended final quote")
+}
+
+func looksLikePlaceholderPreview(text string, visibleText int) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	if visibleText <= 0 {
+		visibleText = len([]rune(lower))
+	}
+
+	genericKPIHits := 0
+	for _, label := range []string{"kpi 1", "kpi 2", "kpi 3"} {
+		if strings.Contains(lower, label) {
+			genericKPIHits++
+		}
+	}
+	if genericKPIHits >= 2 && strings.Count(lower, "value") >= 2 && visibleText < 320 {
+		return true
+	}
+
+	sectionHits := 0
+	for _, label := range []string{"activity feed", "projects board", "client cards", "settings panel"} {
+		if strings.Contains(lower, label) {
+			sectionHits++
+		}
+	}
+	if sectionHits >= 3 && visibleText < 260 &&
+		!strings.Contains(lower, "$") &&
+		!strings.Contains(lower, "%") &&
+		!strings.Contains(lower, "completed") &&
+		!strings.Contains(lower, "active") {
+		return true
+	}
+
+	placeholderPhrases := []string{
+		"lorem ipsum",
+		"coming soon",
+		"placeholder content",
+		"replace this",
+		"todo",
+	}
+	for _, phrase := range placeholderPhrases {
+		if strings.Contains(lower, phrase) && visibleText < 360 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // filterBrowserNoise strips well-known benign browser messages that are not
