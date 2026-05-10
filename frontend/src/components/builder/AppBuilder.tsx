@@ -3661,6 +3661,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const handleWebSocketMessage = async (message: any) => {
     const { type, data } = message
 
+    // Mirror FSM events into the zustand store so non-AppBuilder components
+    // (status indicators, dashboards) can read live FSM state via useStore.
+    if (typeof type === 'string' && type.startsWith('build:fsm:')) {
+      const buildID = data?.build_id || data?.buildId || wsBuildIdRef.current || ''
+      useStore.getState().handleFSMEvent(type as any, buildID, data || {})
+    }
+
     switch (type) {
       case 'build:state':
         setBuildState(prev => {

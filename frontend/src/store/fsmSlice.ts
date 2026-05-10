@@ -1,7 +1,11 @@
 // FSM State Slice — WebSocket FSM event consumer for Zustand store
 // Maps backend FSM bridge events (build:fsm:*) into reactive frontend state
 
+import { enableMapSet } from 'immer'
 import { FSMState, FSMEvent, FSMWSMessageType } from '@/types'
+
+// Required so Immer can draft the Map used in this slice's state.
+enableMapSet()
 
 export interface FSMBuildState {
   buildID: string
