@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
+import type { FSMWSMessageType } from '@/types'
 import { getConfiguredApiUrl, getConfiguredWsUrl } from '@/config/runtime'
 import ModelRoleConfig from './ModelRoleConfig'
 import { useThemeLogo } from '@/hooks/useThemeLogo'
@@ -3664,8 +3665,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     // Mirror FSM events into the zustand store so non-AppBuilder components
     // (status indicators, dashboards) can read live FSM state via useStore.
     if (typeof type === 'string' && type.startsWith('build:fsm:')) {
-      const buildID = data?.build_id || data?.buildId || wsBuildIdRef.current || ''
-      useStore.getState().handleFSMEvent(type as any, buildID, data || {})
+      const buildID = data?.build_id || data?.buildId || message?.build_id || message?.buildId || wsBuildIdRef.current || ''
+      useStore.getState().handleFSMEvent(type as FSMWSMessageType, buildID, data || {})
     }
 
     switch (type) {

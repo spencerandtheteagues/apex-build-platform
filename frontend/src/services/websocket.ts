@@ -201,7 +201,7 @@ export class WebSocketService {
 
     // FSM build events — pass through to zustand store
     if (msgType?.startsWith('build:fsm:')) {
-      const buildID = data?.build_id || data?.buildId || ''
+      const buildID = data?.build_id || data?.buildId || message?.build_id || message?.buildId || ''
       useStore.getState().handleFSMEvent(msgType as FSMWSMessageType, buildID, data)
       return
     }

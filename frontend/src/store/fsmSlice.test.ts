@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('@/services/api', () => ({
   default: {
@@ -17,6 +17,11 @@ const getState = () => useStore.getState()
 describe('fsmSlice', () => {
   beforeEach(() => {
     getState().clearAllFSMStates()
+  })
+
+  afterEach(() => {
+    getState().clearAllFSMStates()
+    vi.useRealTimers()
   })
 
   it('starts with empty FSM state', () => {
@@ -112,6 +117,24 @@ describe('fsmSlice', () => {
     expect(fsm?.currentState).toBe('executing')
   })
 
+  it('ignores FSM events when no build id is available', () => {
+    getState().handleFSMEvent('build:fsm:started', '', { to_state: 'planning' })
+    getState().handleFSMEvent('build:fsm:started', '   ', { to_state: 'planning' })
+
+    expect(getState().fsmStates.size).toBe(0)
+    expect(getState().fsmActiveBuilds).toEqual([])
+  })
+
+  it('falls back to a build id from the event payload', () => {
+    getState().handleFSMEvent('build:fsm:started', '   ', {
+      build_id: ' build-from-payload ',
+      to_state: 'planning',
+    })
+
+    expect(getState().getFSMState('build-from-payload')?.currentState).toBe('planning')
+    expect(getState().fsmActiveBuilds).toContain('build-from-payload')
+  })
+
   it('rollback events surface checkpoint and error details', () => {
     getState().handleFSMValidationFail('build-10', {
       to_state: 'rolling_back',
@@ -140,5 +163,21 @@ describe('fsmSlice', () => {
     const ts = getState().getFSMState('build-12')?.timestamp
     expect(ts).toBeDefined()
     expect(() => new Date(ts!).toISOString()).not.toThrow()
+  })
+
+  it('auto-clears terminal FSM states after the retention window', () => {
+    vi.useFakeTimers()
+
+    getState().handleFSMEvent('build:fsm:validation_pass', 'build-13', {
+      to_state: 'completed',
+    })
+
+    expect(getState().getFSMState('build-13')).toBeDefined()
+    vi.advanceTimersByTime(299999)
+    expect(getState().getFSMState('build-13')).toBeDefined()
+    vi.advanceTimersByTime(1)
+
+    expect(getState().getFSMState('build-13')).toBeUndefined()
+    expect(getState().fsmActiveBuilds).not.toContain('build-13')
   })
 })

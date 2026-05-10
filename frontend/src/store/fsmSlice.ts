@@ -2,10 +2,59 @@
 // Maps backend FSM bridge events (build:fsm:*) into reactive frontend state
 
 import { enableMapSet } from 'immer'
-import { FSMState, FSMEvent, FSMWSMessageType } from '@/types'
+import type { FSMState, FSMEvent, FSMWSMessageType } from '@/types'
 
 // Required so Immer can draft the Map used in this slice's state.
 enableMapSet()
+
+const FSM_STATE_RETENTION_MS = 300000
+const terminalFSMStates = new Set<FSMState>(['completed', 'failed', 'cancelled'])
+const clearTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+const normalizeBuildID = (buildID: string, data: any): string => {
+  const providedBuildID = typeof buildID === 'string' ? buildID.trim() : String(buildID ?? '').trim()
+  if (providedBuildID) return providedBuildID
+  const candidate = data?.build_id || data?.buildId
+  return typeof candidate === 'string' ? candidate.trim() : String(candidate ?? '').trim()
+}
+
+const eventFromMessageType = (msgType: FSMWSMessageType): FSMEvent | null => {
+  if (!msgType.startsWith('build:fsm:')) return null
+  const eventName = msgType.replace('build:fsm:', '')
+  switch (eventName) {
+    case 'started':
+      return 'start'
+    case 'paused':
+      return 'pause'
+    case 'resumed':
+      return 'resume'
+    case 'cancelled':
+      return 'cancel'
+    default:
+      return eventName as FSMEvent
+  }
+}
+
+const cancelClearTimer = (buildID: string) => {
+  const timer = clearTimers.get(buildID)
+  if (!timer) return
+  clearTimeout(timer)
+  clearTimers.delete(buildID)
+}
+
+const scheduleClearTimer = (buildID: string, get: any) => {
+  cancelClearTimer(buildID)
+  const timer = setTimeout(() => {
+    clearTimers.delete(buildID)
+    get().clearFSMState(buildID)
+  }, FSM_STATE_RETENTION_MS)
+  clearTimers.set(buildID, timer)
+}
+
+const cancelAllClearTimers = () => {
+  clearTimers.forEach(clearTimeout)
+  clearTimers.clear()
+}
 
 export interface FSMBuildState {
   buildID: string
@@ -66,37 +115,43 @@ export const createFSMSlice = (set: any, get: any): FSMStateSlice & FSMActions =
 
   // Helper to update or create FSM state for a build
   handleFSMEvent: (msgType: FSMWSMessageType, buildID: string, data: any) => {
-    set((state: any) => {
-      const existing = state.fsmStates.get(buildID)
-      const fsmState: FSMBuildState = {
-        buildID,
-        currentState: data.to_state || data.fsm_state || existing?.currentState || 'idle',
-        previousState: data.from_state || existing?.currentState || null,
-        currentEvent: data.event || null,
-        progress: data.progress ?? existing?.progress ?? 0,
-        elapsedMs: data.elapsed_ms ?? existing?.elapsedMs ?? 0,
-        retryCount: data.retry_count ?? existing?.retryCount ?? 0,
-        stepID: data.step_id || existing?.stepID || '',
-        checkpointID: data.checkpoint_id || existing?.checkpointID || null,
-        errorMessage: data.error || existing?.errorMessage || null,
-        metadata: data.metadata || existing?.metadata || '',
-        timestamp: data.timestamp || new Date().toISOString(),
-      }
+    const eventData = data && typeof data === 'object' ? data : {}
+    const resolvedBuildID = normalizeBuildID(buildID, eventData)
+    if (!resolvedBuildID) return
 
-      state.fsmStates.set(buildID, fsmState)
+    let nextState: FSMState = 'idle'
+    set((state: any) => {
+      const existing = state.fsmStates.get(resolvedBuildID)
+      const fsmState: FSMBuildState = {
+        buildID: resolvedBuildID,
+        currentState: eventData.to_state || eventData.fsm_state || existing?.currentState || 'idle',
+        previousState: eventData.from_state || existing?.currentState || null,
+        currentEvent: eventData.event || eventFromMessageType(msgType) || existing?.currentEvent || null,
+        progress: eventData.progress ?? existing?.progress ?? 0,
+        elapsedMs: eventData.elapsed_ms ?? existing?.elapsedMs ?? 0,
+        retryCount: eventData.retry_count ?? existing?.retryCount ?? 0,
+        stepID: eventData.step_id || existing?.stepID || '',
+        checkpointID: eventData.checkpoint_id || existing?.checkpointID || null,
+        errorMessage: eventData.error || existing?.errorMessage || null,
+        metadata: eventData.metadata || existing?.metadata || '',
+        timestamp: eventData.timestamp || new Date().toISOString(),
+      }
+      nextState = fsmState.currentState
+
+      state.fsmStates.set(resolvedBuildID, fsmState)
 
       // Track active builds
-      if (!state.fsmActiveBuilds.includes(buildID)) {
-        state.fsmActiveBuilds.push(buildID)
-      }
-
-      // Auto-clear completed/error builds from active list after 5 min
-      if (['completed', 'failed', 'cancelled'].includes(fsmState.currentState)) {
-        setTimeout(() => {
-          get().clearFSMState(buildID)
-        }, 300000)
+      if (!state.fsmActiveBuilds.includes(resolvedBuildID)) {
+        state.fsmActiveBuilds.push(resolvedBuildID)
       }
     })
+
+    // Auto-clear completed/error builds from active list after the retention window.
+    if (terminalFSMStates.has(nextState)) {
+      scheduleClearTimer(resolvedBuildID, get)
+    } else {
+      cancelClearTimer(resolvedBuildID)
+    }
   },
 
   // Specific event handlers — all delegate to generic handler
@@ -123,6 +178,7 @@ export const createFSMSlice = (set: any, get: any): FSMStateSlice & FSMActions =
   },
 
   clearFSMState: (buildID: string) => {
+    cancelClearTimer(buildID)
     set((state: any) => {
       state.fsmStates.delete(buildID)
       state.fsmActiveBuilds = state.fsmActiveBuilds.filter((id: string) => id !== buildID)
@@ -130,6 +186,7 @@ export const createFSMSlice = (set: any, get: any): FSMStateSlice & FSMActions =
   },
 
   clearAllFSMStates: () => {
+    cancelAllClearTimers()
     set((state: any) => {
       state.fsmStates.clear()
       state.fsmActiveBuilds = []
