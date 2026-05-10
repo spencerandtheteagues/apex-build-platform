@@ -20,6 +20,7 @@ const artifactDir = process.env.ARTIFACT_DIR || path.join('/tmp', `apex-golden-$
 const previewStabilitySeconds = Number(process.env.PREVIEW_STABILITY_SECONDS || 10)
 const previewStabilityPollMS = Math.max(250, Number(process.env.PREVIEW_STABILITY_POLL_MS || 1000))
 const startupRetrySeconds = Math.max(0, Number(process.env.STARTUP_RETRY_SECONDS || 180))
+const requestTimeoutMS = Math.max(5000, Number(process.env.REQUEST_TIMEOUT_MS || 60000))
 const autoRegister = process.env.AUTO_REGISTER === '1'
 const requireFieldOpsGolden = process.env.REQUIRE_FIELDOPS_GOLDEN !== '0' && /apex\s+fieldops\s+ai/i.test(prompt)
 let loginEmail = process.env.LOGIN_EMAIL || ''
@@ -90,6 +91,12 @@ function isTransientGatewayError(error) {
   return [502, 503, 504].includes(error?.status) && !isStartupError(error)
 }
 
+function isTransientNetworkError(error) {
+  return error?.name === 'AbortError' ||
+    error?.name === 'TimeoutError' ||
+    /aborted|timeout|terminated|econnreset|socket|network/i.test(String(error?.message || error))
+}
+
 async function request(route, options = {}) {
   const { skipReauth = false, ...fetchOptions } = options
   const method = String(fetchOptions.method || 'GET').toUpperCase()
@@ -135,6 +142,11 @@ async function request(route, options = {}) {
         await sleep(5000)
         continue
       }
+      if (['GET', 'HEAD'].includes(method) && isTransientNetworkError(error) && Date.now() - startedAt < startupRetrySeconds * 1000) {
+        console.log(`[${new Date().toISOString()}] transient network error during ${route}; retrying: ${error.message}`)
+        await sleep(5000)
+        continue
+      }
       throw error
     }
   }
@@ -152,11 +164,15 @@ async function requestOnce(route, options = {}) {
   const cookie = cookieHeader()
   if (cookie) headers.Cookie = cookie
 
+  const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(requestTimeoutMS)
+    : undefined
   const response = await fetch(apiURL(route), {
     ...options,
     method,
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: options.signal || signal,
   })
   recordCookies(response.headers)
   const text = await response.text()
