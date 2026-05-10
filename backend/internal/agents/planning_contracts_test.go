@@ -68,6 +68,25 @@ func (r *planningHardTimeoutProbeRouter) GetAvailableProvidersForUser(_ uint) []
 
 func (r *planningHardTimeoutProbeRouter) HasConfiguredProviders() bool { return true }
 
+type blockingPlanningRouter struct {
+	release chan struct{}
+}
+
+func (r *blockingPlanningRouter) Generate(ctx context.Context, provider ai.AIProvider, _ string, _ GenerateOptions) (*ai.AIResponse, error) {
+	<-r.release
+	return &ai.AIResponse{Provider: provider, Content: `{"ok":true}`, Usage: &ai.Usage{}}, nil
+}
+
+func (r *blockingPlanningRouter) GetAvailableProviders() []ai.AIProvider {
+	return []ai.AIProvider{ai.ProviderClaude}
+}
+
+func (r *blockingPlanningRouter) GetAvailableProvidersForUser(_ uint) []ai.AIProvider {
+	return r.GetAvailableProviders()
+}
+
+func (r *blockingPlanningRouter) HasConfiguredProviders() bool { return true }
+
 func TestPlannerRouterAdapterFallsBackWhenPrimaryPlanningProviderTimesOut(t *testing.T) {
 	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "5")
 
@@ -135,6 +154,47 @@ func TestPlannerRouterAdapterHardTimesOutProviderThatIgnoresContext(t *testing.T
 	defer router.mu.Unlock()
 	if len(router.calls) < 2 || router.calls[0] != ai.ProviderClaude || router.calls[1] != ai.ProviderGPT4 {
 		t.Fatalf("provider calls = %+v, want claude then gpt4", router.calls)
+	}
+}
+
+func TestExecuteStructuredPlanningTaskWithDeadlineHonorsContextCancellation(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+
+	manager := &AgentManager{
+		aiRouter: &blockingPlanningRouter{release: release},
+	}
+	build := &Build{
+		ID:           "planning-hard-deadline",
+		UserID:       1,
+		ProviderMode: "platform",
+		PowerMode:    PowerFast,
+	}
+	task := &Task{ID: "plan-hard-deadline", Type: TaskPlan}
+	agent := &Agent{
+		ID:       "lead-hard-deadline",
+		BuildID:  build.ID,
+		Role:     RoleLead,
+		Provider: ai.ProviderClaude,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := manager.executeStructuredPlanningTaskWithDeadline(ctx, task, build, agent)
+		done <- err
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected deadline error")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("planning task did not return after context cancellation")
 	}
 }
 

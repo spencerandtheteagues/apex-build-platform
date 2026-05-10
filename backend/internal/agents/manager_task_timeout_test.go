@@ -210,6 +210,60 @@ func TestRecoverStaleInProgressTasks_DoesNotPrematurelyRecoverReviewStageFix(t *
 	}
 }
 
+func TestRecoverStaleInProgressTasksCancelsRegisteredPlanningExecution(t *testing.T) {
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+	}
+
+	execCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startedAt := time.Now().Add(-3 * time.Minute).UTC()
+	task := &Task{
+		ID:          "plan-stale-cancel",
+		Type:        TaskPlan,
+		Description: "Create build plan",
+		AssignedTo:  "lead-1",
+		Status:      TaskInProgress,
+		StartedAt:   &startedAt,
+		MaxRetries:  2,
+	}
+	build := &Build{
+		ID:        "planning-stale-cancel-build",
+		Status:    BuildPlanning,
+		Mode:      ModeFast,
+		PowerMode: PowerFast,
+		UpdatedAt: startedAt,
+		Agents:    make(map[string]*Agent),
+		Tasks:     []*Task{task},
+	}
+	agent := &Agent{
+		ID:       task.AssignedTo,
+		BuildID:  build.ID,
+		Role:     RoleLead,
+		Provider: ai.ProviderClaude,
+		Status:   StatusWorking,
+	}
+	build.Agents[agent.ID] = agent
+	manager.builds[build.ID] = build
+	manager.agents[agent.ID] = agent
+	manager.registerTaskExecutionCancel(task.ID, cancel)
+
+	if recovered := manager.recoverStaleInProgressTasks(build, 3*time.Minute); !recovered {
+		t.Fatal("expected stale planning task recovery")
+	}
+
+	select {
+	case <-execCtx.Done():
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected registered planning execution context to be cancelled")
+	}
+}
+
 func TestBuildTimeoutForBuild_FullMaxStartsWithExtendedBudget(t *testing.T) {
 	t.Parallel()
 

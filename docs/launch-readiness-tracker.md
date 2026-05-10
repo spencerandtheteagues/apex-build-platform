@@ -36,6 +36,10 @@ This tracker reconciles the master launch plan with the current repository state
 - Stripe launch verification now includes a non-mutating live webhook invalid-signature rejection check and an opt-in billing portal probe for existing Stripe customer accounts.
 - Production canary workflow now has a manual `run_portal_probe` input for the configured canary Stripe customer.
 - Provider cost-threshold skips are classified as provider-level failures so build orchestration can immediately try a cheaper available provider instead of failing the build.
+- FSM WebSocket events now hydrate the shared frontend store from both build-stream and collaboration-stream envelopes without creating empty build IDs.
+- Preview browser verification now rejects placeholder-only generated dashboards such as generic `KPI 1 / Value` cards and loading-skeleton-only sections before a build can claim preview success.
+- Live golden canary tooling now fails on placeholder-only previews and bounds HTTP request hangs with retryable request timeouts.
+- The post-placeholder live golden planning stall was classified from Render logs: the planner produced a 12-step plan quickly, then orchestration did not advance. Planning tasks now register cancellation, enforce an outer deadline around planner post-processing, stop heartbeats before result handoff, and nil AI-router paths fail the task instead of panicking.
 
 ## Launch Blockers Still Open
 
@@ -47,13 +51,14 @@ This tracker reconciles the master launch plan with the current repository state
 
 ## Latest Live Read
 
-- 2026-05-09 03:22 UTC: Render backend deploy `dep-d7vadhlbbn2s73bi4dc0` is live on code commit `2358a30`; repo docs were updated afterward without requiring a backend redeploy.
-- Public `/health` is healthy and ready with startup `2026-05-09T03:25:29.548635607Z` after the final deploy.
-- Strict Render launch verification passed: Render env-var presence was verified without printing secret values, Redis was ready, `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and `preview_runtime_verify` was browser-proof ready.
+- 2026-05-10 00:34 UTC: Render backend deploy `dep-d7vt1fec8suc73917egg` is live on code commit `f1db00d`; repository `main` is `f838cb9` with live-golden script timeout hardening that does not change the deployed backend runtime.
+- Public `/health` is healthy and ready after startup `2026-05-10T00:34:18.050344344Z`.
+- Strict Render launch verification passed after startup settled: Render env-var presence was verified without printing secret values, Redis was ready, `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and `preview_runtime_verify` was browser-proof ready.
 - Mobile external readiness verifier passed its launch-safe default gate: native EAS builds and store submission remain gated until real project/provider/store evidence exists.
 - Stripe launch verifier passed strict production readiness, verified invalid webhook signatures are rejected, and created non-paid checkout sessions for Builder monthly and `$25` credits. Real Stripe event replay and controlled paid checkout remain external evidence gaps.
-- Playwright production launch smoke passed `5 passed / 1 skipped` and preview verification smoke passed `3 passed / 4 skipped`.
-- Production free frontend platform smoke completed build `a04e49ec-d18e-4202-b8ce-56a5ed85b88a` with `ASSERTIONS_PASSED profile=free_frontend power_mode=fast`.
+- Playwright production launch smoke passed `5 passed / 1 skipped` with live Stripe and launch readiness assertions enabled.
+- Production free frontend platform smoke completed build `d7a97337-11c1-4033-bfad-9aa390e8d141` with `ASSERTIONS_PASSED profile=free_frontend power_mode=fast`.
+- Live golden preview proof before the placeholder gate exposed underbuilt dashboard output (`f02923a0-9daf-494f-a580-6dcadaa23bc8`, screenshot at `/tmp/apex-golden-1778372163736/preview.png`), so the placeholder-only preview gate was added and deployed. A post-deploy rerun stalled in planning/waiting; Render logs showed the planner created a valid plan, and the planning hard-deadline/cancel patch is ready for deploy before the next screenshot proof.
 
 ## Evidence Required For Public Launch
 

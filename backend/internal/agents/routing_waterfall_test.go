@@ -191,6 +191,19 @@ func TestGenerateTaskOutputWithProviderUsesRoutingWaterfallWhenEnabled(t *testin
 	}
 }
 
+func TestGenerateTaskOutputWithProviderFailsWhenAIRouterMissing(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{ID: "build-missing-router", PowerMode: PowerFast}
+	agent := &Agent{ID: "agent-missing-router", BuildID: build.ID, Role: RoleFrontend, Provider: ai.ProviderGPT4}
+	task := &Task{ID: "task-missing-router", Type: TaskGenerateUI}
+
+	if candidate, err := am.generateTaskOutputWithProvider(context.Background(), build, agent, task, "prompt", "system", ai.ProviderGPT4, 1200, 0.1); err == nil {
+		t.Fatalf("expected missing router error, got candidate %+v", candidate)
+	}
+}
+
 func TestGenerateTaskOutputWithProviderFallsBackWhenWaterfallDisabled(t *testing.T) {
 	t.Parallel()
 

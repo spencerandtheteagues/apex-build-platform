@@ -513,6 +513,9 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	if am == nil || build == nil || agent == nil || task == nil {
 		return nil, fmt.Errorf("missing generation context")
 	}
+	if am.aiRouter == nil {
+		return nil, fmt.Errorf("ai router not configured")
+	}
 	triage := triageTaskForWaterfall(task)
 	callPowerMode := build.PowerMode
 	waterfallStage := "static_fallback"

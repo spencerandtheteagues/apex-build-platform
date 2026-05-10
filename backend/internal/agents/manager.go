@@ -5402,11 +5402,15 @@ func (am *AgentManager) executeTask(task *Task) {
 		planningProviders := am.planningProviderOrder(build, task, agent.Provider)
 		planTimeout := planningTaskOverallTimeout(build.PowerMode, agent.Provider, planningProviders, am.buildUsesPlatformKeys(build))
 		ctx, cancel := context.WithTimeout(am.ctx, planTimeout)
-		defer cancel()
+		am.registerTaskExecutionCancel(task.ID, cancel)
+		defer func() {
+			am.clearTaskExecutionCancel(task.ID)
+			cancel()
+		}()
 		stopHeartbeat := am.startAgentActivityHeartbeat(ctx, agent.BuildID, agent, task, WSAgentWorking, "planning", agent.Provider, agent.Model)
-		defer stopHeartbeat()
 
-		output, err := am.executeStructuredPlanningTask(ctx, task, build, agent)
+		output, err := am.executeStructuredPlanningTaskWithDeadline(ctx, task, build, agent)
+		stopHeartbeat()
 		if err != nil {
 			am.enqueueTaskResult(&TaskResult{
 				TaskID:  task.ID,

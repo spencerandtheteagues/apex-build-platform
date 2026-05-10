@@ -142,6 +142,26 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 	}, nil
 }
 
+func (am *AgentManager) executeStructuredPlanningTaskWithDeadline(ctx context.Context, task *Task, build *Build, agent *Agent) (*TaskOutput, error) {
+	type planningTaskResult struct {
+		output *TaskOutput
+		err    error
+	}
+
+	resultCh := make(chan planningTaskResult, 1)
+	go func() {
+		output, err := am.executeStructuredPlanningTask(ctx, task, build, agent)
+		resultCh <- planningTaskResult{output: output, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		return result.output, result.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("structured planning task exceeded deadline: %w", ctx.Err())
+	}
+}
+
 func (am *AgentManager) planningProviderOrder(build *Build, task *Task, primary ai.AIProvider) []ai.AIProvider {
 	providers := []ai.AIProvider{primary}
 	preferredPrimary := primary
