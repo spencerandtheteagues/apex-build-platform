@@ -966,6 +966,35 @@ async function verifyPreview(url) {
       typeof sheet.rules === 'number' ? sum + sheet.rules : sum
     ), 0)
     const stylesheetTextSample = stylesheets.map(sheet => sheet.sample || '').join('\n')
+    const classTokens = new Set(classText.split(/\s+/).filter(Boolean))
+    const firstExistingClass = (candidates) => candidates.find(candidate => classTokens.has(candidate)) || ''
+    const probeClasses = [
+      firstExistingClass(['flex', 'grid']),
+      firstExistingClass(['bg-card', 'bg-primary', 'bg-secondary', 'bg-muted', 'bg-accent', 'bg-slate-900', 'bg-gray-900', 'bg-zinc-900', 'bg-neutral-900', 'bg-white']),
+      firstExistingClass(['p-4', 'p-5', 'p-6', 'p-8']),
+      firstExistingClass(['rounded-lg', 'rounded-xl', 'rounded-2xl', 'rounded-md', 'rounded']),
+    ].filter(Boolean)
+    const probe = document.createElement('div')
+    probe.className = ['apex-tailwind-runtime-probe', ...probeClasses].join(' ')
+    probe.style.position = 'absolute'
+    probe.style.left = '-9999px'
+    probe.style.top = '0'
+    probe.textContent = 'tailwind probe'
+    document.body.appendChild(probe)
+    const probeStyle = window.getComputedStyle(probe)
+    const tailwindProbe = {
+      classes: probeClasses,
+      display: probeStyle.display,
+      paddingTop: probeStyle.paddingTop,
+      borderTopLeftRadius: probeStyle.borderTopLeftRadius,
+      backgroundColor: probeStyle.backgroundColor,
+      passed: probeClasses.length >= 2 &&
+        (!probeClasses.some(cls => cls === 'flex' || cls === 'grid') || ['flex', 'grid'].includes(probeStyle.display)) &&
+        (!probeClasses.some(cls => /^p-\d/.test(cls)) || Number.parseFloat(probeStyle.paddingTop || '0') >= 12) &&
+        (!probeClasses.some(cls => /^rounded/.test(cls)) || Number.parseFloat(probeStyle.borderTopLeftRadius || '0') >= 4) &&
+        (!probeClasses.some(cls => /^bg-/.test(cls)) || !/rgba?\(0,\s*0,\s*0(?:,\s*0)?\)|transparent/i.test(probeStyle.backgroundColor)),
+    }
+    probe.remove()
     return {
       body: readStyle('body'),
       rootChild: readStyle('#root > *'),
@@ -975,6 +1004,7 @@ async function verifyPreview(url) {
       accessibleRuleCount,
       utilityClassCount: utilityMatches.length,
       leakedTailwindDirectives: /@tailwind|@import\s+["']tailwindcss["']/.test(stylesheetTextSample),
+      tailwindProbe,
     }
   })
     const screenshotPath = path.join(artifactDir, 'preview.png')
@@ -994,9 +1024,9 @@ async function verifyPreview(url) {
       screenshot: screenshotPath,
     })
     const usesTailwindUtilities = visualProof.utilityClassCount >= 20
-    const hasCompiledUtilityCSS = visualProof.accessibleRuleCount >= 100
+    const hasCompiledUtilityCSS = visualProof.accessibleRuleCount >= 100 || visualProof.tailwindProbe?.passed === true
     if (usesTailwindUtilities && (!hasCompiledUtilityCSS || visualProof.leakedTailwindDirectives)) {
-      throw new Error(`preview rendered Tailwind utility markup without compiled CSS: utility_classes=${visualProof.utilityClassCount} css_rules=${visualProof.accessibleRuleCount} leaked_directives=${visualProof.leakedTailwindDirectives}`)
+      throw new Error(`preview rendered Tailwind utility markup without compiled CSS: utility_classes=${visualProof.utilityClassCount} css_rules=${visualProof.accessibleRuleCount} leaked_directives=${visualProof.leakedTailwindDirectives} probe=${JSON.stringify(visualProof.tailwindProbe || {})}`)
     }
     if (consoleErrors.length > 0 && process.env.ALLOW_CONSOLE_ERRORS !== '1') {
       throw new Error(`preview console errors: ${consoleErrors.slice(0, 5).join(' | ')}`)

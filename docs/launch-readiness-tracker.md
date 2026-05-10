@@ -40,6 +40,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Preview browser verification now rejects placeholder-only generated dashboards such as generic `KPI 1 / Value` cards and loading-skeleton-only sections before a build can claim preview success.
 - Live golden canary tooling now fails on placeholder-only previews and bounds HTTP request hangs with retryable request timeouts.
 - The post-placeholder live golden planning stall was classified from Render logs: the planner produced a 12-step plan quickly, then orchestration did not advance. Planning tasks now register cancellation, enforce an outer deadline around planner post-processing, stop heartbeats before result handoff, and nil AI-router paths fail the task instead of panicking.
+- Live golden Tailwind proof now uses a computed-style probe based on classes already present in the generated app, avoiding false failures when a valid Tailwind build emits fewer than 100 accessible CSS rules.
 
 ## Launch Blockers Still Open
 
@@ -51,14 +52,14 @@ This tracker reconciles the master launch plan with the current repository state
 
 ## Latest Live Read
 
-- 2026-05-10 00:34 UTC: Render backend deploy `dep-d7vt1fec8suc73917egg` is live on code commit `f1db00d`; repository `main` is `f838cb9` with live-golden script timeout hardening that does not change the deployed backend runtime.
-- Public `/health` is healthy and ready after startup `2026-05-10T00:34:18.050344344Z`.
+- 2026-05-10 01:13 UTC: Render backend deploy `dep-d7vtjfee4jis73ej4a4g` is live on code commit `0a76d4d`; repository `main` includes live-golden script timeout and computed Tailwind proof hardening.
+- Public `/health` is healthy and ready after startup `2026-05-10T01:13:00.776146933Z`.
 - Strict Render launch verification passed after startup settled: Render env-var presence was verified without printing secret values, Redis was ready, `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and `preview_runtime_verify` was browser-proof ready.
 - Mobile external readiness verifier passed its launch-safe default gate: native EAS builds and store submission remain gated until real project/provider/store evidence exists.
 - Stripe launch verifier passed strict production readiness, verified invalid webhook signatures are rejected, and created non-paid checkout sessions for Builder monthly and `$25` credits. Real Stripe event replay and controlled paid checkout remain external evidence gaps.
 - Playwright production launch smoke passed `5 passed / 1 skipped` with live Stripe and launch readiness assertions enabled.
 - Production free frontend platform smoke completed build `d7a97337-11c1-4033-bfad-9aa390e8d141` with `ASSERTIONS_PASSED profile=free_frontend power_mode=fast`.
-- Live golden preview proof before the placeholder gate exposed underbuilt dashboard output (`f02923a0-9daf-494f-a580-6dcadaa23bc8`, screenshot at `/tmp/apex-golden-1778372163736/preview.png`), so the placeholder-only preview gate was added and deployed. A post-deploy rerun stalled in planning/waiting; Render logs showed the planner created a valid plan, and the planning hard-deadline/cancel patch is ready for deploy before the next screenshot proof.
+- Live golden preview proof before the placeholder gate exposed underbuilt dashboard output (`f02923a0-9daf-494f-a580-6dcadaa23bc8`, screenshot at `/tmp/apex-golden-1778372163736/preview.png`), so the placeholder-only preview gate was added and deployed. After the planning hard-deadline/cancel patch, fast production golden build `f7f2549b-b082-407e-ac21-dbd18acf3f5e` reached `completed` at 100%, started preview for project `126`, and produced a styled screenshot at `/tmp/apex-golden-1778375628537/preview.png`; the computed Tailwind probe passed against that preview after replacing the script's rule-count-only check.
 
 ## Evidence Required For Public Launch
 
