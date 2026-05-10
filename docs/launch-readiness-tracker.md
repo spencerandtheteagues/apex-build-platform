@@ -1,6 +1,6 @@
 # Apex Build Launch Readiness Tracker
 
-Date: 2026-05-09
+Date: 2026-05-10
 
 This tracker reconciles the master launch plan with the current repository state. Code, tests, production config, and live canary evidence remain authoritative.
 
@@ -60,6 +60,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Playwright production launch smoke passed `5 passed / 1 skipped` with live Stripe and launch readiness assertions enabled.
 - Production free frontend platform smoke completed build `d7a97337-11c1-4033-bfad-9aa390e8d141` with `ASSERTIONS_PASSED profile=free_frontend power_mode=fast`.
 - Live golden preview proof before the placeholder gate exposed underbuilt dashboard output (`f02923a0-9daf-494f-a580-6dcadaa23bc8`, screenshot at `/tmp/apex-golden-1778372163736/preview.png`), so the placeholder-only preview gate was added and deployed. After the planning hard-deadline/cancel patch, fast production golden build `f7f2549b-b082-407e-ac21-dbd18acf3f5e` reached `completed` at 100%, started preview for project `126`, and produced a styled screenshot at `/tmp/apex-golden-1778375628537/preview.png`; the computed Tailwind probe passed against that preview after replacing the script's rule-count-only check.
+- Patched live golden proof completed cleanly after the Tailwind verifier fix: fast production golden build `a7a6b607-3506-40de-97b1-4b56be8179ed` reached `completed` at 100%, restored cleanly through the status gate, recovered after an initial preview-interaction verification failure, passed `quality_gate_status=passed`, started preview for project `127`, captured screenshot evidence at `/tmp/apex-golden-1778376196951/preview.png`, and exited with `GOLDEN_BUILD_PASSED`.
 
 ## Evidence Required For Public Launch
 
@@ -69,7 +70,7 @@ This tracker reconciles the master launch plan with the current repository state
 - `cd tests/e2e && npm run test:preview-verify -- --project=chromium`
 - `APEX_RENDER_EXPECT_PRODUCTION=1 RENDER_API_KEY=... RENDER_BACKEND_SERVICE_ID=... RENDER_FRONTEND_SERVICE_ID=... node scripts/verify_render_launch_env.mjs`
 - Production canary `Launch Verification Scripts` job passing with strict Render secrets configured.
-- Production platform build canary matrix: free-fast passed on 2026-05-09; paid-balanced and paid-max remain.
+- Production platform build canary matrix: free-fast passed on 2026-05-09, fast frontend-only live golden passed on 2026-05-10; paid-balanced and paid-max remain.
 - Stripe webhook invalid-signature rejection check in `scripts/verify_stripe_launch.mjs`; real Stripe event replay and controlled live checkout evidence still required.
 - Strict mobile external-provider evidence with `APEX_MOBILE_EXPECT_NATIVE_READY=1`.
 - Screenshot/console evidence for generated preview readiness.
