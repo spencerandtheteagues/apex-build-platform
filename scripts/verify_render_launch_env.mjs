@@ -166,8 +166,8 @@ const validateBlueprint = (blueprint) => {
 
   if (api.runtime !== 'docker') fail('apex-api must use Docker runtime')
   else ok('apex-api uses Docker runtime')
-  if (api.healthCheckPath !== '/health') fail('apex-api healthCheckPath must be /health')
-  else ok('apex-api healthCheckPath is /health')
+  if (api.healthCheckPath !== '/ready') fail('apex-api healthCheckPath must be /ready')
+  else ok('apex-api healthCheckPath is /ready')
 
   const apiEnv = envMap(api)
   requireEnvValue(apiEnv, 'ENVIRONMENT', 'production', 'apex-api')
@@ -426,11 +426,18 @@ const validateLiveHealth = async () => {
     return
   }
 
+  const ready = await requestJSON(`${apiOrigin}/ready`)
+  if (ready.ready !== true || ready.startup?.ready !== true) {
+    fail(`/ready is not ready: ${truncate(ready)}`)
+  } else {
+    ok('/ready is healthy and ready')
+  }
+
   const health = await requestJSON(`${apiOrigin}/health`)
   if (health.status !== 'healthy' || health.ready !== true) {
-    fail(`/health is not ready: ${truncate(health)}`)
+    fail(`/health is not healthy: ${truncate(health)}`)
   } else {
-    ok('/health is healthy and ready')
+    ok('/health remains healthy')
   }
 
   const features = await requestJSON(`${apiOrigin}/health/features`)
