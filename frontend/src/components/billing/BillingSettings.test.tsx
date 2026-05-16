@@ -37,6 +37,7 @@ describe('BillingSettings', () => {
     apiMocks.getPlans.mockResolvedValue({
       success: true,
       data: {
+        self_serve_ready: true,
         plans: [
           {
             type: 'free',
@@ -120,5 +121,56 @@ describe('BillingSettings', () => {
     expect(screen.getByText('Publish')).toBeTruthy()
     expect(screen.getByText('BYOK')).toBeTruthy()
     expect(screen.getByText(/Renews/)).toBeTruthy()
+  })
+
+  it('does not render paid checkout buttons when billing is not self-serve ready', async () => {
+    apiMocks.getPlans.mockResolvedValueOnce({
+      success: true,
+      data: {
+        self_serve_ready: false,
+        plans: [
+          {
+            type: 'free',
+            name: 'Free',
+            monthly_price_cents: 0,
+            monthly_price_id: '',
+            monthly_credits_usd: 0,
+            is_popular: false,
+            features: ['Static frontend websites'],
+          },
+          {
+            type: 'builder',
+            name: 'Builder',
+            monthly_price_cents: 2400,
+            monthly_price_id: 'price_builder_monthly',
+            monthly_credits_usd: 12,
+            is_popular: true,
+            features: ['Backend generation'],
+          },
+        ],
+      },
+    })
+    apiMocks.getSubscription.mockResolvedValue({
+      success: true,
+      data: {
+        plan_type: 'free',
+        plan_name: 'Free',
+        status: 'inactive',
+      },
+    })
+    apiMocks.getCreditBalance.mockResolvedValue({
+      success: true,
+      data: {
+        balance: 3,
+        has_unlimited: false,
+        bypass_billing: false,
+      },
+    })
+
+    render(<BillingSettings />)
+
+    expect(await screen.findByText('Subscription Plans')).toBeTruthy()
+    expect(screen.queryByText('Upgrade to Builder')).toBeNull()
+    expect(screen.getByText('Contact support')).toBeTruthy()
   })
 })

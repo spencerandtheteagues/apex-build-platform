@@ -597,6 +597,9 @@ For code files, use this exact format:
 		if estimatedCost > 0 {
 			res, err := a.byokManager.ReserveCredits(opts.UserID, estimatedCost, isBYOK)
 			if err != nil {
+				if a.budgetEnforcer != nil && budgetReservation != nil {
+					_ = a.budgetEnforcer.ReleaseReservation(budgetReservation.ID)
+				}
 				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
 					return nil, fmt.Errorf("INSUFFICIENT_CREDITS: %s", insufficientCreditsBuildMessage)
 				}

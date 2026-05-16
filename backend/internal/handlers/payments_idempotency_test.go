@@ -317,6 +317,43 @@ func TestHandleInvoicePaidReplayIsIdempotent(t *testing.T) {
 	assert.Equal(t, int64(1), processedCount)
 }
 
+func TestHandleInvoicePaidUsesWebhookPlanOverStaleUserPlan(t *testing.T) {
+	db := openTestDB(t)
+	user := seedUser(t, db, 2)
+	require.NoError(t, db.Model(&user).Updates(map[string]interface{}{
+		"stripe_customer_id":  "cus_invoice_paid_plan_switch",
+		"subscription_type":   string(payments.PlanBuilder),
+		"subscription_status": string(payments.StatusPastDue),
+	}).Error)
+	h := newTestHandler(db)
+
+	event := &payments.WebhookEvent{
+		EventID:        "evt_invoice_paid_plan_switch",
+		Type:           "invoice.paid",
+		CustomerID:     "cus_invoice_paid_plan_switch",
+		SubscriptionID: "sub_invoice_paid_plan_switch",
+		InvoiceID:      "in_invoice_paid_plan_switch",
+		Amount:         5900,
+		Currency:       "usd",
+		PlanType:       payments.PlanPro,
+	}
+
+	require.NoError(t, h.handleInvoicePaid(event))
+
+	plan := payments.GetPlanByType(payments.PlanPro)
+	require.NotNil(t, plan)
+	updated := reloadUser(t, db, user.ID)
+	assert.Equal(t, string(payments.PlanPro), updated.SubscriptionType)
+	assert.Equal(t, string(payments.StatusActive), updated.SubscriptionStatus)
+	assert.Equal(t, "sub_invoice_paid_plan_switch", updated.SubscriptionID)
+	assert.InDelta(t, 2+plan.MonthlyCreditsUSD, updated.CreditBalance, 0.001)
+
+	var entries []models.CreditLedgerEntry
+	require.NoError(t, db.Where("user_id = ?", user.ID).Find(&entries).Error)
+	require.Len(t, entries, 1)
+	assert.Equal(t, string(payments.PlanPro), entries[0].PlanType)
+}
+
 func TestHandleSubscriptionPlanChangeAndDeletionReplayAreIdempotent(t *testing.T) {
 	db := openTestDB(t)
 	user := seedUser(t, db, 0)

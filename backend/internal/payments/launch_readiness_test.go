@@ -22,6 +22,22 @@ func TestEvaluateBillingLaunchConfigReadyWhenAllSelfServePriceIDsConfigured(t *t
 	}
 }
 
+func TestPricingInfoExposesSelfServeReadiness(t *testing.T) {
+	t.Setenv("STRIPE_SECRET_KEY", "sk_test_valid_but_not_placeholder_123")
+	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_valid_123")
+	t.Setenv("STRIPE_PRICE_BUILDER_MONTHLY", "price_builder_monthly_live")
+	t.Setenv("STRIPE_PRICE_BUILDER_ANNUAL", "price_builder_annual_live")
+	t.Setenv("STRIPE_PRICE_PRO_MONTHLY", "price_pro_monthly_live")
+	t.Setenv("STRIPE_PRICE_PRO_ANNUAL", "price_pro_annual_live")
+	t.Setenv("STRIPE_PRICE_TEAM_MONTHLY", "price_team_monthly_live")
+	t.Setenv("STRIPE_PRICE_TEAM_ANNUAL", "price_team_annual_live")
+
+	pricing := GetPricingInfo()
+	if !pricing.SelfServeReady || !pricing.StripeConfigured || !pricing.WebhookConfigured || !pricing.RequiredPriceIDsConfigured {
+		t.Fatalf("expected pricing readiness to be fully true, got %+v", pricing)
+	}
+}
+
 func TestEvaluateBillingLaunchConfigReportsMissingWebhookAndPriceIDs(t *testing.T) {
 	t.Setenv("STRIPE_PRICE_BUILDER_MONTHLY", "price_builder_monthly_live")
 	t.Setenv("STRIPE_PRICE_BUILDER_ANNUAL", "price_builder_annual_live")

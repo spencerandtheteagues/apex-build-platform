@@ -188,6 +188,7 @@ const fallbackPlans: Plan[] = [
 
 export function BillingSettings() {
   const [plans, setPlans] = useState<Plan[]>([])
+  const [selfServeReady, setSelfServeReady] = useState(false)
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [creditBalance, setCreditBalance] = useState<number | null>(null)
   const [hasUnlimited, setHasUnlimited] = useState(false)
@@ -214,8 +215,10 @@ export function BillingSettings() {
       if (plansRes.status === 'fulfilled' && plansRes.value.success && plansRes.value.data) {
         const featured = ['free', 'builder', 'pro', 'team']
         setPlans(normalizePlans(plansRes.value.data.plans).filter(p => featured.includes(p.type)))
+        setSelfServeReady(Boolean(plansRes.value.data.self_serve_ready))
       } else {
         setPlans([])
+        setSelfServeReady(false)
       }
       if (subRes.status === 'fulfilled' && subRes.value.success && subRes.value.data) {
         setSubscription(normalizeSubscription(subRes.value.data))
@@ -270,8 +273,8 @@ export function BillingSettings() {
   const currentPlanType = subscription?.plan_type ?? 'free'
 
   const handleUpgrade = async (plan: Plan) => {
-    if (!plan.monthly_price_id || isPlaceholderPriceID(plan.monthly_price_id)) {
-      setError('Stripe is not configured in this environment.')
+    if (!selfServeReady || !plan.monthly_price_id || isPlaceholderPriceID(plan.monthly_price_id)) {
+      setError('Self-serve billing is not available right now.')
       return
     }
     setUpgradeLoading(plan.type)
@@ -440,7 +443,7 @@ export function BillingSettings() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {!hasUnlimited && !bypassBilling && (
+            {!hasUnlimited && !bypassBilling && selfServeReady && (
               <button
                 onClick={() => {
                   setBuyAmount(null)
@@ -487,6 +490,7 @@ export function BillingSettings() {
             const isCurrent = plan.type === currentPlanType
             const priceStr = plan.monthly_price_cents === 0 ? 'Free' : `$${(plan.monthly_price_cents / 100).toFixed(0)}`
             const features = plan.features.length > 0 ? plan.features : cfg.features
+            const checkoutAvailable = selfServeReady && !isPlaceholderPriceID(plan.monthly_price_id)
 
             return (
               <div
@@ -552,7 +556,7 @@ export function BillingSettings() {
                     <div className="rounded-2xl border border-gray-800 px-4 py-3 text-center text-sm text-gray-500">
                       Default tier
                     </div>
-                  ) : (
+                  ) : checkoutAvailable ? (
                     <button
                       onClick={() => void handleUpgrade(plan)}
                       disabled={upgradeLoading === plan.type}
@@ -578,6 +582,10 @@ export function BillingSettings() {
                         </>
                       )}
                     </button>
+                  ) : (
+                    <div className="rounded-2xl border border-gray-800 bg-gray-950/70 px-4 py-3 text-center text-sm font-semibold text-gray-400">
+                      Contact support
+                    </div>
                   )}
                 </div>
               </div>
@@ -599,10 +607,12 @@ export function BillingSettings() {
             <button
               key={pack.amountUsd}
               onClick={() => {
+                if (!selfServeReady) return
                 setBuyAmount(pack.amountUsd)
                 setShowBuyCredits(true)
               }}
-              className="relative flex flex-col gap-4 rounded-3xl border p-5 text-left transition hover:-translate-y-0.5"
+              disabled={!selfServeReady}
+              className="relative flex flex-col gap-4 rounded-3xl border p-5 text-left transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
               style={{
                 borderColor: pack.border,
                 background: `linear-gradient(180deg, ${pack.bg}, rgba(3,7,18,0.88))`,
@@ -633,7 +643,7 @@ export function BillingSettings() {
               </div>
 
               <div className="rounded-2xl border px-3 py-2 text-center text-sm font-semibold" style={{ borderColor: pack.border, background: `${pack.color}18`, color: pack.color }}>
-                Buy Now
+                {selfServeReady ? 'Buy Now' : 'Unavailable'}
               </div>
             </button>
           ))}

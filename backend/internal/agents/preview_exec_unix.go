@@ -5,10 +5,12 @@ package agents
 import (
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 func configurePreviewCheckCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 2 * time.Second
 }
 
 func terminatePreviewCheckCommand(cmd *exec.Cmd) {

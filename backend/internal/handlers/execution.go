@@ -247,6 +247,34 @@ func (h *ExecutionHandler) recordExecutionUsage(ctx context.Context, userID uint
 	}
 }
 
+func (h *ExecutionHandler) requireVerifiedExecutionUser(c *gin.Context, userID uint) bool {
+	if h == nil || h.DB == nil || userID == 0 {
+		return true
+	}
+
+	var user models.User
+	if err := h.DB.Select("is_verified", "email_verified_at", "is_admin", "is_super_admin").First(&user, userID).Error; err != nil {
+		log.Printf("execution: failed to verify user %d before managed execution: %v", userID, err)
+		c.JSON(http.StatusServiceUnavailable, StandardResponse{
+			Success: false,
+			Error:   "User verification status is unavailable",
+			Code:    "USER_VERIFICATION_UNAVAILABLE",
+		})
+		return false
+	}
+
+	if user.IsAdmin || user.IsSuperAdmin || user.IsVerified || user.EmailVerifiedAt != nil {
+		return true
+	}
+
+	c.JSON(http.StatusForbidden, StandardResponse{
+		Success: false,
+		Error:   "Email not verified. Enter the latest verification code from your email, or request a new one.",
+		Code:    "email_not_verified",
+	})
+	return false
+}
+
 // ExecuteCodeRequest represents a code execution request
 type ExecuteCodeRequest struct {
 	Code      string            `json:"code" binding:"required"`
@@ -267,6 +295,9 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 			Error:   "User not authenticated",
 			Code:    "NOT_AUTHENTICATED",
 		})
+		return
+	}
+	if !h.requireVerifiedExecutionUser(c, userID) {
 		return
 	}
 
@@ -418,6 +449,9 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 			Error:   "User not authenticated",
 			Code:    "NOT_AUTHENTICATED",
 		})
+		return
+	}
+	if !h.requireVerifiedExecutionUser(c, userID) {
 		return
 	}
 
@@ -620,6 +654,9 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 			Error:   "User not authenticated",
 			Code:    "NOT_AUTHENTICATED",
 		})
+		return
+	}
+	if !h.requireVerifiedExecutionUser(c, userID) {
 		return
 	}
 

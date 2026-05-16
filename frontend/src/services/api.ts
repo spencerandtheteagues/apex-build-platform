@@ -3015,6 +3015,10 @@ export class ApiService {
         is_popular: boolean
         features: string[]
       }>
+      self_serve_ready?: boolean
+      stripe_configured?: boolean
+      webhook_configured?: boolean
+      required_price_ids_configured?: boolean
     }
   }> {
     const response = await this.client.get('/billing/plans')

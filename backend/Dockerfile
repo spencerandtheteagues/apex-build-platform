@@ -174,9 +174,9 @@ ENV GRACEFUL_SHUTDOWN_TIMEOUT=30s
 # Expose port
 EXPOSE 8080
 
-# Health check - checks /health endpoint every 30 seconds
+# Health check - checks startup readiness every 30 seconds
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8080/ready || exit 1
 
 # Run the application
 ENTRYPOINT ["/app/render-entrypoint.sh"]

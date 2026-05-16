@@ -37,9 +37,11 @@ func newPreviewHandlerTestFixture(t *testing.T, requireSandbox bool) (*PreviewHa
 	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Project{}, &models.File{}, &models.CompletedBuild{}))
 
 	user := models.User{
-		Username:     strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),
-		Email:        strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_") + "@example.com",
-		PasswordHash: "hashed-password",
+		Username:           strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),
+		Email:              strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_") + "@example.com",
+		PasswordHash:       "hashed-password",
+		SubscriptionType:   "builder",
+		SubscriptionStatus: "active",
 	}
 	require.NoError(t, db.Create(&user).Error)
 

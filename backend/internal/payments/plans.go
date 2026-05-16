@@ -448,20 +448,31 @@ func IsWithinLimit(limit, current int) bool {
 
 // PricingInfo returns a formatted pricing structure for the frontend
 type PricingInfo struct {
-	Plans          []Plan   `json:"plans"`
-	Currency       string   `json:"currency"`
-	CurrencySymbol string   `json:"currency_symbol"`
-	BillingCycles  []string `json:"billing_cycles"`
-	TrialAvailable bool     `json:"trial_available"`
+	Plans                      []Plan                     `json:"plans"`
+	Currency                   string                     `json:"currency"`
+	CurrencySymbol             string                     `json:"currency_symbol"`
+	BillingCycles              []string                   `json:"billing_cycles"`
+	TrialAvailable             bool                       `json:"trial_available"`
+	SelfServeReady             bool                       `json:"self_serve_ready"`
+	StripeConfigured           bool                       `json:"stripe_configured"`
+	WebhookConfigured          bool                       `json:"webhook_configured"`
+	RequiredPriceIDsConfigured bool                       `json:"required_price_ids_configured"`
+	BillingLaunchConfigIssues  []BillingLaunchConfigIssue `json:"billing_launch_config_issues,omitempty"`
 }
 
 // GetPricingInfo returns complete pricing information for display
 func GetPricingInfo() *PricingInfo {
+	launchConfig := EvaluateBillingLaunchConfig(os.Getenv("STRIPE_SECRET_KEY"), os.Getenv("STRIPE_WEBHOOK_SECRET"))
 	return &PricingInfo{
-		Plans:          GetAllPlans(),
-		Currency:       "usd",
-		CurrencySymbol: "$",
-		BillingCycles:  []string{"monthly", "annual"},
-		TrialAvailable: true,
+		Plans:                      GetAllPlans(),
+		Currency:                   "usd",
+		CurrencySymbol:             "$",
+		BillingCycles:              []string{"monthly", "annual"},
+		TrialAvailable:             true,
+		SelfServeReady:             launchConfig.Ready,
+		StripeConfigured:           launchConfig.StripeConfigured,
+		WebhookConfigured:          launchConfig.WebhookConfigured,
+		RequiredPriceIDsConfigured: launchConfig.RequiredPriceIDsConfigured,
+		BillingLaunchConfigIssues:  launchConfig.Issues,
 	}
 }

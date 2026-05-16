@@ -515,14 +515,29 @@ func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) error 
 		return fmt.Errorf("user not found for invoice payment: %w", err)
 	}
 
-	// Mark subscription active outside the credit transaction — this update is idempotent.
-	if err := h.db.Model(&user).Update("subscription_status", string(payments.StatusActive)).Error; err != nil {
-		log.Printf("Failed to update subscription status: %v", err)
+	planType := event.PlanType
+	if strings.TrimSpace(event.PriceID) != "" && planType == payments.PlanFree {
+		return fmt.Errorf("invoice %s uses unknown Stripe price ID %q", event.InvoiceID, event.PriceID)
+	}
+	if planType == "" {
+		planType = payments.PlanType(user.SubscriptionType)
+		if planType == "" {
+			planType = payments.PlanFree
+		}
 	}
 
-	planType := payments.PlanType(user.SubscriptionType)
-	if planType == "" {
-		planType = payments.PlanFree
+	// Mark subscription active outside the credit transaction — this update is idempotent.
+	updates := map[string]interface{}{
+		"subscription_status": string(payments.StatusActive),
+	}
+	if event.PlanType != "" && event.PlanType != payments.PlanFree {
+		updates["subscription_type"] = string(event.PlanType)
+	}
+	if strings.TrimSpace(event.SubscriptionID) != "" {
+		updates["subscription_id"] = event.SubscriptionID
+	}
+	if err := h.db.Model(&user).Updates(updates).Error; err != nil {
+		log.Printf("Failed to update subscription status: %v", err)
 	}
 	plan := payments.GetPlanByType(planType)
 	if plan == nil || plan.MonthlyCreditsUSD <= 0 {

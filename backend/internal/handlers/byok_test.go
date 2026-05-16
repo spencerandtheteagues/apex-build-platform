@@ -25,11 +25,16 @@ func newBYOKHandlerTestFixture(t *testing.T, subscriptionType string) (*BYOKHand
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.User{}, &models.UserAPIKey{}, &models.AIUsageLog{}))
 
+	status := "inactive"
+	if subscriptionType != "free" {
+		status = "active"
+	}
 	user := models.User{
-		Username:         strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),
-		Email:            strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_") + "@example.com",
-		PasswordHash:     "hashed-password",
-		SubscriptionType: subscriptionType,
+		Username:           strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_"),
+		Email:              strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_") + "@example.com",
+		PasswordHash:       "hashed-password",
+		SubscriptionType:   subscriptionType,
+		SubscriptionStatus: status,
 	}
 	require.NoError(t, db.Create(&user).Error)
 

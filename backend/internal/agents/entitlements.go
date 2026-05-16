@@ -109,6 +109,46 @@ func isPaidBuildPlan(planType string) bool {
 	return paidBuildPlans[strings.ToLower(strings.TrimSpace(planType))]
 }
 
+func isActivePaidBuildPlan(planType, status string) bool {
+	plan := strings.ToLower(strings.TrimSpace(planType))
+	if plan == "owner" {
+		return true
+	}
+	if !paidBuildPlans[plan] {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active", "trialing":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *BuildHandler) currentSubscriptionEntitlement(c *gin.Context, userID uint) (string, string, bool) {
+	planType := h.currentSubscriptionType(c, userID)
+	status := ""
+	if value, ok := c.Get("subscription_status"); ok {
+		if statusValue, ok := value.(string); ok {
+			status = strings.ToLower(strings.TrimSpace(statusValue))
+		}
+	}
+	if h != nil && h.db != nil && userID != 0 {
+		var user models.User
+		if err := h.db.Select("subscription_type", "subscription_status", "has_unlimited_credits", "bypass_billing").First(&user, userID).Error; err == nil {
+			dbPlan := strings.ToLower(strings.TrimSpace(user.SubscriptionType))
+			if dbPlan != "" {
+				planType = dbPlan
+			}
+			status = strings.ToLower(strings.TrimSpace(user.SubscriptionStatus))
+			if user.BypassBilling || user.HasUnlimitedCredits {
+				return planType, status, true
+			}
+		}
+	}
+	return planType, status, isActivePaidBuildPlan(planType, status)
+}
+
 func buildSubscriptionRequirement(req *BuildRequest) (bool, string) {
 	if req == nil {
 		return false, ""

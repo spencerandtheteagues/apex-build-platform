@@ -24,19 +24,31 @@ func (s *stubPreviewVerifier) VerifyBuildFiles(ctx context.Context, files []Veri
 func TestPreviewVerificationGateTimeoutScalesByPowerMode(t *testing.T) {
 	t.Setenv("APEX_PREVIEW_GATE_TIMEOUT_SECONDS", "")
 
-	if got := previewVerificationGateTimeout(PowerFast); got != 90*time.Second {
-		t.Fatalf("fast timeout = %s, want 90s", got)
+	if got := previewVerificationGateTimeout(PowerFast); got != 3*time.Minute {
+		t.Fatalf("fast timeout = %s, want 3m", got)
 	}
-	if got := previewVerificationGateTimeout(PowerBalanced); got != 3*time.Minute {
-		t.Fatalf("balanced timeout = %s, want 3m", got)
+	if got := previewVerificationGateTimeout(PowerBalanced); got != 4*time.Minute {
+		t.Fatalf("balanced timeout = %s, want 4m", got)
 	}
-	if got := previewVerificationGateTimeout(PowerMax); got != 4*time.Minute {
-		t.Fatalf("max timeout = %s, want 4m", got)
+	if got := previewVerificationGateTimeout(PowerMax); got != 5*time.Minute {
+		t.Fatalf("max timeout = %s, want 5m", got)
 	}
 
 	t.Setenv("APEX_PREVIEW_GATE_TIMEOUT_SECONDS", "45")
 	if got := previewVerificationGateTimeout(PowerMax); got != 45*time.Second {
 		t.Fatalf("env override timeout = %s, want 45s", got)
+	}
+}
+
+func TestShouldRunPreviewReadinessWhenPreviewRequiredEvenAfterCompilePass(t *testing.T) {
+	manager := &AgentManager{}
+	build := &Build{
+		RequirePreviewReady:     true,
+		CompileValidationPassed: true,
+	}
+
+	if !manager.shouldRunPreviewReadinessVerification(build) {
+		t.Fatal("require_preview_ready must still run preview readiness checks after compile validation passes")
 	}
 }
 
@@ -718,6 +730,47 @@ func TestRunPreviewVerificationGateSkipsGeneratedTestArtifacts(t *testing.T) {
 	}
 	if verifier.files[0].Path != "src/App.tsx" {
 		t.Fatalf("expected src/App.tsx to remain after filtering, got %+v", verifier.files)
+	}
+}
+
+func TestRunPreviewVerificationGateFailsCriticalSignalAfterRepairAttempt(t *testing.T) {
+	verifier := &stubPreviewVerifier{
+		result: &PreviewVerificationResult{
+			Passed:                       true,
+			VisionSeverity:               "critical",
+			RepairHints:                  []string{"visual: blank screen detected on first paint"},
+			CanaryPostInteractionChecked: true,
+			CanaryPostInteractionHealthy: true,
+		},
+	}
+	manager := &AgentManager{
+		ctx:             context.Background(),
+		previewVerifier: verifier,
+		subscribers:     map[string][]chan *WSMessage{},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:                          "preview-critical-blocks",
+		Status:                      BuildCompleted,
+		Progress:                    100,
+		RequirePreviewReady:         true,
+		PreviewVerificationAttempts: 1,
+	}
+	status := BuildCompleted
+	buildError := ""
+	allFiles := []GeneratedFile{
+		{Path: "src/App.tsx", Content: "export default function App() { return <div>Hello</div>; }"},
+	}
+
+	if manager.runPreviewVerificationGate(build, allFiles, &status, &buildError, now) {
+		t.Fatal("expected terminal critical preview failure to return false")
+	}
+	if status != BuildFailed || build.Status != BuildFailed {
+		t.Fatalf("expected critical preview signal to fail build, status=%s build=%s", status, build.Status)
+	}
+	if !strings.Contains(buildError, "visual_critical") {
+		t.Fatalf("expected visual critical error, got %q", buildError)
 	}
 }
 

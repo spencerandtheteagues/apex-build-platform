@@ -13,29 +13,35 @@ import (
 const backendSubscriptionRequiredCode = "BACKEND_SUBSCRIPTION_REQUIRED"
 
 func currentSubscriptionType(c *gin.Context, db *gorm.DB, userID uint) string {
+	if db != nil && userID != 0 {
+		var user models.User
+		if err := db.Select("subscription_type").First(&user, userID).Error; err == nil {
+			planType := strings.ToLower(strings.TrimSpace(user.SubscriptionType))
+			if planType != "" {
+				return planType
+			}
+		}
+	}
+
 	if plan, ok := c.Get("subscription_type"); ok {
 		if planType, ok := plan.(string); ok && strings.TrimSpace(planType) != "" {
 			return strings.ToLower(strings.TrimSpace(planType))
 		}
 	}
-
-	if db == nil || userID == 0 {
-		return "free"
-	}
-
-	var user models.User
-	if err := db.Select("subscription_type").First(&user, userID).Error; err != nil {
-		return "free"
-	}
-
-	planType := strings.ToLower(strings.TrimSpace(user.SubscriptionType))
-	if planType == "" {
-		return "free"
-	}
-	return planType
+	return "free"
 }
 
 func hasPaidBackendPlan(c *gin.Context, db *gorm.DB, userID uint) bool {
+	if db != nil && userID != 0 {
+		var user models.User
+		if err := db.Select("subscription_type", "subscription_status", "bypass_billing", "has_unlimited_credits").First(&user, userID).Error; err == nil {
+			if user.BypassBilling || user.HasUnlimitedCredits {
+				return true
+			}
+			return isActivePaidBackendPlan(user.SubscriptionType, user.SubscriptionStatus)
+		}
+	}
+
 	if bypassBilling, ok := c.Get("bypass_billing"); ok {
 		if bypass, ok := bypassBilling.(bool); ok && bypass {
 			return true
@@ -47,12 +53,31 @@ func hasPaidBackendPlan(c *gin.Context, db *gorm.DB, userID uint) bool {
 		}
 	}
 
-	switch currentSubscriptionType(c, db, userID) {
-	case "builder", "pro", "team", "enterprise", "owner":
-		return true
-	default:
-		return false
+	return isActivePaidBackendPlan(currentSubscriptionType(c, nil, 0), currentSubscriptionStatus(c))
+}
+
+func currentSubscriptionStatus(c *gin.Context) string {
+	if status, ok := c.Get("subscription_status"); ok {
+		if statusType, ok := status.(string); ok && strings.TrimSpace(statusType) != "" {
+			return strings.ToLower(strings.TrimSpace(statusType))
+		}
 	}
+	return ""
+}
+
+func isActivePaidBackendPlan(planType, status string) bool {
+	plan := strings.ToLower(strings.TrimSpace(planType))
+	if plan == "owner" {
+		return true
+	}
+	switch plan {
+	case "builder", "pro", "team", "enterprise":
+		switch strings.ToLower(strings.TrimSpace(status)) {
+		case "active", "trialing":
+			return true
+		}
+	}
+	return false
 }
 
 func requirePaidBackendPlan(c *gin.Context, db *gorm.DB, userID uint, feature string) bool {

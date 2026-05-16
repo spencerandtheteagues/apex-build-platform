@@ -75,11 +75,11 @@ func previewVerificationGateTimeout(mode PowerMode) time.Duration {
 	}
 	switch mode {
 	case PowerMax:
-		return 4 * time.Minute
+		return 5 * time.Minute
 	case PowerBalanced:
-		return 3 * time.Minute
+		return 4 * time.Minute
 	default:
-		return 90 * time.Second
+		return 3 * time.Minute
 	}
 }
 
@@ -321,6 +321,41 @@ func (am *AgentManager) runPreviewVerificationGate(
 						return true
 					}
 				}
+			}
+		}
+
+		if build.RequirePreviewReady {
+			if failureKind, details, critical := previewCriticalLaunchBlocker(result); critical {
+				errMsg := fmt.Sprintf("Preview verification failed after critical preview signal (%s): %s", failureKind, details)
+				appendVerificationReport(build, VerificationReport{
+					ID:            uuid.New().String(),
+					BuildID:       build.ID,
+					Phase:         "preview_verification",
+					Surface:       SurfaceGlobal,
+					Status:        VerificationFailed,
+					Deterministic: true,
+					ChecksRun: append(append([]string(nil), checksRun...),
+						fmt.Sprintf("failure_class:%s", previewFailureClass(failureKind)),
+						"critical_preview_signal",
+					),
+					Errors:      []string{details},
+					Blockers:    []string{fmt.Sprintf("preview_verification_failed:%s", failureKind)},
+					GeneratedAt: now.UTC(),
+				})
+				recordPreviewRepairOutcome(build, false, frontendFiles)
+				*status = BuildFailed
+				*buildError = errMsg
+				build.mu.Lock()
+				build.Status = BuildFailed
+				if build.Progress > 99 {
+					build.Progress = 99
+				}
+				build.Error = errMsg
+				build.CompletedAt = &now
+				build.UpdatedAt = now
+				build.mu.Unlock()
+				am.cancelAutomatedRecoveryTasksForLoopCap(build)
+				return false
 			}
 		}
 
@@ -1050,6 +1085,27 @@ func appendUniquePreviewWarnings(groups ...[]string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+func previewCriticalLaunchBlocker(result *PreviewVerificationResult) (string, string, bool) {
+	if result == nil {
+		return "", "", false
+	}
+	if strings.EqualFold(strings.TrimSpace(result.VisionSeverity), "critical") {
+		criticalHints := filterVisualCriticalHints(result.RepairHints)
+		detail := strings.TrimSpace(result.Details)
+		if len(criticalHints) > 0 {
+			detail = "Vision analysis detected critical visual issues: " + summarizeHints(criticalHints, 2)
+		}
+		if detail == "" {
+			detail = "Vision analysis detected critical visual issues."
+		}
+		return "visual_critical", detail, true
+	}
+	if interactionCriticalSignal(result) {
+		return "interaction_dead", buildInteractionFailureDetail(result), true
+	}
+	return "", "", false
 }
 
 // ── Interaction repair gate helpers ──────────────────────────────────────────

@@ -844,9 +844,10 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// real entitlement, not the plan that was baked in at build-creation time.
 	if am.db != nil && build.UserID > 0 {
 		var u models.User
-		if err := am.db.Select("subscription_type", "has_unlimited_credits", "bypass_billing").First(&u, build.UserID).Error; err == nil {
+		if err := am.db.Select("subscription_type", "subscription_status", "has_unlimited_credits", "bypass_billing").First(&u, build.UserID).Error; err == nil {
 			livePlan := strings.ToLower(strings.TrimSpace(u.SubscriptionType))
-			if u.BypassBilling || u.HasUnlimitedCredits || isPaidBuildPlan(livePlan) {
+			entitled := u.BypassBilling || u.HasUnlimitedCredits || isActivePaidBuildPlan(livePlan, u.SubscriptionStatus)
+			if entitled {
 				if livePlan == "" {
 					livePlan = "owner"
 				}
@@ -863,7 +864,15 @@ func (am *AgentManager) StartBuild(buildID string) error {
 					build.SnapshotState.PolicyState.BYOKEnabled = true
 				}
 				build.mu.Unlock()
-				log.Printf("StartBuild: upgraded plan for user %d from stored value to %q (bypass=%v unlimited=%v)", build.UserID, livePlan, u.BypassBilling, u.HasUnlimitedCredits)
+				log.Printf("StartBuild: upgraded plan for user %d from stored value to %q (status=%q bypass=%v unlimited=%v)", build.UserID, livePlan, u.SubscriptionStatus, u.BypassBilling, u.HasUnlimitedCredits)
+			} else {
+				build.mu.Lock()
+				if build.SubscriptionPlan != "free" {
+					log.Printf("StartBuild: downgrading inactive paid plan for user %d from %q/%q to free", build.UserID, livePlan, u.SubscriptionStatus)
+				}
+				build.SubscriptionPlan = "free"
+				refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+				build.mu.Unlock()
 			}
 		} else {
 			log.Printf("StartBuild: could not fetch subscription for user %d: %v", build.UserID, err)
@@ -1334,11 +1343,11 @@ func (am *AgentManager) userHasActiveBYOKKey(userID uint) bool {
 	}
 
 	var user models.User
-	if err := am.db.Select("subscription_type", "has_unlimited_credits", "bypass_billing").First(&user, userID).Error; err != nil {
+	if err := am.db.Select("subscription_type", "subscription_status", "has_unlimited_credits", "bypass_billing").First(&user, userID).Error; err != nil {
 		log.Printf("Failed to check BYOK entitlement for user %d: %v", userID, err)
 		return false
 	}
-	if !(user.BypassBilling || user.HasUnlimitedCredits || isPaidBuildPlan(user.SubscriptionType)) {
+	if !(user.BypassBilling || user.HasUnlimitedCredits || isActivePaidBuildPlan(user.SubscriptionType, user.SubscriptionStatus)) {
 		return false
 	}
 
@@ -30375,21 +30384,22 @@ func readinessErrorsContainPlannedFeatureCoverageFailure(readinessErrors []strin
 }
 
 func (am *AgentManager) shouldRunPreviewReadinessVerification(build *Build) bool {
-	// Skip the npm build step if the compile validation loop already confirmed that
-	// the generated code builds cleanly. Running npm install + build a second time
-	// would add ~80s of overhead with no additional signal.
 	if build != nil {
 		build.mu.RLock()
+		requirePreviewReady := build.RequirePreviewReady
 		compilePassed := build.CompileValidationPassed
 		build.mu.RUnlock()
+		if requirePreviewReady {
+			return true
+		}
+		// Skip the npm build step if the compile validation loop already confirmed
+		// that the generated code builds cleanly and this build did not request the
+		// stronger preview-ready contract.
 		if compilePassed {
 			return false
 		}
 	}
 
-	if build != nil && build.RequirePreviewReady {
-		return true
-	}
 	// For cloud provider builds (Claude, GPT-4, Gemini, Grok), always compile-verify.
 	// These flagship models produce code users expect to run immediately — verify it does.
 	// Skip for Ollama (local models have limited context/quality; verification adds too much latency).
@@ -32122,6 +32132,7 @@ func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, a
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, cmdName, args...)
+	configurePreviewCheckCommand(cmd)
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("PORT=%d", port),
@@ -32139,13 +32150,18 @@ func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, a
 	go func() {
 		waitCh <- cmd.Wait()
 	}()
+	waited := false
 	defer func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		if cmd.Process == nil {
+			return
+		}
+		terminatePreviewCheckCommand(cmd)
+		if waited {
+			return
 		}
 		select {
 		case <-waitCh:
-		default:
+		case <-time.After(2 * time.Second):
 		}
 	}()
 
@@ -32155,6 +32171,7 @@ func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, a
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-waitCh:
+			waited = true
 			if firstHTTPFailure != "" {
 				return firstHTTPFailure, false
 			}
@@ -32432,6 +32449,7 @@ func runPreviewHTTPProbe(workDir string) (string, bool) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "npm", "run", "preview", "--", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
+	configurePreviewCheckCommand(cmd)
 	cmd.Dir = workDir
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -32443,13 +32461,18 @@ func runPreviewHTTPProbe(workDir string) (string, bool) {
 	go func() {
 		waitCh <- cmd.Wait()
 	}()
+	waited := false
 	defer func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		if cmd.Process == nil {
+			return
+		}
+		terminatePreviewCheckCommand(cmd)
+		if waited {
+			return
 		}
 		select {
 		case <-waitCh:
-		default:
+		case <-time.After(2 * time.Second):
 		}
 	}()
 
@@ -32459,6 +32482,7 @@ func runPreviewHTTPProbe(workDir string) (string, bool) {
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-waitCh:
+			waited = true
 			serverReportedReady := previewProbeOutputShowsServerReady(out.String())
 			skip, summary := classifyPreviewHTTPProbeFailure(out.String(), err, serverReportedReady)
 			return summary, skip

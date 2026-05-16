@@ -270,6 +270,32 @@ func requestContextIsAdmin(c *gin.Context) bool {
 	return false
 }
 
+func (h *BuildHandler) requireVerifiedBuildUser(c *gin.Context, userID uint) bool {
+	if requestContextIsAdmin(c) || h == nil || h.db == nil || userID == 0 {
+		return true
+	}
+
+	var user models.User
+	if err := h.db.Select("is_verified", "email_verified_at", "is_admin", "is_super_admin").First(&user, userID).Error; err != nil {
+		log.Printf("StartBuild: failed to verify user %d before managed build: %v", userID, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":      "User verification status is unavailable",
+			"error_code": "USER_VERIFICATION_UNAVAILABLE",
+		})
+		return false
+	}
+
+	if user.IsAdmin || user.IsSuperAdmin || user.IsVerified || user.EmailVerifiedAt != nil {
+		return true
+	}
+
+	c.JSON(http.StatusForbidden, gin.H{
+		"error":      "Email not verified. Enter the latest verification code from your email, or request a new one.",
+		"error_code": "email_not_verified",
+	})
+	return false
+}
+
 func writeBuildLookupError(c *gin.Context, err error, fallbackErr error) {
 	lookupErr := err
 	if lookupErr == nil {
@@ -507,8 +533,16 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		req.RequirePreviewReady = true
 	}
 
-	planType := h.currentSubscriptionType(c, uid)
-	if requiresUpgrade, reason := buildSubscriptionRequirement(&req); requiresUpgrade && !isPaidBuildPlan(planType) {
+	if !h.requireVerifiedBuildUser(c, uid) {
+		return
+	}
+
+	planType, subscriptionStatus, paidEntitled := h.currentSubscriptionEntitlement(c, uid)
+	effectivePlanType := planType
+	if !paidEntitled {
+		effectivePlanType = "free"
+	}
+	if requiresUpgrade, reason := buildSubscriptionRequirement(&req); requiresUpgrade && !paidEntitled {
 		log.Printf("StartBuild: free-tier request includes paid runtime scope (%s); enforcing frontend-only mode", reason)
 		// Strip backend/database from the request so the build runs as frontend-only.
 		// The preview pane backend proxy is still available for rendering the UI.
@@ -527,7 +561,7 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	if req.PowerMode != "" {
 		powerModeRank := map[PowerMode]int{PowerFast: 0, PowerBalanced: 1, PowerMax: 2}
 		maxAllowed := PowerFast
-		switch planType {
+		switch effectivePlanType {
 		case "builder":
 			maxAllowed = PowerBalanced
 		case "pro", "team", "enterprise", "owner":
@@ -537,11 +571,12 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		maxRank := powerModeRank[maxAllowed]
 		if reqKnown && reqRank > maxRank {
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":          fmt.Sprintf("Power mode %q requires a higher subscription tier", req.PowerMode),
-				"error_code":     "POWER_MODE_UPGRADE_REQUIRED",
-				"current_plan":   planType,
-				"max_power_mode": string(maxAllowed),
-				"suggestion":     "Upgrade your plan to use higher power modes, or select a lower power mode.",
+				"error":               fmt.Sprintf("Power mode %q requires a higher subscription tier", req.PowerMode),
+				"error_code":          "POWER_MODE_UPGRADE_REQUIRED",
+				"current_plan":        planType,
+				"subscription_status": subscriptionStatus,
+				"max_power_mode":      string(maxAllowed),
+				"suggestion":          "Upgrade your plan to use higher power modes, or select a lower power mode.",
 			})
 			return
 		}
@@ -661,7 +696,7 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	}
 
 	// Create the build
-	build, err := h.manager.CreateBuild(uid, planType, &req)
+	build, err := h.manager.CreateBuild(uid, effectivePlanType, &req)
 	if err != nil {
 		log.Printf("StartBuild: failed to create build: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{

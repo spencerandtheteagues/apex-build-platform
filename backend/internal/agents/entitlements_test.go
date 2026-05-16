@@ -95,6 +95,22 @@ func TestIsPaidBuildPlan(t *testing.T) {
 	}
 }
 
+func TestIsActivePaidBuildPlanRequiresGoodStanding(t *testing.T) {
+	for _, status := range []string{"active", "trialing"} {
+		if !isActivePaidBuildPlan("builder", status) {
+			t.Fatalf("builder/%s should unlock paid build features", status)
+		}
+	}
+	for _, status := range []string{"", "inactive", "past_due", "canceled"} {
+		if isActivePaidBuildPlan("builder", status) {
+			t.Fatalf("builder/%s must not unlock paid build features", status)
+		}
+	}
+	if !isActivePaidBuildPlan("owner", "canceled") {
+		t.Fatal("owner should retain internal paid build access")
+	}
+}
+
 func TestUserHasActiveBYOKKeyRequiresPaidPlan(t *testing.T) {
 	db := openBuildTestDB(t)
 
@@ -116,10 +132,11 @@ func TestUserHasActiveBYOKKeyRequiresPaidPlan(t *testing.T) {
 	}
 
 	builderUser := models.User{
-		Username:         "builder-byok-user",
-		Email:            "builder-byok@example.com",
-		PasswordHash:     "hash",
-		SubscriptionType: "builder",
+		Username:           "builder-byok-user",
+		Email:              "builder-byok@example.com",
+		PasswordHash:       "hash",
+		SubscriptionType:   "builder",
+		SubscriptionStatus: "active",
 	}
 	if err := db.Create(&builderUser).Error; err != nil {
 		t.Fatalf("create builder user: %v", err)
@@ -139,6 +156,27 @@ func TestUserHasActiveBYOKKeyRequiresPaidPlan(t *testing.T) {
 	}
 	if !manager.userHasActiveBYOKKey(builderUser.ID) {
 		t.Fatal("builder users with active keys should retain BYOK access")
+	}
+
+	pastDueUser := models.User{
+		Username:           "past-due-byok-user",
+		Email:              "past-due-byok@example.com",
+		PasswordHash:       "hash",
+		SubscriptionType:   "builder",
+		SubscriptionStatus: "past_due",
+	}
+	if err := db.Create(&pastDueUser).Error; err != nil {
+		t.Fatalf("create past due user: %v", err)
+	}
+	if err := db.Create(&models.UserAPIKey{
+		UserID:   pastDueUser.ID,
+		Provider: "claude",
+		IsActive: true,
+	}).Error; err != nil {
+		t.Fatalf("create past due key: %v", err)
+	}
+	if manager.userHasActiveBYOKKey(pastDueUser.ID) {
+		t.Fatal("past-due builder users must not retain BYOK access")
 	}
 }
 

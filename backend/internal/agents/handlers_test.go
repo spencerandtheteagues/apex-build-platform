@@ -1820,6 +1820,43 @@ func TestStartBuildValidatesMalformedRequestBeforeCreditCheck(t *testing.T) {
 	}
 }
 
+func TestStartBuildRejectsUnverifiedUserBeforeManagedSpend(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.User{
+		ID:                 1,
+		Username:           "unverified-builder",
+		Email:              "unverified-builder@example.com",
+		PasswordHash:       "hashed",
+		SubscriptionType:   "builder",
+		SubscriptionStatus: "active",
+		CreditBalance:      25,
+	}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	am := &AgentManager{
+		db: db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	body, _ := json.Marshal(map[string]string{"description": "Build a launch-ready SaaS dashboard with polished onboarding."})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unverified user, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "email_not_verified") {
+		t.Fatalf("expected email_not_verified response, got %s", w.Body.String())
+	}
+}
+
 func TestStartBuildFallsBackToFrontendPreviewForFreeFullStackRequests(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.User{
@@ -1827,6 +1864,7 @@ func TestStartBuildFallsBackToFrontendPreviewForFreeFullStackRequests(t *testing
 		Username:         "free-user",
 		Email:            "free@example.com",
 		PasswordHash:     "hashed",
+		IsVerified:       true,
 		SubscriptionType: "free",
 		CreditBalance:    10,
 	}).Error; err != nil {
@@ -1888,12 +1926,14 @@ func TestStartBuildFallsBackToFrontendPreviewForFreeFullStackRequests(t *testing
 func TestStartBuildAllowsHostedOllamaRoleAssignments(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.User{
-		ID:               1,
-		Username:         "builder-user",
-		Email:            "builder@example.com",
-		PasswordHash:     "hashed",
-		SubscriptionType: "builder",
-		CreditBalance:    25,
+		ID:                 1,
+		Username:           "builder-user",
+		Email:              "builder@example.com",
+		PasswordHash:       "hashed",
+		IsVerified:         true,
+		SubscriptionType:   "builder",
+		SubscriptionStatus: "active",
+		CreditBalance:      25,
 	}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}

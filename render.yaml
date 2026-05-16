@@ -14,7 +14,7 @@ services:
     region: oregon
     plan: starter
     branch: main
-    healthCheckPath: /health
+    healthCheckPath: /ready
     envVars:
       - key: ENVIRONMENT
         value: production

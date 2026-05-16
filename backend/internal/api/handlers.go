@@ -1307,6 +1307,7 @@ func (s *Server) AuthMiddleware() gin.HandlerFunc {
 		c.Set("email", claims.Email)
 		c.Set("role", claims.Role)
 		c.Set("subscription_type", claims.SubscriptionType)
+		c.Set("subscription_status", claims.SubscriptionStatus)
 		c.Set("is_admin", claims.IsAdmin)
 		c.Set("is_super_admin", claims.IsSuperAdmin)
 		c.Set("has_unlimited_credits", claims.HasUnlimitedCredits)

@@ -21,7 +21,7 @@ func TestPreviewRuntimeVerificationEnabled(t *testing.T) {
 		{name: "explicit true wins", environment: "development", setting: "true", chromePath: "", want: true},
 		{name: "explicit false wins", environment: "production", setting: "false", chromePath: "/usr/bin/chromium-browser", want: false},
 		{name: "production defaults on when chrome available", environment: "production", setting: "", chromePath: "/usr/bin/chromium-browser", want: true},
-		{name: "production stays off without chrome", environment: "production", setting: "", chromePath: "", want: false},
+		{name: "production fails closed without chrome", environment: "production", setting: "", chromePath: "", want: true},
 		{name: "development default stays off", environment: "development", setting: "", chromePath: "/usr/bin/chromium-browser", want: false},
 	}
 
@@ -54,6 +54,42 @@ func TestFormatConfiguredPlansForLogUsesPaymentPlanTruth(t *testing.T) {
 		if strings.Contains(got, stale) {
 			t.Fatalf("plan log contains stale price %q in %q", stale, got)
 		}
+	}
+}
+
+func TestMetricsEnabledForEnvironmentRequiresProductionAuthToken(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment string
+		setting     string
+		authToken   string
+		want        bool
+	}{
+		{name: "production disabled without token", environment: "production", setting: "true", want: false},
+		{name: "staging disabled without token", environment: "staging", setting: "true", want: false},
+		{name: "production enabled with token", environment: "production", setting: "true", authToken: "metrics-secret", want: true},
+		{name: "development enabled without token", environment: "development", setting: "true", want: true},
+		{name: "explicit false wins", environment: "production", setting: "false", authToken: "metrics-secret", want: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := metricsEnabledForEnvironment(tc.environment, tc.setting, tc.authToken)
+			if got != tc.want {
+				t.Fatalf("metricsEnabledForEnvironment(%q, %q, %q) = %v, want %v", tc.environment, tc.setting, tc.authToken, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRedactConnectionURLStripsCredentials(t *testing.T) {
+	got := redactConnectionURL("redis://user:password@redis.example.com:6379/0")
+	if strings.Contains(got, "user") || strings.Contains(got, "password") {
+		t.Fatalf("redactConnectionURL leaked credentials: %q", got)
+	}
+	if !strings.Contains(got, "redis.example.com:6379/0") || !strings.Contains(got, "auth configured") {
+		t.Fatalf("redactConnectionURL = %q, want host/path with auth marker", got)
 	}
 }
 

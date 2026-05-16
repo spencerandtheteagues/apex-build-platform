@@ -44,13 +44,13 @@ func TestResolvePreviewRuntimeVerify(t *testing.T) {
 		}
 	})
 
-	t.Run("production without chrome stays off", func(t *testing.T) {
+	t.Run("production without chrome stays on so preview gate fails closed", func(t *testing.T) {
 		resetEnv(t)
 		t.Setenv("GO_ENV", "production")
 
 		enabled, mode := resolvePreviewRuntimeVerify("")
-		if enabled || mode != "production_no_chrome" {
-			t.Fatalf("resolvePreviewRuntimeVerify() = (%v, %q), want (false, %q)", enabled, mode, "production_no_chrome")
+		if !enabled || mode != "production_missing_browser" {
+			t.Fatalf("resolvePreviewRuntimeVerify() = (%v, %q), want (true, %q)", enabled, mode, "production_missing_browser")
 		}
 	})
 

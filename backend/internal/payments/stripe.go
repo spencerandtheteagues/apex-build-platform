@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/stripe/stripe-go/v76"
@@ -581,7 +582,12 @@ func (s *StripeService) HandleWebhook(payload []byte, signature string) (*Webhoo
 			return nil, ErrInvalidWebhook
 		}
 	} else {
-		// For development without webhook secret
+		if !allowUnsignedStripeWebhooks() {
+			log.Printf("Stripe webhook rejected: STRIPE_WEBHOOK_SECRET is not configured in %s", stripeWebhookEnvironment())
+			return nil, ErrInvalidWebhook
+		}
+		// Local development/test only. Production and staging must always verify
+		// the Stripe-Signature header before any billing mutation is attempted.
 		if err := json.Unmarshal(payload, &event); err != nil {
 			return nil, fmt.Errorf("failed to parse webhook: %w", err)
 		}
@@ -647,6 +653,10 @@ func (s *StripeService) HandleWebhook(payload []byte, signature string) (*Webhoo
 		webhookEvent.SubscriptionID = string(inv.Subscription.ID)
 		webhookEvent.Amount = inv.AmountPaid
 		webhookEvent.Currency = string(inv.Currency)
+		if priceID := invoicePrimaryPriceID(&inv); priceID != "" {
+			webhookEvent.PriceID = priceID
+			webhookEvent.PlanType = GetPlanTypeByPriceID(priceID)
+		}
 
 	case "invoice.payment_failed":
 		var inv stripe.Invoice
@@ -659,6 +669,10 @@ func (s *StripeService) HandleWebhook(payload []byte, signature string) (*Webhoo
 		webhookEvent.Amount = inv.AmountDue
 		webhookEvent.Currency = string(inv.Currency)
 		webhookEvent.Status = StatusPastDue
+		if priceID := invoicePrimaryPriceID(&inv); priceID != "" {
+			webhookEvent.PriceID = priceID
+			webhookEvent.PlanType = GetPlanTypeByPriceID(priceID)
+		}
 
 	case "customer.created", "customer.updated":
 		var cust stripe.Customer
@@ -696,6 +710,34 @@ func (s *StripeService) HandleWebhook(payload []byte, signature string) (*Webhoo
 	}
 
 	return webhookEvent, nil
+}
+
+func invoicePrimaryPriceID(inv *stripe.Invoice) string {
+	if inv == nil || inv.Lines == nil {
+		return ""
+	}
+	for _, line := range inv.Lines.Data {
+		if line != nil && line.Price != nil && strings.TrimSpace(line.Price.ID) != "" {
+			return strings.TrimSpace(line.Price.ID)
+		}
+	}
+	return ""
+}
+
+func allowUnsignedStripeWebhooks() bool {
+	switch stripeWebhookEnvironment() {
+	case "", "development", "dev", "local", "test", "testing":
+		return true
+	default:
+		return false
+	}
+}
+
+func stripeWebhookEnvironment() string {
+	if env := strings.ToLower(strings.TrimSpace(os.Getenv("ENVIRONMENT"))); env != "" {
+		return env
+	}
+	return strings.ToLower(strings.TrimSpace(os.Getenv("GO_ENV")))
 }
 
 // GetInvoices retrieves invoices for a customer

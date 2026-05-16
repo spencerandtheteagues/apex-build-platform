@@ -533,7 +533,7 @@ func main() {
 		switch runtimeVerifyMode {
 		case "explicit_disabled":
 			message = "Runtime Vite boot proof explicitly disabled (APEX_PREVIEW_RUNTIME_VERIFY=false)"
-		case "production_no_chrome":
+		case "production_missing_browser":
 			message = "Runtime Vite boot proof unavailable in production because Chrome was not found on PATH"
 		}
 		startupRegistry.MarkDegraded("preview_runtime_verify", startup.TierOptional,
@@ -640,7 +640,7 @@ func main() {
 	redisURL := os.Getenv("REDIS_URL")
 	var redisCache *cache.RedisCache
 	if redisURL != "" {
-		log.Printf("Redis cache connecting to: %s", redisURL)
+		log.Printf("Redis cache connecting to: %s", redactConnectionURL(redisURL))
 		redisCache = cache.NewRedisCacheFromURL(redisURL, cacheConfig)
 		log.Println("Redis cache initialized (falls back to in-memory on connection failure)")
 	} else {
@@ -992,7 +992,7 @@ func main() {
 	log.Printf("   - Active plans: %s", formatConfiguredPlansForLog(payments.GetAllPlans()))
 
 	// Initialize Prometheus Metrics and Business Metrics Collector
-	metricsEnabled := getEnv("ENABLE_METRICS", "true") == "true"
+	metricsEnabled := metricsEnabledForEnvironment(getEnv("ENVIRONMENT", ""), getEnv("ENABLE_METRICS", "true"), getEnv("METRICS_AUTH_TOKEN", ""))
 	if metricsEnabled {
 		// Set build info
 		m := metrics.Get()
@@ -1009,7 +1009,7 @@ func main() {
 		log.Println("   - Metrics endpoint: GET /metrics")
 		startupRegistry.MarkReady("metrics", startup.TierOptional, "Prometheus metrics initialized", nil)
 	} else {
-		startupRegistry.MarkDegraded("metrics", startup.TierOptional, "Prometheus metrics disabled by configuration", nil)
+		startupRegistry.MarkDegraded("metrics", startup.TierOptional, metricsDisabledSummary(getEnv("ENVIRONMENT", ""), getEnv("ENABLE_METRICS", "true"), getEnv("METRICS_AUTH_TOKEN", "")), nil)
 	}
 
 	// Initialize API server
@@ -1291,7 +1291,7 @@ func resolvePreviewRuntimeVerify(chromePath string) (bool, string) {
 		if chromePath != "" {
 			return true, "production_default"
 		}
-		return false, "production_no_chrome"
+		return true, "production_missing_browser"
 	}
 
 	return false, "non_production_default"
@@ -1472,7 +1472,7 @@ func setupRoutes(
 	router.Use(middleware.SecurityHeaders())
 
 	// Add Prometheus metrics middleware (if enabled)
-	if getEnv("ENABLE_METRICS", "true") == "true" {
+	if metricsEnabledForEnvironment(getEnv("ENVIRONMENT", ""), getEnv("ENABLE_METRICS", "true"), getEnv("METRICS_AUTH_TOKEN", "")) {
 		router.Use(metrics.PrometheusMiddleware())
 		// Metrics endpoint (Prometheus format) — requires METRICS_AUTH_TOKEN bearer token
 		metricsToken := getEnv("METRICS_AUTH_TOKEN", "")
@@ -2013,6 +2013,53 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+func metricsEnabledForEnvironment(environment, setting, authToken string) bool {
+	if !strings.EqualFold(strings.TrimSpace(setting), "true") {
+		return false
+	}
+	if isProductionLikeEnvironment(environment) && strings.TrimSpace(authToken) == "" {
+		return false
+	}
+	return true
+}
+
+func metricsDisabledSummary(environment, setting, authToken string) string {
+	if !strings.EqualFold(strings.TrimSpace(setting), "true") {
+		return "Prometheus metrics disabled by configuration"
+	}
+	if isProductionLikeEnvironment(environment) && strings.TrimSpace(authToken) == "" {
+		return "Prometheus metrics disabled because METRICS_AUTH_TOKEN is required in production"
+	}
+	return "Prometheus metrics disabled"
+}
+
+func isProductionLikeEnvironment(environment string) bool {
+	switch strings.ToLower(strings.TrimSpace(environment)) {
+	case "production", "prod", "staging", "stage":
+		return true
+	default:
+		return false
+	}
+}
+
+func redactConnectionURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "[redacted-url]"
+	}
+	hasAuth := parsed.User != nil
+	parsed.User = nil
+	redacted := parsed.String()
+	if hasAuth {
+		return redacted + " (auth configured)"
+	}
+	return redacted
+}
+
 func getEnvAny(keys []string, defaultValue string) string {
 	for _, key := range keys {
 		if value := os.Getenv(key); value != "" {
@@ -2048,7 +2095,7 @@ func previewRuntimeVerificationEnabled(environment, explicitSetting, chromePath 
 	if strings.EqualFold(setting, "false") {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(environment), "production") && strings.TrimSpace(chromePath) != ""
+	return strings.EqualFold(strings.TrimSpace(environment), "production")
 }
 
 func formatConfiguredPlansForLog(plans []payments.Plan) string {
