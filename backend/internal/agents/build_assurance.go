@@ -64,6 +64,7 @@ CURRENT DELIVERY TARGET:
 - If the prompt asked for backend/data/auth/billing/jobs/realtime scope, capture the deferred contract honestly in frontend states and architecture docs so a later paid pass can wire it in without redesigning the UI.`)
 	}
 
+
 	return strings.TrimSpace(apexBuildAssuranceMission + `
 
 CURRENT DELIVERY TARGET:
@@ -83,6 +84,7 @@ func buildAssuranceTaskContext(build *Build) string {
 		mode = "free_frontend_preview"
 		note = "Ship the strongest truthful frontend-only preview possible and defer paid runtime scope without blocking the build."
 	}
+
 
 	return fmt.Sprintf(`
 <build_assurance>

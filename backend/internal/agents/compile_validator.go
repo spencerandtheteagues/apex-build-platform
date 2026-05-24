@@ -120,11 +120,11 @@ type cvRepairCandidate struct {
 func maxCompileAttempts(mode PowerMode) int {
 	switch mode {
 	case PowerMax:
-		return 3
+		return 5
 	case PowerBalanced:
-		return 2
+		return 4
 	default: // PowerFast and unknown
-		return 2 // Fast still gets one repair pass; a single missed import should not fail first-pass.
+		return 3 // Fast still gets repair passes; a single missed import should not fail first-pass.
 	}
 }
 

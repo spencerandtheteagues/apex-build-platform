@@ -248,16 +248,17 @@ func planningProviderAttemptTimeout(provider ai.AIProvider, mode PowerMode, useP
 		}
 	}
 
-	// Managed cloud planning must fail over quickly; a stuck lead planner blocks
-	// every downstream work order and makes the build appear dead at 0-20%.
+	// Managed cloud Ollama (e.g. Kimi K2.6 via Ollama Cloud) needs more time to
+	// produce a complete build plan. A truncated plan causes cascading downstream
+	// failures and the 95% stall pattern. Fail over only after generous timeout.
 	if provider == ai.ProviderOllama && usePlatformKeys {
 		switch mode {
 		case PowerMax:
-			return 45 * time.Second
+			return 180 * time.Second
 		case PowerBalanced:
-			return 35 * time.Second
+			return 120 * time.Second
 		default:
-			return 25 * time.Second
+			return 90 * time.Second
 		}
 	}
 
@@ -265,11 +266,11 @@ func planningProviderAttemptTimeout(provider ai.AIProvider, mode PowerMode, useP
 	if provider == ai.ProviderOllama && !usePlatformKeys {
 		switch mode {
 		case PowerMax:
-			return 150 * time.Second
+			return 240 * time.Second
 		case PowerBalanced:
-			return 120 * time.Second
+			return 180 * time.Second
 		default:
-			return 90 * time.Second
+			return 120 * time.Second
 		}
 	}
 

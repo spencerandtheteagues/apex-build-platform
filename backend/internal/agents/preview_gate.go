@@ -385,9 +385,10 @@ func (am *AgentManager) runPreviewVerificationGate(
 	attempts := build.PreviewVerificationAttempts
 	build.mu.RUnlock()
 
-	if attempts >= 1 {
-		// Already tried once. Terminate with failure.
-		// Point 3: record repair outcome — failed second pass.
+	if attempts >= 3 {
+		// Already tried three times. Terminate with failure.
+		// This prevents infinite repair loops while still giving complex apps
+		// multiple chances to recover (AI repair → deterministic → shell fallback).
 		recordPreviewRepairOutcome(build, false, frontendFilePathsFromFiles(allFiles))
 		errMsg := fmt.Sprintf("Preview verification failed after repair attempt (%s): %s", result.FailureKind, result.Details)
 		*status = BuildFailed
@@ -405,14 +406,27 @@ func (am *AgentManager) runPreviewVerificationGate(
 		return false
 	}
 
-	// ── Attempt 1: Deterministic in-line repair ─────────────────────────
-	if am.applyPreviewDeterministicRepair(build, allFiles, result, now) {
-		return true // repair applied, caller should return so finalization restarts
-	}
-
-	// ── Attempt 2: AI-guided repair task ────────────────────────────────
+	// ── Attempt 1: AI-guided repair task (PRIMARY) ─────────────────────
+	// AI repair is preferred over shell fallback because shell fallback discards
+	// all generated app content and replaces it with a generic recovery page.
+	// Only skip AI repair when AI is unavailable or we've already hit the loop cap.
 	if am.launchPreviewRepairTask(build, allFiles, result, now) {
 		return true // repair task queued, caller should return
+	}
+
+	// ── Attempt 2: Deterministic in-line repair (FALLBACK) ──────────────
+	// Deterministic repairs (fence strip, router patch) are fast, reversible,
+	// and don't discard user app content. Run before shell fallback.
+	if am.applyPreviewDeterministicRepair(build, allFiles, result, now) {
+		return true // repair applied, re-check
+	}
+
+	// ── Attempt 3: Shell fallback (LAST RESORT) ──────────────────────────
+	// Shell fallback replaces the entire app with a generic APEX recovery page.
+	// This should only be used when the generated code is so broken that there's
+	// nothing worth preserving, and AI repair is unavailable.
+	if previewFailureLooksLikeShellFallbackCandidate(result) {
+		return am.applyPreviewShellFallbackRepair(build, result, now)
 	}
 
 	// No repair available — fail the build.
@@ -450,20 +464,22 @@ func (am *AgentManager) applyPreviewDeterministicRepair(
 		if am.applyPreviewFenceStripRepair(build, allFiles, result, now) {
 			return true
 		}
-		return am.applyPreviewShellFallbackRepair(build, result, now)
+		// corrupt_content currently has no non-fallback deterministic repair
+		return false
 	case "js_runtime_error":
 		if am.applyPreviewRouterContextRepair(build, result, now) {
 			return true
 		}
-		if previewFailureLooksLikeShellFallbackCandidate(result) {
-			return am.applyPreviewShellFallbackRepair(build, result, now)
-		}
+		return false
 	case "app_route_not_found", "shell_only_preview":
 		if am.applyPreviewRouterContextRepair(build, result, now) {
 			return true
 		}
+		// No simple deterministic repair for route-not-found without shell fallback
+		return false
 	case "blank_screen", "missing_entrypoint", "invalid_html", "invalid_package_json":
-		return am.applyPreviewShellFallbackRepair(build, result, now)
+		// No fast deterministic repair for these — shell fallback is the last resort
+		return false
 	}
 	return false
 }

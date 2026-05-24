@@ -20364,24 +20364,16 @@ func previewFallbackRemovableFrontendSourcePath(path string) bool {
 	}
 
 	lower := strings.ToLower(path)
-	if strings.HasPrefix(lower, "src/") {
+	// Only remove critical ENTRY POINT files during shell fallback.
+	// User components, hooks, utils, and pages under src/ are PRESERVED
+	// so the new shell can import and render them.
+	switch lower {
+	case "src/main.tsx", "src/main.ts", "src/main.jsx", "src/main.js",
+		"src/app.tsx", "src/app.ts", "src/app.jsx", "src/app.js",
+		"src/index.tsx", "src/index.ts", "src/index.jsx", "src/index.js",
+		"src/index.css", "src/app.css",
+		"index.html", "public/index.html":
 		return true
-	}
-	for _, prefix := range []string{
-		"app/",
-		"pages/",
-		"components/",
-		"client/src/",
-		"frontend/src/",
-		"web/src/",
-		"apps/web/src/",
-		"apps/frontend/src/",
-		"packages/web/src/",
-		"packages/frontend/src/",
-	} {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
 	}
 	return false
 }
@@ -21238,7 +21230,7 @@ func maxAutomatedRecoveryAttempts(mode PowerMode) int {
 }
 
 func repeatedReadinessErrorClassExhausted(attempts int, priorErrorClass, currentErrorClass string) bool {
-	return attempts >= 3 && priorErrorClass != "" && priorErrorClass == currentErrorClass
+	return attempts >= 5 && priorErrorClass != "" && priorErrorClass == currentErrorClass
 }
 
 func deterministicRepairScoringBuild(build *Build) *Build {
