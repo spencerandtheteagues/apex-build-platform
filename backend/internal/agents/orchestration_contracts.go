@@ -2327,6 +2327,13 @@ func deriveAuthContract(plan *BuildPlan, intent *IntentBrief) *ContractAuthStrat
 	if !required && provider == "" && sessionStrategy == "" && tokenStrategy == "" && callbackStrategy == "" {
 		return nil
 	}
+	// SECURITY: If auth is explicitly required but no strategy was detected from
+	// env vars or API endpoints, default to token strategy. JWT-based auth and
+	// most modern auth systems use bearer tokens; a missing strategy should not
+	// block the entire build.
+	if required && sessionStrategy == "" && tokenStrategy == "" && callbackStrategy == "" {
+		tokenStrategy = "token"
+	}
 	return &ContractAuthStrategy{
 		Required:         required,
 		Provider:         provider,
