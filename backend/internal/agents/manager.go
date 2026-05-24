@@ -28762,84 +28762,87 @@ FRONTEND-FIRST CONTRACT RULE:
 - Before finishing, compare the frontend fetch/EventSource URLs against the backend routes you registered and remove any drift.
 - If backend TypeScript runs as ESM ("type": "module" or NodeNext/Node16), every relative local import must use an explicit runtime extension like "./routes/api.js".
 
-REQUIREMENTS FOR EVERY ENDPOINT:
-- Input validation with descriptive error messages
-- Authentication/authorization middleware where needed
-- Proper HTTP status codes (201 for create, 404 for not found, etc.)
-- Try/catch error handling with appropriate error responses
-- Database transactions for multi-step operations
-- Rate limiting considerations
-- Request/response type definitions
+DATABASE RULE — CRITICAL:
+- Use the PostgreSQL pg driver directly. Raw SQL with parameterized queries ($1, $2).
+- NEVER use Prisma, Drizzle, TypeORM, or Mongoose; these are forbidden in the strict stack.
+- Create a single src/db.ts that exports a reusable pool (using new Pool({ connectionString: process.env.DATABASE_URL })).
+- Every query uses pool.query("SELECT ... WHERE id = $1", [id]) with explicit parameter placeholders.
 
-EXAMPLE ENDPOINT PATTERN:
-// File: src/routes/users.ts
+CODE PATTERN RULES:
+- ALWAYS use async/await. NEVER use .then() chains; they hide errors and produce fragile code.
+- For every endpoint: validate input (manual checks or a tiny helper), handle errors with try/catch, return proper HTTP status, log errors internally.
+
+MANDATORY FILES for every Express backend:
+- src/server.ts — Express app bootstrap, CORS, JSON body parser, route registration, error handler, app.listen() with process.env.PORT
+- src/db.ts — PostgreSQL pg Pool export
+- src/routes/*.ts — One file per resource (auth.ts, users.ts, etc.). Each exports a Router.
+- src/middleware/auth.ts — JWT verification middleware (if auth is required)
+- .env.example — List all required env vars with example values
+
+EXAMPLE ENDPOINT PATTERN (using pg only, no ORM):
 ` + "```" + `typescript
 import { Router, Request, Response } from 'express';
-import { z } from 'zod';
-import { prisma } from '../db';
-import { authMiddleware } from '../middleware/auth';
+import { pool } from '../db';
 
 const router = Router();
 
-const createUserSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1).max(100),
-  password: z.string().min(8),
-});
-
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const data = createUserSchema.parse(req.body);
-    const user = await prisma.user.create({ data: { ...data, passwordHash: await hash(data.password) } });
-    res.status(201).json({ id: user.id, email: user.email, name: user.name });
+    const { email, name, password } = req.body;
+    if (!email || !name || !password) {
+      return res.status(400).json({ error: 'email, name, and password are required' });
+    }
+    const result = await pool.query(
+      'INSERT INTO users (id, email, name, password_hash) VALUES (gen_random_uuid(), $1, $2, $3) RETURNING id, email, name',
+      [email, name, password]
+    );
+    res.status(201).json(result.rows[0]);
   } catch (err) {
-    if (err instanceof z.ZodError) return res.status(400).json({ errors: err.errors });
-    if (err.code === 'P2002') return res.status(409).json({ error: 'Email already exists' });
+    console.error('POST /users error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 ` + "```" + `
 
-Follow this pattern: validation, auth, error handling, proper status codes.` + "\n\n" + assuranceContext + techHint + baseRules,
+Follow this pattern: input validation, parameterized pg query, proper status codes, centralized error handling.
+` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleDatabase: `You are the Database Agent — an expert data architect who designs efficient, normalized schemas.
 You specialize in relational database design, query optimization, and data integrity.
 
-YOUR OUTPUT MUST INCLUDE:
-- Complete schema with all tables, columns, types, and constraints
-- Primary keys, foreign keys, unique constraints, and indexes
-- Default values and NOT NULL constraints
-- Seed data for development/testing
-- Migration files if applicable
+DATABASE RULE — CRITICAL:
+- Strict stack uses PostgreSQL via raw pg driver — NO Prisma, Drizzle, TypeORM, or Mongoose.
+- Output SQL DDL files (.sql), not ORM schemas.
+- Create src/db.ts that exports a pg.Pool connected to process.env.DATABASE_URL.
+- Use gen_random_uuid() or uuid_generate_v4() for primary keys.
+- Seed data MUST be insertable via psql -f or node seed.ts (using the pg pool).
+- Do NOT generate a Prisma schema or any other ORM config file.
 
-REQUIREMENTS:
-- Every relationship must have proper foreign keys with ON DELETE behavior
-- Add indexes on frequently queried columns (email, created_at, foreign keys)
-- Use appropriate data types (UUID for IDs, TIMESTAMP for dates, TEXT vs VARCHAR)
-- Include audit columns (created_at, updated_at) on all tables
+MANDATORY OUTPUT FILES:
+- src/db.ts — pg Pool export
+- schema.sql — CREATE TABLE, ALTER TABLE, CREATE INDEX statements
+- seed.sql — INSERT statements for dev/testing
 
-EXAMPLE SCHEMA PATTERN:
-// File: prisma/schema.prisma
-` + "```" + `prisma
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String
-  password  String
-  role      Role     @default(USER)
-  posts     Post[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+EXAMPLE SCHEMA PATTERN (SQL DDL only):
+` + "```" + `sql
+-- schema.sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-  @@index([email])
-  @@index([createdAt])
-}
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT now(),
+  updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
 
-enum Role {
-  USER
-  ADMIN
-}
-` + "```" + `` + "\n\n" + assuranceContext + techHint + baseRules,
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_created_at ON users(created_at);
+` + "```" + `
+
+Follow this pattern: SQL DDL only, no ORM abstractions, all indexes explicit.
+` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleTesting: `You are the Testing Agent — an expert QA engineer who writes comprehensive, executable tests.
 You specialize in unit tests, integration tests, and edge case coverage.
