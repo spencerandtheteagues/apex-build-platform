@@ -5763,7 +5763,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     const liveSessionAvailable = !isTerminalBuildStatus(status) && payload.live !== false
 
     setBuildState({
-      id: String(payload.id || payload.build_id || buildId),
+      id: String(payload.build_id || buildId || payload.id),
       status,
       progress: typeof payload.progress === 'number' ? clampPercent(payload.progress) : 0,
       agents,
