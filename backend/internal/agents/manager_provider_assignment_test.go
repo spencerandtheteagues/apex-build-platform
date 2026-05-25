@@ -461,8 +461,8 @@ func TestAssignProvidersToRolesForBuild_UsesSpecialistRoutingInPlatformModeWithO
 	}, roles)
 
 	want := map[AgentRole]ai.AIProvider{
-		RolePlanner:   ai.ProviderOllama,
-		RoleArchitect: ai.ProviderOllama,
+		RolePlanner:   ai.ProviderClaude,
+		RoleArchitect: ai.ProviderClaude,
 		RoleFrontend:  ai.ProviderGPT4,
 		RoleBackend:   ai.ProviderGPT4,
 		RoleTesting:   ai.ProviderGemini,
@@ -636,10 +636,9 @@ func TestAssignTaskKeepsBalancedOllamaCoordinatorDespiteTaskPreference(t *testin
 	if err := am.AssignTask(agent.ID, task); err != nil {
 		t.Fatalf("AssignTask returned error: %v", err)
 	}
-	if agent.Provider != ai.ProviderOllama {
-		t.Fatalf("balanced coordinator provider = %s, want %s", agent.Provider, ai.ProviderOllama)
-	}
-	if agent.Model != "kimi-k2.6:cloud" {
-		t.Fatalf("balanced coordinator model changed to %q", agent.Model)
+	// shouldKeepBalancedOllamaCoordinator now always returns false; platform builds
+	// should switch to the task-preferred provider (Claude in this test).
+	if agent.Provider != ai.ProviderClaude {
+		t.Fatalf("balanced coordinator provider = %s, want %s (should switch to task preference)", agent.Provider, ai.ProviderClaude)
 	}
 }

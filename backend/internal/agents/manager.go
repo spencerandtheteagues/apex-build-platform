@@ -987,10 +987,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	}
 
 	if !useOllama {
-		if usePlatformKeys && build.PowerMode == PowerBalanced && providerListContains(availableProviders, ai.ProviderOllama) {
-			leadProvider = ai.ProviderOllama
-			useOllama = true
-		} else if selected := am.selectLeadProvider(availableProviders); selected != "" {
+		if selected := am.selectLeadProvider(availableProviders); selected != "" {
 			leadProvider = selected
 		}
 	}
@@ -2690,9 +2687,6 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		if am.buildUsesPlatformKeys(build) {
 			switch role {
 			case RolePlanner, RoleArchitect:
-				if build != nil && build.PowerMode == PowerBalanced && available[ai.ProviderOllama] {
-					return ai.ProviderOllama
-				}
 				if available[ai.ProviderClaude] {
 					return ai.ProviderClaude
 				}
@@ -2781,9 +2775,7 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 			if !assigned {
 				switch role {
 				case RolePlanner, RoleArchitect:
-					if build != nil && build.PowerMode == PowerBalanced && available[ai.ProviderOllama] {
-						assignments[role] = ai.ProviderOllama
-					} else if available[ai.ProviderClaude] {
+					if available[ai.ProviderClaude] {
 						assignments[role] = ai.ProviderClaude
 					}
 				case RoleReviewer:
@@ -3230,21 +3222,9 @@ func (am *AgentManager) alignAgentProviderToTaskPreference(build *Build, agent *
 }
 
 func shouldKeepBalancedOllamaCoordinator(build *Build, agent *Agent) bool {
-	if build == nil || agent == nil {
-		return false
-	}
-	if build.PowerMode != PowerBalanced || agent.Provider != ai.ProviderOllama {
-		return false
-	}
-	if strings.EqualFold(strings.TrimSpace(build.ProviderMode), "byok") {
-		return false
-	}
-	switch agent.Role {
-	case RoleLead, RolePlanner, RoleArchitect:
-		return true
-	default:
-		return false
-	}
+	// Platform-key builds now use Claude for Lead/Planner/Architect; never lock to Ollama.
+	// For BYOK Ollama builds, allow task-preference switching.
+	return false
 }
 
 func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, task *Task) {
