@@ -384,6 +384,7 @@ func main() {
 	// Initialize Budget Enforcer (S1: Hard Budget Caps)
 	budgetEnforcer := budget.NewBudgetEnforcer(database.GetDB(), spendTracker)
 	budgetHandler := handlers.NewBudgetHandler(budgetEnforcer)
+	budgetHandler.SetBuildKiller(agentManager)
 	budgetMiddleware := middleware.BudgetCheck(budgetEnforcer)
 	log.Println("Budget Enforcer initialized (daily/monthly/per-build caps, instant stop)")
 	startupRegistry.MarkReady("budget_enforcement", startup.TierOptional, "Budget enforcement initialized", nil)
@@ -1545,6 +1546,7 @@ func setupRoutes(
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
+	v1.Use(middleware.RateLimit()) // SECURITY: global IP rate limit (1000 req/min, burst 50)
 	{
 		// Frontend API clients are rooted at /api/v1 in production. Keep the
 		// root health endpoints for infrastructure probes, but mirror the

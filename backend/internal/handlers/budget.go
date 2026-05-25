@@ -9,14 +9,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// BuildKiller cancels running builds. Implemented by agents.AgentManager.
+type BuildKiller interface {
+	KillAllBuilds(userID uint) int
+}
+
 // BudgetHandler serves the budget cap management API.
 type BudgetHandler struct {
-	enforcer *budget.BudgetEnforcer
+	enforcer    *budget.BudgetEnforcer
+	buildKiller BuildKiller
 }
 
 // NewBudgetHandler creates a new BudgetHandler.
 func NewBudgetHandler(enforcer *budget.BudgetEnforcer) *BudgetHandler {
 	return &BudgetHandler{enforcer: enforcer}
+}
+
+// SetBuildKiller wires the agent manager so KillAll can cancel running builds.
+func (h *BudgetHandler) SetBuildKiller(bk BuildKiller) {
+	h.buildKiller = bk
 }
 
 // GetCaps returns all active budget caps for the authenticated user.
@@ -133,11 +144,15 @@ func (h *BudgetHandler) KillAll(c *gin.Context) {
 		return
 	}
 
-	// Placeholder: actual kill logic will be wired through the build manager
+	killed := 0
+	if h.buildKiller != nil {
+		killed = h.buildKiller.KillAllBuilds(userID)
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "kill-all signal sent",
-		"user_id": userID,
+		"success":       true,
+		"message":       "kill-all signal sent",
+		"user_id":       userID,
+		"builds_killed": killed,
 	})
 }
 

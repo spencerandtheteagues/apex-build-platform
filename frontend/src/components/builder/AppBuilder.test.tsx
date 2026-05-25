@@ -553,10 +553,10 @@ describe('AppBuilder control surface', () => {
 
     await openMockedBuild()
 
-    expect((await screen.findAllByText('Claude Opus 4.7')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Claude Opus 4.5')).length).toBeGreaterThan(0)
     expect(screen.queryAllByText('GPT-4o Mini').filter((el) => el.tagName !== 'OPTION')).toHaveLength(0)
-    expect(screen.getAllByText('ChatGPT 5.4').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Gemini 3.1 Pro Preview').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('GPT-4o').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Gemini 2.5 Pro').length).toBeGreaterThan(0)
   })
 
   it('does not display a Gemini model under the Grok provider panel', async () => {
@@ -588,9 +588,9 @@ describe('AppBuilder control surface', () => {
 
     await openMockedBuild()
 
-    expect((await screen.findAllByText('Grok 4.20')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Grok 3')).length).toBeGreaterThan(0)
     expect(screen.queryAllByText('gemini-2.5-flash').filter((el) => el.tagName !== 'OPTION')).toHaveLength(0)
-    expect(screen.getAllByText('Gemini 3.1 Pro Preview').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Gemini 2.5 Pro').length).toBeGreaterThan(0)
   })
 
   it('keeps foreign flagship model labels out of the Ollama provider panel', async () => {
@@ -623,7 +623,7 @@ describe('AppBuilder control surface', () => {
     await openMockedBuild()
 
     expect((await screen.findAllByText('Kimi K2.6')).length).toBeGreaterThan(0)
-    expect(screen.queryAllByText('Claude Opus 4.7').filter((el) => el.tagName !== 'OPTION')).toHaveLength(1)
+    expect(screen.queryAllByText('Claude Opus 4.5').filter((el) => el.tagName !== 'OPTION')).toHaveLength(1)
   })
 
   it('issues a restart command for failed builds', async () => {

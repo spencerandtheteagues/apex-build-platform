@@ -517,7 +517,11 @@ func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) error 
 
 	planType := event.PlanType
 	if strings.TrimSpace(event.PriceID) != "" && planType == payments.PlanFree {
-		return fmt.Errorf("invoice %s uses unknown Stripe price ID %q", event.InvoiceID, event.PriceID)
+		// Unknown price ID — acknowledge the webhook without granting credits.
+		// This handles prorations, test-mode prices, and prices predating the
+		// current catalog. plan-activation comes via customer.subscription.updated.
+		log.Printf("WARNING: invoice %s uses unrecognized Stripe price ID %q — acknowledging without credit grant (event=%s)", event.InvoiceID, event.PriceID, event.EventID)
+		return nil
 	}
 	if planType == "" {
 		planType = payments.PlanType(user.SubscriptionType)
