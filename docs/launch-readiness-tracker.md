@@ -80,3 +80,66 @@ This tracker reconciles the master launch plan with the current repository state
 
 - Public launch position: source/export and Expo Web preview can be shown truthfully when enabled.
 - Native builds, store upload, listing metadata, screenshots, review submission, and store approval remain gated beta until live external-provider evidence exists.
+
+---
+
+## 2026-05-25 Launch Readiness Update
+
+### Bugs Fixed Today (4 commits, all on main)
+
+**Root Cause: Ollama/Kimi K2 Cloud forced routing blocked all balanced+max builds**
+
+Prior code forced balanced+platform builds to use `ollama/kimi-k2.6:cloud` for Lead/Planner/Architect roles. Kimi K2 Cloud hangs indefinitely on complex planning tasks with no per-task timeout. Three separate code paths enforced this. Additionally, per-request cost thresholds caused fallback to Ollama (cost=0) when Claude/GPT4 exceeded threshold on large context tasks.
+
+- `513e190`: Remove forced Ollama lead provider for balanced+platform builds
+- `cee6b50`: Raise cost thresholds (initial attempt, insufficient)
+- `627cb2a`: Raise Claude threshold to $2.00 (also insufficient)
+- `5f70ca2`: Remove per-request cost thresholds entirely (correct fix)
+- `fc3d81f`: Add rollback drill evidence template to launch-runbook.md
+
+### Canary Evidence
+
+**TASK-004 PASSED — Balanced Full-Stack Canary (2026-05-25)**
+- Build: `69d3582e` (DocuLens AI SaaS, balanced, 33 files)
+- Result: `status=completed progress=100 quality_gate_status=passed`
+- Duration: ~13 minutes (17:26 UTC → 17:39 UTC)
+- Provider routing: Claude Sonnet 4.6 → planning/lead; DeepSeek/GPT4 → parallel_core
+- Preview: live and interactive
+
+**TASK-005 IN PROGRESS — Max Power Canary (2026-05-25)**
+- Build: `f360affa` (Ops Command Center, max, claude-opus-4-7 lead)
+- Status: in_progress, architecture phase, actively generating with claude-opus-4-7
+- No Ollama fallback observed (cost threshold fix working)
+
+**Prior Canaries (from earlier session)**
+- free-fast build: PASSED
+- fast-frontend-only build: PASSED
+
+### Test Suite Status
+
+**Frontend (2026-05-25):**
+- TypeScript typecheck: PASS (0 errors)
+- ESLint: PASS (0 errors)
+- Vitest unit tests: 225/225 PASS (34 test files)
+
+**Backend (2026-05-25):**
+- `go test ./...`: All packages PASS except:
+  - `internal/execution`: 2 FAIL (`TestContainerSandboxExecuteGo`, `TestContainerSandboxExecuteWorkspaceCommand`)
+  - Failure cause: VPS Docker environment lacks `/cache/go-build` directory permissions
+  - Classification: **non-blocking** — production uses E2B sandbox (not local Docker)
+  - Evidence: E2B status `launch_ready=true` in `/health/features`
+
+### Updated Launch Blockers
+
+- [ ] **TASK-005**: Max power canary still running (build f360affa)
+- [ ] **TASK-006**: Enable `APEX_ENABLE_GITHUB_ACTIONS=true` in GitHub repo variables (requires GitHub admin)
+- [ ] **TASK-007**: Rollback drill execution (requires Render dashboard/API key)
+- [ ] Stripe webhook replay (real events, not just invalid-signature check)
+- [ ] Controlled paid checkout pass in production
+- [ ] Fix Gemini provider error (`gemini: status=error` in /health)
+- [ ] Fix Grok auth error (`grok: status=auth_error` in /health)
+
+### Latest Server State (2026-05-25 18:00 UTC)
+- Render backend restarted: `2026-05-25T18:00:37Z` (commit `5f70ca2`)
+- Health: healthy, 5/7 providers (gemini=error, grok=auth_error — non-critical for launch)
+- Active build: `f360affa` (max canary, claude-opus-4-7)
