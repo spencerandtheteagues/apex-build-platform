@@ -209,5 +209,5 @@ databases:
     # user: apex_user
 
 # Preview Environments (for PRs)
-previewsEnabled: false
+previewsEnabled: true
 previewsExpireAfterDays: 7
