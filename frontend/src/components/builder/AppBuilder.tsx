@@ -7754,6 +7754,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     <Github className="w-5 h-5 mr-3" />
                     Import from GitHub
                   </Button>
+
+                  <Button
+                    onClick={() => onNavigateToIDE?.({ target: 'editor', projectId: null })}
+                    variant="outline"
+                    size="lg"
+                    className="builder-tertiary-btn w-full h-14 border-2 border-gray-700 text-gray-300 hover:bg-gray-800 hover:border-gray-600 transition-all duration-300 font-semibold"
+                  >
+                    <Code2 className="w-5 h-5 mr-3" />
+                    Open a blank workspace
+                  </Button>
                 </div>
 
                 {/* Example Apps */}
