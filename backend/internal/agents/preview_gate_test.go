@@ -191,7 +191,7 @@ func TestRunPreviewVerificationGateTerminalFailureDropsProgressBelowCompletion(t
 		ID:                          "preview-terminal-failure",
 		Status:                      BuildCompleted,
 		Progress:                    100,
-		PreviewVerificationAttempts: 1,
+		PreviewVerificationAttempts: 3,
 		Tasks:                       []*Task{},
 	}
 	status := BuildCompleted
@@ -453,7 +453,7 @@ func TestRunPreviewVerificationGateFailsAfterFallbackStillReportsShellFailure(t 
 		Progress:                    99,
 		UpdatedAt:                   now,
 		TechStack:                   &TechStack{Frontend: "React", Styling: "Tailwind"},
-		PreviewVerificationAttempts: 1,
+		PreviewVerificationAttempts: 3,
 		Agents:                      map[string]*Agent{},
 		Tasks: []*Task{
 			{

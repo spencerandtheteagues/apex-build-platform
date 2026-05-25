@@ -1637,6 +1637,13 @@ func cvRunCommand(ctx context.Context, workDir string, timeout time.Duration, na
 
 	cmd := exec.CommandContext(cmdCtx, name, args...)
 	configurePreviewCheckCommand(cmd)
+	// Override cancel to immediately kill the entire process group instead of
+	// waiting for WaitDelay — compile validation commands should stop quickly
+	// when the parent context is cancelled (e.g. build cancelled mid-compile).
+	cmd.Cancel = func() error {
+		terminatePreviewCheckCommand(cmd)
+		return nil
+	}
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), "CI=1", "FORCE_COLOR=0")
 

@@ -19,10 +19,10 @@ func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
 		mode PowerMode
 		want int
 	}{
-		{name: "fast", mode: PowerFast, want: 2},
-		{name: "balanced", mode: PowerBalanced, want: 2},
-		{name: "max", mode: PowerMax, want: 3},
-		{name: "unknown defaults to fast behavior", mode: PowerMode("unknown"), want: 2},
+		{name: "fast", mode: PowerFast, want: 3},
+		{name: "balanced", mode: PowerBalanced, want: 4},
+		{name: "max", mode: PowerMax, want: 5},
+		{name: "unknown defaults to fast behavior", mode: PowerMode("unknown"), want: 3},
 	}
 
 	for _, tt := range tests {
