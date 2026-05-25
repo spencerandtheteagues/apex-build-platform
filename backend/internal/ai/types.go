@@ -197,13 +197,13 @@ func DefaultRouterConfig() *RouterConfig {
 			ProviderGLM:      120,
 		},
 		CostThresholds: map[AIProvider]float64{
-			ProviderClaude:   0.50, // max cost per request (architecture tasks can reach $0.33)
-			ProviderGPT4:     0.50, // max cost per request
-			ProviderGemini:   0.30, // max cost per request
-			ProviderGrok:     0.30, // max cost per request
+			ProviderClaude:   2.00, // max cost per request; opus-4-7 architecture tasks can reach $0.55+
+			ProviderGPT4:     1.00, // max cost per request
+			ProviderGemini:   0.50, // max cost per request
+			ProviderGrok:     0.50, // max cost per request
 			ProviderOllama:   0.00, // Free — runs locally
-			ProviderDeepSeek: 0.20,
-			ProviderGLM:      0.20,
+			ProviderDeepSeek: 0.50,
+			ProviderGLM:      0.50,
 		},
 		// Enable emergency fallback for BYOK scenarios to prevent build failures
 		EnableBYOKEmergencyFallback: true,
