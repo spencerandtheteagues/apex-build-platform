@@ -14,21 +14,75 @@ This file is the shared planning surface for Apex Build feature pathways. Read i
 
 APEX-BUILD.DEV should reliably turn a user prompt into a complete project, reach 100% build completion, and open a stable running preview with evidence the user can trust.
 
+## PRIORITY DIRECTIVE (Written 2026-05-25 by Claude audit — READ THIS FIRST)
+
+Spencer ran a full audit. The following is the authoritative action queue before anything else.
+
+### ALREADY FIXED (no further action needed)
+- Git email fixed on VPS: `spencerandtheteagues@gmail.com` (was root@hostname, was blocking GitHub pushes with GH007)
+- Orphan builds cancelled (IDs 6b52a8cf, 3e7f907f — stuck in_progress for 4+ hours)
+
+### WHAT IS BROKEN RIGHT NOW
+**Last successful production builds: May 1-4. All May 24 builds failed:**
+- Two 99% failures: auth contract bug — FIXED by commit d3ac616, deployed at 22:44 May 24
+- Two orphans: cancelled (stale from container restart)
+- One 0% failure at 23:41 May 24: planning stall — Ollama Cloud failed, ALL fallbacks also failed
+
+**Root cause of 0% stall:** `planningProviderOrder()` balanced-mode places Ollama Cloud first (5 models: kimi-k2.6, glm-5.1, deepseek-v4-pro, deepseek-v4-flash, qwen3.5). All get 120s each = 10min cap. Then falls through to `rankedFallbackProvidersForTask` and `configuredPlatformPlanningFallbackProviders`. If Ollama Cloud is slow AND non-Ollama fallbacks also fail, build stalls at 0% → orchestrator waits 40min → timeout. This happened at 23:41 when Ollama Cloud was apparently unhealthy.
+
+### PRIORITY ACTION QUEUE — WORK THROUGH IN ORDER
+
+**STEP 1: Run a live build test immediately and observe to completion**
+- Admin login: username=`admin`, password=`TheStarsh1pKEY!`
+- URL: https://apex-build.dev
+- Prompt: "Build a simple React todo app with Node.js/Express backend and PostgreSQL database. Include JWT user auth, task CRUD, and a clean dashboard UI."
+- Mode: balanced
+- Monitor for 15 minutes. At 0% stall > 3min: Ollama Cloud is failing.
+- At 100%: take screenshot of preview.
+- Evidence: screenshot of 100% complete build with working preview.
+
+**STEP 2: If 0% stall — diagnose and fix Ollama Cloud**
+- Test Ollama Cloud directly from VPS terminal (use OLLAMA_API_KEY from Render env vars, NOT from this repo)
+- If Ollama Cloud fails: set `APEX_BALANCED_OLLAMA_PLANNING_MODELS=` empty in Render to disable Ollama planning chain
+- OR add Claude/GPT-4 as explicit fallback at end of `ollamaBalancedPlanningModelFallbacks()` in `build_spec.go`
+
+**STEP 3: Verify free vs paid preview distinction**
+- Register a FREE account at apex-build.dev (not admin)
+- Try creating a backend app — should be frontend-only or blocked
+- Verify upgrade prompt appears
+- Evidence: screenshot showing free user sees frontend preview only
+
+**STEP 4: Test Stripe billing (FT-006)**
+- Use Stripe test card `4242 4242 4242 4242`
+- Complete checkout for Builder plan
+- Verify subscription_type updates in DB (check via admin panel or API)
+- Verify backend access unlocks after upgrade
+- Evidence: DB shows plan=builder after checkout
+
+**STEP 5: Fix any issues found and confirm clean matrix**
+- If build fails, diagnose and fix the specific blocker
+- Re-run build tests until 2+ builds complete to 100% with working previews
+
+**DO NOT WASTE TIME ON:**
+- Skill setup (skills are complete and saved correctly)
+- Browser-harness debugging (use Python requests for API testing)
+- render.yaml tweaks (infrastructure is correctly configured)
+- Writing docs before evidence gates are passed
+
 ## Active Pathways
 
 | ID | Status | Area | Pathway | Next Action | Evidence Gate |
 | --- | --- | --- | --- | --- | --- |
-| FT-001 | Active | Architecture Intelligence | Count which directories, databases, structures, and contracts AI agents reference during builds, then improve the most-used knowledge pockets. | Rank the hottest live plus historical reference pockets and enrich only the top source-of-truth gaps. | Admin map aggregates live and completed snapshot counts; backend tests prove metadata-only storage and terminal snapshot aggregation. |
-| FT-002 | Active | First-Pass Reliability | Reduce stalls near 95% and make failed validation/preview states produce deterministic repair actions instead of credit-burning loops. | Run the paid full-stack canary matrix now that the post-placeholder planning stall completed in production. | Repeated prompt matrix runs with completed builds, stable preview screenshots, and logged failure classification. |
-| FT-003 | Active | Preview Stability | Make generated app previews start consistently and stop white-screen restart loops. | Broaden the clean live golden screenshot proof to the paid full-stack matrix. | `/health/features` reports preview launch readiness and browser proof clean, then preview canary reaches ready state, stays loaded, and captures screenshot evidence after refresh. |
-| FT-004 | Queued | Knowledge Pockets | Use reference-count telemetry to identify high-value docs, schemas, and templates that agents actually consult. | Add a top-pocket report that separates live, historical, and combined rankings before any prompt injection. | Admin report shows counts by node, directory, database, and structure from both live builds and terminal snapshots. |
-| FT-005 | Active | Mobile Output | Add first-class mobile app generation as its own path, led by Expo/React Native and kept separate from responsive web or Capacitor wrapping. | Run `scripts/verify_mobile_external_readiness.mjs` with a real mobile project before enabling public native/store claims. | Generated Expo source validates locally, exports cleanly, native/store flags stay gated by default, and strict external readiness proves credentials, native artifacts, store package, and submission evidence. |
-| FT-006 | Active | Billing Launch Readiness | Make Stripe subscription, credit purchase, and invoice handling safe enough for public signup. | Replay real Stripe test webhooks through the deployed endpoint, then run a controlled live checkout and billing portal pass. | `/health/features` reports payments ready, local replay tests pass, the launch verifier passes in strict mode, Stripe CLI/dashboard replay proves duplicate delivery, and controlled live checkout plus billing portal flows succeed. |
-| FT-007 | Complete | Render Launch Readiness | Prove the deployed Render environment matches the production blueprint and launch runtime expectations. | Keep strict Render verification in the launch gate and rerun it after env or deploy changes. | Completed 2026-05-09: strict Render verification passed against live services, required env vars were present without printing values, Redis/runtime/preview browser proof were ready, and production smoke canaries passed on `main` commit `2358a30`. |
+| FT-001 | Queued | Architecture Intelligence | Reference counting for AI agents. | Defer until FT-002/003 pass. | Admin map shows counts. |
+| FT-002 | **BLOCKING** | First-Pass Reliability | Last 4 builds failed. Must verify current deployment completes to 100%. | Run fresh build (balanced, full-stack with auth) and observe. | 2+ builds complete to 100% with no 0%/99% failure. |
+| FT-003 | **BLOCKING** | Preview Stability | Must verify preview loads after successful build. | After FT-002 first success, screenshot the preview. | Preview loads, no white screen, stays up 30s, screenshot captured. |
+| FT-004 | Queued | Knowledge Pockets | Defer until FT-002/003/006 complete. | No action. | N/A |
+| FT-005 | Deferred | Mobile Output | Lower priority than core build reliability for launch. | No action until core paths are stable. | N/A |
+| FT-006 | Active | Billing Launch Readiness | Stripe checkout must work end-to-end. | Test checkout with test card in live env. | Successful test checkout, plan upgrades in DB, billing portal accessible. |
+| FT-007 | Complete | Render Launch Readiness | Render env healthy, preview environments now enabled. | Rerun after env changes. | Completed 2026-05-09; updated 2026-05-25 with preview envs enabled. |
+| FT-008 | Active | Free vs Paid Preview Gate | Free users: frontend-only preview. Paid users: full backend. | Test with free account, verify gate, verify upgrade prompt. | Free: frontend only + upgrade prompt. Paid: full backend unlocked. |
 
 ## Pathway Template
-
-Use this template for new entries:
 
 ```md
 | FT-000 | Proposed | Area | One-sentence pathway. | Smallest useful next action. | Concrete proof required before marking complete. |
