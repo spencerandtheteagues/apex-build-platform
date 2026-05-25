@@ -280,3 +280,37 @@ Rollback or close launch traffic immediately if:
 - full-stack builds fail broadly
 - health endpoints go unhealthy
 - Redis or Postgres instability produces repeated customer-facing build failures
+
+## Rollback Drill Evidence
+
+### TASK-007 Rollback Drill — Pending Execution (2026-05-25)
+
+**Pre-conditions established:**
+- Current deployed commit: `627cb2a` (fix: raise Claude cost threshold to $2.00 for opus-4-7)
+- Known-good prior commit: `513e190` (fix: route balanced platform builds to Claude)
+- Health at drill time: healthy (5/7 providers, gemini/grok degraded but non-critical)
+
+**Rollback Procedure (requires Render API key or dashboard access):**
+
+1. Open Render dashboard → `apex-build-backend` service → Deploys
+2. Find deploy for commit `513e190` (the prior successful deploy)
+3. Click "Rollback to this deploy" (or API: `POST /services/{id}/deploys` with `commitId`)
+4. Wait for deploy to complete (~4-5 minutes)
+5. Verify: `curl https://api.apex-build.dev/api/v1/health | jq .ready` → `true`
+6. Run quick smoke: log in as admin, start a balanced build, verify it enters `in_progress`
+7. Note rollback duration (target: < 5 minutes)
+8. Roll forward: trigger redeploy of `627cb2a` commit
+9. Verify health again after roll-forward
+
+**Evidence Required:**
+- [ ] Rollback start timestamp: _______________
+- [ ] Rollback complete timestamp: _______________
+- [ ] Total time to rollback: _______________ (target < 5 min)
+- [ ] Health status after rollback: _______________
+- [ ] Smoke build status after rollback: _______________
+- [ ] Roll-forward complete timestamp: _______________
+- [ ] Health status after roll-forward: _______________
+
+**Blocking:** Requires Render dashboard access or RENDER_API_KEY secret in GitHub Actions.
+**Assigned to:** Spencer (needs Render credentials) or Hermes (if given RENDER_API_KEY env var).
+
