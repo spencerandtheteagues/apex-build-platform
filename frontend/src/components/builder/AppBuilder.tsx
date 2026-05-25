@@ -112,6 +112,7 @@ import OrchestrationOverview from './OrchestrationOverview'
 import BuildPieProgress from './BuildPieProgress'
 import BuildScreen from './BuildScreen'
 import TemplateGallery from './TemplateGallery'
+import CostTicker from '@/components/ide/CostTicker'
 
 // ============================================================================
 // TYPES

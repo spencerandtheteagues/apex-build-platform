@@ -1473,6 +1473,7 @@ const Nav: React.FC<LandingProps> = ({ onGetStarted }) => (
       <nav className="launch-nav-links" aria-label="Primary navigation">
         <a href="#features">Features</a>
         <a href="#agents">Agents</a>
+        <a href="/explore">Explore</a>
         <a href="#pricing">Pricing</a>
         <a href="#docs">Docs</a>
       </nav>

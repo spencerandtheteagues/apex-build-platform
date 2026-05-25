@@ -168,11 +168,13 @@ func (am *AgentManager) planningProviderOrder(build *Build, task *Task, primary 
 	if am == nil || build == nil {
 		return compactPlanningProviders(primary, providers)
 	}
+	// TEMPORARY: Route all platform-key planning through Claude while Ollama cloud
+	// is experiencing empty responses. Restored: 2026-05-25. Remove when Ollama recovers.
 	if build.PowerMode == PowerBalanced && am.buildUsesPlatformKeys(build) {
 		available := am.getCurrentlyAvailableProvidersForBuild(build)
-		if providerListContains(available, ai.ProviderOllama) {
-			providers = []ai.AIProvider{ai.ProviderOllama, primary}
-			preferredPrimary = ai.ProviderOllama
+		if providerListContains(available, ai.ProviderClaude) {
+			providers = []ai.AIProvider{ai.ProviderClaude, primary}
+			preferredPrimary = ai.ProviderClaude
 		}
 	}
 	tried := map[ai.AIProvider]bool{}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,9 +20,30 @@ import (
 // for payments idempotency tests.
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&models.User{},
+		&models.ProcessedStripeEvent{},
+		&models.CreditLedgerEntry{},
+	))
+	return db
+}
+
+// openTestDBForConcurrency opens an in-memory SQLite database tuned for concurrent
+// writes (WAL + busy timeout) and migrates the tables needed for payments
+// idempotency tests.
+func openTestDBForConcurrency(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared&_busy_timeout=5000"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	_, err = sqlDB.Exec("PRAGMA journal_mode=WAL;")
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&models.User{},
@@ -315,6 +337,65 @@ func TestHandleInvoicePaidReplayIsIdempotent(t *testing.T) {
 	var processedCount int64
 	require.NoError(t, db.Model(&models.ProcessedStripeEvent{}).Where("stripe_event_id = ?", event.EventID).Count(&processedCount).Error)
 	assert.Equal(t, int64(1), processedCount)
+}
+
+// TestHandleInvoicePaidConcurrentDedup verifies that many goroutines calling
+// handleInvoicePaid with the same event EventID simultaneously result in exactly
+// one CreditLedgerEntry.
+func TestHandleInvoicePaidConcurrentDedup(t *testing.T) {
+	db := openTestDBForConcurrency(t)
+	user := seedUser(t, db, 2)
+	require.NoError(t, db.Model(&user).Updates(map[string]interface{}{
+		"stripe_customer_id":  "cus_invoice_paid_concurrent",
+		"subscription_type":   string(payments.PlanPro),
+		"subscription_status": string(payments.StatusPastDue),
+	}).Error)
+	h := newTestHandler(db)
+
+	event := &payments.WebhookEvent{
+		EventID:        "evt_invoice_paid_concurrent",
+		Type:           "invoice.paid",
+		CustomerID:     "cus_invoice_paid_concurrent",
+		SubscriptionID: "sub_invoice_paid_concurrent",
+		InvoiceID:      "in_invoice_paid_concurrent",
+		Amount:         5900,
+		Currency:       "usd",
+	}
+
+	var wg sync.WaitGroup
+	numRoutines := 10
+	errors := make([]error, numRoutines)
+
+	for i := range numRoutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errors[idx] = h.handleInvoicePaid(event)
+		}(i)
+	}
+
+	wg.Wait()
+
+	for _, err := range errors {
+		assert.NoError(t, err)
+	}
+
+	plan := payments.GetPlanByType(payments.PlanPro)
+	require.NotNil(t, plan)
+	updated := reloadUser(t, db, user.ID)
+	assert.Equal(t, string(payments.StatusActive), updated.SubscriptionStatus)
+	assert.InDelta(t, 2+plan.MonthlyCreditsUSD, updated.CreditBalance, 0.001)
+
+	var ledgerEntries []models.CreditLedgerEntry
+	require.NoError(t, db.Where("user_id = ?", user.ID).Find(&ledgerEntries).Error)
+	require.Len(t, ledgerEntries, 1, "exactly one CreditLedgerEntry must be created under concurrent duplicate delivery")
+	assert.InDelta(t, plan.MonthlyCreditsUSD, ledgerEntries[0].AmountUSD, 0.001)
+	assert.Equal(t, "monthly_allocation", ledgerEntries[0].EntryType)
+	assert.Equal(t, "evt_invoice_paid_concurrent", ledgerEntries[0].StripeEventID)
+
+	var processedCount int64
+	require.NoError(t, db.Model(&models.ProcessedStripeEvent{}).Where("stripe_event_id = ?", event.EventID).Count(&processedCount).Error)
+	assert.Equal(t, int64(1), processedCount, "exactly one dedup row must be recorded under concurrent duplicate delivery")
 }
 
 func TestHandleInvoicePaidUsesWebhookPlanOverStaleUserPlan(t *testing.T) {
