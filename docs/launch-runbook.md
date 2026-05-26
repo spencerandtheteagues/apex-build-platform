@@ -239,6 +239,42 @@ GitHub Actions now includes `.github/workflows/production-canary.yml`:
 
 Treat any failure in that workflow as a customer-facing reliability regression until explained.
 
+## Load and Concurrency Test (TASK-010)
+
+Uses `scripts/loadtest.js` (k6) to validate platform performance and stability under expected launch traffic.
+
+**Default public-only run:**
+
+```bash
+k6 run scripts/loadtest.js
+```
+
+This runs 200 concurrent VUs against the landing page and `/ready` health endpoint. No credentials are needed, and no mutations are performed. Thresholds: landing/health p95 < 800ms and public error rate < 5%.
+
+**Optional authenticated API load:**
+
+```bash
+RUN_AUTH_API=1 LOGIN_EMAIL='user@example.com' LOGIN_PASSWORD='replace-me' k6 run scripts/loadtest.js
+```
+
+This adds a 50-VU authenticated scenario hitting `/api/v1/usage/limits` and `/api/v1/projects`. Threshold: auth API error rate < 1%, auth API p95 < 2s.
+
+**Optional build-start load:**
+
+```bash
+RUN_BUILD_STARTS=1 LOGIN_EMAIL='paid-canary@example.com' LOGIN_PASSWORD='replace-me' k6 run scripts/loadtest.js
+```
+
+This starts 10 concurrent free-fast/frontend-only builds, carries each returned build poll token, polls each build to terminal state, and requires completion with no 5xx. Intended for canary accounts only. It never runs without explicit opt-in.
+
+**Guardrail test (no network, no credentials):**
+
+```bash
+bash scripts/test/loadtest_guardrail_test.sh
+```
+
+Validates script shape, no-secret hygiene, opt-in defaults, thresholds, backend-supported login fields, poll-token handling, and k6 syntax without running traffic.
+
 ## Manual Checks
 
 Run these after the automated checks pass:
@@ -295,16 +331,21 @@ Rollback or close launch traffic immediately if:
 
 ## Rollback Drill Evidence
 
-### TASK-007 Rollback Drill — Pending Execution (updated 2026-05-26)
+### TASK-007 Rollback Drill — Dry-Run Evidence Recorded (updated 2026-05-26)
 
 **Pre-conditions established:**
-- Current deployed commit: must be read from Render deploy metadata immediately before the drill; do not rely on this runbook for the commit hash.
-- Known-good prior deploy: select the most recent successful deploy that passed `/health`, `/health/features`, and a build smoke before the drill.
-- Latest public health read before this update: 2026-05-26 12:30 UTC, healthy/ready, critical services `6/6 ready`, optional services `40/40 ready`, 5/7 providers healthy, E2B execution launch-ready, preview service launch-ready, and runtime browser proof ready. Gemini and Grok remained degraded from credit/spend/permission posture and must be fixed or explicitly classified before launch.
+- Rollback drill dry-run executed 2026-05-26 16:19 UTC via `scripts/verify-rollback.sh`.
+- Render API key validated: service enumeration and deploy history retrieval successful.
+- Backend service: `apex-backend` (srv-d5qgfus9c44c73dmq3i0)
+- Frontend service: `apex-frontend` (srv-d5qg57fpm1nc738qdbk0) — static_site, live deploy: dep-d8as5mnlk1mc738r9ue0.
+- Current backend deploy: `dep-d8as3muk1jcs73f89960` (status=live, created=2026-05-26T15:53:00Z).
+- Previous backend deploy: `dep-d8arakplkp6s73crpia0` (status=deactivated, created=2026-05-26T14:59:31Z).
+- Health confirmed at drill time: backend `/ready` returns healthy/ready, critical 6/6, optional 40/40, 5/7 providers healthy (Gemini rate-limited, Grok credit-exhausted — pre-existing, not rollback-related).
+- Frontend `/health` returns valid HTML (static site serving correctly).
 
 **Rollback Procedure (requires Render API key or dashboard access):**
 
-1. Open Render dashboard → `apex-build-backend` service → Deploys
+1. Open Render dashboard → `apex-backend` service → Deploys
 2. Read the prior known-good deploy ID and commit from Render immediately before the drill.
 3. Click "Rollback to this deploy" (or API: `POST /services/{id}/deploys` with `commitId`)
 4. Wait for deploy to complete (~4-5 minutes)
@@ -314,7 +355,13 @@ Rollback or close launch traffic immediately if:
 8. Roll forward: trigger redeploy of the deploy ID/commit that was current immediately before the drill.
 9. Verify health again after roll-forward
 
-**Evidence Required:**
+**Dry-Run Evidence (2026-05-26):**
+- [x] Render API key validated and can enumerate services and deploys
+- [x] Current and previous deploy IDs identified with timestamps
+- [x] `/ready` health endpoint confirmed healthy at drill time
+- [x] Frontend health confirmed serving at drill time
+- [x] `scripts/verify-rollback.sh` dry-run completed successfully
+- [ ] Full rollback executed (requires intentional ~4-5min downtime approval)
 - [ ] Rollback start timestamp: _______________
 - [ ] Rollback complete timestamp: _______________
 - [ ] Total time to rollback: _______________ (target < 5 min)
@@ -323,5 +370,31 @@ Rollback or close launch traffic immediately if:
 - [ ] Roll-forward complete timestamp: _______________
 - [ ] Health status after roll-forward: _______________
 
-**Blocking:** Requires Render dashboard access or RENDER_API_KEY secret in GitHub Actions.
+**Note:** Full execution requires ~4-5 min backend downtime. Dry-run confirms all prerequisites, service discovery, deploy history, and health verification are operational. Execute `RENDER_API_KEY=<key> bash scripts/verify-rollback.sh --execute` when ready for the full drill.
 **Assigned to:** Spencer (needs Render credentials) or Hermes (if given RENDER_API_KEY env var).
+
+## Load Test Evidence
+
+### TASK-010 Load Test - 200 Concurrent Public VUs (updated 2026-05-26)
+
+**Scenario:** 200 concurrent VUs, ramping 0→200 over 30s, sustained 200 for 60s, ramp-down 10s. Alternating between landing page (`https://apex-build.dev/`) and health endpoint (`https://api.apex-build.dev/ready`).
+
+**Results:**
+- Total requests: 14,906 over 1m40s
+- Throughput: ~148 req/s
+- Error rate: **0.00%** (0 errors out of 14,906 requests)
+- Landing p95 latency: **125ms** (target: < 800ms) ✓
+- Health p95 latency: **204ms** (target: < 800ms) ✓
+- Overall p95 latency: **174ms** (target: < 2000ms) ✓
+- All checks passed: 100% (landing 200, content present, health 200, body reports ready)
+
+**Acceptance Criteria:**
+- [x] /health and landing p95 < 800ms under 200 concurrent
+- [ ] Authenticated API error rate < 1% under 50 concurrent (requires canary credentials; harness added but live auth run not recorded)
+- [ ] 10 concurrent builds all reach completed (requires canary credentials; harness added but live build-start run not recorded)
+- [ ] No 5xx spikes; rate-limit responses are graceful 429s (0 5xx observed)
+- [x] Results appended to docs/launch-runbook.md
+
+**Script:** `scripts/loadtest.js`
+**Command:** `k6 run scripts/loadtest.js`
+**Environment:** 200 public VUs, k6 v0.50.0 local execution, 2026-05-26

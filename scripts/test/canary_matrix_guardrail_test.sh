@@ -97,6 +97,19 @@ run_prompt_matrix_safe 1 "PROMPT_MATRIX_POWER_MODE_INVALID" \
   "unknown power mode -> fails before live run" -- \
   EXPECTED_PROMPT_COUNT=1 POWER_MODES=turbo
 
+# ---- prompt fixture breadth guardrail (no network) ----
+echo
+BREADTH_TEST="$SCRIPT_DIR/prompt_matrix_fixture_breadth_test.sh"
+if [[ -x "$BREADTH_TEST" || -f "$BREADTH_TEST" ]]; then
+  if bash "$BREADTH_TEST"; then
+    pass "prompt fixture breadth guardrail passes"
+  else
+    fail "prompt fixture breadth guardrail passes"
+  fi
+else
+  fail "prompt matrix fixture breadth guardrail script missing: $BREADTH_TEST"
+fi
+
 echo
 echo "Ran $TESTS_RUN assertions, $TESTS_FAILED failed."
 if [[ "$TESTS_FAILED" -gt 0 ]]; then

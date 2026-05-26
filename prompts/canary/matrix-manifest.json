@@ -1,0 +1,238 @@
+{
+  "version": "1",
+  "description": "Launch-diverse prompt fixture set for the 20-prompt canary matrix. Every prompt stays simulated/local-safe; complex/backend/integration prompts do not require real external APIs or payments.",
+  "categories": {
+    "simple": 6,
+    "medium": 8,
+    "complex": 6
+  },
+  "required_capabilities": [
+    "backend_api",
+    "persistence",
+    "auth_roles",
+    "realtime_or_collab",
+    "file_or_media",
+    "commerce_or_billing_sim",
+    "admin_reporting",
+    "ai_simulation"
+  ],
+  "capability_coverage": {
+    "backend_api": [
+      "01-ai-saas-document-intelligence.md",
+      "02-saas-dashboard-ops-command-center.md",
+      "03-crm-sales-pipeline.md",
+      "04-client-portal-agency.md",
+      "07-inventory-warehouse-control.md",
+      "16-ecommerce-store-checkout.md",
+      "18-finance-tracker-budget-planner.md",
+      "19-admin-panel-user-management.md"
+    ],
+    "persistence": [
+      "01-ai-saas-document-intelligence.md",
+      "03-crm-sales-pipeline.md",
+      "04-client-portal-agency.md",
+      "05-marketplace-contractor-directory.md",
+      "07-inventory-warehouse-control.md",
+      "13-todo-habit-tracker.md",
+      "16-ecommerce-store-checkout.md",
+      "18-finance-tracker-budget-planner.md",
+      "19-admin-panel-user-management.md"
+    ],
+    "auth_roles": [
+      "02-saas-dashboard-ops-command-center.md",
+      "03-crm-sales-pipeline.md",
+      "09-social-community-content-messaging.md",
+      "17-real-time-chat-team-messenger.md",
+      "19-admin-panel-user-management.md"
+    ],
+    "realtime_or_collab": [
+      "08-project-management-collaboration.md",
+      "09-social-community-content-messaging.md",
+      "17-real-time-chat-team-messenger.md"
+    ],
+    "file_or_media": [
+      "01-ai-saas-document-intelligence.md",
+      "08-project-management-collaboration.md",
+      "09-social-community-content-messaging.md",
+      "11-portfolio-case-study-site.md"
+    ],
+    "commerce_or_billing_sim": [
+      "12-calculator-roi-estimator.md",
+      "14-pricing-page-plan-comparison.md",
+      "16-ecommerce-store-checkout.md",
+      "18-finance-tracker-budget-planner.md"
+    ],
+    "admin_reporting": [
+      "02-saas-dashboard-ops-command-center.md",
+      "05-marketplace-contractor-directory.md",
+      "07-inventory-warehouse-control.md",
+      "19-admin-panel-user-management.md"
+    ],
+    "ai_simulation": [
+      "01-ai-saas-document-intelligence.md",
+      "20-ai-chatbot-support-agent.md"
+    ]
+  },
+  "files": [
+    {
+      "file": "10-landing-page-waitlist-funnel.md",
+      "category": "simple",
+      "simulated": true,
+      "summary": "Landing page and marketing waitlist funnel with forms, demo modal, and admin-lite signup view.",
+      "capabilities": ["file_or_media"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "11-portfolio-case-study-site.md",
+      "category": "simple",
+      "simulated": true,
+      "summary": "Portfolio and case study showcase site with project gallery, filtering, and contact form.",
+      "capabilities": ["file_or_media"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "12-calculator-roi-estimator.md",
+      "category": "simple",
+      "simulated": true,
+      "summary": "Interactive ROI calculator with configurable inputs, chart visualization, and report export simulation.",
+      "capabilities": ["commerce_or_billing_sim"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "13-todo-habit-tracker.md",
+      "category": "simple",
+      "simulated": true,
+      "summary": "Task and habit tracker with streaks, categories, calendar views, and progress visualization.",
+      "capabilities": ["persistence"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "14-pricing-page-plan-comparison.md",
+      "category": "simple",
+      "simulated": true,
+      "summary": "Pricing and plan comparison page with tiered plans, feature matrices, FAQ, and simulated CTA flow.",
+      "capabilities": ["commerce_or_billing_sim"],
+      "local_safe_notes": "All data in-memory, no real payments."
+    },
+    {
+      "file": "15-blog-content-hub.md",
+      "category": "simple",
+      "simulated": true,
+      "summary": "Blog and content hub with article listing, search, categories, tags, and newsletter signup.",
+      "capabilities": [],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "02-saas-dashboard-ops-command-center.md",
+      "category": "medium",
+      "simulated": true,
+      "summary": "Operations command center with dashboards, workspaces, reports, team roles, permissions matrix, and audit log.",
+      "capabilities": ["backend_api", "auth_roles", "admin_reporting"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "01-ai-saas-document-intelligence.md",
+      "category": "medium",
+      "simulated": true,
+      "summary": "AI document intelligence workspace with simulated streaming analysis, risk scoring, and chat follow-up.",
+      "capabilities": ["backend_api", "persistence", "file_or_media", "ai_simulation"],
+      "local_safe_notes": "AI output is simulated locally; no real AI providers or external APIs."
+    },
+    {
+      "file": "03-crm-sales-pipeline.md",
+      "category": "medium",
+      "simulated": true,
+      "summary": "CRM sales pipeline with deals, stages, contacts, activity timeline, and forecast.",
+      "capabilities": ["backend_api", "persistence", "auth_roles"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "04-client-portal-agency.md",
+      "category": "medium",
+      "simulated": true,
+      "summary": "Agency client portal with projects, invoices, messages, shared files, and approvals.",
+      "capabilities": ["backend_api", "persistence"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "06-booking-salon-scheduler.md",
+      "category": "medium",
+      "simulated": true,
+      "summary": "Salon booking app with service selection, staff calendar, time slots, and appointment management.",
+      "capabilities": [],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "07-inventory-warehouse-control.md",
+      "category": "medium",
+      "simulated": true,
+      "summary": "Warehouse inventory control system with stock tracking, purchase orders, receiving workflow, and reorder rules.",
+      "capabilities": ["backend_api", "persistence", "admin_reporting"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "08-project-management-collaboration.md",
+      "category": "medium",
+      "simulated": true,
+      "summary": "Project management app with Kanban boards, task details, roadmap, team workload, and simulated collaboration.",
+      "capabilities": ["realtime_or_collab", "file_or_media"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "05-marketplace-contractor-directory.md",
+      "category": "medium",
+      "simulated": true,
+      "summary": "Contractor marketplace directory with search, profiles, reviews, bidding simulation, and job posting.",
+      "capabilities": ["persistence", "admin_reporting"],
+      "local_safe_notes": "All data in-memory, no external APIs."
+    },
+    {
+      "file": "09-social-community-content-messaging.md",
+      "category": "complex",
+      "simulated": true,
+      "summary": "Social community app with content feed, member profiles, groups, messaging, and moderation queue.",
+      "capabilities": ["auth_roles", "realtime_or_collab", "file_or_media"],
+      "local_safe_notes": "All data in-memory; messaging is simulated, no external APIs."
+    },
+    {
+      "file": "16-ecommerce-store-checkout.md",
+      "category": "complex",
+      "simulated": true,
+      "summary": "Ecommerce storefront with product catalog, cart, simulated checkout flow, and order history.",
+      "capabilities": ["backend_api", "persistence", "commerce_or_billing_sim"],
+      "local_safe_notes": "Payment and checkout are simulated locally; no real payment processors or external APIs."
+    },
+    {
+      "file": "17-real-time-chat-team-messenger.md",
+      "category": "complex",
+      "simulated": true,
+      "summary": "Slack-style team messaging app with channels, DMs, threads, reactions, typing indicators, and search.",
+      "capabilities": ["auth_roles", "realtime_or_collab"],
+      "local_safe_notes": "Realtime is simulated locally; no WebSocket server or external APIs."
+    },
+    {
+      "file": "18-finance-tracker-budget-planner.md",
+      "category": "complex",
+      "simulated": true,
+      "summary": "Personal finance tracker with spending, budgets, savings goals, bills, and cashflow visualization.",
+      "capabilities": ["backend_api", "persistence", "commerce_or_billing_sim"],
+      "local_safe_notes": "All data in-memory; no bank connections, payment processors, or external APIs."
+    },
+    {
+      "file": "19-admin-panel-user-management.md",
+      "category": "complex",
+      "simulated": true,
+      "summary": "Admin panel for user/permissions management with roles, audit log, SSO placeholders, and security toggles.",
+      "capabilities": ["backend_api", "persistence", "auth_roles", "admin_reporting"],
+      "local_safe_notes": "All data in-memory; SSO is a placeholder, no external APIs."
+    },
+    {
+      "file": "20-ai-chatbot-support-agent.md",
+      "category": "complex",
+      "simulated": true,
+      "summary": "AI support chatbot workspace with simulated conversational AI, knowledge base, agent escalations, and training eval.",
+      "capabilities": ["ai_simulation"],
+      "local_safe_notes": "AI responses are simulated locally; no real AI providers or external APIs."
+    }
+  ]
+}

@@ -54,6 +54,9 @@ jobs:
       - name: Run canary matrix false-green tests
         run: bash scripts/test/canary_matrix_guardrail_test.sh
 
+      - name: Run prompt matrix fixture breadth guardrail
+        run: bash scripts/test/prompt_matrix_fixture_breadth_test.sh
+
   public-launch-smoke:
     name: Public Launch Smoke
     needs: canary-script-guardrails
