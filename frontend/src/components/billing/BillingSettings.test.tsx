@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 vi.mock('@/services/api', () => ({
@@ -309,7 +309,7 @@ describe('BillingSettings', () => {
     const downgradeBtn = screen.getByText('Downgrade to Builder')
     expect(downgradeBtn).toBeTruthy()
 
-    downgradeBtn.click()
+    fireEvent.click(downgradeBtn)
 
     await waitFor(() => {
       expect(container.textContent).toContain('Downgrade scheduled')
@@ -387,7 +387,7 @@ describe('BillingSettings', () => {
     const upgradeBtn = screen.getByText('Upgrade to Pro')
     expect(upgradeBtn).toBeTruthy()
 
-    upgradeBtn.click()
+    fireEvent.click(upgradeBtn)
 
     await waitFor(() => {
       expect(container.textContent).toContain('Upgraded to Pro')
