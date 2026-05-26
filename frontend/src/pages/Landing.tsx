@@ -1867,6 +1867,50 @@ const Pricing = ({ onGetStarted }: LandingProps) => (
   </section>
 )
 
+const FEATURED_BUILDS = [
+  { name: 'Task Manager Pro', desc: 'Full-stack task board with real-time updates, drag-and-drop, and team assignments.', tags: ['React', 'Go', 'Postgres'], icon: Workflow },
+  { name: 'SaaS Analytics Dashboard', desc: 'Multi-tenant analytics platform with charts, user funnels, and CSV export.', tags: ['React', 'Node', 'Redis'], icon: TerminalSquare },
+  { name: 'E-Commerce Storefront', desc: 'Product catalog, cart, Stripe checkout, and order management with admin panel.', tags: ['Next.js', 'Go', 'Stripe'], icon: Database },
+  { name: 'Real-time Chat App', desc: 'WebSocket-powered group chat with rooms, file sharing, and message history.', tags: ['React', 'Go', 'WebSocket'], icon: Brain },
+  { name: 'Developer Portfolio', desc: 'Animated portfolio site with project showcase, blog, and contact form.', tags: ['React', 'Tailwind', 'MDX'], icon: Code2 },
+  { name: 'Inventory Tracker', desc: 'Stock management with barcode scanning, low-stock alerts, and supplier contacts.', tags: ['React', 'Go', 'SQLite'], icon: Layers3 },
+] as const
+
+const FeaturedBuilds = () => (
+  <section className="landing-section">
+    <div className="launch-shell">
+      <motion.div {...fadeUp}>
+        <div className="section-kicker">Built with Apex</div>
+        <h2 className="section-title">Real apps. Real code. Shipped.</h2>
+        <p className="section-copy">
+          Every build produces a real, working product with full source, deployment config, and handoff docs.
+          Browse what the community has shipped from a prompt.
+        </p>
+      </motion.div>
+      <div className="pillar-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 18 }}>
+        {FEATURED_BUILDS.map(({ name, desc, tags, icon }) => {
+          const BuildIcon = icon as IconType
+          return (
+            <motion.article key={name} className="launch-card" {...fadeUp} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div className="card-icon"><BuildIcon width={20} height={20} /></div>
+              <h3 style={{ margin: 0 }}>{name}</h3>
+              <p style={{ margin: 0, flex: 1 }}>{desc}</p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                {tags.map((tag) => (
+                  <span key={tag} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}>{tag}</span>
+                ))}
+              </div>
+              <a href="/explore" className="launch-link-button" style={{ marginTop: 4, fontSize: 13, textDecoration: 'none', color: '#67e8f9', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                View <ArrowRight width={13} height={13} />
+              </a>
+            </motion.article>
+          )
+        })}
+      </div>
+    </div>
+  </section>
+)
+
 const Docs = () => (
   <section id="docs" className="landing-section">
     <div className="launch-shell">
@@ -1955,6 +1999,7 @@ const Landing: React.FC<LandingProps> = ({ onGetStarted }) => (
     <ModelRouting />
     <Comparison />
     <Pricing onGetStarted={onGetStarted} />
+    <FeaturedBuilds />
     <Docs />
     <CTA onGetStarted={onGetStarted} />
     <Footer />
