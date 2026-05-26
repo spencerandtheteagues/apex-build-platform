@@ -15,6 +15,7 @@ This tracker reconciles the master launch plan with the current repository state
 
 - No-network prompt matrix fixture breadth guardrail added: `scripts/test/prompt_matrix_fixture_breadth_test.sh` enforces that the 20-prompt `prompts/canary` set stays launch-diverse (6 simple, 8 medium, 6 complex; 8 required capabilities covered) via `prompts/canary/matrix-manifest.json`. The guardrail is wired into `scripts/test/canary_matrix_guardrail_test.sh` and `.github/workflows/production-canary.yml`. Live matrix run evidence remains open; this only prevents the repo from claiming breadth from a narrow frontend-only prompt set.
 - TASK-010 load harness added: `scripts/loadtest.js` is a k6 load harness covering 200 concurrent unauthenticated landing+health traffic, optional 50-VU authenticated API load, and optional 10-concurrent build-start polling with build poll tokens. Authenticated and mutating scenarios are fully opt-in, and `scripts/test/loadtest_guardrail_test.sh` validates script shape, thresholds, credential hygiene, login fields, poll-token handling, and k6 syntax without secrets or network traffic. Live authenticated API and build-start evidence remain open.
+- TASK-008 backend gate evidence recorded: after timing-test harness stabilization, `cd backend && go test -p 1 -parallel 4 ./... -timeout 20m` passed on `kali` on 2026-05-26 with evidence log `/tmp/backend_full_p1_after_tmp_cleanup_20260526T1650Z.txt`; `go build ./...` also passed. The focused timing-test fixes were pushed in commit `c7df8ec`.
 - Pricing truth aligned around Builder `$24/mo`, Pro `$59/mo`, Team `$149/mo`.
 - Pro annual price aligned to `$566.40/yr`.
 - Frontend launch-special `$49/$79` copy removed.
@@ -68,7 +69,7 @@ This tracker reconciles the master launch plan with the current repository state
 
 ## Evidence Required For Public Launch
 
-- `cd backend && go test -p 1 -parallel 4 ./... -timeout 20m`
+- Backend gate last passed on 2026-05-26: `cd backend && go test -p 1 -parallel 4 ./... -timeout 20m` on `kali`, evidence log `/tmp/backend_full_p1_after_tmp_cleanup_20260526T1650Z.txt`; `go build ./...` also passed.
 - `cd frontend && npm run typecheck && npm run test -- --run && npm run lint && npm run build`
 - `cd tests/e2e && PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 PLAYWRIGHT_EXPECT_LAUNCH_READY=1 npm run test:launch -- --project=chromium`
 - `cd tests/e2e && npm run test:preview-verify -- --project=chromium`
@@ -127,12 +128,12 @@ Prior code forced balanced+platform builds to use `ollama/kimi-k2.6:cloud` for L
 - ESLint: PASS (0 errors)
 - Vitest unit tests: 225/225 PASS (34 test files)
 
-**Backend (2026-05-25):**
-- `go test ./...`: All packages PASS except:
-  - `internal/execution`: 2 FAIL (`TestContainerSandboxExecuteGo`, `TestContainerSandboxExecuteWorkspaceCommand`)
-  - Failure cause: VPS Docker environment lacks `/cache/go-build` directory permissions
-  - Classification: **non-blocking** — production uses E2B sandbox (not local Docker)
-  - Evidence: E2B status `launch_ready=true` in `/health/features`
+**Backend (2026-05-26):**
+- Required serialized backend suite: PASS on `kali`.
+- Command: `cd backend && go test -p 1 -parallel 4 ./... -timeout 20m`
+- Evidence log: `/tmp/backend_full_p1_after_tmp_cleanup_20260526T1650Z.txt`
+- Build gate: `go build ./...` PASS.
+- Note: timing-sensitive backend agent tests were stabilized in commit `c7df8ec`; use the serialized command above for the full backend gate to avoid local Chrome/package contention.
 
 ### Updated Launch Blockers
 
