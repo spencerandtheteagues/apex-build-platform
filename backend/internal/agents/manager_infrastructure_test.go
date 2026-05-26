@@ -164,3 +164,76 @@ func TestEnqueueTaskResultFallsBackWhenResultQueueBlocked(t *testing.T) {
 		}
 	}
 }
+
+func TestQueuedTaskResultWatchdogProcessesUnconsumedResult(t *testing.T) {
+	t.Setenv("TASK_RESULT_QUEUE_WATCHDOG_SECONDS", "1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now().UTC()
+	task := &Task{
+		ID:         "queued-result-without-processor",
+		Type:       TaskReview,
+		Status:     TaskInProgress,
+		AssignedTo: "reviewer-1",
+		StartedAt:  &now,
+		CreatedAt:  now,
+	}
+	agent := &Agent{
+		ID:          "reviewer-1",
+		Role:        RoleReviewer,
+		Status:      StatusWorking,
+		BuildID:     "build-result-watchdog",
+		CurrentTask: task,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	build := &Build{
+		ID:        "build-result-watchdog",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		Agents:    map[string]*Agent{agent.ID: agent},
+		Tasks:     []*Task{task},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	am := &AgentManager{
+		ctx:                    ctx,
+		cancel:                 cancel,
+		agents:                 map[string]*Agent{agent.ID: agent},
+		builds:                 map[string]*Build{build.ID: build},
+		subscribers:            map[string][]chan *WSMessage{},
+		taskQueue:              make(chan *Task, 1),
+		resultQueue:            make(chan *TaskResult, 1),
+		taskDispatcherRunning:  true,
+		resultProcessorRunning: true,
+	}
+
+	am.enqueueTaskResult(&TaskResult{
+		TaskID:  task.ID,
+		AgentID: agent.ID,
+		Attempt: 0,
+		Success: true,
+		Output:  &TaskOutput{Messages: []string{"review passed"}},
+	})
+
+	deadline := time.After(3 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("task status = %s agent status = %s; expected queued result watchdog to complete task", task.Status, agent.Status)
+		case <-tick.C:
+			if task.Status == TaskCompleted && agent.Status == StatusCompleted {
+				if task.Output == nil || len(task.Output.Messages) != 1 || task.Output.Messages[0] != "review passed" {
+					t.Fatalf("unexpected task output after watchdog: %+v", task.Output)
+				}
+				return
+			}
+		}
+	}
+}

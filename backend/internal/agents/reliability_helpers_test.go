@@ -698,11 +698,12 @@ func TestRecoverStaleInProgressTasksQueuesSyntheticTimeoutFailure(t *testing.T) 
 
 	cancelled := make(chan struct{}, 1)
 	manager := &AgentManager{
-		ctx:         context.Background(),
-		builds:      make(map[string]*Build),
-		agents:      make(map[string]*Agent),
-		resultQueue: make(chan *TaskResult, 2),
-		subscribers: make(map[string][]chan *WSMessage),
+		ctx:                    context.Background(),
+		builds:                 make(map[string]*Build),
+		agents:                 make(map[string]*Agent),
+		resultQueue:            make(chan *TaskResult, 2),
+		resultProcessorRunning: true,
+		subscribers:            make(map[string][]chan *WSMessage),
 		taskCancels: map[string]context.CancelFunc{
 			"stale-task": func() {
 				select {

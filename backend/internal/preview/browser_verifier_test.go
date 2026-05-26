@@ -14,10 +14,6 @@ import (
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 )
 
-// chromeSem limits concurrent Chrome launches to 1 to prevent resource exhaustion on constrained hosts.
-var chromeSem = make(chan struct{}, 1)
-
-
 // ── filterBrowserNoise ────────────────────────────────────────────────────────
 
 func TestFilterBrowserNoise_RemovesResizeObserver(t *testing.T) {
@@ -363,7 +359,6 @@ func TestBrowserVerifier_PassesWhenAppRendered(t *testing.T) {
 	chromeSem <- struct{}{}
 	defer func() { <-chromeSem }()
 
-
 	// Serve a page with pre-rendered content in #root (no JS needed)
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -401,7 +396,6 @@ func TestBrowserVerifier_FailsOnBlankMount(t *testing.T) {
 	chromeSem <- struct{}{}
 	defer func() { <-chromeSem }()
 
-
 	// Serve a page with empty #root and no JS to populate it
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -437,7 +431,6 @@ func TestBrowserVerifier_PassesWhenJSPopulatesMount(t *testing.T) {
 	}
 	chromeSem <- struct{}{}
 	defer func() { <-chromeSem }()
-
 
 	// Simulate React: JS runs synchronously and populates #root
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -479,7 +472,6 @@ func TestBrowserVerifier_PollsForDelayedMount(t *testing.T) {
 	chromeSem <- struct{}{}
 	defer func() { <-chromeSem }()
 
-
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!DOCTYPE html>
@@ -518,7 +510,6 @@ func TestBrowserVerifier_DetectsUncaughtException(t *testing.T) {
 	}
 	chromeSem <- struct{}{}
 	defer func() { <-chromeSem }()
-
 
 	// Page that throws but also leaves mount empty → should fail as js_runtime_error
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

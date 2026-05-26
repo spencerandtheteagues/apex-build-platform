@@ -5162,10 +5162,99 @@ func (am *AgentManager) enqueueTaskResult(result *TaskResult) {
 	select {
 	case am.resultQueue <- result:
 		applog.Operation("agent.task_result.enqueue", am.taskResultOperationFields(result, "success", map[string]any{"handoff": "queue"}))
+		am.scheduleQueuedTaskResultWatchdog(result)
 	case <-time.After(2 * time.Second):
 		applog.Operation("agent.task_result.enqueue", am.taskResultOperationFields(result, "degraded", map[string]any{"handoff": "direct", "error": "result queue blocked"}))
 		log.Printf("Result queue blocked for task %s; processing result directly to avoid build stall", result.TaskID)
 		go am.processResultSafely(result)
+	}
+}
+
+func taskResultWatchdogDelay() time.Duration {
+	seconds := envInt("TASK_RESULT_QUEUE_WATCHDOG_SECONDS", 10)
+	if seconds <= 0 {
+		return 0
+	}
+	if seconds > 120 {
+		seconds = 120
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func (am *AgentManager) scheduleQueuedTaskResultWatchdog(result *TaskResult) {
+	if am == nil || result == nil || strings.TrimSpace(result.TaskID) == "" {
+		return
+	}
+	delay := taskResultWatchdogDelay()
+	if delay <= 0 {
+		return
+	}
+
+	fallback := cloneTaskResultForAsync(result)
+	time.AfterFunc(delay, func() {
+		if !am.taskResultStillNeedsProcessing(fallback) {
+			return
+		}
+		applog.Operation("agent.task_result.watchdog", am.taskResultOperationFields(fallback, "degraded", map[string]any{
+			"handoff":  "direct_watchdog",
+			"delay_ms": delay.Milliseconds(),
+			"error":    "queued result was not applied before watchdog deadline",
+		}))
+		log.Printf("Result queue watchdog processing task %s directly after %s", fallback.TaskID, delay)
+		go am.processResultSafely(fallback)
+	})
+}
+
+func cloneTaskResultForAsync(result *TaskResult) *TaskResult {
+	if result == nil {
+		return nil
+	}
+	clone := *result
+	if result.Output != nil {
+		var output TaskOutput
+		if raw, err := json.Marshal(result.Output); err == nil && json.Unmarshal(raw, &output) == nil {
+			clone.Output = &output
+		}
+	}
+	return &clone
+}
+
+func (am *AgentManager) taskResultStillNeedsProcessing(result *TaskResult) bool {
+	if am == nil || result == nil || strings.TrimSpace(result.TaskID) == "" {
+		return false
+	}
+
+	am.mu.RLock()
+	builds := make([]*Build, 0, len(am.builds))
+	for _, build := range am.builds {
+		if build != nil {
+			builds = append(builds, build)
+		}
+	}
+	am.mu.RUnlock()
+
+	for _, build := range builds {
+		build.mu.RLock()
+		for _, task := range build.Tasks {
+			if task == nil || task.ID != result.TaskID {
+				continue
+			}
+			assignedMatches := strings.TrimSpace(result.AgentID) == "" || strings.TrimSpace(task.AssignedTo) == "" || task.AssignedTo == result.AgentID
+			pending := assignedMatches && !isTerminalTaskStatus(task.Status) && task.RetryCount == result.Attempt
+			build.mu.RUnlock()
+			return pending
+		}
+		build.mu.RUnlock()
+	}
+	return false
+}
+
+func isTerminalTaskStatus(status TaskStatus) bool {
+	switch status {
+	case TaskCompleted, TaskFailed, TaskCancelled:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -6199,6 +6288,23 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		build.mu.RLock()
 		buildInactive = build.Status == BuildFailed || build.Status == BuildCancelled || build.Status == BuildCompleted
 		build.mu.RUnlock()
+	}
+
+	if task != nil && (task.Status == TaskCompleted || task.Status == TaskFailed) {
+		now := time.Now()
+		if agent.CurrentTask != nil && agent.CurrentTask.ID == task.ID {
+			agent.CurrentTask = nil
+		}
+		if agent.Status == StatusWorking || agent.Status == StatusWaiting {
+			agent.Status = StatusIdle
+		}
+		agent.UpdatedAt = now
+		agent.mu.Unlock()
+		log.Printf("Dropping result for terminal task %s with status %s (agent %s)", task.ID, task.Status, result.AgentID)
+		if buildErr == nil {
+			am.checkBuildCompletion(build)
+		}
+		return
 	}
 
 	if result.Error != nil && (errors.Is(result.Error, errBuildNotActive) || errors.Is(result.Error, errBuildBudgetExceeded)) {

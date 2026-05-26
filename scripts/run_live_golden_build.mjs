@@ -284,8 +284,6 @@ function providerModelOverrides() {
   }
   return {
     ollama: process.env.KIMI_OLLAMA_MODEL || process.env.OLLAMA_MODEL_DEFAULT || 'kimi-k2.6',
-    deepseek: process.env.DEEPSEEK_OLLAMA_MODEL || 'deepseek-v4-pro',
-    glm: process.env.GLM_OLLAMA_MODEL || 'glm-5.1',
   }
 }
 
