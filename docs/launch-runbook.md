@@ -1,6 +1,6 @@
 # Launch Runbook
 
-Last updated: 2026-05-08
+Last updated: 2026-05-26
 
 This is the minimum go-live runbook for opening `apex-build.dev` to real customers.
 
@@ -22,6 +22,17 @@ This is the minimum go-live runbook for opening `apex-build.dev` to real custome
 - Confirm `/health/features` reports `code_execution.details.launch_ready=true` and `preview_service.details.launch_ready=true`.
 - Confirm production has one reachable isolated runtime path for code execution: `E2B_API_KEY` or a remote Docker configuration such as `APEX_EXECUTION_DOCKER_HOST`.
 - Confirm production preview has one reachable isolated runtime path for preview containers/backend preview: `APEX_PREVIEW_DOCKER_HOST` plus `APEX_PREVIEW_CONNECT_HOST` when needed, or a validated E2B preview runtime.
+
+## Provider Planning Controls
+
+These backend knobs are operational controls, not marketing claims. Use them to bound planner stalls while preserving fallback quality:
+
+- `APEX_PLANNING_PROVIDER_TIMEOUT_MS`: millisecond override for each structured planner provider attempt. Intended for tests and emergency diagnosis only.
+- `APEX_PLANNING_PROVIDER_TIMEOUT_SECONDS`: second override for each structured planner provider attempt.
+- `APEX_PLANNING_OLLAMA_TIMEOUT_SECONDS`: Ollama-specific planner attempt override when Ollama needs a longer budget than other providers.
+- `APEX_BALANCED_OLLAMA_PLANNING_MODELS`: comma-separated balanced-mode Ollama Cloud model fallback order.
+
+Planner responses that complete after their configured attempt deadline must be treated as timeouts and rotated to the next eligible provider. Provider clients must honor request contexts; hard-timeout wrappers keep the orchestration wait path bounded but cannot safely terminate provider code that ignores cancellation after it has been called.
 
 ## Render Workspace Setup
 
@@ -53,7 +64,7 @@ npm run test:launch
 
 ### 2. Stripe launch verification
 
-From the repo root, check production billing readiness, authenticated billing config, self-serve price IDs, and optionally create Stripe checkout sessions without completing payment.
+From the repo root, check production billing readiness, authenticated billing config, self-serve price IDs, and optionally create Stripe checkout sessions without completing payment. These verifier probes do not prove the full paid billing lifecycle; controlled paid checkout completion, plan persistence, billing portal return, upgrade/downgrade, cancellation, and real webhook replay remain separate launch gates.
 
 ```bash
 APEX_API_URL=https://api.apex-build.dev \
@@ -221,9 +232,9 @@ GitHub Actions now includes `.github/workflows/production-canary.yml`:
 - the Stripe verifier checks invalid webhook signatures are rejected; real webhook event replay still remains a Stripe dashboard or CLI step
 - workflow dispatch input `run_mobile_external_strict=true` requires `APEX_MOBILE_CANARY_TOKEN` and `APEX_MOBILE_CANARY_PROJECT_ID`, then proves strict native/store evidence for that project
 - `Preview Verification Canary` runs preview readiness coverage against production
-- `Platform Build Canary (free-fast / paid-balanced / paid-max)` runs the build matrix against production
+- `Platform Build Canary (free-fast / paid-balanced / paid-max)` runs the build matrix against production; paid scenarios are skipped without `APEX_CANARY_EMAIL`/`APEX_CANARY_PASSWORD` and only hard-fail the workflow when repo variable `APEX_REQUIRE_PAID_CANARIES=true`
 - `Golden FieldOps Live Canary` runs the balanced/max golden prompt when canary credentials exist
-- `Prompt Reliability Live Matrix` remains manual through `run_prompt_matrix=true`
+- `Prompt Reliability Live Matrix` remains manual through `run_prompt_matrix=true`; the current default is the 20 prompt files in `prompts/canary` running as one paid full-mode profile. A requested matrix run now fails if `APEX_CANARY_EMAIL`/`APEX_CANARY_PASSWORD` are absent, but it is not mixed-tier launch evidence until the workflow or local script records 20/20 passing live artifacts and separate free-fast/full-stack profiles are added where needed.
 - set `APEX_CANARY_USERNAME` as well when the paid canary account authenticates more reliably by username than email
 
 Treat any failure in that workflow as a customer-facing reliability regression until explained.
@@ -258,6 +269,7 @@ Do not open the product to customers if any of these are true:
 - billing plans return placeholder Stripe price IDs
 - the platform build smoke does not reach a clean terminal result
 - restart recovery acknowledges the action but does not create new execution
+- any open launch-readiness tracker blocker lacks either passing evidence or an explicit launch-owner acceptance note, including Stripe lifecycle/replay, production canary, paid-max canary, rollback drill, failed-build restart, load test, diverse matrix, and provider-posture decisions
 - Render database or Redis maintenance is actively in progress
 
 ## First-Hour Monitoring
@@ -283,23 +295,23 @@ Rollback or close launch traffic immediately if:
 
 ## Rollback Drill Evidence
 
-### TASK-007 Rollback Drill — Pending Execution (2026-05-25)
+### TASK-007 Rollback Drill — Pending Execution (updated 2026-05-26)
 
 **Pre-conditions established:**
-- Current deployed commit: `627cb2a` (fix: raise Claude cost threshold to $2.00 for opus-4-7)
-- Known-good prior commit: `513e190` (fix: route balanced platform builds to Claude)
-- Health at drill time: healthy (5/7 providers, gemini/grok degraded but non-critical)
+- Current deployed commit: must be read from Render deploy metadata immediately before the drill; do not rely on this runbook for the commit hash.
+- Known-good prior deploy: select the most recent successful deploy that passed `/health`, `/health/features`, and a build smoke before the drill.
+- Latest public health read before this update: 2026-05-26 12:30 UTC, healthy/ready, critical services `6/6 ready`, optional services `40/40 ready`, 5/7 providers healthy, E2B execution launch-ready, preview service launch-ready, and runtime browser proof ready. Gemini and Grok remained degraded from credit/spend/permission posture and must be fixed or explicitly classified before launch.
 
 **Rollback Procedure (requires Render API key or dashboard access):**
 
 1. Open Render dashboard → `apex-build-backend` service → Deploys
-2. Find deploy for commit `513e190` (the prior successful deploy)
+2. Read the prior known-good deploy ID and commit from Render immediately before the drill.
 3. Click "Rollback to this deploy" (or API: `POST /services/{id}/deploys` with `commitId`)
 4. Wait for deploy to complete (~4-5 minutes)
 5. Verify: `curl https://api.apex-build.dev/api/v1/health | jq .ready` → `true`
 6. Run quick smoke: log in as admin, start a balanced build, verify it enters `in_progress`
 7. Note rollback duration (target: < 5 minutes)
-8. Roll forward: trigger redeploy of `627cb2a` commit
+8. Roll forward: trigger redeploy of the deploy ID/commit that was current immediately before the drill.
 9. Verify health again after roll-forward
 
 **Evidence Required:**
@@ -313,4 +325,3 @@ Rollback or close launch traffic immediately if:
 
 **Blocking:** Requires Render dashboard access or RENDER_API_KEY secret in GitHub Actions.
 **Assigned to:** Spencer (needs Render credentials) or Hermes (if given RENDER_API_KEY env var).
-

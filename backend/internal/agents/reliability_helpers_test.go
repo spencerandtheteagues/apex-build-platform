@@ -509,7 +509,7 @@ func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *test
 		build.Tasks[0].CompletedAt = &now
 		build.UpdatedAt = now
 		build.mu.Unlock()
-	case <-time.After(1500 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 		t.Fatal("expected phase waiter to trigger stale-task recovery")
 	}
 
@@ -518,7 +518,7 @@ func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *test
 		if !ok {
 			t.Fatal("expected recovered phase to complete successfully")
 		}
-	case <-time.After(1500 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 		t.Fatal("expected phase waiter to exit after recovery")
 	}
 

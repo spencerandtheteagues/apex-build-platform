@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       run_prompt_matrix:
-        description: Run the 10-prompt paid live reliability matrix
+        description: Run the 20-prompt paid full-mode live reliability matrix
         required: false
         default: false
         type: boolean
@@ -437,6 +437,7 @@ jobs:
   prompt-reliability-live-matrix:
     name: Prompt Reliability Live Matrix
     if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' && github.event_name == 'workflow_dispatch' && inputs.run_prompt_matrix == true }}
+    needs: canary-script-guardrails
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -452,8 +453,8 @@ jobs:
           if [[ -n "$APEX_CANARY_EMAIL" && -n "$APEX_CANARY_PASSWORD" ]]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping prompt reliability matrix because APEX_CANARY_EMAIL/APEX_CANARY_PASSWORD are not configured."
+            echo "::error::run_prompt_matrix=true requires APEX_CANARY_EMAIL and APEX_CANARY_PASSWORD secrets."
+            exit 1
           fi
 
       - name: Set up Node
@@ -479,6 +480,7 @@ jobs:
         env:
           BASE_URL: https://api.apex-build.dev/api/v1
           PROMPT_DIR: prompts/canary
+          EXPECTED_PROMPT_COUNT: 20
           POWER_MODES: ${{ inputs.prompt_matrix_power_modes }}
           MODE: full
           POLL_SECONDS: 15

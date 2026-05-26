@@ -1,5 +1,5 @@
 import React, { startTransition, useDeferredValue, useMemo, useState } from 'react'
-import { AlertCircle, CheckCircle2, Clock3, FileDiff, Filter, Layers3, Search, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock3, FileDiff, Filter, Layers3, Search, ShieldCheck, Sparkles, Workflow, XCircle } from 'lucide-react'
 
 import type {
   BuildApproval,
@@ -24,6 +24,7 @@ type OrchestrationOverviewProps = {
   buildStatus: string
   currentPhase?: string
   qualityGateStatus?: string
+  qualityGateStage?: string
   capabilityState?: BuildCapabilityState
   policyState?: BuildPolicyState
   blockers?: BuildBlocker[]
@@ -61,6 +62,20 @@ const EMPTY_BLOCKERS: BuildBlocker[] = []
 const EMPTY_APPROVALS: BuildApproval[] = []
 const EMPTY_CAPABILITIES: string[] = []
 const EMPTY_CHECKPOINTS: CheckpointLike[] = []
+const PREVIEW_VERIFICATION_KEYWORDS = ["preview_verification", "placeholder_preview", "frontend", "preview"] as const
+
+const hasPreviewVerificationSignal = (parts: Array<string | string[] | undefined>): boolean =>
+  PREVIEW_VERIFICATION_KEYWORDS.some((kw) =>
+    parts
+      .flatMap((part) => Array.isArray(part) ? part : [part])
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(kw)
+  )
+
+const isPreviewVerificationReport = (report: BuildVerificationReportState): boolean =>
+  hasPreviewVerificationSignal([report.surface, report.phase, report.blockers, report.errors, report.truth_tags])
 
 const PHASE_DEFS = [
   { id: 'intent', label: 'Request Intake', description: 'Normalize the request and classify static-ready vs upgrade-required vs full-stack.' },
@@ -710,8 +725,78 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
     props.capabilityState?.requires_backend_runtime ? 'Scalable path: preserve the current frontend contract while moving backend responsibilities behind a typed API boundary.' : null,
   ].filter(Boolean) as string[]
 
+  const verificationReports = props.verificationReports
+
+  const readyForPreview =
+    (verificationReports || []).some((r) =>
+      isPreviewVerificationReport(r) && r.status === "passed"
+    ) ||
+    props.promotionDecision?.preview_ready ||
+    verifiedSurfaceCount > 0
+
+  const previewVerificationFailed = (verificationReports || []).filter(
+    (r) =>
+      isPreviewVerificationReport(r) &&
+      (r.status === "failed" || r.status === "blocked")
+  )
+
+  const previewQualityGateFailed =
+    props.qualityGateStatus === "failed" &&
+    hasPreviewVerificationSignal([props.qualityGateStage, props.currentPhase])
+
+  const gateIsBlockingPreview =
+    previewQualityGateFailed ||
+    previewVerificationFailed.length > 0 ||
+    (
+      blockers.some((b) => hasPreviewVerificationSignal([b.type, b.category, b.title, b.summary])) &&
+      (props.qualityGateStatus === "failed" || props.qualityGateStatus === "blocked")
+    )
+
   return (
     <div className="space-y-6">
+      {gateIsBlockingPreview && (
+        <div
+          className="rounded-2xl border-2 border-red-500/40 bg-red-950/30 p-5"
+          role="alert"
+          aria-label="Preview launch may be blocked by verification failures"
+        >
+          <div className="flex items-start gap-3">
+            <XCircle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-red-200">
+                Preview launch may be blocked — verification reports or quality gate failed
+              </div>
+              <div className="mt-2 space-y-1">
+                {previewQualityGateFailed && (
+                  <div className="text-xs text-red-300/80">
+                    Quality gate status: {humanize(props.qualityGateStatus)}.
+                  </div>
+                )}
+                {previewVerificationFailed.map((report) => (
+                  <div key={report.id} className="text-xs text-red-300/80">
+                    {humanize(report.surface)}: {humanize(report.status)} during {humanize(report.phase)}
+                    {report.blockers && report.blockers.length > 0 ? ` — ${report.blockers.join("; ")}` : ""}
+                  </div>
+                ))}
+                {blockers
+                  .filter((b) => b.severity === "blocking")
+                  .slice(0, 3)
+                  .map((b) => (
+                    <div key={b.id} className="text-xs text-red-300/80">
+                      Blocker: {b.title}{b.summary ? ` — ${b.summary}` : ""}
+                    </div>
+                  ))}
+              </div>
+              {!readyForPreview && (
+                <div className="mt-3 text-xs text-red-400/60">
+                  No passing preview verification or readiness state has been reached yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <Card variant="cyberpunk" className="overflow-hidden border-2 border-gray-800 bg-black/70 backdrop-blur-md">
         <CardContent className="relative p-0">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_35%),radial-gradient(circle_at_top_right,rgba(168,85,247,0.14),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_55%)]" />

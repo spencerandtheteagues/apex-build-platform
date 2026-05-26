@@ -15,6 +15,53 @@ vi.mock('@/components/ui', () => ({
 import OrchestrationOverview from './OrchestrationOverview'
 
 describe('OrchestrationOverview', () => {
+  it('does not show preview warning for backend-only quality gate failures', () => {
+    render(
+      <OrchestrationOverview
+        buildStatus="failed"
+        currentPhase="backend_contract"
+        qualityGateStatus="failed"
+        verificationReports={[
+          {
+            id: 'vr-backend',
+            build_id: 'build-1',
+            phase: 'validation',
+            surface: 'backend',
+            status: 'failed',
+            blockers: ['contract mismatch'],
+            generated_at: '2026-05-01T12:00:00Z',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.queryByText(/Preview launch may be blocked/i)).toBeNull()
+  })
+
+  it('shows preview warning for frontend placeholder preview failures', () => {
+    render(
+      <OrchestrationOverview
+        buildStatus="failed"
+        currentPhase="validation"
+        qualityGateStatus="failed"
+        verificationReports={[
+          {
+            id: 'vr-preview',
+            build_id: 'build-1',
+            phase: 'validation',
+            surface: 'frontend',
+            status: 'blocked',
+            blockers: ['placeholder_preview'],
+            generated_at: '2026-05-01T12:00:00Z',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText(/Preview launch may be blocked/i)).toBeTruthy()
+    expect(screen.getByText(/placeholder_preview/i)).toBeTruthy()
+  })
+
   it('renders the build journal and mock-to-real diff from orchestration state', () => {
     render(
       <OrchestrationOverview

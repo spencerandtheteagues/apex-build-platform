@@ -10,7 +10,9 @@ fi
 BASE_URL="${BASE_URL:-https://api.apex-build.dev/api/v1}"
 PROMPT_DIR="${PROMPT_DIR:-prompts/canary}"
 PROMPT_FILES="${PROMPT_FILES:-}"
+EXPECTED_PROMPT_COUNT="${EXPECTED_PROMPT_COUNT:-}"
 POWER_MODES="${POWER_MODES:-balanced}"
+ALLOWED_POWER_MODES="${ALLOWED_POWER_MODES:-fast balanced max}"
 MODE="${MODE:-full}"
 POLL_SECONDS="${POLL_SECONDS:-15}"
 MAX_POLLS="${MAX_POLLS:-220}"
@@ -52,6 +54,17 @@ if [[ "${#prompt_files[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+if [[ -n "$EXPECTED_PROMPT_COUNT" ]]; then
+  if ! [[ "$EXPECTED_PROMPT_COUNT" =~ ^[0-9]+$ ]] || [[ "$EXPECTED_PROMPT_COUNT" -le 0 ]]; then
+    echo "PROMPT_MATRIX_EXPECTED_COUNT_INVALID: EXPECTED_PROMPT_COUNT must be a positive integer" >&2
+    exit 1
+  fi
+  if [[ "${#prompt_files[@]}" -ne "$EXPECTED_PROMPT_COUNT" ]]; then
+    echo "PROMPT_MATRIX_PROMPT_COUNT_MISMATCH: expected $EXPECTED_PROMPT_COUNT prompt files, found ${#prompt_files[@]}" >&2
+    exit 1
+  fi
+fi
+
 for prompt_file in "${prompt_files[@]}"; do
   if [[ ! -f "$prompt_file" ]]; then
     echo "PROMPT_MATRIX_PROMPT_MISSING: $prompt_file" >&2
@@ -59,11 +72,33 @@ for prompt_file in "${prompt_files[@]}"; do
   fi
 done
 
+power_modes=()
+for power_mode in $POWER_MODES; do
+  allowed=0
+  for allowed_power_mode in $ALLOWED_POWER_MODES; do
+    if [[ "$power_mode" == "$allowed_power_mode" ]]; then
+      allowed=1
+      break
+    fi
+  done
+  if [[ "$allowed" -ne 1 ]]; then
+    echo "PROMPT_MATRIX_POWER_MODE_INVALID: $power_mode is not in allowed set: $ALLOWED_POWER_MODES" >&2
+    exit 1
+  fi
+  power_modes+=("$power_mode")
+done
+
+if [[ "${#power_modes[@]}" -eq 0 ]]; then
+  echo "PROMPT_MATRIX_POWER_MODES_EMPTY: POWER_MODES must include at least one mode" >&2
+  exit 1
+fi
+
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "PROMPT_MATRIX_DRY_RUN"
   echo "BASE_URL=$BASE_URL"
   echo "APEX_LIVE_TEST_MODEL_PROFILE=${APEX_LIVE_TEST_MODEL_PROFILE:-}"
-  echo "POWER_MODES=$POWER_MODES"
+  echo "EXPECTED_PROMPT_COUNT=${EXPECTED_PROMPT_COUNT:-}"
+  echo "POWER_MODES=${power_modes[*]}"
   echo "ARTIFACT_ROOT=$ARTIFACT_ROOT"
   for prompt_file in "${prompt_files[@]}"; do
     echo "PROMPT=$(slug_from_prompt "$prompt_file") path=$prompt_file"
@@ -147,7 +182,7 @@ NODE
 
 for prompt_file in "${prompt_files[@]}"; do
   prompt_slug="$(slug_from_prompt "$prompt_file")"
-  for power_mode in $POWER_MODES; do
+  for power_mode in "${power_modes[@]}"; do
     run_artifacts="$ARTIFACT_ROOT/$prompt_slug/$power_mode"
     mkdir -p "$run_artifacts"
 
@@ -184,10 +219,13 @@ for prompt_file in "${prompt_files[@]}"; do
   done
 done
 
-node - "$summary_jsonl" "$ARTIFACT_ROOT/summary.json" "$ARTIFACT_ROOT/summary.md" <<'NODE'
+expected_runs=$((${#prompt_files[@]} * ${#power_modes[@]}))
+
+node - "$summary_jsonl" "$ARTIFACT_ROOT/summary.json" "$ARTIFACT_ROOT/summary.md" "$expected_runs" <<'NODE'
 const fs = require('node:fs')
 
-const [jsonlPath, summaryJSONPath, summaryMDPath] = process.argv.slice(2)
+const [jsonlPath, summaryJSONPath, summaryMDPath, expectedTotalRaw] = process.argv.slice(2)
+const expectedTotal = Number(expectedTotalRaw || 0)
 const rows = fs.readFileSync(jsonlPath, 'utf8')
   .split(/\r?\n/)
   .filter(Boolean)
@@ -203,7 +241,8 @@ for (const row of rows) {
 
 const summary = {
   generated_at: new Date().toISOString(),
-  passed: rows.every(row => row.passed),
+  passed: expectedTotal > 0 && rows.length === expectedTotal && rows.every(row => row.passed),
+  expected_total: expectedTotal,
   total: rows.length,
   passed_count: rows.filter(row => row.passed).length,
   failed_count: rows.filter(row => !row.passed).length,
@@ -246,6 +285,12 @@ NODE
 
 echo
 echo "PROMPT_MATRIX_SUMMARY=$ARTIFACT_ROOT/summary.md"
+
+actual_runs="$(wc -l < "$summary_jsonl" | tr -d '[:space:]')"
+if [[ "$expected_runs" -le 0 || "$actual_runs" -ne "$expected_runs" ]]; then
+  echo "PROMPT_MATRIX_RUN_COUNT_MISMATCH: expected $expected_runs runs, recorded $actual_runs" >&2
+  overall_status=1
+fi
 
 if [[ "$overall_status" -ne 0 ]]; then
   echo "PROMPT_MATRIX_FAILED" >&2

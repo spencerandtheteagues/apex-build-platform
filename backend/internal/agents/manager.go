@@ -408,9 +408,8 @@ func (am *AgentManager) startAgentActivityHeartbeat(
 		})
 	}
 
+	emitHeartbeat(startedAt)
 	go func() {
-		emitHeartbeat(startedAt)
-
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -32308,6 +32307,29 @@ func (am *AgentManager) ensureGeneratedBackendRuntimeScripts(
 }
 
 func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, args []string) (string, bool) {
+	summary, skip := "", false
+	for attempt := 0; attempt < 3; attempt++ {
+		summary, skip = runBackendHTTPProbeOnce(workDir, healthPaths, cmdName, args)
+		if summary == "" || !retryableBackendHTTPProbePortCollision(summary, skip) {
+			return summary, skip
+		}
+		time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
+	}
+	return summary, skip
+}
+
+func retryableBackendHTTPProbePortCollision(summary string, skip bool) bool {
+	if !skip {
+		return false
+	}
+	lower := strings.ToLower(summary)
+	return strings.Contains(lower, "address already in use") ||
+		strings.Contains(lower, "eaddrinuse") ||
+		strings.Contains(lower, "eaddrnotavail") ||
+		strings.Contains(lower, "unable to allocate local port")
+}
+
+func runBackendHTTPProbeOnce(workDir string, healthPaths []string, cmdName string, args []string) (string, bool) {
 	normalizedPaths := make([]string, 0, len(healthPaths))
 	seen := make(map[string]struct{}, len(healthPaths))
 	for _, path := range healthPaths {
@@ -32398,7 +32420,12 @@ func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, a
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-				return "", false
+				if ok, summary, skip := confirmPreviewHTTPProbeSuccess(ctx, client, url, waitCh, &waited, &out, 250*time.Millisecond); ok {
+					return "", false
+				} else if summary != "" {
+					return summary, skip
+				}
+				continue
 			}
 			if resp.StatusCode >= 500 {
 				continue
@@ -32618,9 +32645,6 @@ func classifyPreviewHTTPProbeFailure(output string, err error, serverReportedRea
 	if err == nil {
 		return false, summary
 	}
-	if serverReportedReady {
-		return true, summary
-	}
 
 	lower := strings.ToLower(strings.Join([]string{output, summary, err.Error()}, "\n"))
 	hostIndicators := []string{
@@ -32639,6 +32663,43 @@ func classifyPreviewHTTPProbeFailure(output string, err error, serverReportedRea
 		}
 	}
 	return false, summary
+}
+
+func confirmPreviewHTTPProbeSuccess(ctx context.Context, client *http.Client, url string, waitCh <-chan error, waited *bool, out *bytes.Buffer, settle time.Duration) (bool, string, bool) {
+	timer := time.NewTimer(settle)
+	defer timer.Stop()
+
+	select {
+	case err := <-waitCh:
+		if waited != nil {
+			*waited = true
+		}
+		serverReportedReady := false
+		if out != nil {
+			serverReportedReady = previewProbeOutputShowsServerReady(out.String())
+		}
+		skip, summary := classifyPreviewHTTPProbeFailure(bufferString(out), err, serverReportedReady)
+		return false, summary, skip
+	case <-timer.C:
+	case <-ctx.Done():
+		return false, "probe confirmation timed out before stable success", false
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, "", false
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 400, "", false
+}
+
+func bufferString(buf *bytes.Buffer) string {
+	if buf == nil {
+		return ""
+	}
+	return buf.String()
 }
 
 func runPreviewHTTPProbe(workDir string) (string, bool) {
@@ -32699,7 +32760,11 @@ func runPreviewHTTPProbe(workDir string) (string, bool) {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
-				return "", false
+				if ok, summary, skip := confirmPreviewHTTPProbeSuccess(ctx, client, url, waitCh, &waited, &out, 250*time.Millisecond); ok {
+					return "", false
+				} else if summary != "" {
+					return summary, skip
+				}
 			}
 		}
 		time.Sleep(500 * time.Millisecond)

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -69,9 +70,16 @@ func NewVerifier(serverRunner *ServerRunner) *Verifier {
 // enabled for Vite/React projects. Includes headless Chrome browser proof
 // when Chrome is available (adds ~30-120 s to finalization).
 func NewVerifierWithRuntime(serverRunner *ServerRunner) *Verifier {
+	return NewVerifierWithRuntimeChromePath(serverRunner, findChrome())
+}
+
+// NewVerifierWithRuntimeChromePath returns a runtime verifier pinned to a
+// startup-smoked Chrome path. This prevents runtime checks from rediscovering a
+// Chrome binary that startup already rejected.
+func NewVerifierWithRuntimeChromePath(serverRunner *ServerRunner, chromePath string) *Verifier {
 	return &Verifier{
 		serverRunner:    serverRunner,
-		runtimeVerifier: NewRuntimeVerifierWithBrowser(),
+		runtimeVerifier: NewRuntimeVerifierWithBrowserPath(chromePath),
 	}
 }
 
@@ -409,20 +417,24 @@ func (v *Verifier) httpBootCheck(ctx context.Context, files []VerifiableFile, ht
 		}
 	}
 
-	// Find a free port
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("bind port: %w", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir(dir)))
-	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", port), Handler: mux}
+	srv := &http.Server{Handler: mux}
 
-	// Start server in goroutine
-	go srv.ListenAndServe() //nolint:errcheck
+	serveErrCh := make(chan error, 1)
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrCh <- err
+			return
+		}
+		serveErrCh <- nil
+	}()
 
 	defer func() {
 		shutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -430,8 +442,14 @@ func (v *Verifier) httpBootCheck(ctx context.Context, files []VerifiableFile, ht
 		srv.Shutdown(shutCtx) //nolint:errcheck
 	}()
 
-	// Give the server a moment to start
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case err := <-serveErrCh:
+		if err != nil {
+			return fmt.Errorf("serve static preview: %w", err)
+		}
+		return fmt.Errorf("serve static preview: server exited before first request")
+	default:
+	}
 
 	// Determine request path from entry (index.html at root → "/")
 	reqPath := "/"

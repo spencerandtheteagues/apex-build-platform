@@ -65,10 +65,17 @@ func NewRuntimeVerifier() *RuntimeVerifier { return &RuntimeVerifier{} }
 // Chrome page-load proof after HTTP checks pass. Chrome is auto-detected; if
 // unavailable, verification fails honestly instead of silently downgrading.
 func NewRuntimeVerifierWithBrowser() *RuntimeVerifier {
+	return NewRuntimeVerifierWithBrowserPath(findChrome())
+}
+
+// NewRuntimeVerifierWithBrowserPath creates a RuntimeVerifier pinned to a
+// startup-smoked Chrome binary. Use this when startup health already rejected
+// broken browser candidates.
+func NewRuntimeVerifierWithBrowserPath(chromePath string) *RuntimeVerifier {
 	return &RuntimeVerifier{
-		browser:        NewBrowserVerifier(),
+		browser:        NewBrowserVerifierWithChromePath(chromePath),
 		visionVerifier: NewVisionVerifierFromEnv(),
-		canary:         NewCanaryTester(),
+		canary:         NewCanaryTesterWithChromePath(chromePath),
 	}
 }
 
@@ -190,7 +197,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 		}
 	}()
 
-	// ── 4. Wait for Vite to accept connections on the reserved URL ────────
+	// ── 4. Wait for this Vite process to report the reserved URL ───────────
 	stop := make(chan struct{})
 	defer close(stop)
 	readyTimeout := rv.runtimeServerReadyTimeout(totalTimeout, installTimeout)
@@ -200,7 +207,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 		}
 	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", vitePort)
-	ready, exited, exitErr := waitForTCPPortOrExit(vitePort, readyTimeout, stop, viteExitCh)
+	ready, exited, exitErr := waitForExpectedViteURLOrExit(baseURL, readyTimeout, stop, viteExitCh, viteLogs)
 	if !ready {
 		serverLogs := truncateLog(viteLogs.String(), 1500)
 		if exited {
@@ -219,7 +226,7 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			)
 		}
 		return rv.rtFailWithLogs("boot_failed",
-			fmt.Sprintf("Vite dev server did not accept connections at %s within %s", baseURL, formatRuntimeTimeout(readyTimeout)),
+			fmt.Sprintf("Vite dev server did not report %s within %s", baseURL, formatRuntimeTimeout(readyTimeout)),
 			"Check vite.config.ts for syntax errors. Ensure all imports resolve. Common cause: missing or misconfigured entry point.",
 			start, serverLogs,
 		)
@@ -681,26 +688,36 @@ func waitForTCPPortOrExit(port int, timeout time.Duration, stop <-chan struct{},
 
 var viteLocalURLRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+/?`)
 
-func waitForViteURLOrExit(timeout time.Duration, stop <-chan struct{}, exitCh <-chan error, logs *bytes.Buffer) (baseURL string, exited bool, err error) {
+func waitForExpectedViteURLOrExit(expectedBaseURL string, timeout time.Duration, stop <-chan struct{}, exitCh <-chan error, logs *bytes.Buffer) (ready bool, exited bool, err error) {
+	expectedBaseURL = strings.TrimRight(strings.TrimSpace(expectedBaseURL), "/")
+	if expectedBaseURL == "" {
+		return false, false, nil
+	}
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(150 * time.Millisecond)
 	defer ticker.Stop()
 	for time.Now().Before(deadline) {
 		select {
 		case <-stop:
-			return "", false, nil
+			return false, false, nil
 		case err := <-exitCh:
-			if url := extractViteLocalURL(logs.String()); url != "" {
-				return url, false, nil
-			}
-			return "", true, err
+			return false, true, err
 		case <-ticker.C:
-			if url := extractViteLocalURL(logs.String()); url != "" {
-				return url, false, nil
+			logText := ""
+			if logs != nil {
+				logText = logs.String()
+			}
+			if viteLogsContainExpectedURL(logText, expectedBaseURL) {
+				select {
+				case err := <-exitCh:
+					return false, true, err
+				default:
+				}
+				return true, false, nil
 			}
 		}
 	}
-	return "", false, nil
+	return false, false, nil
 }
 
 func extractViteLocalURL(logs string) string {
@@ -709,6 +726,19 @@ func extractViteLocalURL(logs string) string {
 		return ""
 	}
 	return strings.TrimRight(match, "/")
+}
+
+func viteLogsContainExpectedURL(logs string, expectedBaseURL string) bool {
+	expectedBaseURL = strings.TrimRight(strings.TrimSpace(expectedBaseURL), "/")
+	if expectedBaseURL == "" {
+		return false
+	}
+	for _, match := range viteLocalURLRe.FindAllString(logs, -1) {
+		if strings.TrimRight(match, "/") == expectedBaseURL {
+			return true
+		}
+	}
+	return false
 }
 
 // ── HTTP check helpers ────────────────────────────────────────────────────────

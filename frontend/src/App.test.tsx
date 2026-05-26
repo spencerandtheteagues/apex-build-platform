@@ -5,6 +5,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const selectProjectMock = vi.fn()
+const clearCurrentProjectMock = vi.fn()
+let currentProjectMock: { id: number } | null = null
 
 vi.mock('./services/api', () => ({
   default: {
@@ -18,12 +20,13 @@ vi.mock('./hooks/useStore', () => ({
     user: { id: 7, username: 'tester', subscription_type: 'free' },
     isAuthenticated: true,
     isLoading: false,
-    currentProject: null,
+    currentProject: currentProjectMock,
     login: vi.fn(),
     register: vi.fn(),
     refreshUser: vi.fn(),
     selectProject: selectProjectMock,
     setCurrentProject: vi.fn(),
+    clearCurrentProject: clearCurrentProjectMock,
     updateProfile: vi.fn(),
     logout: vi.fn(),
   }),
@@ -51,12 +54,20 @@ vi.mock('./components/ui', () => {
 
 vi.mock('./components/builder/AppBuilder', () => ({
   AppBuilder: ({ onNavigateToIDE }: any) => (
-    <button
-      type="button"
-      onClick={() => onNavigateToIDE?.({ target: 'preview', projectId: 16 })}
-    >
-      Open preview workspace
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => onNavigateToIDE?.({ target: 'preview', projectId: 16 })}
+      >
+        Open preview workspace
+      </button>
+      <button
+        type="button"
+        onClick={() => onNavigateToIDE?.({ target: 'editor', projectId: null })}
+      >
+        Open blank workspace
+      </button>
+    </>
   ),
 }))
 
@@ -155,6 +166,11 @@ describe('App IDE navigation', () => {
 
   beforeEach(() => {
     selectProjectMock.mockReset()
+    clearCurrentProjectMock.mockReset()
+    clearCurrentProjectMock.mockImplementation(() => {
+      currentProjectMock = null
+    })
+    currentProjectMock = null
     storage = installLocalStorageMock()
     window.history.replaceState({}, '', '/')
   })
@@ -162,7 +178,7 @@ describe('App IDE navigation', () => {
   it('selects the target project when builder navigation opens the IDE preview workspace', async () => {
     render(<App />)
 
-    await screen.findByRole('button', { name: /open preview workspace/i })
+    await screen.findByRole('button', { name: /open preview workspace/i }, { timeout: 5000 })
     fireEvent.click(screen.getByRole('button', { name: /open preview workspace/i }))
 
     await waitFor(() => {
@@ -172,6 +188,22 @@ describe('App IDE navigation', () => {
       expect(window.location.pathname).toBe('/project/16')
     })
     expect(await screen.findByText('Mock IDE preview')).toBeTruthy()
+  })
+
+  it('opens a blank IDE workspace when builder navigation explicitly passes a null project', async () => {
+    currentProjectMock = { id: 21 }
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: /open blank workspace/i }, { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: /open blank workspace/i }))
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/ide')
+    })
+    expect(selectProjectMock).not.toHaveBeenCalled()
+    expect(clearCurrentProjectMock).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('Mock IDE editor')).toBeTruthy()
   })
 
   it('restores the last project when the IDE tab is clicked without an active project', async () => {

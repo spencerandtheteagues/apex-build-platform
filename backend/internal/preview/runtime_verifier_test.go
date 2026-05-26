@@ -1,7 +1,9 @@
 package preview
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -576,6 +578,64 @@ func TestExtractViteLocalURL(t *testing.T) {
 	if got := extractViteLocalURL(logs); got != "http://127.0.0.1:50683" {
 		t.Fatalf("expected parsed Vite local URL, got %q", got)
 	}
+}
+
+func TestWaitForExpectedViteURLOrExitRequiresSpawnedURL(t *testing.T) {
+	t.Run("exact spawned url", func(t *testing.T) {
+		stop := make(chan struct{})
+		exitCh := make(chan error, 1)
+		var logs bytes.Buffer
+		logs.WriteString("  Local:   http://127.0.0.1:50683/\n")
+
+		ready, exited, err := waitForExpectedViteURLOrExit("http://127.0.0.1:50683", 300*time.Millisecond, stop, exitCh, &logs)
+		if !ready || exited || err != nil {
+			t.Fatalf("ready=%v exited=%v err=%v, want ready spawned URL", ready, exited, err)
+		}
+	})
+
+	t.Run("different port does not pass", func(t *testing.T) {
+		stop := make(chan struct{})
+		exitCh := make(chan error, 1)
+		var logs bytes.Buffer
+		logs.WriteString("  Local:   http://127.0.0.1:50684/\n")
+
+		ready, exited, err := waitForExpectedViteURLOrExit("http://127.0.0.1:50683", 200*time.Millisecond, stop, exitCh, &logs)
+		if ready || exited || err != nil {
+			t.Fatalf("ready=%v exited=%v err=%v, want timeout without readiness", ready, exited, err)
+		}
+	})
+
+	t.Run("ready log followed by exit is failure", func(t *testing.T) {
+		stop := make(chan struct{})
+		exitCh := make(chan error, 1)
+		exitCh <- errors.New("vite crashed after ready log")
+		var logs bytes.Buffer
+		logs.WriteString("  Local:   http://127.0.0.1:50683/\n")
+
+		ready, exited, err := waitForExpectedViteURLOrExit("http://127.0.0.1:50683", time.Second, stop, exitCh, &logs)
+		if ready || !exited || err == nil {
+			t.Fatalf("ready=%v exited=%v err=%v, want process-exit failure", ready, exited, err)
+		}
+	})
+
+	t.Run("foreign listener cannot prove readiness", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Skipf("local listener unavailable: %v", err)
+		}
+		defer ln.Close()
+
+		port := ln.Addr().(*net.TCPAddr).Port
+		stop := make(chan struct{})
+		exitCh := make(chan error, 1)
+		exitCh <- errors.New("spawned vite exited before reporting url")
+		var logs bytes.Buffer
+
+		ready, exited, err := waitForExpectedViteURLOrExit(fmt.Sprintf("http://127.0.0.1:%d", port), time.Second, stop, exitCh, &logs)
+		if ready || !exited || err == nil {
+			t.Fatalf("ready=%v exited=%v err=%v, want foreign listener ignored and spawned exit reported", ready, exited, err)
+		}
+	})
 }
 
 func TestApplyAdvisoryBrowserSignalsAddsVisionAndCanaryMetadata(t *testing.T) {

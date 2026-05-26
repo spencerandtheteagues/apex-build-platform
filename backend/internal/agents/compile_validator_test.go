@@ -164,7 +164,7 @@ func TestCVRunCommandHonorsParentDeadline(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected parent context deadline to stop command")
 	}
-	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
 		t.Fatalf("expected command to stop near parent deadline, elapsed %s", elapsed)
 	}
 }

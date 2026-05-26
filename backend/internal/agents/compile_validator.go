@@ -1637,6 +1637,7 @@ func cvRunCommand(ctx context.Context, workDir string, timeout time.Duration, na
 
 	cmd := exec.CommandContext(cmdCtx, name, args...)
 	configurePreviewCheckCommand(cmd)
+	cmd.WaitDelay = 100 * time.Millisecond
 	// Override cancel to immediately kill the entire process group instead of
 	// waiting for WaitDelay — compile validation commands should stop quickly
 	// when the parent context is cancelled (e.g. build cancelled mid-compile).

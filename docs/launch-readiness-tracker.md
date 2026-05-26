@@ -1,13 +1,14 @@
 # Apex Build Launch Readiness Tracker
 
-Date: 2026-05-10
+Date: 2026-05-26
 
 This tracker reconciles the master launch plan with the current repository state. Code, tests, production config, and live canary evidence remain authoritative.
 
 ## Current Branch State
 
 - Branch: `main`
-- Local status after push: clean and even with `origin/main`; live backend code deploy is recorded below.
+- Local status must be checked with `git status`; this tracker records launch evidence and must not be used as a cleanliness claim.
+- 2026-05-26 orchestrator note: the local tree contains launch-readiness doc, builder onboarding, preview verification surfacing, and placeholder-gate hardening changes that are under local verification before push.
 - Push dependency: do not store GitHub, Render, Stripe, provider, or customer secrets in repo files, docs, remotes, or logs.
 
 ## Closed In This Batch
@@ -39,41 +40,42 @@ This tracker reconciles the master launch plan with the current repository state
 - FSM WebSocket events now hydrate the shared frontend store from both build-stream and collaboration-stream envelopes without creating empty build IDs.
 - Preview browser verification now rejects placeholder-only generated dashboards such as generic `KPI 1 / Value` cards and loading-skeleton-only sections before a build can claim preview success.
 - Live golden canary tooling now fails on placeholder-only previews and bounds HTTP request hangs with retryable request timeouts.
+- Backend browser verification and live golden preview checks now share stricter app-shell/recovery-shell placeholder semantics, and the backend browser proof analyzes full visible text rather than a short DOM-text snippet.
+- The live prompt matrix runner now has no-network false-green guardrails for expected prompt count, non-empty/allowed power modes, and exact run counts; the production canary matrix job requires 20 prompt files and depends on script guardrail tests.
+- Manually requested production prompt-matrix evidence now fails if canary credentials are absent instead of finishing as a skipped green workflow.
+- Builder blank-workspace navigation now preserves the explicit `/ide` no-project intent instead of falling back to the active project, and the main build screen surfaces preview-relevant blockers even when no verification report is attached.
 - The post-placeholder live golden planning stall was classified from Render logs: the planner produced a 12-step plan quickly, then orchestration did not advance. Planning tasks now register cancellation, enforce an outer deadline around planner post-processing, stop heartbeats before result handoff, and nil AI-router paths fail the task instead of panicking.
 - Live golden Tailwind proof now uses a computed-style probe based on classes already present in the generated app, avoiding false failures when a valid Tailwind build emits fewer than 100 accessible CSS rules.
 
 ## Launch Blockers Still Open
 
-- Replay real Stripe test webhooks through the configured webhook endpoint for subscription checkout, credit purchase, invoice paid, invoice failed, plan change, and duplicate event delivery.
-- Run a controlled paid live checkout, billing portal, upgrade/downgrade, and cancellation pass before enabling broad public signup.
-- Enable `APEX_ENABLE_GITHUB_ACTIONS=true` and run the production canary workflow against `https://apex-build.dev` and `https://api.apex-build.dev`.
-- Verify paid full-stack build, paid max build, export/deploy handoff, billing upgrade/downgrade, and failed-build restart in production.
+- Replay real Stripe test/live-mode webhooks through the configured webhook endpoint for subscription checkout, credit purchase, invoice paid, invoice failed, plan change, subscription deletion, and duplicate event delivery.
+- Run a controlled paid live checkout, billing portal, upgrade/downgrade, and cancellation pass before enabling broad public signup. A real customer payment was observed on 2026-05-25, but that is not a substitute for controlled billing-lifecycle evidence.
+- Enable `APEX_ENABLE_GITHUB_ACTIONS=true`, configure required GitHub/Render/Stripe/canary secrets, set `APEX_REQUIRE_PAID_CANARIES=true` when using the workflow as launch evidence, and run the production canary workflow against `https://apex-build.dev` and `https://api.apex-build.dev`.
+- Verify paid max build, export/deploy handoff, billing upgrade/downgrade, and failed-build restart in production. Paid balanced full-stack passed on 2026-05-25 with build `69d3582e`.
+- Run the 20-prompt diverse matrix and launch-concurrency load test; record completion, preview, quality, p95 latency, and error-rate evidence. The `prompts/canary` set now contains 20 topic fixtures, but implementation breadth still needs backend, persistence, auth, realtime, file/media, and integration-heavy cases before it proves diverse launch behavior. Launch readiness still requires a live matrix run with recorded artifacts and 20/20 passing results.
 - Run strict mobile external-provider readiness verification with a real mobile project, EAS Build/Submit history, Apple credentials, Google Play credentials, and store-readiness evidence before making native mobile build/store claims public.
+- Decide whether Gemini and Grok degraded provider health are acceptable for public launch with 5/7 providers healthy, or fix provider billing/permissions before launch.
 
 ## Latest Live Read
 
-- 2026-05-10 01:13 UTC: Render backend deploy `dep-d7vtjfee4jis73ej4a4g` is live on code commit `0a76d4d`; repository `main` includes live-golden script timeout and computed Tailwind proof hardening.
-- Public `/health` is healthy and ready after startup `2026-05-10T01:13:00.776146933Z`.
-- Strict Render launch verification passed after startup settled: Render env-var presence was verified without printing secret values, Redis was ready, `code_execution.details.launch_ready=true`, `preview_service.details.launch_ready=true`, and `preview_runtime_verify` was browser-proof ready.
-- Mobile external readiness verifier passed its launch-safe default gate: native EAS builds and store submission remain gated until real project/provider/store evidence exists.
-- Stripe launch verifier passed strict production readiness, verified invalid webhook signatures are rejected, and created non-paid checkout sessions for Builder monthly and `$25` credits. Real Stripe event replay and controlled paid checkout remain external evidence gaps.
-- Playwright production launch smoke passed `5 passed / 1 skipped` with live Stripe and launch readiness assertions enabled.
-- Production free frontend platform smoke completed build `d7a97337-11c1-4033-bfad-9aa390e8d141` with `ASSERTIONS_PASSED profile=free_frontend power_mode=fast`.
-- Live golden preview proof before the placeholder gate exposed underbuilt dashboard output (`f02923a0-9daf-494f-a580-6dcadaa23bc8`, screenshot at `/tmp/apex-golden-1778372163736/preview.png`), so the placeholder-only preview gate was added and deployed. After the planning hard-deadline/cancel patch, fast production golden build `f7f2549b-b082-407e-ac21-dbd18acf3f5e` reached `completed` at 100%, started preview for project `126`, and produced a styled screenshot at `/tmp/apex-golden-1778375628537/preview.png`; the computed Tailwind probe passed against that preview after replacing the script's rule-count-only check.
-- Patched live golden proof completed cleanly after the Tailwind verifier fix: fast production golden build `a7a6b607-3506-40de-97b1-4b56be8179ed` reached `completed` at 100%, restored cleanly through the status gate, recovered after an initial preview-interaction verification failure, passed `quality_gate_status=passed`, started preview for project `127`, captured screenshot evidence at `/tmp/apex-golden-1778376196951/preview.png`, and exited with `GOLDEN_BUILD_PASSED`.
+- 2026-05-26 12:30 UTC: public `/health` reports `ready=true`, `feature_readiness_status=healthy`, and 5/7 providers healthy. Claude, DeepSeek, GLM, GPT-4, and Ollama report `ok`; Gemini reports `error` from depleted credits/rate limit; Grok reports `auth_error` from permissions or spend limit.
+- 2026-05-26 12:30 UTC: public `/health/features` reports `status=healthy`, critical services `6/6 ready`, optional services `40/40 ready`, `code_execution.details.launch_ready=true` through E2B, `preview_service.details.launch_ready=true`, and `preview_runtime_verify` ready with browser proof enabled.
+- 2026-05-25: TASK-004 paid balanced full-stack canary functionally passed with build `69d3582e`, `status=completed progress=100 quality_gate_status=passed`, and a live interactive preview. Screenshot/console artifact location is not attached in the current tracker and remains required before treating this as complete launch evidence.
+- Historical 2026-05-10 evidence remains useful for prior verifier behavior: strict Render launch verification passed, mobile launch-safe default verification passed, Stripe invalid-signature/non-paid checkout probes passed, Playwright production launch smoke passed `5 passed / 1 skipped`, and fast live golden proof exited `GOLDEN_BUILD_PASSED`. Real Stripe event replay, controlled billing lifecycle, paid max, rollback, restart recovery, load test, and diverse matrix evidence remain open.
 
 ## Evidence Required For Public Launch
 
-- `cd backend && go test ./... -timeout 12m`
+- `cd backend && go test -p 1 -parallel 4 ./... -timeout 20m`
 - `cd frontend && npm run typecheck && npm run test -- --run && npm run lint && npm run build`
 - `cd tests/e2e && PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 PLAYWRIGHT_EXPECT_LAUNCH_READY=1 npm run test:launch -- --project=chromium`
 - `cd tests/e2e && npm run test:preview-verify -- --project=chromium`
 - `APEX_RENDER_EXPECT_PRODUCTION=1 RENDER_API_KEY=... RENDER_BACKEND_SERVICE_ID=... RENDER_FRONTEND_SERVICE_ID=... node scripts/verify_render_launch_env.mjs`
-- Production canary `Launch Verification Scripts` job passing with strict Render secrets configured.
-- Production platform build canary matrix: free-fast passed on 2026-05-09, fast frontend-only live golden passed on 2026-05-10; paid-balanced and paid-max remain.
+- Production canary `Launch Verification Scripts` job passing with strict Render secrets configured, paid canary credentials present, and `APEX_REQUIRE_PAID_CANARIES=true` when the workflow is used as launch evidence.
+- Production platform build canary matrix: free-fast passed on 2026-05-09, fast frontend-only live golden passed on 2026-05-10, paid-balanced passed on 2026-05-25; paid-max remains open.
 - Stripe webhook invalid-signature rejection check in `scripts/verify_stripe_launch.mjs`; real Stripe event replay and controlled live checkout evidence still required.
 - Strict mobile external-provider evidence with `APEX_MOBILE_EXPECT_NATIVE_READY=1`.
-- Screenshot/console evidence for generated preview readiness.
+- Screenshot/console evidence for generated preview readiness, including an archived path or artifact reference for each launch-critical canary.
 - Rollback drill and support/incident checklist reviewed.
 
 ## Mobile Launch Position
@@ -99,12 +101,13 @@ Prior code forced balanced+platform builds to use `ollama/kimi-k2.6:cloud` for L
 
 ### Canary Evidence
 
-**TASK-004 PASSED — Balanced Full-Stack Canary (2026-05-25)**
+**TASK-004 FUNCTIONAL PASS — Balanced Full-Stack Canary (2026-05-25)**
 - Build: `69d3582e` (DocuLens AI SaaS, balanced, 33 files)
 - Result: `status=completed progress=100 quality_gate_status=passed`
 - Duration: ~13 minutes (17:26 UTC → 17:39 UTC)
 - Provider routing: Claude Sonnet 4.6 → planning/lead; DeepSeek/GPT4 → parallel_core
 - Preview: live and interactive
+- Missing evidence artifact: screenshot/console path is not attached in this tracker yet.
 
 **TASK-005 IN PROGRESS — Max Power Canary (2026-05-25)**
 - Build: `f360affa` (Ops Command Center, max, claude-opus-4-7 lead)
@@ -131,15 +134,16 @@ Prior code forced balanced+platform builds to use `ollama/kimi-k2.6:cloud` for L
 
 ### Updated Launch Blockers
 
-- [ ] **TASK-005**: Max power canary still running (build f360affa)
+- [ ] **TASK-005**: Max power canary has no recorded pass yet; last documented build was `f360affa` in progress on 2026-05-25
 - [ ] **TASK-006**: Enable `APEX_ENABLE_GITHUB_ACTIONS=true` in GitHub repo variables (requires GitHub admin)
 - [ ] **TASK-007**: Rollback drill execution (requires Render dashboard/API key)
-- [ ] Stripe webhook replay (real events, not just invalid-signature check)
-- [ ] Controlled paid checkout pass in production
-- [ ] Fix Gemini provider error (`gemini: status=error` in /health)
-- [ ] Fix Grok auth error (`grok: status=auth_error` in /health)
+- [ ] Stripe webhook replay for all critical events (real events, not just invalid-signature check)
+- [ ] Controlled paid checkout, billing portal, upgrade/downgrade, and cancellation pass in production
+- [ ] Failed-build restart/recovery, export/deploy handoff, diverse prompt matrix, and launch load test evidence
+- [ ] Fix Gemini provider error (`gemini: status=error` in `/health`) or explicitly approve 5/7 provider launch posture
+- [ ] Fix Grok auth error (`grok: status=auth_error` in `/health`) or explicitly approve 5/7 provider launch posture
 
-### Latest Server State (2026-05-25 18:00 UTC)
-- Render backend restarted: `2026-05-25T18:00:37Z` (commit `5f70ca2`)
-- Health: healthy, 5/7 providers (gemini=error, grok=auth_error — non-critical for launch)
-- Active build: `f360affa` (max canary, claude-opus-4-7)
+### Latest Server State (2026-05-26 12:30 UTC)
+- Public health: healthy and ready, 5/7 providers healthy.
+- Runtime readiness: E2B execution launch-ready, preview service launch-ready, browser runtime proof ready.
+- Provider caveat: Gemini and Grok remain degraded from credit/spend/permission posture; do not market 7/7 provider readiness until fixed or explicitly accepted as non-critical.

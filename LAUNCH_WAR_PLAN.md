@@ -2,7 +2,7 @@
 ## Master Task List for 98% Confidence of Beating Replit by 10%+ Across 10 Categories
 
 **Prepared by:** APEX Launch Master Orchestrator
-**Date:** 2026-05-25
+**Date:** 2026-05-26
 **Codebase:** `/root/apex-build-platform`
 **Live:** https://apex-build.dev (backend: https://api.apex-build.dev)
 **Timeline:** 10 days to paid public launch
@@ -13,9 +13,9 @@
 
 - Backend compiles clean (`cd backend && go build ./...` EXIT 0). Strong reliability baseline.
 - **Stripe webhook idempotency is REAL** — `ProcessedStripeEvent` unique key + transactional `ApplyCreditGrant`, with passing local replay tests. Most P0 billing work is *live verification*, not new code.
-- **Stripe is LIVE and working** — a real customer already paid through apex-build (confirmed 2026-05-25). TASK-001, TASK-002, TASK-003 are COMPLETE.
-- **Explore page has fork/remix/publish already built** — just not linked in nav.
-- **Blank IDE is reachable at `/ide`** — just has no entry-point button.
+- **Stripe is LIVE and processing real payments** — a real customer payment was confirmed by the launch owner from Stripe/dashboard config on 2026-05-25; no secret, customer, or payment payload is stored in the repo. TASK-001 is complete; TASK-002/TASK-003 still need controlled replay/lifecycle evidence before broad public launch.
+- **Explore page has fork/remix/publish already built** — linked from the landing page and app navigation in current code; deploy and smoke evidence still need to be recorded for the launch commit.
+- **Blank IDE is reachable at `/ide`** — current builder onboarding code adds a first-run blank-workspace escape hatch; deploy and smoke evidence still need to be recorded for the launch commit.
 - **Always-on controller + hosting keep-alive exist** and are wired into `backend/cmd/main.go:849`.
 - **Cost transparency** (CostTicker, SpendDashboard, BudgetSettings, PanicKillButton) and **BYOK** (APIKeySettings, ModelSelector) are built — our moat is unsurfaced.
 - The genuinely weak category needing net-new work is **Onboarding** (passive slideshow, no guided first-build).
@@ -55,7 +55,7 @@ P3 (4): 303, 304, 305, 306
 ---
 
 # SECTION 1: P0 TASKS — LAUNCH BLOCKERS
-### (must complete before any customer is charged)
+### (must complete before broad paid public launch)
 
 ---
 
@@ -71,7 +71,7 @@ Owner: openclaw
 TASK-002: Create live Stripe webhook endpoint and replay all critical events
 Priority: P0
 Category: Billing
-Status: COMPLETE — webhook live and processing real payments
+Status: PARTIAL — endpoint is live and processing real payments; controlled replay of all critical event types is still required
 Owner: openclaw
 ```
 
@@ -79,7 +79,7 @@ Owner: openclaw
 TASK-003: Execute one controlled live paid checkout end-to-end with a real card
 Priority: P0
 Category: Billing
-Status: COMPLETE — real customer paid through apex-build 2026-05-25
+Status: PARTIAL — real customer payment observed 2026-05-25; controlled checkout, portal, plan-change, cancellation, and webhook replay evidence still required
 Owner: openclaw
 ```
 
@@ -89,11 +89,11 @@ Priority: P0
 Category: Build-Quality
 Estimated Time: 10 minutes
 Owner: openclaw
+Status: FUNCTIONAL PASS — balanced full-stack canary passed 2026-05-25 with build `69d3582e`; screenshot/console artifact path still needs archival evidence
 
 CONTEXT:
-The tracker confirms free-fast and fast-frontend-only golden builds pass, but paid-balanced and
-paid-max canaries are still OPEN. We claim 100% build completion — this must be proven on a real
-full-stack build at the balanced tier before launch.
+The tracker confirms free-fast and fast-frontend-only golden builds pass, and the paid-balanced
+full-stack canary passed on 2026-05-25. Paid-max and broader matrix evidence remain open.
 
 FILES TO CHANGE:
 - None (uses scripts/ live golden tooling against api.apex-build.dev)
@@ -106,14 +106,14 @@ preview starts, confirm placeholder-gate passes (no generic KPI/skeleton-only ou
 capture a styled screenshot.
 
 ACCEPTANCE CRITERIA:
-- [ ] Build reaches status=completed at 100% (no 95% stall)
-- [ ] Preview server starts and serves a real, styled, interactive app
-- [ ] Placeholder-only preview gate (preview_gate.go) PASSES (not triggered)
-- [ ] quality_gate_status=passed
-- [ ] Screenshot evidence captured to /tmp and reviewed for visual quality
+- [x] Build reaches status=completed at 100% (no 95% stall)
+- [x] Preview server starts and serves a real, styled, interactive app
+- [x] Placeholder-only preview gate (preview_gate.go) PASSES (not triggered)
+- [x] quality_gate_status=passed
+- [ ] Screenshot/console artifact path captured and reviewed for visual quality
 
 VERIFICATION COMMAND:
-APEX_GOLDEN_POWER_MODE=balanced APEX_GOLDEN_PROFILE=paid_fullstack node scripts/<live-golden-runner>.mjs  # expects GOLDEN_BUILD_PASSED
+PROMPT_FILE=prompts/canary/02-saas-dashboard-ops-command-center.md MODE=full POWER_MODE=balanced LOGIN_EMAIL='<paid-canary-email>' LOGIN_PASSWORD='<paid-canary-password>' node scripts/run_live_golden_build.mjs  # expects GOLDEN_BUILD_PASSED
 ```
 
 ```
@@ -132,10 +132,11 @@ FILES TO CHANGE:
 - None (live golden tooling)
 
 EXACT CHANGE REQUIRED:
-Trigger a full-stack max-mode build using a more complex prompt (TemplateGallery "E-Commerce
-Store": catalog, cart, Stripe checkout, order history, admin panel; React+Node+PostgreSQL).
-Confirm the planning hard-deadline patch holds (no 95% stall on the larger plan), build
-completes, preview is real.
+Trigger a max-mode build using the e-commerce canary prompt (`prompts/canary/16-ecommerce-store-checkout.md`):
+catalog, cart, simulated checkout, order history, and account/order surfaces. This canary safely
+proves max-power build/preview reliability without exercising real Stripe payments or external
+APIs; Stripe lifecycle proof remains TASK-002/TASK-003. Confirm the planning hard-deadline patch
+holds (no 95% stall on the larger plan), the build completes, and preview is real.
 
 ACCEPTANCE CRITERIA:
 - [ ] Build reaches status=completed at 100%
@@ -145,7 +146,7 @@ ACCEPTANCE CRITERIA:
 - [ ] Screenshot evidence reviewed
 
 VERIFICATION COMMAND:
-APEX_GOLDEN_POWER_MODE=max APEX_GOLDEN_PROFILE=paid_fullstack node scripts/<live-golden-runner>.mjs  # expects GOLDEN_BUILD_PASSED
+PROMPT_FILE=prompts/canary/16-ecommerce-store-checkout.md MODE=full POWER_MODE=max LOGIN_EMAIL='<paid-canary-email>' LOGIN_PASSWORD='<paid-canary-password>' node scripts/run_live_golden_build.mjs  # expects GOLDEN_BUILD_PASSED
 ```
 
 ```
@@ -154,6 +155,7 @@ Priority: P0
 Category: Reliability
 Estimated Time: 8 minutes (config) + watch
 Owner: openclaw
+Status: BLOCKED BY EXTERNAL ADMIN — requires GitHub Actions enablement and repo secrets; paid canaries only hard-fail when `APEX_REQUIRE_PAID_CANARIES=true`
 
 CONTEXT:
 production-canary.yml exists but APEX_ENABLE_GITHUB_ACTIONS is not enabled, so the canary has
@@ -165,8 +167,9 @@ FILES TO CHANGE:
 
 EXACT CHANGE REQUIRED:
 Set repo secrets: RENDER_API_KEY, RENDER_BACKEND_SERVICE_ID, RENDER_FRONTEND_SERVICE_ID, and any
-Stripe canary customer/secret the workflow expects (see production-canary.yml). Set repo variable
-APEX_ENABLE_GITHUB_ACTIONS=true. Manually dispatch the workflow.
+Stripe/canary secrets the workflow expects (see production-canary.yml). Set repo variables
+APEX_ENABLE_GITHUB_ACTIONS=true and APEX_REQUIRE_PAID_CANARIES=true when using the workflow as
+launch evidence. Manually dispatch the workflow with paid canary credentials present.
 
 ACCEPTANCE CRITERIA:
 - [ ] "Launch Verification Scripts" job passes (Stripe + Render + mobile verifiers)
@@ -184,6 +187,7 @@ Priority: P0
 Category: Reliability
 Estimated Time: 10 minutes
 Owner: hernmes
+Status: BLOCKED BY EXTERNAL ADMIN — requires Render dashboard access or `RENDER_API_KEY`
 
 CONTEXT:
 The tracker lists "rollback drill" as required-but-undone evidence. If a launch-day deploy breaks
@@ -194,10 +198,11 @@ FILES TO CHANGE:
 - docs/launch-runbook.md (append a dated "Rollback Drill" evidence section)
 
 EXACT CHANGE REQUIRED:
-1. Identify the current known-good deploy (commit b2a591a or the live one). 2. In Render, trigger
-a manual redeploy of the prior successful deploy (rollback). 3. Confirm /health returns healthy
-and a smoke build still works. 4. Roll forward to current. 5. Record start/end timestamps, deploy
-IDs, and total downtime in launch-runbook.md.
+1. Read the current and prior known-good deploy IDs/commits from Render deploy metadata immediately
+before the drill. 2. In Render, trigger a manual redeploy of the prior successful deploy
+(rollback). 3. Confirm /health returns healthy and a smoke build still works. 4. Roll forward to
+current. 5. Record start/end timestamps, deploy IDs, commit IDs, and total downtime in
+launch-runbook.md.
 
 ACCEPTANCE CRITERIA:
 - [ ] Rollback to prior deploy completes and /health is healthy
@@ -250,17 +255,25 @@ Owner: hernmes
 CONTEXT:
 Our non-negotiable is 100% build completion and 100% preview success. We have golden proofs for a
 couple of profiles but not a broad diverse matrix. The first 100 users will submit unpredictable
-prompts; we must prove breadth.
+prompts; we must prove breadth. The `prompts/canary` fixture set now has 20 topic fixtures across
+simple, operational, commerce, collaboration, finance, admin, and simulated-AI surfaces. It is still
+architecturally narrow because most fixtures use React/Tailwind/shadcn, in-memory data, and local
+simulation. This closes topic-fixture count only; it does not satisfy the 20-prompt launch gate
+until the live matrix runs and records 20/20 passing build, preview, quality, console, and artifact
+evidence.
 
 FILES TO CHANGE:
 - docs/launch-readiness-tracker.md (append the matrix results table)
 
 EXACT CHANGE REQUIRED:
 Run 20 builds spanning: 6 simple (landing page, portfolio, calculator, to-do, pricing page, blog
-frontend), 8 medium (the TemplateGallery medium templates), 6 complex (e-commerce, real-time
-chat, social feed, finance tracker, admin panel, AI chatbot). Use free-fast for the 6 simple
-frontend ones and paid tiers for full-stack. Record completion %, preview success,
-time-to-preview, and a visual-quality 1-10 score for each.
+frontend), 8 medium operational/productivity prompts, and 6 more complex domains (e-commerce,
+real-time chat simulation, social feed, finance tracker, admin panel, AI chatbot simulation). The
+current GitHub `prompt-reliability-live-matrix` job runs all prompt fixtures with one full-mode
+profile and is evidence for paid full-mode frontend/in-memory reliability only. Mixed-tier launch
+evidence still requires a follow-up profile split that runs simple prompts through free-fast and
+backend/persistence/auth/realtime/integration-heavy prompts through paid full-stack modes. Record
+completion %, preview success, time-to-preview, and a visual-quality 1-10 score for each run.
 
 ACCEPTANCE CRITERIA:
 - [ ] 20/20 builds reach completed (100% completion rate)
@@ -335,7 +348,7 @@ ACCEPTANCE CRITERIA:
 - [ ] No regression: existing payments_idempotency_test.go cases still pass
 
 VERIFICATION COMMAND:
-cd backend && go test ./internal/handlers/ -run Idempoten -count=5 -race
+cd backend && go test ./internal/handlers -run TestHandleInvoicePaidConcurrentDedup -count=5 -race
 ```
 
 ```
@@ -1093,15 +1106,15 @@ VERIFY: curl -s https://apex-build.dev/explore | grep -i "og:\|meta"
 
 | # | Category | Replit | Apex now | Notes |
 |---|---|---|---|---|
-| 1 | Build Quality | 6 | 7.0 | Paid-balanced/max canary unproven |
+| 1 | Build Quality | 6 | 7.0 | Paid-balanced passed; paid-max and diverse matrix remain unproven |
 | 2 | Speed | 7 | 6.0 | Inconsistent preview load; not yet measured per-tier |
 | 3 | UI Polish | 7 | 6.0 | Distinctive but cluttered |
-| 4 | Onboarding | 9 | 4.0 | Passive slideshow; no blank-IDE button surfaced |
+| 4 | Onboarding | 9 | 5.5 | Current tree adds starter prompts and blank-IDE escape hatch; deployed first-run evidence still needed |
 | 5 | Cost Transparency | 4 | 8.0 | Built but under-surfaced (our moat) |
 | 6 | Deployment | 6 | 5.0 | Always-on + providers exist but hidden |
 | 7 | IDE | 6 | 7.0 | Monaco+BYOK+git already > Replit |
-| 8 | Community | 4 | 3.0 | Explore built, not linked |
-| 9 | Billing | 5 | 8.0 | Idempotency real; live checkout PROVEN (real customer paid) |
+| 8 | Community | 4 | 4.5 | Explore is linked from landing/app nav; landing proof, onboarding link, and focused tests still pending |
+| 9 | Billing | 5 | 8.0 | Idempotency real; real payment observed; controlled checkout/portal/plan-change/cancellation/webhook replay still open |
 | 10 | Reliability | 6 | 7.0 | Good logging; recovery paths unproven |
 
 ## After P0 + P1 complete (projected)
@@ -1148,7 +1161,10 @@ VERIFY: curl -s https://apex-build.dev/explore | grep -i "og:\|meta"
 - **Day 9:** Launch Readiness Verification — re-run full matrix, full test suite, Playwright, canary; final launch authorization sign-off.
 - **Day 10:** Launch window + on-call (TASK-209).
 
-**Hard gate:** No additional customers charged until TASK-004 through TASK-012 are all checked.
+**Hard gate:** Broad paid public launch must not proceed until TASK-004 through TASK-012 are checked
+or have explicit launch-owner acceptance notes. Current live checkout exposure/control must be
+confirmed by an admin as disabled, allowlisted, or intentionally risk-accepted before additional
+customers are directed to paid signup.
 
 ---
 

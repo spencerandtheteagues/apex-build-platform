@@ -245,6 +245,7 @@ function App() {
   const initialProjectIdRef = useRef<number | null>(initialRouteRef.current.projectId)
   const pendingProjectIdRef = useRef<number | null>(initialProjectIdRef.current)
   const pendingLaunchTargetRef = useRef<IDELaunchTarget | null>(initialProjectIdRef.current ? 'dashboard' : null)
+  const explicitBlankIDERef = useRef(false)
   const workspaceMenuRef = useRef<HTMLDivElement | null>(null)
   const [currentView, setCurrentView] = useState<AppView>(initialRouteRef.current.currentView)
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set([initialRouteRef.current.currentView]))
@@ -295,6 +296,7 @@ function App() {
     refreshUser,
     selectProject,
     setCurrentProject,
+    clearCurrentProject,
     updateProfile,
     logout,
     verificationPending,
@@ -310,8 +312,17 @@ function App() {
     if (view === 'builder') {
       setShowLanding(false)
     }
+    if (view !== 'ide') {
+      explicitBlankIDERef.current = false
+    }
     if (typeof window !== 'undefined') {
-      const targetPath = getPathForView(view, options?.projectId ?? (view === 'ide' ? currentProject?.id ?? null : null))
+      const hasProjectOverride = Object.prototype.hasOwnProperty.call(options ?? {}, 'projectId')
+      const routeProjectId = hasProjectOverride
+        ? options?.projectId ?? null
+        : view === 'ide'
+          ? currentProject?.id ?? null
+          : null
+      const targetPath = getPathForView(view, routeProjectId)
       const currentPath = `${window.location.pathname}${window.location.search}`
       if (currentPath !== targetPath) {
         const method = options?.replace ? 'replaceState' : 'pushState'
@@ -326,7 +337,12 @@ function App() {
     projectId?: number | null
   }) => {
     const target = options?.target ?? 'dashboard'
-    const targetProjectId = options?.projectId ?? currentProject?.id ?? null
+    const hasProjectOverride = Object.prototype.hasOwnProperty.call(options ?? {}, 'projectId')
+    const targetProjectId = hasProjectOverride ? options?.projectId ?? null : currentProject?.id ?? null
+    explicitBlankIDERef.current = hasProjectOverride && targetProjectId === null
+    if (explicitBlankIDERef.current) {
+      clearCurrentProject()
+    }
     pendingProjectIdRef.current = targetProjectId
     pendingLaunchTargetRef.current = target
     setIdeLaunchTarget(target)
@@ -338,7 +354,7 @@ function App() {
     if (isAuthenticated && targetProjectId && currentProject?.id !== targetProjectId) {
       void selectProject(targetProjectId)
     }
-  }, [currentProject?.id, isAuthenticated, navigateToView, selectProject])
+  }, [clearCurrentProject, currentProject?.id, isAuthenticated, navigateToView, selectProject])
 
   const handleWorkspaceNavigation = useCallback((view: AppView) => {
     if (view === 'ide') {
@@ -582,6 +598,7 @@ function App() {
     const launchTarget = pendingLaunchTargetRef.current ?? 'dashboard'
     pendingProjectIdRef.current = null
     pendingLaunchTargetRef.current = null
+    explicitBlankIDERef.current = false
     setIdeLaunchTarget(launchTarget)
     navigateToView('ide', { replace: true, projectId })
     void selectProject(projectId)
@@ -633,7 +650,7 @@ function App() {
   }, [currentProject?.id, user?.id])
 
   useEffect(() => {
-    if (!isAuthenticated || currentProject || currentView !== 'ide' || isRestoringProject) return
+    if (!isAuthenticated || currentProject || currentView !== 'ide' || isRestoringProject || explicitBlankIDERef.current) return
     if (pendingProjectIdRef.current) return
     if (!recoverableProjectId) return
 
@@ -803,6 +820,7 @@ function App() {
     const handlePopState = () => {
       const routeState = getInitialRouteState()
       pendingProjectIdRef.current = routeState.projectId
+      explicitBlankIDERef.current = false
       setShowLanding(routeState.showLanding)
       setCurrentView(routeState.currentView)
       setActiveLegalDocument(getRequestedLegalDocument())
@@ -829,7 +847,7 @@ function App() {
   useEffect(() => {
     if (typeof window === 'undefined' || currentView !== 'ide') return
 
-    const activeProjectId = currentProject?.id ?? pendingProjectIdRef.current ?? null
+    const activeProjectId = explicitBlankIDERef.current ? null : currentProject?.id ?? pendingProjectIdRef.current ?? null
     const targetPath = getPathForView('ide', activeProjectId)
     const currentPath = `${window.location.pathname}${window.location.search}`
     if (currentPath !== targetPath) {

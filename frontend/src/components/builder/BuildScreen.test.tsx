@@ -25,6 +25,7 @@ const baseProps = () => ({
     promptPackVersions: undefined as any,
     promptPackActivationEvents: undefined as any,
     powerMode: "balanced" as const,
+    verificationReports: [] as any[],
   },
   providerPanels: [] as any[],
   aiThoughts: [] as any[],
@@ -674,5 +675,227 @@ describe("BuildScreen header prompt actions", () => {
       screen.getByText(/This failure may be platform-related/i)
     ).toBeTruthy();
     expect(screen.getByText(/Build session unavailable/i)).toBeTruthy();
+  });
+});
+
+describe("PreviewVerificationBanner", () => {
+  it("does not render when verification reports are all passed", () => {
+    const props = baseProps();
+    props.buildState.verificationReports = [
+      {
+        id: "vr-1",
+        phase: "validation",
+        surface: "frontend",
+        status: "passed" as const,
+        generated_at: "2026-05-01T12:00:00Z",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.queryByText(/Preview launch may be blocked/i)
+    ).toBeNull();
+  });
+
+  it("does not render when verification report surface is non-preview", () => {
+    const props = baseProps();
+    props.buildState.verificationReports = [
+      {
+        id: "vr-1",
+        phase: "validation",
+        surface: "backend",
+        status: "failed" as const,
+        blockers: ["contract mismatch"],
+        generated_at: "2026-05-01T12:00:00Z",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.queryByText(/Preview launch may be blocked/i)
+    ).toBeNull();
+  });
+
+  it("does not render for a backend-only failed quality gate", () => {
+    const props = baseProps();
+    (props.buildState as any).qualityGateStatus = "failed";
+    (props.buildState as any).qualityGateStage = "backend_contract";
+    props.buildState.verificationReports = [
+      {
+        id: "vr-backend-only",
+        phase: "validation",
+        surface: "backend",
+        status: "failed" as const,
+        blockers: ["contract mismatch"],
+        generated_at: "2026-05-01T12:00:00Z",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.queryByText(/Preview launch may be blocked/i)
+    ).toBeNull();
+  });
+
+  it("renders banner when quality gate status is failed", () => {
+    const props = baseProps();
+    (props.buildState as any).qualityGateStatus = "failed";
+    (props.buildState as any).qualityGateStage = "preview_verification";
+    props.buildState.verificationReports = [
+      {
+        id: "vr-1",
+        phase: "validation",
+        surface: "frontend",
+        status: "failed" as const,
+        errors: ["entrypoint missing"],
+        blockers: ["no boot command"],
+        generated_at: "2026-05-01T12:00:00Z",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.getByRole("alert", { name: /preview verification failure/i })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Preview launch may be blocked — failed verification/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Quality gate "Preview Verification" failed\./i)
+    ).toBeTruthy();
+    expect(screen.getByText(/entrypoint missing/i)).toBeTruthy();
+    expect(screen.getByText(/no boot command/i)).toBeTruthy();
+  });
+
+  it("renders banner for blocked verification report with preview surface", () => {
+    const props = baseProps();
+    props.buildState.verificationReports = [
+      {
+        id: "vr-2",
+        phase: "validation",
+        surface: "preview",
+        status: "blocked" as const,
+        blockers: ["placeholder_preview", "no static build"],
+        generated_at: "2026-05-01T12:00:00Z",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.getByRole("alert", { name: /preview verification failure/i })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Preview verification blocked: placeholder_preview; no static build/i)
+    ).toBeTruthy();
+  });
+
+  it("renders banner for frontend report with placeholder preview blocker", () => {
+    const props = baseProps();
+    props.buildState.verificationReports = [
+      {
+        id: "vr-placeholder",
+        phase: "validation",
+        surface: "frontend",
+        status: "blocked" as const,
+        blockers: ["placeholder_preview"],
+        generated_at: "2026-05-01T12:00:00Z",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.getByRole("alert", { name: /preview verification failure/i })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Frontend verification blocked: placeholder_preview/i)
+    ).toBeTruthy();
+  });
+
+  it("renders banner for preview blocker even when no verification report is attached", () => {
+    const props = baseProps();
+    props.buildState.blockers = [
+      {
+        id: "blocker-preview",
+        type: "placeholder_preview",
+        category: "preview",
+        severity: "blocking",
+        title: "Placeholder preview blocked launch",
+        summary: "Generic KPI cards replaced the requested app screen.",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.getByRole("alert", { name: /preview verification failure/i })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Build blocker: Placeholder preview blocked launch/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Generic KPI cards replaced the requested app screen/i)
+    ).toBeTruthy();
+  });
+
+  it("renders banner when qualityGateStage contains preview", () => {
+    const props = baseProps();
+    (props.buildState as any).qualityGateStatus = "failed";
+    (props.buildState as any).qualityGateStage = "preview_validation";
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.getByRole("alert", { name: /preview verification failure/i })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Quality gate "Preview Validation" failed\./i)
+    ).toBeTruthy();
+  });
+
+  it("renders banner with verification report errors when no blockers", () => {
+    const props = baseProps();
+    props.buildState.verificationReports = [
+      {
+        id: "vr-3",
+        phase: "validation",
+        surface: "frontend",
+        status: "failed" as const,
+        errors: ["missing entrypoint", "port undefined"],
+        generated_at: "2026-05-01T12:00:00Z",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.getByRole("alert", { name: /preview verification failure/i })
+    ).toBeTruthy();
+    expect(screen.getByText(/missing entrypoint; port undefined/i)).toBeTruthy();
+  });
+
+  it("does not render when qualityGateStatus is passed with no failed reports", () => {
+    const props = baseProps();
+    (props.buildState as any).qualityGateStatus = "passed";
+    props.buildState.verificationReports = [
+      {
+        id: "vr-4",
+        phase: "validation",
+        surface: "frontend",
+        status: "passed" as const,
+        generated_at: "2026-05-01T12:00:00Z",
+      },
+    ];
+
+    render(<BuildScreen {...props} />);
+
+    expect(
+      screen.queryByText(/Preview launch may be blocked/i)
+    ).toBeNull();
   });
 });

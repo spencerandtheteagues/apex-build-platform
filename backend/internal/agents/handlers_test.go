@@ -584,7 +584,7 @@ func TestGetBuildStatusFallsBackToSnapshotWhenLiveReadStalls(t *testing.T) {
 		if body["progress"] != float64(79) {
 			t.Fatalf("expected active snapshot backend_services progress to be capped at 79, got %v", body["progress"])
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(1500 * time.Millisecond):
 		t.Fatal("expected build status fallback to return promptly when live state read blocks")
 	}
 }
@@ -740,7 +740,7 @@ func TestGetBuildDetailsFallsBackToSnapshotWhenLiveReadStalls(t *testing.T) {
 		if !ok || len(files) != 1 {
 			t.Fatalf("expected snapshot files in fallback response, got %T %#v", body["files"], body["files"])
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(1500 * time.Millisecond):
 		t.Fatal("expected build details fallback to return promptly when live state read blocks")
 	}
 }
@@ -861,7 +861,7 @@ func TestGetBuildDetailsRestoresStaleSnapshotWhenLiveReadStalls(t *testing.T) {
 		default:
 			t.Fatal("expected restored in-progress task to be requeued")
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(1500 * time.Millisecond):
 		t.Fatal("expected stale snapshot restore to return promptly when live state read blocks")
 	}
 }

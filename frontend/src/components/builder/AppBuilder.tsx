@@ -113,6 +113,8 @@ import BuildPieProgress from './BuildPieProgress'
 import BuildScreen from './BuildScreen'
 import TemplateGallery from './TemplateGallery'
 import CostTicker from '@/components/ide/CostTicker'
+import { OnboardingTour } from './OnboardingTour'
+import type { OnboardingStarter } from './onboardingStarters'
 
 // ============================================================================
 // TYPES
@@ -2336,6 +2338,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   const builderRootRef = useRef<HTMLDivElement>(null)
   const startOverSignalRef = useRef<number | undefined>(undefined)
+  const handleOnboardingStarterSelect = useCallback((starter: OnboardingStarter) => {
+    setAppDescription(starter.prompt)
+    setBuildMode(starter.mode)
+    setPowerMode('fast')
+    setTargetPlatform('web')
+    setTargetPathExplicit(true)
+    window.setTimeout(() => {
+      builderRootRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    }, 0)
+  }, [])
   const getScopedStorageKey = useCallback((baseKey: string) => {
     if (!user?.id) {
       return baseKey
@@ -6867,6 +6879,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             <SpendToast key={t.id} agentRole={t.agentRole} cost={t.cost} onDismiss={() => dismissSpendToast(t.id)} />
           ))}
         </div>
+      )}
+      {!buildState && !isBuilding && (
+        <OnboardingTour
+          onStarterSelect={handleOnboardingStarterSelect}
+          onOpenBlankWorkspace={() => onNavigateToIDE?.({ target: 'editor', projectId: null })}
+        />
       )}
       {/* Buy Credits Modal */}
       {showBuyCredits && (

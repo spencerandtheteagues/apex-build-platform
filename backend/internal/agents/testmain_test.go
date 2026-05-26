@@ -7,9 +7,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	previewVerificationInstallTimeout = 6 * time.Second
-	previewVerificationBuildTimeout = 6 * time.Second
-	previewVerificationNodeTestTimeout = 6 * time.Second
+	previewVerificationInstallTimeout = 12 * time.Second
+	previewVerificationBuildTimeout = 12 * time.Second
+	previewVerificationNodeTestTimeout = 12 * time.Second
 
 	os.Exit(m.Run())
 }

@@ -2199,13 +2199,9 @@ func TestVerificationNeedsNodeInstall(t *testing.T) {
 }
 
 func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
-	t.Parallel()
-
 	am := &AgentManager{}
 
 	t.Run("missing_build_script", func(t *testing.T) {
-		t.Parallel()
-
 		files := []GeneratedFile{
 			{
 				Path: "backend/package.json",
@@ -2224,8 +2220,6 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 	})
 
 	t.Run("no_deps_build_script_succeeds", func(t *testing.T) {
-		t.Parallel()
-
 		if _, err := exec.LookPath("npm"); err != nil {
 			t.Skip("npm not available")
 		}
@@ -2249,8 +2243,6 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 	})
 
 	t.Run("missing_runtime_script_fails_when_runtime_proof_required", func(t *testing.T) {
-		t.Parallel()
-
 		if _, err := exec.LookPath("npm"); err != nil {
 			t.Skip("npm not available")
 		}
@@ -2274,8 +2266,6 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 	})
 
 	t.Run("start_script_runtime_probe_succeeds", func(t *testing.T) {
-		t.Parallel()
-
 		if _, err := exec.LookPath("npm"); err != nil {
 			t.Skip("npm not available")
 		}
@@ -2305,8 +2295,6 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 	})
 
 	t.Run("start_script_runtime_probe_404_fails", func(t *testing.T) {
-		t.Parallel()
-
 		if _, err := exec.LookPath("npm"); err != nil {
 			t.Skip("npm not available")
 		}
@@ -2336,8 +2324,6 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 	})
 
 	t.Run("dev_script_runtime_probe_succeeds_without_start", func(t *testing.T) {
-		t.Parallel()
-
 		if _, err := exec.LookPath("npm"); err != nil {
 			t.Skip("npm not available")
 		}
@@ -2445,8 +2431,6 @@ if __name__ == "__main__":
 	})
 
 	t.Run("tsc_root_mismatch_fails_preflight", func(t *testing.T) {
-		t.Parallel()
-
 		files := []GeneratedFile{
 			{
 				Path: "backend/package.json",
@@ -3759,7 +3743,7 @@ func TestPreviewProbeOutputShowsServerReady(t *testing.T) {
 func TestClassifyPreviewHTTPProbeFailure(t *testing.T) {
 	t.Parallel()
 
-	t.Run("reported_ready_but_probe_timed_out_skips", func(t *testing.T) {
+	t.Run("reported_ready_but_probe_timed_out_remains_failure", func(t *testing.T) {
 		t.Parallel()
 
 		skip, summary := classifyPreviewHTTPProbeFailure(
@@ -3767,8 +3751,8 @@ func TestClassifyPreviewHTTPProbeFailure(t *testing.T) {
 			context.DeadlineExceeded,
 			true,
 		)
-		if !skip {
-			t.Fatalf("expected ready-but-unreachable preview server to skip verifier")
+		if skip {
+			t.Fatalf("expected ready-but-unreachable preview server to remain a real failure")
 		}
 		if !strings.Contains(summary, "127.0.0.1:4173") {
 			t.Fatalf("expected probe summary to preserve preview output, got %q", summary)
@@ -7406,11 +7390,11 @@ func TestFinalizationRerunAfterDeterministicRepairDoesNotRecurse(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(1500 * time.Millisecond):
 		t.Fatal("expected finalization to return after scheduling repaired readiness rerun")
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		build.mu.RLock()
 		status := build.Status

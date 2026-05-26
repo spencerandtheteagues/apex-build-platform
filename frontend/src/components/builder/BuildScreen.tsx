@@ -23,6 +23,7 @@ import {
   Copy,
   Check,
   DollarSign,
+  XCircle,
 } from "lucide-react";
 import { ProviderStatusBar } from "./ProviderStatusBar";
 import { LiveActivityFeed } from "./LiveActivityFeed";
@@ -1937,6 +1938,111 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
   );
 };
 
+// ─── Preview Verification Banner ──────────────────────────────────────────────
+
+interface PreviewVerificationBannerProps {
+  qualityGateStatus?: BSBuildState["qualityGateStatus"]
+  qualityGateStage?: string
+  verificationReports?: BuildVerificationReport[]
+  blockers?: BuildBlocker[]
+}
+
+const PREVIEW_KEYWORDS = ["preview_verification", "placeholder_preview", "frontend", "preview"] as const
+
+const hasPreviewSignal = (parts: Array<string | string[] | undefined>): boolean =>
+  PREVIEW_KEYWORDS.some((kw) =>
+    parts
+      .flatMap((part) => Array.isArray(part) ? part : [part])
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(kw)
+  )
+
+const isPreviewRelevantReport = (report: BuildVerificationReport): boolean =>
+  hasPreviewSignal([report.surface, report.phase, report.blockers, report.errors, report.truth_tags])
+
+const isPreviewRelevantBlocker = (blocker: BuildBlocker): boolean =>
+  hasPreviewSignal([blocker.type, blocker.category, blocker.title, blocker.summary, blocker.unblocks_with])
+
+const bannerTrigger = (
+  reports: BuildVerificationReport[] | undefined,
+  blockers: BuildBlocker[] | undefined,
+  qualityGateStatus: BSBuildState["qualityGateStatus"] | undefined,
+  qualityGateStage: string | undefined
+): { show: boolean; reasons: string[] } => {
+  const reasons: string[] = []
+
+  const qualityGateFailedPreview = qualityGateStatus === "failed" && hasPreviewSignal([qualityGateStage])
+  if (qualityGateFailedPreview) {
+    reasons.push(`Quality gate ${qualityGateStage ? `"${humanize(qualityGateStage)}" ` : ""}failed.`)
+  }
+
+  const failedOrBlocked = (reports || []).filter((r) => r.status === "failed" || r.status === "blocked")
+  const previewFailedOrBlocked = failedOrBlocked.filter(isPreviewRelevantReport)
+  for (const report of previewFailedOrBlocked) {
+    const surface = humanize(report.surface || report.phase)
+    const parts: string[] = []
+    if (report.errors && report.errors.length > 0) {
+      parts.push(...report.errors)
+    }
+    if (report.blockers && report.blockers.length > 0) {
+      parts.push(...report.blockers)
+    }
+    if (parts.length > 0) {
+      reasons.push(`${surface} verification ${report.status}: ${parts.join("; ")}`)
+    } else {
+      reasons.push(`${surface} verification ${report.status}.`)
+    }
+  }
+
+  const previewBlockers = (blockers || []).filter(isPreviewRelevantBlocker)
+  for (const blocker of previewBlockers) {
+    const detail = blocker.summary || blocker.unblocks_with || blocker.type || blocker.category || ""
+    reasons.push(`Build blocker: ${blocker.title}${detail ? ` — ${detail}` : ""}`)
+  }
+
+  if (!qualityGateFailedPreview && previewFailedOrBlocked.length === 0 && previewBlockers.length === 0) {
+    return { show: false, reasons: [] }
+  }
+
+  return { show: true, reasons }
+}
+
+const PreviewVerificationBanner: React.FC<PreviewVerificationBannerProps> = ({
+  qualityGateStatus,
+  qualityGateStage,
+  verificationReports,
+  blockers,
+}) => {
+  const { show, reasons } = bannerTrigger(verificationReports, blockers, qualityGateStatus, qualityGateStage)
+  if (!show) return null
+
+  return (
+    <div
+      className="shrink-0 px-3 sm:px-4 py-2 border-b border-red-500/30 bg-red-950/40"
+      role="alert"
+      aria-label="Preview verification failure: launch may be blocked"
+    >
+      <div className="flex items-start gap-2">
+        <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <div className="text-xs sm:text-sm font-semibold text-red-200">
+            Preview launch may be blocked — failed verification
+          </div>
+          {reasons.length > 0 && (
+            <ul className="mt-1 list-disc list-inside text-[11px] sm:text-xs text-red-300/80 space-y-0.5">
+              {reasons.map((r, i) => (
+                <li key={i} className="break-words">{r}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main BuildScreen Component ───────────────────────────────────────────────
 
 export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
@@ -2083,6 +2189,14 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         currentBuildSpend={currentBuildSpend}
         currentBuildSpendEvents={currentBuildSpendEvents}
         buildStalled={buildStalled}
+      />
+
+      {/* Preview verification banner */}
+      <PreviewVerificationBanner
+        qualityGateStatus={buildState.qualityGateStatus}
+        qualityGateStage={buildState.qualityGateStage}
+        verificationReports={buildState.verificationReports}
+        blockers={buildState.blockers}
       />
 
       {/* Row 2: Provider Status Bar */}

@@ -50,7 +50,7 @@
 - Required tests / validations:
   - `cd backend && go test ./cmd -run 'TestExecutionLaunchReadinessDetails|TestPreviewLaunchReadinessDetails|TestResolvePreviewRuntimeVerify|TestPreviewRuntimeVerificationEnabled' -count=1`
   - `cd backend && go test ./cmd ./internal/api -run 'TestExecutionLaunchReadinessDetails|TestPreviewLaunchReadinessDetails|TestFeatureReadiness|TestPlatformTruth' -count=1`
-  - `cd backend && go test ./... -timeout 12m`
+  - `cd backend && go test -p 1 -parallel 4 ./... -timeout 20m`
   - `cd tests/e2e && npx tsc --noEmit`
   - `git diff --check`
 

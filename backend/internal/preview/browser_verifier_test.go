@@ -14,6 +14,10 @@ import (
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 )
 
+// chromeSem limits concurrent Chrome launches to 1 to prevent resource exhaustion on constrained hosts.
+var chromeSem = make(chan struct{}, 1)
+
+
 // ── filterBrowserNoise ────────────────────────────────────────────────────────
 
 func TestFilterBrowserNoise_RemovesResizeObserver(t *testing.T) {
@@ -96,6 +100,14 @@ func TestLooksLikeShellOnlyPreview(t *testing.T) {
 	if !looksLikeShellOnlyPreview(shell, len(shell)) {
 		t.Fatal("expected sidebar-only shell to fail browser verification")
 	}
+	fourItemShell := "Apex FieldOps AI Dashboard Job Pipeline New Job Crew Management Bootstrapped by Apex.Build"
+	if !looksLikeShellOnlyPreview(fourItemShell, len(fourItemShell)) {
+		t.Fatal("expected four-item sidebar-only shell to fail browser verification")
+	}
+	recoveredShell := "Apex recovered preview. Frontend-first recovery synthesized a stable preview shell."
+	if !looksLikeShellOnlyPreview(recoveredShell, len(recoveredShell)) {
+		t.Fatal("expected deterministic recovery shell to fail browser verification")
+	}
 	realApp := "Apex FieldOps AI Dashboard Job Pipeline New Job Crew Management Settings Open Jobs 7 Pending Estimate Value $48,000 Launch Estimate Swarm"
 	if looksLikeShellOnlyPreview(realApp, len(realApp)) {
 		t.Fatal("expected real dashboard content to pass shell-only heuristic")
@@ -105,15 +117,84 @@ func TestLooksLikeShellOnlyPreview(t *testing.T) {
 func TestLooksLikePlaceholderPreview(t *testing.T) {
 	t.Parallel()
 
-	placeholder := "SignalRoom Dashboard KPI 1 Value KPI 2 Value KPI 3 Value Activity Feed Projects Board Client Cards Settings Panel Navigation Dashboard Clients Settings"
-	if !looksLikePlaceholderPreview(placeholder, len(placeholder)) {
-		t.Fatal("expected generic KPI/skeleton dashboard to fail placeholder preview heuristic")
-	}
+	// Must flag: generic KPI/Metric cards with Value labels
+	t.Run("generic_metric_cards", func(t *testing.T) {
+		s := "Dashboard Metric 1 Value Metric 2 Value Metric 3 Value Summary"
+		if !looksLikePlaceholderPreview(s, len(s)) {
+			t.Fatal("expected generic Metric cards to fail placeholder preview heuristic")
+		}
+	})
 
-	realDashboard := "SignalRoom Dashboard Revenue $128,400 Conversion 18% Active Projects 24 Activity Feed Nova Supply approved contract Projects Board Atlas redesign completed Client Cards Meridian Health active Settings Panel Notifications enabled"
-	if looksLikePlaceholderPreview(realDashboard, len(realDashboard)) {
-		t.Fatal("expected concrete seeded dashboard to pass placeholder preview heuristic")
-	}
+	// Must flag: repeated Sample Data / Chart Placeholder / Coming Soon sections
+	t.Run("repeated_placeholder_sections", func(t *testing.T) {
+		s := "Overview Sample Data Reports Chart Placeholder Contact Coming Soon"
+		if !looksLikePlaceholderPreview(s, len(s)) {
+			t.Fatal("expected repeated placeholder sections to fail placeholder preview heuristic")
+		}
+	})
+
+	// Must flag: skeleton-only preview
+	t.Run("skeleton_only", func(t *testing.T) {
+		s := "Loading Skeleton ..."
+		if !looksLikePlaceholderPreview(s, len(s)) {
+			t.Fatal("expected skeleton-only preview to fail placeholder preview heuristic")
+		}
+	})
+
+	// Must flag: loading-only preview with ellipsis
+	t.Run("loading_only_ellipsis", func(t *testing.T) {
+		s := "Loading data ..."
+		if !looksLikePlaceholderPreview(s, len(s)) {
+			t.Fatal("expected loading-only preview to fail placeholder preview heuristic")
+		}
+	})
+
+	// Must NOT flag: concrete seeded dashboard
+	t.Run("real_dashboard", func(t *testing.T) {
+		s := "SignalRoom Dashboard Revenue $128,400 Conversion 18% Active Projects 24 Activity Feed Nova Supply approved contract Projects Board Atlas redesign completed Client Cards Meridian Health active Settings Panel Notifications enabled"
+		if looksLikePlaceholderPreview(s, len(s)) {
+			t.Fatal("expected concrete seeded dashboard to pass placeholder preview heuristic")
+		}
+	})
+
+	// Must NOT flag: earlier real dashboard (preserve existing)
+	t.Run("legacy_real_dashboard", func(t *testing.T) {
+		realDashboard := "SignalRoom Dashboard Revenue $128,400 Conversion 18% Active Projects 24 Activity Feed Nova Supply approved contract Projects Board Atlas redesign completed Client Cards Meridian Health active Settings Panel Notifications enabled"
+		if looksLikePlaceholderPreview(realDashboard, len(realDashboard)) {
+			t.Fatal("expected concrete seeded dashboard to pass placeholder preview heuristic")
+		}
+	})
+
+	// Preserve existing legacy positive case
+	t.Run("legacy_placeholder", func(t *testing.T) {
+		placeholder := "SignalRoom Dashboard KPI 1 Value KPI 2 Value KPI 3 Value Activity Feed Projects Board Client Cards Settings Panel Navigation Dashboard Clients Settings"
+		if !looksLikePlaceholderPreview(placeholder, len(placeholder)) {
+			t.Fatal("expected generic KPI/skeleton dashboard to fail placeholder preview heuristic")
+		}
+	})
+
+	// Must NOT flag: normal app copy with real dollar values
+	t.Run("normal_app_copy", func(t *testing.T) {
+		s := "Metric Overview Monthly recurring revenue $45,200 Active users 1,240 Conversion rate 3.2% New signups 87"
+		if looksLikePlaceholderPreview(s, len(s)) {
+			t.Fatal("expected normal app copy with real values to pass placeholder preview heuristic")
+		}
+	})
+
+	// Must NOT flag: normal app copy with percentages
+	t.Run("normal_app_copy_percent", func(t *testing.T) {
+		s := "Project Alpha completed at 92% capacity. Metric 2 is not a label here, just prose. Sample data was imported from BigQuery."
+		if looksLikePlaceholderPreview(s, len(s)) {
+			t.Fatal("expected normal prose mentioning metric/sample to pass placeholder preview heuristic")
+		}
+	})
+
+	t.Run("value_substrings_do_not_count_as_value_labels", func(t *testing.T) {
+		s := "Dashboard Metric 1 valuable context Metric 2 valuation details with concrete seeded stories and workflow notes"
+		if looksLikePlaceholderPreview(s, len(s)) {
+			t.Fatal("expected value substrings to avoid generic metric Value label detection")
+		}
+	})
 }
 
 // ── BrowserVerifier.Available / skipped ──────────────────────────────────────
@@ -279,6 +360,9 @@ func TestBrowserVerifier_PassesWhenAppRendered(t *testing.T) {
 	if !bv.Available() {
 		t.Skip("Chrome not available — skipping browser integration test")
 	}
+	chromeSem <- struct{}{}
+	defer func() { <-chromeSem }()
+
 
 	// Serve a page with pre-rendered content in #root (no JS needed)
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +377,7 @@ func TestBrowserVerifier_PassesWhenAppRendered(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 
 	result := bv.VerifyPageLoad(ctx, srv.URL)
@@ -314,6 +398,9 @@ func TestBrowserVerifier_FailsOnBlankMount(t *testing.T) {
 	if !bv.Available() {
 		t.Skip("Chrome not available")
 	}
+	chromeSem <- struct{}{}
+	defer func() { <-chromeSem }()
+
 
 	// Serve a page with empty #root and no JS to populate it
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +415,7 @@ func TestBrowserVerifier_FailsOnBlankMount(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 
 	result := bv.VerifyPageLoad(ctx, srv.URL)
@@ -348,6 +435,9 @@ func TestBrowserVerifier_PassesWhenJSPopulatesMount(t *testing.T) {
 	if !bv.Available() {
 		t.Skip("Chrome not available")
 	}
+	chromeSem <- struct{}{}
+	defer func() { <-chromeSem }()
+
 
 	// Simulate React: JS runs synchronously and populates #root
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +458,7 @@ func TestBrowserVerifier_PassesWhenJSPopulatesMount(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 
 	result := bv.VerifyPageLoad(ctx, srv.URL)
@@ -386,6 +476,9 @@ func TestBrowserVerifier_PollsForDelayedMount(t *testing.T) {
 	if !bv.Available() {
 		t.Skip("Chrome not available")
 	}
+	chromeSem <- struct{}{}
+	defer func() { <-chromeSem }()
+
 
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -405,7 +498,7 @@ func TestBrowserVerifier_PollsForDelayedMount(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 
 	result := bv.VerifyPageLoad(ctx, srv.URL)
@@ -423,6 +516,9 @@ func TestBrowserVerifier_DetectsUncaughtException(t *testing.T) {
 	if !bv.Available() {
 		t.Skip("Chrome not available")
 	}
+	chromeSem <- struct{}{}
+	defer func() { <-chromeSem }()
+
 
 	// Page that throws but also leaves mount empty → should fail as js_runtime_error
 	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -440,7 +536,7 @@ func TestBrowserVerifier_DetectsUncaughtException(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 
 	result := bv.VerifyPageLoad(ctx, srv.URL)

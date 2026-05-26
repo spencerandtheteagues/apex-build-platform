@@ -86,7 +86,9 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		attemptCtx := ctx
 		cancel := func() {}
 		attemptTimeout := planningProviderAttemptTimeout(provider, a.powerMode, a.usePlatformKeys)
+		attemptDeadline := time.Time{}
 		if attemptTimeout > 0 {
+			attemptDeadline = time.Now().Add(attemptTimeout)
 			attemptCtx, cancel = context.WithTimeout(ctx, attemptTimeout)
 		}
 
@@ -112,8 +114,9 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		})
 
 		type planningGenerateResult struct {
-			resp *ai.AIResponse
-			err  error
+			resp        *ai.AIResponse
+			err         error
+			completedAt time.Time
 		}
 		resultCh := make(chan planningGenerateResult, 1)
 		go func() {
@@ -131,15 +134,21 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 				UsePlatformKeys:         a.usePlatformKeys,
 				DisableProviderFallback: true,
 			})
-			resultCh <- planningGenerateResult{resp: resp, err: err}
+			resultCh <- planningGenerateResult{resp: resp, err: err, completedAt: time.Now()}
 		}()
 
 		var resp *ai.AIResponse
 		var err error
 		select {
 		case result := <-resultCh:
-			resp = result.resp
-			err = result.err
+			if attemptErr := attemptCtx.Err(); attemptErr != nil {
+				err = fmt.Errorf("planning provider %s timed out after %s: %w", provider, attemptTimeout.Round(time.Second), attemptErr)
+			} else if !attemptDeadline.IsZero() && !result.completedAt.Before(attemptDeadline) {
+				err = fmt.Errorf("planning provider %s timed out after %s: %w", provider, attemptTimeout.Round(time.Second), context.DeadlineExceeded)
+			} else {
+				resp = result.resp
+				err = result.err
+			}
 		case <-attemptCtx.Done():
 			err = fmt.Errorf("planning provider %s timed out after %s: %w", provider, attemptTimeout.Round(time.Second), attemptCtx.Err())
 		}

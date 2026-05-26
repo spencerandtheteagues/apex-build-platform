@@ -775,10 +775,29 @@ function looksLikePlaceholderPreviewText(text) {
   const lower = String(text || '').trim().toLowerCase()
   if (!lower) return false
   const visibleLength = lower.length
-  const genericKpis = ['kpi 1', 'kpi 2', 'kpi 3'].filter(label => lower.includes(label)).length
+
+  // Generic KPI / Metric cards with Value labels
+  const genericKpis = ['kpi 1', 'kpi 2', 'kpi 3', 'metric 1', 'metric 2', 'metric 3']
+    .filter(label => lower.includes(label)).length
   if (genericKpis >= 2 && (lower.match(/\bvalue\b/g) || []).length >= 2 && visibleLength < 320) {
     return true
   }
+
+  // Repeated placeholder section titles
+  const sectionPlaceholders = ['sample data', 'chart placeholder', 'coming soon']
+    .filter(label => lower.includes(label)).length
+  if (sectionPlaceholders >= 2 && visibleLength < 320) {
+    return true
+  }
+
+  // Loading-only or skeleton-only content
+  if (visibleLength < 180 && lower.includes('skeleton') && !/[$%]/.test(text)) {
+    return true
+  }
+  if (visibleLength < 120 && lower.includes('loading') && /\.{3}|…/.test(text) && !/[$%]/.test(text)) {
+    return true
+  }
+
   const placeholderSections = ['activity feed', 'projects board', 'client cards', 'settings panel']
     .filter(label => lower.includes(label)).length
   if (placeholderSections >= 3 && visibleLength < 260 && !/[$%]|\bcompleted\b|\bactive\b/i.test(text)) {
@@ -889,11 +908,9 @@ async function verifyPreview(url) {
     if (/apex recovered preview|frontend-first recovery|recovered baseline|generated project produced a backend runtime without a frontend entrypoint|synthesized a stable preview shell/i.test(bodyText)) {
       throw new Error(`preview rendered the deterministic recovery shell instead of the requested app: ${bodyText.slice(0, 500)}`)
     }
-    const shellOnlyNav = /dashboard/i.test(bodyText) &&
-      /job pipeline/i.test(bodyText) &&
-      /new job/i.test(bodyText) &&
-      /crew management/i.test(bodyText) &&
-      /settings/i.test(bodyText) &&
+    const shellNavHits = ['dashboard', 'job pipeline', 'new job', 'crew management', 'settings']
+      .filter(label => new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(bodyText)).length
+    const shellOnlyNav = shellNavHits >= 4 &&
       /bootstrapped by apex\.build/i.test(bodyText) &&
       bodyText.trim().length < 180 &&
       !/open jobs|pending estimate|launch estimate swarm|recommended final quote/i.test(bodyText)

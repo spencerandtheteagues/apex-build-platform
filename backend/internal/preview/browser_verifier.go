@@ -122,6 +122,13 @@ func NewBrowserVerifier() *BrowserVerifier {
 	return &BrowserVerifier{chromePath: findChrome()}
 }
 
+// NewBrowserVerifierWithChromePath creates a BrowserVerifier pinned to a
+// previously validated Chrome binary. Passing an empty path makes browser proof
+// unavailable.
+func NewBrowserVerifierWithChromePath(chromePath string) *BrowserVerifier {
+	return &BrowserVerifier{chromePath: strings.TrimSpace(chromePath)}
+}
+
 // Available reports whether a Chrome/Chromium binary was found.
 func (bv *BrowserVerifier) Available() bool { return bv.chromePath != "" }
 
@@ -215,7 +222,8 @@ const mountCheckJS = `JSON.stringify((function() {
 				textLength: text.length,
 				visibleText: visible.length,
 				hasContent: hasStructuralContent || hasMeaningfulText || hasMarkupOnlyContent,
-				snippet: text.substring(0, 500)
+				snippet: (visible || text).substring(0, 500),
+				analysisText: visible || text
 			};
 		}
 	}
@@ -224,12 +232,15 @@ const mountCheckJS = `JSON.stringify((function() {
   var bodyVisible = (document.body && document.body.innerText || '').trim();
   return {found: false, childCount: 0, textLength: bodyText.length,
           visibleText: bodyVisible.length,
-          hasContent: bodyVisible.length > 20, snippet: bodyText.substring(0, 500)};
+          hasContent: bodyVisible.length > 20,
+          snippet: (bodyVisible || bodyText).substring(0, 500),
+          analysisText: bodyVisible || bodyText};
 })())`
 
 const (
 	browserMountPollInterval = 200 * time.Millisecond
-	browserMountPollTimeout  = 4 * time.Second
+	browserMountPollTimeout  = 30 * time.Second
+	browserPageLoadTimeout   = 60 * time.Second
 )
 
 func browserMountJSONHasContent(raw string) bool {
@@ -272,8 +283,9 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		return &BrowserPageLoadResult{Skipped: true, Duration: time.Since(start)}
 	}
 
-	// 20 s hard budget for the entire browser check
-	bCtx, bCancel := context.WithTimeout(ctx, 20*time.Second)
+	// Hard budget for the entire browser check. Chrome startup can be slow on
+	// saturated CI/VPS hosts, but this remains bounded for launch gates.
+	bCtx, bCancel := context.WithTimeout(ctx, browserPageLoadTimeout)
 	defer bCancel()
 
 	// ── Launch sandboxed Chrome ──────────────────────────────────────────────
@@ -373,12 +385,16 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 	mu.Unlock()
 
 	// ── Navigation failure ───────────────────────────────────────────────────
-	if navErr != nil && bCtx.Err() == nil {
-		// Distinguish a true navigation failure from a context deadline
+	if navErr != nil {
+		failKind := "browser_load_failed"
 		detail := "browser failed to load page: " + navErr.Error()
+		if bCtx.Err() != nil {
+			failKind = "browser_load_timeout"
+			detail = fmt.Sprintf("browser page-load proof timed out after %s: %v", browserPageLoadTimeout, bCtx.Err())
+		}
 		return &BrowserPageLoadResult{
 			Passed:         false,
-			FailureKind:    "browser_load_failed",
+			FailureKind:    failKind,
 			Details:        detail,
 			RepairHints:    []string{"Ensure index.html is valid and the Vite dev server is running. Check for JS parse errors in the entry module."},
 			Duration:       time.Since(start),
@@ -390,15 +406,20 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 
 	// ── Parse mount state ────────────────────────────────────────────────────
 	var mount struct {
-		Found       bool   `json:"found"`
-		Selector    string `json:"selector"`
-		ChildCount  int    `json:"childCount"`
-		TextLength  int    `json:"textLength"`
-		VisibleText int    `json:"visibleText"`
-		HasContent  bool   `json:"hasContent"`
-		Snippet     string `json:"snippet"`
+		Found        bool   `json:"found"`
+		Selector     string `json:"selector"`
+		ChildCount   int    `json:"childCount"`
+		TextLength   int    `json:"textLength"`
+		VisibleText  int    `json:"visibleText"`
+		HasContent   bool   `json:"hasContent"`
+		Snippet      string `json:"snippet"`
+		AnalysisText string `json:"analysisText"`
 	}
 	_ = json.Unmarshal([]byte(mountJSON), &mount)
+	heuristicText := mount.AnalysisText
+	if strings.TrimSpace(heuristicText) == "" {
+		heuristicText = mount.Snippet
+	}
 
 	// ── Decision logic ───────────────────────────────────────────────────────
 	// Render success is the primary signal: if the mount point has content,
@@ -443,7 +464,7 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		}
 	}
 
-	if looksLikeAppLevelNotFound(mount.Snippet) {
+	if looksLikeAppLevelNotFound(heuristicText) {
 		return &BrowserPageLoadResult{
 			Passed:      false,
 			FailureKind: "app_route_not_found",
@@ -480,7 +501,7 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		}
 	}
 
-	if looksLikeShellOnlyPreview(mount.Snippet, mount.VisibleText) {
+	if looksLikeShellOnlyPreview(heuristicText, mount.VisibleText) {
 		return &BrowserPageLoadResult{
 			Passed:      false,
 			FailureKind: "shell_only_preview",
@@ -498,7 +519,7 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		}
 	}
 
-	if looksLikePlaceholderPreview(mount.Snippet, mount.VisibleText) {
+	if looksLikePlaceholderPreview(heuristicText, mount.VisibleText) {
 		return &BrowserPageLoadResult{
 			Passed:      false,
 			FailureKind: "placeholder_preview",
@@ -554,7 +575,12 @@ func looksLikeShellOnlyPreview(text string, visibleText int) bool {
 	}
 	if strings.Contains(lower, "future patches") ||
 		strings.Contains(lower, "real ui screens will be routed here") ||
-		strings.Contains(lower, "routes will be added later") {
+		strings.Contains(lower, "routes will be added later") ||
+		strings.Contains(lower, "apex recovered preview") ||
+		strings.Contains(lower, "frontend-first recovery") ||
+		strings.Contains(lower, "recovered baseline") ||
+		strings.Contains(lower, "generated project produced a backend runtime without a frontend entrypoint") ||
+		strings.Contains(lower, "synthesized a stable preview shell") {
 		return true
 	}
 
@@ -587,13 +613,36 @@ func looksLikePlaceholderPreview(text string, visibleText int) bool {
 		visibleText = len([]rune(lower))
 	}
 
+	// Generic KPI / Metric cards with Value labels
 	genericKPIHits := 0
-	for _, label := range []string{"kpi 1", "kpi 2", "kpi 3"} {
+	for _, label := range []string{"kpi 1", "kpi 2", "kpi 3", "metric 1", "metric 2", "metric 3"} {
 		if strings.Contains(lower, label) {
 			genericKPIHits++
 		}
 	}
-	if genericKPIHits >= 2 && strings.Count(lower, "value") >= 2 && visibleText < 320 {
+	if genericKPIHits >= 2 && countWholeWord(lower, "value") >= 2 && visibleText < 320 {
+		return true
+	}
+
+	// Repeated placeholder section titles (e.g., Sample Data, Chart Placeholder, Coming Soon)
+	sectionPlaceholderHits := 0
+	for _, label := range []string{"sample data", "chart placeholder", "coming soon"} {
+		if strings.Contains(lower, label) {
+			sectionPlaceholderHits++
+		}
+	}
+	if sectionPlaceholderHits >= 2 && visibleText < 320 {
+		return true
+	}
+
+	// Loading-only or skeleton-only content
+	if visibleText < 180 && strings.Contains(lower, "skeleton") &&
+		!strings.Contains(lower, "$") && !strings.Contains(lower, "%") {
+		return true
+	}
+	if visibleText < 120 && strings.Contains(lower, "loading") &&
+		(strings.Contains(lower, "...") || strings.Contains(lower, "…")) &&
+		!strings.Contains(lower, "$") && !strings.Contains(lower, "%") {
 		return true
 	}
 
@@ -625,6 +674,32 @@ func looksLikePlaceholderPreview(text string, visibleText int) bool {
 	}
 
 	return false
+}
+
+func countWholeWord(text, word string) int {
+	if word == "" {
+		return 0
+	}
+	count := 0
+	offset := 0
+	for {
+		idx := strings.Index(text[offset:], word)
+		if idx < 0 {
+			return count
+		}
+		start := offset + idx
+		end := start + len(word)
+		beforeOK := start == 0 || !isASCIIWordByte(text[start-1])
+		afterOK := end == len(text) || !isASCIIWordByte(text[end])
+		if beforeOK && afterOK {
+			count++
+		}
+		offset = end
+	}
+}
+
+func isASCIIWordByte(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_'
 }
 
 // filterBrowserNoise strips well-known benign browser messages that are not

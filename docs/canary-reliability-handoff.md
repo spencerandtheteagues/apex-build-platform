@@ -163,7 +163,7 @@ TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp \
 go build ./...
 
 TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp \
-go test ./... -timeout=120s
+go test -p 1 -parallel 4 ./... -timeout 20m
 ```
 
 Also validate the smoke script syntax:

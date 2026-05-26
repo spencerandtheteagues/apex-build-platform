@@ -1,7 +1,7 @@
 // APEX-BUILD Onboarding Tour
 // First-time user guided walkthrough explaining the app build process
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import {
   Sparkles,
@@ -17,7 +17,9 @@ import {
   Bot,
   FileCode,
   Download,
+  Code2,
 } from 'lucide-react'
+import { onboardingStarters, type OnboardingStarter } from './onboardingStarters'
 
 const ONBOARDING_KEY = 'apex_onboarding_completed'
 
@@ -104,13 +106,21 @@ const tourSteps: TourStep[] = [
 
 interface OnboardingTourProps {
   onComplete?: () => void
+  onStarterSelect?: (starter: OnboardingStarter) => void
+  onOpenBlankWorkspace?: () => void
   forceShow?: boolean
 }
 
-export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forceShow = false }) => {
+export const OnboardingTour: React.FC<OnboardingTourProps> = ({
+  onComplete,
+  onStarterSelect,
+  onOpenBlankWorkspace,
+  forceShow = false,
+}) => {
   const [isVisible, setIsVisible] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const [isExiting, setIsExiting] = useState(false)
+  const modalRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (forceShow) {
@@ -125,15 +135,35 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
     }
   }, [forceShow])
 
+  useEffect(() => {
+    if (isVisible) {
+      modalRef.current?.focus()
+    }
+  }, [currentStep, isVisible])
+
+  const completeTour = useCallback(() => {
+    localStorage.setItem(ONBOARDING_KEY, 'true')
+    onComplete?.()
+  }, [onComplete])
+
   const handleClose = useCallback(() => {
     setIsExiting(true)
     setTimeout(() => {
       setIsVisible(false)
       setIsExiting(false)
-      localStorage.setItem(ONBOARDING_KEY, 'true')
-      onComplete?.()
+      completeTour()
     }, 300)
-  }, [onComplete])
+  }, [completeTour])
+
+  const handleStarterSelect = useCallback((starter: OnboardingStarter) => {
+    onStarterSelect?.(starter)
+    handleClose()
+  }, [handleClose, onStarterSelect])
+
+  const handleOpenBlankWorkspace = useCallback(() => {
+    onOpenBlankWorkspace?.()
+    handleClose()
+  }, [handleClose, onOpenBlankWorkspace])
 
   const handleNext = useCallback(() => {
     if (currentStep < tourSteps.length - 1) {
@@ -158,6 +188,8 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
   const step = tourSteps[currentStep]
   const isLast = currentStep === tourSteps.length - 1
   const progress = ((currentStep + 1) / tourSteps.length) * 100
+  const titleId = 'apex-onboarding-title'
+  const descriptionId = 'apex-onboarding-description'
 
   return (
     <div className={cn(
@@ -168,6 +200,7 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+        aria-hidden="true"
         onClick={handleSkip}
       />
 
@@ -178,7 +211,14 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
         'shadow-2xl shadow-red-500/10',
         'transition-all duration-300',
         isExiting ? 'scale-95 opacity-0' : 'scale-100 opacity-100'
-      )}>
+      )}
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+      >
         {/* Progress bar */}
         <div className="h-1 bg-gray-800">
           <div
@@ -189,6 +229,8 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
 
         {/* Close button */}
         <button
+          type="button"
+          aria-label="Close onboarding tour"
           onClick={handleSkip}
           className="absolute top-4 right-4 p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-gray-800/50 transition-colors z-10"
         >
@@ -210,12 +252,12 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
           </div>
 
           {/* Title */}
-          <h2 className="text-2xl font-bold text-white text-center mb-3">
+          <h2 id={titleId} className="text-2xl font-bold text-white text-center mb-3">
             {step.title}
           </h2>
 
           {/* Description */}
-          <p className="text-gray-400 text-center text-sm leading-relaxed mb-6">
+          <p id={descriptionId} className="text-gray-400 text-center text-sm leading-relaxed mb-6">
             {step.description}
           </p>
 
@@ -237,6 +279,45 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
               </p>
             </div>
           )}
+
+          {isLast && (
+            <div className="mb-6 space-y-3">
+              <div className="grid gap-2 sm:grid-cols-3">
+                {onboardingStarters.map((starter) => {
+                  const StarterIcon = starter.icon
+                  return (
+                    <button
+                      key={starter.id}
+                      type="button"
+                      onClick={() => handleStarterSelect(starter)}
+                      aria-label={`Prefill prompt: ${starter.title}`}
+                      className="group min-h-[132px] rounded-xl border border-red-500/20 bg-red-500/[0.04] p-3 text-left transition-all hover:border-red-400/45 hover:bg-red-500/10"
+                    >
+                      <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg border border-red-400/25 bg-black/35 text-red-300 transition-colors group-hover:text-red-200">
+                        <StarterIcon className="h-5 w-5" />
+                      </span>
+                      <span className="block text-sm font-bold text-white">{starter.title}</span>
+                      <span className="mt-2 block text-[11px] leading-5 text-gray-400">{starter.description}</span>
+                      <span className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-red-200">
+                        Prefill prompt
+                        <ChevronRight className="h-3 w-3" />
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              {onOpenBlankWorkspace && (
+                <button
+                  type="button"
+                  onClick={handleOpenBlankWorkspace}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-900/70 px-4 py-3 text-sm font-semibold text-gray-200 transition-colors hover:border-gray-600 hover:bg-gray-800 hover:text-white"
+                >
+                  <Code2 className="h-4 w-4" />
+                  Open blank workspace
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer with navigation */}
@@ -244,6 +325,7 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
           <div className="flex items-center gap-2">
             {currentStep > 0 ? (
               <button
+                type="button"
                 onClick={handlePrev}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800/50 transition-colors"
               >
@@ -252,6 +334,7 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
               </button>
             ) : (
               <button
+                type="button"
                 onClick={handleSkip}
                 className="px-3 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-300 transition-colors"
               >
@@ -264,6 +347,8 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
             {tourSteps.map((_, i) => (
               <button
                 key={i}
+                type="button"
+                aria-label={`Go to onboarding step ${i + 1}`}
                 onClick={() => setCurrentStep(i)}
                 className={cn(
                   'w-2 h-2 rounded-full transition-all duration-200',
@@ -278,6 +363,7 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
           </div>
 
           <button
+            type="button"
             onClick={handleNext}
             className={cn(
               'flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-medium transition-all',
@@ -286,7 +372,7 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ onComplete, forc
                 : 'bg-gray-800 text-white hover:bg-gray-700'
             )}
           >
-            {isLast ? 'Start Building' : 'Next'}
+            {isLast ? 'Continue to builder' : 'Next'}
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>

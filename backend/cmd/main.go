@@ -501,7 +501,7 @@ func main() {
 	runtimeVerifyEnabled, runtimeVerifyMode := resolvePreviewRuntimeVerify(chromePath)
 	var pvVerifier *preview.Verifier
 	if runtimeVerifyEnabled {
-		pvVerifier = preview.NewVerifierWithRuntime(previewHandler.GetServerRunner())
+		pvVerifier = preview.NewVerifierWithRuntimeChromePath(previewHandler.GetServerRunner(), chromePath)
 		log.Println("Preview verification gate enabled (runtime boot proof ON)")
 	} else {
 		pvVerifier = preview.NewVerifier(previewHandler.GetServerRunner())

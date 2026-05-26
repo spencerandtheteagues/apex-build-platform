@@ -90,10 +90,10 @@ Most competitors default to managed credentials or platform-managed model access
 
 **Replit:** Replit has a large community of published "Repls" that users can fork, remix, and discover. This drives organic growth.
 
-**APEX Build gap:** The Explore page (`pages/Explore.tsx`) exists but is not prominently linked from landing or onboarding. There is no published-app discovery flow.
+**APEX Build gap:** The Explore page (`pages/Explore.tsx`) exists and is linked from landing/app navigation in current code, but onboarding does not yet point users to community builds and the landing page still lacks proof that real apps are being built. Focused Explore/Landing tests are also still missing.
 
 **Target state:**
-- Surface the Explore page prominently in the landing nav
+- Keep the Explore page prominent in the landing/app nav and add onboarding discovery entry points only when the action label is honest
 - Allow published apps to have a public gallery card with a one-click fork/remix path
 - Add a "Featured Builds" section to the landing page showcasing real apps built on APEX
 

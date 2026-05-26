@@ -173,19 +173,29 @@ func TestGeneratePreservesTimeForFallbackProvider(t *testing.T) {
 
 	primaryCalls := 0
 	fallbackCalls := 0
+	primaryHadReservedBudget := false
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	parentDeadline, _ := ctx.Deadline()
 
 	router := &AIRouter{
 		clients: map[AIProvider]AIClient{
 			ProviderGPT4: &routerStubClient{
 				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
 					primaryCalls++
-					<-ctx.Done()
-					return nil, ctx.Err()
+					if deadline, ok := ctx.Deadline(); ok && deadline.Before(parentDeadline.Add(-100*time.Millisecond)) {
+						primaryHadReservedBudget = true
+					}
+					return nil, context.DeadlineExceeded
 				},
 			},
 			ProviderClaude: &routerStubClient{
 				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
 					fallbackCalls++
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
 					return &AIResponse{
 						Provider: ProviderClaude,
 						Content:  "fallback ok",
@@ -204,9 +214,6 @@ func TestGeneratePreservesTimeForFallbackProvider(t *testing.T) {
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 160*time.Millisecond)
-	defer cancel()
-
 	resp, err := router.Generate(ctx, &AIRequest{
 		ID:         "fallback-budget",
 		Provider:   ProviderGPT4,
@@ -224,6 +231,9 @@ func TestGeneratePreservesTimeForFallbackProvider(t *testing.T) {
 	}
 	if fallbackCalls != 1 {
 		t.Fatalf("fallback calls = %d, want 1", fallbackCalls)
+	}
+	if !primaryHadReservedBudget {
+		t.Fatal("primary provider attempt did not reserve parent deadline time for fallback")
 	}
 }
 

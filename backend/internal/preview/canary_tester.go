@@ -41,6 +41,13 @@ func NewCanaryTester() *CanaryTester {
 	}
 }
 
+func NewCanaryTesterWithChromePath(chromePath string) *CanaryTester {
+	return &CanaryTester{
+		chromePath: strings.TrimSpace(chromePath),
+		enabled:    canaryProbesEnabled(),
+	}
+}
+
 func (ct *CanaryTester) Available() bool {
 	return ct != nil && ct.enabled && ct.chromePath != ""
 }

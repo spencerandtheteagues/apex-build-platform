@@ -10,6 +10,11 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MATRIX="$REPO_ROOT/scripts/run_platform_canary_matrix.sh"
+PROMPT_MATRIX="$REPO_ROOT/scripts/run_live_prompt_matrix.sh"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+PROMPT_FIXTURE="$TMP_DIR/01-test-prompt.md"
+printf 'Build a small test app.\n' > "$PROMPT_FIXTURE"
 
 TESTS_RUN=0
 TESTS_FAILED=0
@@ -37,6 +42,25 @@ run_matrix_safe() {
   fi
 }
 
+# run_prompt_matrix_safe <expected_rc> <expected_token> <label> -- <env assignments...>
+run_prompt_matrix_safe() {
+  local expected_rc="$1" expected_token="$2" label="$3"
+  shift 3
+  [[ "$1" == "--" ]] && shift
+  local out rc
+  out="$(env "$@" APEX_SKIP_OLLAMA_CREDIT_SAVER_SOURCE=1 DRY_RUN=1 PROMPT_FILES="$PROMPT_FIXTURE" \
+    bash "$PROMPT_MATRIX" 2>&1)"
+  rc=$?
+  if [[ "$rc" == "$expected_rc" && "$out" == *"$expected_token"* ]]; then
+    pass "$label (rc=$rc)"
+  else
+    fail "$label (rc=$rc want $expected_rc; token '$expected_token' present=$([[ "$out" == *"$expected_token"* ]] && echo yes || echo no))"
+    echo "----- output -----" >&2
+    echo "$out" >&2
+    echo "------------------" >&2
+  fi
+}
+
 echo "== matrix false-green guardrails (no network) =="
 
 # Required paid scenarios without credentials must fail as INCOMPLETE, not green.
@@ -53,6 +77,25 @@ run_matrix_safe 1 "CANARY_MATRIX_NO_SCENARIOS_RAN" \
 run_matrix_safe 1 "CANARY_MATRIX_NO_SCENARIOS_RAN" \
   "optional paid + no creds -> not green" -- \
   REQUIRE_PAID_SCENARIOS=0 RUN_PAID_BALANCED=1 RUN_PAID_MAX=1
+
+echo
+echo "== prompt matrix shape guardrails (dry run, no network) =="
+
+run_prompt_matrix_safe 0 "PROMPT_MATRIX_DRY_RUN" \
+  "expected prompt count and balanced mode -> dry-run ok" -- \
+  EXPECTED_PROMPT_COUNT=1 POWER_MODES=balanced
+
+run_prompt_matrix_safe 1 "PROMPT_MATRIX_PROMPT_COUNT_MISMATCH" \
+  "expected prompt count mismatch -> fails before live run" -- \
+  EXPECTED_PROMPT_COUNT=2 POWER_MODES=balanced
+
+run_prompt_matrix_safe 1 "PROMPT_MATRIX_POWER_MODES_EMPTY" \
+  "blank power modes -> fails before live run" -- \
+  EXPECTED_PROMPT_COUNT=1 POWER_MODES="   "
+
+run_prompt_matrix_safe 1 "PROMPT_MATRIX_POWER_MODE_INVALID" \
+  "unknown power mode -> fails before live run" -- \
+  EXPECTED_PROMPT_COUNT=1 POWER_MODES=turbo
 
 echo
 echo "Ran $TESTS_RUN assertions, $TESTS_FAILED failed."
