@@ -111,6 +111,8 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 		agentID:         agent.ID,
 		taskID:          task.ID,
 		userID:          build.UserID,
+		requestID:       build.RequestID,
+		operationID:     build.OperationID,
 		powerMode:       build.PowerMode,
 		usePlatformKeys: am.buildUsesPlatformKeys(build),
 	}

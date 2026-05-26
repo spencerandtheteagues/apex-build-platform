@@ -198,7 +198,9 @@ func (g *GeminiClient) generateWithModelFallback(ctx context.Context, model stri
 	models := geminiModelFallbacks(model)
 	var lastErr error
 	for idx, candidate := range models {
-		url := fmt.Sprintf("%s/%s:generateContent?key=%s", g.baseURL, candidate, g.apiKey)
+		// The API key is sent via the x-goog-api-key header (set in makeRequest), never in
+		// the URL — a key in the query string leaks into wrapped *url.Error transport errors.
+		url := fmt.Sprintf("%s/%s:generateContent", g.baseURL, candidate)
 		resp, err := g.makeRequest(ctx, url, req)
 		if err == nil {
 			return resp, candidate, nil
@@ -398,10 +400,13 @@ func (g *GeminiClient) makeRequest(ctx context.Context, url string, req *geminiR
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", g.apiKey)
 
 	resp, err := g.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
+		// A transport error is a *url.Error whose string includes the request URL; redact
+		// defensively in case a key ever appears there.
+		return nil, fmt.Errorf("failed to make request: %s", redactSecrets(err.Error(), g.apiKey))
 	}
 	defer resp.Body.Close()
 
@@ -411,22 +416,25 @@ func (g *GeminiClient) makeRequest(ctx context.Context, url string, req *geminiR
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// Parse specific error types for better error messages
+		// Preserve the provider's own (secret-redacted) message so health diagnostics show
+		// the real reason instead of a generic prefix. The structured prefix stays first so
+		// classifyProviderError keys off it regardless of body content.
+		detail := sanitizeProviderBody(body, g.apiKey)
 		switch resp.StatusCode {
 		case 429:
-			return nil, fmt.Errorf("RATE_LIMIT: Gemini API rate limit exceeded. Please wait before retrying")
+			return nil, fmt.Errorf("RATE_LIMIT: Gemini API rate limit exceeded - please wait before retrying%s", detailSuffix(resp.StatusCode, detail))
 		case 403:
 			// Check if it's a quota issue
 			if bytes.Contains(body, []byte("quota")) || bytes.Contains(body, []byte("QUOTA")) {
-				return nil, fmt.Errorf("QUOTA_EXCEEDED: Gemini API quota exhausted. Consider adding billing or using another provider")
+				return nil, fmt.Errorf("QUOTA_EXCEEDED: Gemini API quota exhausted - add billing or use another provider%s", detailSuffix(resp.StatusCode, detail))
 			}
-			return nil, fmt.Errorf("FORBIDDEN: Gemini API access denied - check API key permissions")
+			return nil, fmt.Errorf("FORBIDDEN: Gemini API access denied - check API key permissions%s", detailSuffix(resp.StatusCode, detail))
 		case 401:
-			return nil, fmt.Errorf("UNAUTHORIZED: Invalid Gemini API key")
+			return nil, fmt.Errorf("UNAUTHORIZED: invalid Gemini API key%s", detailSuffix(resp.StatusCode, detail))
 		case 500, 502, 503, 504:
-			return nil, fmt.Errorf("SERVICE_ERROR: Gemini service temporarily unavailable (status %d)", resp.StatusCode)
+			return nil, fmt.Errorf("SERVICE_ERROR: Gemini service temporarily unavailable%s", detailSuffix(resp.StatusCode, detail))
 		default:
-			return nil, fmt.Errorf("API_ERROR: Gemini request failed with status %d: %s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("API_ERROR: Gemini request failed%s", detailSuffix(resp.StatusCode, detail))
 		}
 	}
 
@@ -483,7 +491,7 @@ func (g *GeminiClient) Health(ctx context.Context) error {
 		},
 	}
 
-	url := fmt.Sprintf("%s/gemini-2.5-flash-lite:generateContent?key=%s", g.baseURL, g.apiKey)
+	url := fmt.Sprintf("%s/gemini-2.5-flash-lite:generateContent", g.baseURL)
 	_, err := g.makeRequest(ctx, url, testReq)
 	return err
 }

@@ -529,6 +529,82 @@ func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *test
 	}
 }
 
+func TestProcessResultFallsBackToBuildScopedAgentRegistry(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	task := &Task{
+		ID:          "stale-plan-task",
+		Type:        TaskPlan,
+		Description: "Create plan",
+		Status:      TaskInProgress,
+		AssignedTo:  "lead-1",
+		MaxRetries:  2,
+		Input:       map[string]any{},
+		CreatedAt:   time.Now(),
+	}
+	agent := &Agent{
+		ID:          "lead-1",
+		BuildID:     "build-scoped-agent",
+		Role:        RoleLead,
+		Provider:    ai.ProviderClaude,
+		Model:       "claude-sonnet-4-6",
+		Status:      StatusWorking,
+		CurrentTask: task,
+	}
+	build := &Build{
+		ID:           agent.BuildID,
+		Status:       BuildPlanning,
+		Mode:         ModeFull,
+		PowerMode:    PowerBalanced,
+		ProviderMode: "platform",
+		UpdatedAt:    time.Now(),
+		Agents:       map[string]*Agent{agent.ID: agent},
+		Tasks:        []*Task{task},
+	}
+
+	manager := &AgentManager{
+		ctx:         ctx,
+		builds:      map[string]*Build{build.ID: build},
+		agents:      map[string]*Agent{},
+		aiRouter:    &consensusRetryRouter{providers: []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4}},
+		taskQueue:   make(chan *Task, 1),
+		subscribers: map[string][]chan *WSMessage{},
+	}
+
+	manager.processResult(&TaskResult{
+		TaskID:  task.ID,
+		AgentID: agent.ID,
+		Attempt: 0,
+		Success: false,
+		Error:   errors.New("planning provider claude timed out after 55s: context deadline exceeded"),
+	})
+
+	if got := manager.agents[agent.ID]; got != agent {
+		t.Fatalf("expected build-scoped agent to be restored into manager registry, got %+v", got)
+	}
+	if task.Status != TaskPending {
+		t.Fatalf("expected timed-out task to be requeued pending, got %s", task.Status)
+	}
+	if task.RetryCount != 1 {
+		t.Fatalf("expected retry_count=1, got %d", task.RetryCount)
+	}
+	if task.RetryStrategy != RetryStrategy("switch_provider") {
+		t.Fatalf("expected switch_provider retry strategy, got %s", task.RetryStrategy)
+	}
+
+	select {
+	case queued := <-manager.taskQueue:
+		if queued != task {
+			t.Fatalf("expected recovered task to be requeued, got %+v", queued)
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("expected recovered task to be requeued")
+	}
+}
+
 func TestWaitForPhaseCompletionSurvivesRecoverableProviderTimeoutRetry(t *testing.T) {
 	t.Parallel()
 

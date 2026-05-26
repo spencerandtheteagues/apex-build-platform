@@ -59,6 +59,16 @@ import {
 const DEFAULT_PRODUCTION_API_BASE_URL = 'https://api.apex-build.dev/api/v1'
 export const PREVIEW_START_TIMEOUT_MS = 90_000
 
+export const createOperationId = (): string => {
+  const cryptoSource = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined
+  if (cryptoSource?.randomUUID) {
+    return `op_${cryptoSource.randomUUID()}`
+  }
+
+  const randomPart = Math.random().toString(36).slice(2, 10)
+  return `op_${Date.now().toString(36)}_${randomPart}`
+}
+
 // Get API URL from environment or use default
 const getApiUrl = (): string => {
   const configuredApiUrl = getConfiguredApiUrl()
@@ -145,6 +155,17 @@ const setHeaderValue = (headers: AxiosRequestConfig['headers'], key: string, val
 
   headerStore[key] = value
   return headerStore
+}
+
+const getHeaderValue = (headers: AxiosRequestConfig['headers'], key: string): string | undefined => {
+  const headerStore = headers as any
+  if (!headerStore) return undefined
+  if (typeof headerStore.get === 'function') {
+    const value = headerStore.get(key)
+    return typeof value === 'string' ? value : undefined
+  }
+
+  return headerStore[key] ?? headerStore[key.toLowerCase()]
 }
 
 const removeHeaderValue = (headers: AxiosRequestConfig['headers'], key: string): AxiosRequestConfig['headers'] => {
@@ -320,6 +341,11 @@ export class ApiService {
 
   private setupInterceptors() {
     this.client.interceptors.request.use(async (config) => {
+      if (!getHeaderValue(config.headers, 'X-Apex-Operation-ID')) {
+        const operationId = createOperationId()
+        config.headers = setHeaderValue(config.headers, 'X-Apex-Operation-ID', operationId) as typeof config.headers
+        config.headers = setHeaderValue(config.headers, 'X-Apex-Client-Trace-ID', operationId) as typeof config.headers
+      }
       const method = (config.method ?? 'get').toLowerCase()
       if (method !== 'get' && method !== 'head' && method !== 'options') {
         await this.fetchCsrfToken()

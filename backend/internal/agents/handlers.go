@@ -514,6 +514,12 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	}
 
 	log.Printf("StartBuild: description=%s, mode=%s", truncate(req.Description, 50), req.Mode)
+	if requestID := strings.TrimSpace(c.GetString("request_id")); requestID != "" {
+		req.RequestID = requestID
+	}
+	if operationID := strings.TrimSpace(c.GetString("operation_id")); operationID != "" {
+		req.OperationID = operationID
+	}
 
 	// Validate description before running provider or billing checks so clients
 	// get actionable input errors instead of quota failures for malformed requests.
@@ -706,6 +712,16 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		return
 	}
 	log.Printf("StartBuild: build created with ID %s", build.ID)
+	applog.Operation("build.start.accepted", map[string]any{
+		"status":       "success",
+		"build_id":     build.ID,
+		"user_id":      uid,
+		"request_id":   build.RequestID,
+		"operation_id": build.OperationID,
+		"mode":         string(req.Mode),
+		"power_mode":   string(req.PowerMode),
+		"prompt_len":   len(req.Description),
+	})
 	applog.BuildStarted(build.ID, uid, string(req.Mode), string(req.PowerMode), req.Description)
 
 	// Start the build process asynchronously

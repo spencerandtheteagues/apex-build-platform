@@ -7902,6 +7902,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             currentBuildSpend={currentBuildSpend}
             currentBuildSpendEvents={currentBuildSpendEvents}
             buildStalled={buildStalled}
+            userSubscriptionType={user?.subscription_type}
             chatInput={chatInput}
             setChatInput={setChatInput}
             plannerSendMode={plannerSendMode}

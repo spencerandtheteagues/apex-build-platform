@@ -10,6 +10,8 @@ vi.mock('@/services/api', () => ({
     getSubscription: vi.fn(),
     getCreditBalance: vi.fn(),
     getInvoices: vi.fn(),
+    changePlan: vi.fn(),
+    createCheckoutSession: vi.fn(),
   },
 }))
 
@@ -25,6 +27,8 @@ const apiMocks = apiService as unknown as {
   getSubscription: ReturnType<typeof vi.fn>
   getCreditBalance: ReturnType<typeof vi.fn>
   getInvoices: ReturnType<typeof vi.fn>
+  changePlan: ReturnType<typeof vi.fn>
+  createCheckoutSession: ReturnType<typeof vi.fn>
 }
 
 describe('BillingSettings', () => {
@@ -172,5 +176,222 @@ describe('BillingSettings', () => {
     expect(await screen.findByText('Subscription Plans')).toBeTruthy()
     expect(screen.queryByText('Upgrade to Builder')).toBeNull()
     expect(screen.getByText('Contact support')).toBeTruthy()
+  })
+
+  it('shows upgrade button for paid user looking at higher tier', async () => {
+    apiMocks.getPlans.mockResolvedValue({
+      success: true,
+      data: {
+        self_serve_ready: true,
+        plans: [
+          {
+            type: 'free',
+            name: 'Free',
+            monthly_price_cents: 0,
+            monthly_price_id: '',
+            monthly_credits_usd: 0,
+            is_popular: false,
+            features: [],
+          },
+          {
+            type: 'builder',
+            name: 'Builder',
+            monthly_price_cents: 2400,
+            monthly_price_id: 'price_builder_monthly_live',
+            monthly_credits_usd: 12,
+            is_popular: true,
+            features: ['Backend generation', 'Publish', 'BYOK'],
+          },
+          {
+            type: 'pro',
+            name: 'Pro',
+            monthly_price_cents: 5900,
+            monthly_price_id: 'price_pro_monthly_live',
+            monthly_credits_usd: 40,
+            is_popular: false,
+            features: ['Ollama cloud models', 'BYOK + caps', 'Long runs'],
+          },
+        ],
+      },
+    })
+    apiMocks.getSubscription.mockResolvedValue({
+      success: true,
+      data: {
+        plan_type: 'builder',
+        plan_name: 'Builder',
+        status: 'active',
+        current_period_end: '2026-04-21T00:00:00Z',
+      },
+    })
+    apiMocks.getCreditBalance.mockResolvedValue({
+      success: true,
+      data: {
+        balance: 14,
+        has_unlimited: false,
+        bypass_billing: false,
+      },
+    })
+
+    render(<BillingSettings />)
+
+    expect(await screen.findByText('Subscription Plans')).toBeTruthy()
+    expect(screen.getByText('Upgrade to Pro')).toBeTruthy()
+    expect(screen.getByText('Downgrade to Free')).toBeTruthy()
+  })
+
+  it('downgrade button communicates period-end effect', async () => {
+    apiMocks.changePlan.mockResolvedValue({
+      success: true,
+      data: {
+        plan_type: 'builder',
+        billing_cycle: 'monthly',
+        status: 'active',
+        current_period_end: '2026-04-21T00:00:00Z',
+      },
+    })
+
+    apiMocks.getPlans.mockResolvedValue({
+      success: true,
+      data: {
+        self_serve_ready: true,
+        plans: [
+          {
+            type: 'free',
+            name: 'Free',
+            monthly_price_cents: 0,
+            monthly_price_id: '',
+            monthly_credits_usd: 0,
+            is_popular: false,
+            features: [],
+          },
+          {
+            type: 'builder',
+            name: 'Builder',
+            monthly_price_cents: 2400,
+            monthly_price_id: 'price_builder_monthly_live',
+            monthly_credits_usd: 12,
+            is_popular: true,
+            features: ['Backend generation'],
+          },
+          {
+            type: 'pro',
+            name: 'Pro',
+            monthly_price_cents: 5900,
+            monthly_price_id: 'price_pro_monthly_live',
+            monthly_credits_usd: 40,
+            is_popular: false,
+            features: ['Ollama cloud models'],
+          },
+        ],
+      },
+    })
+    apiMocks.getSubscription.mockResolvedValue({
+      success: true,
+      data: {
+        plan_type: 'pro',
+        plan_name: 'Pro',
+        status: 'active',
+        current_period_end: '2026-05-21T00:00:00Z',
+      },
+    })
+    apiMocks.getCreditBalance.mockResolvedValue({
+      success: true,
+      data: {
+        balance: 40,
+        has_unlimited: false,
+        bypass_billing: false,
+      },
+    })
+
+    const { container } = render(<BillingSettings />)
+
+    expect(await screen.findByText('Subscription Plans')).toBeTruthy()
+    const downgradeBtn = screen.getByText('Downgrade to Builder')
+    expect(downgradeBtn).toBeTruthy()
+
+    downgradeBtn.click()
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('Downgrade scheduled')
+      expect(container.textContent).toContain('until the end of the current period')
+    })
+  })
+
+  it('upgrade button communicates immediate prorated charge', async () => {
+    apiMocks.changePlan.mockResolvedValue({
+      success: true,
+      data: {
+        plan_type: 'pro',
+        billing_cycle: 'monthly',
+        status: 'active',
+        current_period_end: '2026-05-21T00:00:00Z',
+      },
+    })
+
+    apiMocks.getPlans.mockResolvedValue({
+      success: true,
+      data: {
+        self_serve_ready: true,
+        plans: [
+          {
+            type: 'free',
+            name: 'Free',
+            monthly_price_cents: 0,
+            monthly_price_id: '',
+            monthly_credits_usd: 0,
+            is_popular: false,
+            features: [],
+          },
+          {
+            type: 'builder',
+            name: 'Builder',
+            monthly_price_cents: 2400,
+            monthly_price_id: 'price_builder_monthly_live',
+            monthly_credits_usd: 12,
+            is_popular: true,
+            features: ['Backend generation'],
+          },
+          {
+            type: 'pro',
+            name: 'Pro',
+            monthly_price_cents: 5900,
+            monthly_price_id: 'price_pro_monthly_live',
+            monthly_credits_usd: 40,
+            is_popular: false,
+            features: ['Ollama cloud models'],
+          },
+        ],
+      },
+    })
+    apiMocks.getSubscription.mockResolvedValue({
+      success: true,
+      data: {
+        plan_type: 'builder',
+        plan_name: 'Builder',
+        status: 'active',
+        current_period_end: '2026-04-21T00:00:00Z',
+      },
+    })
+    apiMocks.getCreditBalance.mockResolvedValue({
+      success: true,
+      data: {
+        balance: 12,
+        has_unlimited: false,
+        bypass_billing: false,
+      },
+    })
+
+    const { container } = render(<BillingSettings />)
+
+    expect(await screen.findByText('Subscription Plans')).toBeTruthy()
+    const upgradeBtn = screen.getByText('Upgrade to Pro')
+    expect(upgradeBtn).toBeTruthy()
+
+    upgradeBtn.click()
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('Upgraded to Pro')
+      expect(container.textContent).toContain('prorated difference immediately')
+    })
   })
 })

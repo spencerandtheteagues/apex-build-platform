@@ -16,6 +16,7 @@ import (
 
 	"apex-build/internal/agents/autonomous"
 	"apex-build/internal/ai"
+	"apex-build/internal/applog"
 
 	"github.com/google/uuid"
 )
@@ -40,6 +41,8 @@ type plannerRouterAdapter struct {
 	agentID         string
 	taskID          string
 	userID          uint
+	requestID       string
+	operationID     string
 	powerMode       PowerMode
 	usePlatformKeys bool
 	lastProvider    ai.AIProvider
@@ -88,6 +91,25 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		}
 
 		a.broadcastPlanningProviderAttempt(route, idx+1, len(routes), attemptTimeout)
+		finishOperation := applog.StartOperation("planner.provider.attempt", map[string]any{
+			"build_id":            a.buildID,
+			"request_id":          a.requestID,
+			"operation_id":        a.operationID,
+			"agent_id":            a.agentID,
+			"task_id":             a.taskID,
+			"user_id":             a.userID,
+			"provider":            string(provider),
+			"model":               route.model,
+			"attempt":             idx + 1,
+			"attempt_total":       len(routes),
+			"timeout_ms":          attemptTimeout.Milliseconds(),
+			"power_mode":          string(a.powerMode),
+			"use_platform_keys":   a.usePlatformKeys,
+			"prompt_len":          len(prompt),
+			"max_tokens":          opts.MaxTokens,
+			"disable_fallback":    true,
+			"operation_subsystem": "planning",
+		})
 
 		type planningGenerateResult struct {
 			resp *ai.AIResponse
@@ -98,6 +120,8 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 			resp, err := a.router.Generate(attemptCtx, provider, prompt, GenerateOptions{
 				UserID:                  a.userID,
 				BuildID:                 a.buildID,
+				RequestID:               a.requestID,
+				OperationID:             a.operationID,
 				MaxTokens:               opts.MaxTokens,
 				Temperature:             opts.Temperature,
 				SystemPrompt:            opts.SystemPrompt,
@@ -122,6 +146,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		cancel()
 
 		if err != nil {
+			finishOperation("failed", err, nil)
 			lastErr = err
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
@@ -132,6 +157,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		}
 		if resp == nil {
 			lastErr = fmt.Errorf("empty response from planning provider %s", provider)
+			finishOperation("failed", lastErr, nil)
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
 			}
@@ -141,6 +167,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		}
 		if strings.TrimSpace(resp.Content) == "" {
 			lastErr = fmt.Errorf("empty content from planning provider %s", provider)
+			finishOperation("failed", lastErr, map[string]any{"response_provider": string(resp.Provider)})
 			if a.manager != nil && a.buildID != "" {
 				a.manager.markProviderTemporaryFailure(a.buildID, provider)
 			}
@@ -155,6 +182,11 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		if a.manager != nil && a.buildID != "" {
 			a.manager.clearProviderTemporaryFailure(a.buildID, provider)
 		}
+		finishOperation("success", nil, map[string]any{
+			"response_provider": string(resp.Provider),
+			"response_model":    a.lastModel,
+			"response_chars":    len(resp.Content),
+		})
 		a.broadcastPlanningProviderSuccess(provider, a.lastModel)
 		return resp.Content, nil
 	}
@@ -221,11 +253,11 @@ func ollamaBalancedPlanningModelFallbacks() []string {
 		}
 	}
 	return []string{
-		"kimi-k2.6:cloud",
+		"deepseek-v4-flash:cloud",
 		"glm-5.1:cloud",
 		"deepseek-v4-pro:cloud",
-		"deepseek-v4-flash:cloud",
-		"qwen3.5:cloud",
+		"devstral-small-2:24b:cloud",
+		"qwen3.5:397b:cloud",
 	}
 }
 

@@ -202,12 +202,15 @@ func TestPlanningProviderAttemptTimeoutUsesShortManagedCloudCaps(t *testing.T) {
 	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "")
 	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_SECONDS", "")
 
-	if got := planningProviderAttemptTimeout(ai.ProviderOllama, PowerMax, true); got != 45*time.Second {
-		t.Fatalf("managed ollama max planning timeout = %s, want 45s", got)
+	// Managed cloud Ollama gets longer timeouts to avoid truncated plans.
+	if got := planningProviderAttemptTimeout(ai.ProviderOllama, PowerMax, true); got != 180*time.Second {
+		t.Fatalf("managed ollama max planning timeout = %s, want 180s", got)
 	}
-	if got := planningProviderAttemptTimeout(ai.ProviderOllama, PowerBalanced, false); got != 120*time.Second {
-		t.Fatalf("BYOK/local ollama balanced planning timeout = %s, want 120s", got)
+	// BYOK/self-hosted Ollama (not using platform keys) is expected to be slower.
+	if got := planningProviderAttemptTimeout(ai.ProviderOllama, PowerBalanced, false); got != 180*time.Second {
+		t.Fatalf("BYOK/local ollama balanced planning timeout = %s, want 180s", got)
 	}
+	// Claude fallback for balanced gets a standard cap.
 	if got := planningProviderAttemptTimeout(ai.ProviderClaude, PowerBalanced, true); got != 55*time.Second {
 		t.Fatalf("balanced cloud fallback planning timeout = %s, want 55s", got)
 	}
@@ -272,8 +275,11 @@ func TestPlanningProviderOrderPrefersOllamaForBalancedPlatformPlanning(t *testin
 	}
 	task := &Task{ID: "plan", Type: TaskPlan}
 
+	// Current production behavior: Ollama cloud is bypassed for planning when
+	// using platform keys in balanced mode (Claude is used first as a fallback).
+	// This is a temporary workaround for Ollama empty response issues.
 	got := am.planningProviderOrder(build, task, ai.ProviderClaude)
-	wantPrefix := []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude, ai.ProviderGPT4}
+	wantPrefix := []ai.AIProvider{ai.ProviderClaude, ai.ProviderOllama, ai.ProviderGPT4}
 	if len(got) < len(wantPrefix) {
 		t.Fatalf("planning providers = %v, want at least %v", got, wantPrefix)
 	}
@@ -289,11 +295,11 @@ func TestPlanningRouteCandidatesExpandBalancedOllamaCloudModelFallbacks(t *testi
 
 	got := planningRouteCandidates([]ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude}, PowerBalanced, true)
 	want := []planningRouteCandidate{
-		{provider: ai.ProviderOllama, model: "kimi-k2.6:cloud"},
+		{provider: ai.ProviderOllama, model: "deepseek-v4-flash:cloud"},
 		{provider: ai.ProviderOllama, model: "glm-5.1:cloud"},
 		{provider: ai.ProviderOllama, model: "deepseek-v4-pro:cloud"},
-		{provider: ai.ProviderOllama, model: "deepseek-v4-flash:cloud"},
-		{provider: ai.ProviderOllama, model: "qwen3.5:cloud"},
+		{provider: ai.ProviderOllama, model: "devstral-small-2:24b:cloud"},
+		{provider: ai.ProviderOllama, model: "qwen3.5:397b:cloud"},
 		{provider: ai.ProviderClaude},
 	}
 	if len(got) != len(want) {
@@ -312,13 +318,16 @@ func TestPlanningTaskOverallTimeoutBudgetsExpandedOllamaPlanningRoutes(t *testin
 	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_SECONDS", "")
 	t.Setenv("APEX_PLANNING_OLLAMA_TIMEOUT_SECONDS", "")
 
+	// With managed cloud Ollama (balanced), each Ollama attempt gets 120s.
+	// 5 Ollama fallbacks + 1 Claude fallback = 5*120 + 55 + 30 = 685s,
+	// which is capped at 10 minutes by the safety ceiling.
 	got := planningTaskOverallTimeout(
 		PowerBalanced,
 		ai.ProviderOllama,
 		[]ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude},
 		true,
 	)
-	want := 30*time.Second + 5*(35*time.Second) + 55*time.Second
+	want := 10 * time.Minute
 	if got != want {
 		t.Fatalf("overall planning timeout = %s, want %s", got, want)
 	}

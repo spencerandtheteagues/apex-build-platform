@@ -4,6 +4,15 @@
 import { getConfiguredApiUrl } from '@/config/runtime'
 import { AICapability, AIProvider, AIMessage } from '@/types'
 
+const createOperationId = (): string => {
+  const cryptoSource = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined
+  if (cryptoSource?.randomUUID) {
+    return `op_${cryptoSource.randomUUID()}`
+  }
+
+  return `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+}
+
 export interface AIStreamChunk {
   type: 'content' | 'error' | 'done' | 'usage'
   content?: string
@@ -128,12 +137,15 @@ class AIService {
     onStream: StreamCallback,
     signal: AbortSignal
   ): Promise<string> {
+    const operationId = createOperationId()
     const response = await fetch(`${this.baseURL}/ai/stream`, {
       method: 'POST',
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
+        'X-Apex-Operation-ID': operationId,
+        'X-Apex-Client-Trace-ID': operationId,
       },
       body: JSON.stringify({
         capability: options.capability,
@@ -205,11 +217,14 @@ class AIService {
     options: Omit<AIGenerationOptions, 'stream'>,
     signal: AbortSignal
   ): Promise<string> {
+    const operationId = createOperationId()
     const response = await fetch(`${this.baseURL}/ai/generate`, {
       method: 'POST',
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
+        'X-Apex-Operation-ID': operationId,
+        'X-Apex-Client-Trace-ID': operationId,
       },
       body: JSON.stringify({
         capability: options.capability,
@@ -239,11 +254,14 @@ class AIService {
     abortSignal?: AbortSignal
   ): Promise<AICompletionSuggestion | null> {
     try {
+      const operationId = createOperationId()
       const response = await fetch(`${this.baseURL}/ai/complete`, {
         method: 'POST',
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
+          'X-Apex-Operation-ID': operationId,
+          'X-Apex-Client-Trace-ID': operationId,
         },
         body: JSON.stringify({
           capability: 'code_completion',

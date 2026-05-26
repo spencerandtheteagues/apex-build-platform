@@ -27,6 +27,7 @@ import {
 import { ProviderStatusBar } from "./ProviderStatusBar";
 import { LiveActivityFeed } from "./LiveActivityFeed";
 import { BuildHistory } from "./BuildHistory";
+import KeepThisRunning from "./KeepThisRunning";
 import DiffReviewPanel from "@/components/diff/DiffReviewPanel";
 import AIRepairReviewPanel from "@/components/ide/AIRepairReviewPanel";
 import AITelemetryOverlay from "@/components/ide/AITelemetryOverlay";
@@ -306,6 +307,7 @@ interface BuildScreenProps {
   currentBuildSpend: number;
   currentBuildSpendEvents: number;
   buildStalled: boolean;
+  userSubscriptionType?: 'free' | 'builder' | 'pro' | 'team' | 'enterprise' | 'owner';
   chatInput: string;
   setChatInput: (v: string) => void;
   plannerSendMode: BuildMessageTargetMode;
@@ -1971,6 +1973,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     currentBuildSpend,
     currentBuildSpendEvents,
     buildStalled,
+    userSubscriptionType,
     chatInput,
     setChatInput,
     plannerSendMode,
@@ -2132,7 +2135,17 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         />
       </div>
 
-      {/* Row 4: Bottom Nav Strip */}
+      {/* Row 5: Keep This Running — post-build always-on CTA (TASK-104) */}
+      {buildCompleted && (
+        <KeepThisRunning
+          projectId={createdProjectId}
+          deploymentId={null}
+          isPaid={['builder', 'pro', 'team', 'enterprise', 'owner'].includes(userSubscriptionType || '')}
+          buildCompleted={buildCompleted}
+        />
+      )}
+
+      {/* Row 6: Bottom Nav Strip */}
       <BottomNavStrip
         activeOverlay={activeOverlay}
         onSelectOverlay={setActiveOverlay}
@@ -2149,7 +2162,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         isPreparingPreview={isPreparingPreview}
       />
 
-      {/* Row 5: Chat Input */}
+      {/* Row 7: Chat Input */}
       <ChatInputBar
         chatInput={chatInput}
         setChatInput={setChatInput}

@@ -26,6 +26,8 @@ const (
 	dockerMetadataTimeout = 5 * time.Second
 	dockerBuildTimeout    = 2 * time.Minute
 	dockerProbeCacheTTL   = 30 * time.Second
+	sandboxUID            = 1000
+	sandboxGID            = 1000
 )
 
 type dockerBoolCacheEntry struct {
@@ -1466,9 +1468,9 @@ func (s *ContainerSandbox) buildDockerArgs(
 	}
 
 	// Tmpfs mounts
-	tmpfsFlags := "rw,exec,nosuid,size=%s,mode=1777,uid=1000,gid=1000"
+	tmpfsFlags := fmt.Sprintf("rw,exec,nosuid,size=%%s,mode=1777,uid=%d,gid=%d", sandboxUID, sandboxGID)
 	if !s.languageNeedsExecutableTmp(exec.Language) {
-		tmpfsFlags = "rw,noexec,nosuid,size=%s,mode=1777,uid=1000,gid=1000"
+		tmpfsFlags = fmt.Sprintf("rw,noexec,nosuid,size=%%s,mode=1777,uid=%d,gid=%d", sandboxUID, sandboxGID)
 	}
 	args = append(args,
 		"--tmpfs", fmt.Sprintf("/tmp:"+tmpfsFlags, limits.TmpfsSize),

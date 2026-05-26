@@ -51,7 +51,8 @@ func TestOllamaCloudNormalizesKimiAlias(t *testing.T) {
 		{model: "glm-5.1", want: "glm-5.1:cloud"},
 		{model: "deepseek-v4", want: "deepseek-v4-flash:cloud"},
 		{model: "deepseek-v4-pro", want: "deepseek-v4-pro:cloud"},
-		{model: "qwen-3.6-27b", want: "qwen3.5:cloud"},
+		{model: "qwen-3.6-27b", want: "qwen3.5:397b:cloud"},
+		{model: "devstral-small-24b", want: "devstral-small-2:24b:cloud"},
 	}
 	for _, tt := range tests {
 		req := &AIRequest{
@@ -70,6 +71,38 @@ func TestOllamaBaseURLNormalizesV1Suffix(t *testing.T) {
 	client := NewOllamaCloudClient("https://ollama.com/v1", "cloud-key")
 	if got := client.baseURL; got != "https://ollama.com" {
 		t.Fatalf("baseURL = %q, want https://ollama.com", got)
+	}
+}
+
+func TestOllamaCloudKeyEnablesConcurrencyGateOnGenericClient(t *testing.T) {
+	t.Setenv("OLLAMA_CLOUD_MAX_CONCURRENT", "3")
+
+	client := NewOllamaClient("https://ollama.com/v1", "cloud-key")
+	if client.concurrent == nil {
+		t.Fatal("expected cloud-key Ollama client to allocate concurrency semaphore")
+	}
+	if cap(client.concurrent) != 3 {
+		t.Fatalf("expected semaphore cap 3, got %d", cap(client.concurrent))
+	}
+}
+
+func TestNewAIRouterEnablesOllamaCloudWhenOnlyAPIKeyIsConfigured(t *testing.T) {
+	t.Setenv("OLLAMA_CLOUD_MAX_CONCURRENT", "3")
+
+	router := NewAIRouter("", "", "", "", "", "cloud-key")
+	client, ok := router.GetClient(ProviderOllama)
+	if !ok {
+		t.Fatal("expected Ollama client when API key is configured without explicit base URL")
+	}
+	ollamaClient, ok := client.(*OllamaClient)
+	if !ok {
+		t.Fatalf("expected *OllamaClient, got %T", client)
+	}
+	if ollamaClient.baseURL != "https://ollama.com" {
+		t.Fatalf("baseURL = %q, want https://ollama.com", ollamaClient.baseURL)
+	}
+	if ollamaClient.concurrent == nil || cap(ollamaClient.concurrent) != 3 {
+		t.Fatalf("expected cloud concurrency gate cap 3, got %#v", ollamaClient.concurrent)
 	}
 }
 

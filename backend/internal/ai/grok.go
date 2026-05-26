@@ -236,7 +236,8 @@ func (g *GrokClient) makeRequest(ctx context.Context, req *grokRequest) (*grokRe
 
 	resp, err := g.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
+		// Redact defensively: a transport *url.Error embeds the request URL.
+		return nil, fmt.Errorf("failed to make request: %s", redactSecrets(err.Error(), g.apiKey))
 	}
 	defer resp.Body.Close()
 
@@ -246,22 +247,27 @@ func (g *GrokClient) makeRequest(ctx context.Context, req *grokRequest) (*grokRe
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// Preserve the provider's own (secret-redacted) message for diagnostics. The
+		// structured prefix stays first so classifyProviderError keys off it.
+		detail := sanitizeProviderBody(body, g.apiKey)
 		switch resp.StatusCode {
 		case 429:
-			return nil, fmt.Errorf("RATE_LIMIT: Grok API rate limit exceeded")
+			return nil, fmt.Errorf("RATE_LIMIT: Grok API rate limit exceeded%s", detailSuffix(resp.StatusCode, detail))
 		case 403:
 			if grokErrorBodyIndicatesDisabledKey(body) {
-				return nil, fmt.Errorf("FORBIDDEN: Grok API key is disabled - enable or regenerate the key in the xAI console")
+				// Intentionally omit the body here: it contains the (now-redacted) key and the
+				// crafted message is already actionable.
+				return nil, fmt.Errorf("FORBIDDEN: Grok API key is disabled - enable or regenerate the key in the xAI console (status %d)", resp.StatusCode)
 			}
-			return nil, fmt.Errorf("FORBIDDEN: Grok API access denied - check API key permissions")
+			return nil, fmt.Errorf("FORBIDDEN: Grok API access denied - check API key permissions%s", detailSuffix(resp.StatusCode, detail))
 		case 401:
-			return nil, fmt.Errorf("UNAUTHORIZED: Invalid Grok API key")
+			return nil, fmt.Errorf("UNAUTHORIZED: invalid Grok API key%s", detailSuffix(resp.StatusCode, detail))
 		case 402:
-			return nil, fmt.Errorf("QUOTA_EXCEEDED: Grok API quota exhausted - add credits at console.x.ai")
+			return nil, fmt.Errorf("QUOTA_EXCEEDED: Grok API quota exhausted - add credits at console.x.ai%s", detailSuffix(resp.StatusCode, detail))
 		case 500, 502, 503, 504:
-			return nil, fmt.Errorf("SERVICE_ERROR: Grok service temporarily unavailable (status %d)", resp.StatusCode)
+			return nil, fmt.Errorf("SERVICE_ERROR: Grok service temporarily unavailable%s", detailSuffix(resp.StatusCode, detail))
 		default:
-			return nil, fmt.Errorf("API_ERROR: Grok request failed with status %d: %s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("API_ERROR: Grok request failed%s", detailSuffix(resp.StatusCode, detail))
 		}
 	}
 

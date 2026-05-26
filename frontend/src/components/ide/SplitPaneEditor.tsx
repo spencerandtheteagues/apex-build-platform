@@ -6,7 +6,10 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'reac
 import { cn } from '@/lib/utils'
 import { EditorPane, PaneFile, PaneLayout } from '@/hooks/usePaneManager'
 import { AICapability, File } from '@/types'
-import { Button, Loading } from '@/components/ui'
+import { Button } from '@/components/ui'
+// Imported by direct path (not the editor barrel) so the fallback stays Monaco-free
+// and can render before the lazy editor chunk loads.
+import { EditorLoadingFallback } from '@/components/editor/EditorLoadingFallback'
 import {
   X,
   Code,
@@ -19,15 +22,6 @@ import {
 // Lazy load Monaco Editor
 const MonacoEditor = lazy(() =>
   import('@/components/editor/MonacoEditor').then(m => ({ default: m.MonacoEditor }))
-)
-
-const EditorLoadingFallback = () => (
-  <div className="flex items-center justify-center h-full bg-gray-900/50">
-    <div className="text-center">
-      <Loading size="lg" variant="primary" />
-      <p className="mt-3 text-sm text-gray-400">Loading editor...</p>
-    </div>
-  </div>
 )
 
 interface EditorPaneContentProps {

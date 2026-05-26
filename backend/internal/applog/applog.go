@@ -5,9 +5,14 @@ package applog
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
+	"time"
 )
 
 // Init configures the global slog logger based on environment variables.
@@ -200,4 +205,183 @@ func Debug(msg string, args ...any) {
 
 func WithContext(ctx context.Context) *slog.Logger {
 	return slog.Default()
+}
+
+// Operation emits one redacted, structured platform-operation event. Use it for
+// high-volume operational telemetry where every start, handoff, success, and
+// failure needs the same correlation shape in production logs.
+func Operation(operation string, fields map[string]any) {
+	operation = strings.TrimSpace(operation)
+	if operation == "" {
+		operation = "unknown"
+	}
+
+	safe := redactMap(fields)
+	if strings.TrimSpace(fmt.Sprint(safe["operation_id"])) == "" {
+		safe["operation_id"] = NewOperationID()
+	}
+
+	attrs := []slog.Attr{
+		slog.String("event", "platform_operation"),
+		slog.String("operation", operation),
+	}
+	keys := make([]string, 0, len(safe))
+	for key := range safe {
+		if key == "event" || key == "operation" || strings.TrimSpace(key) == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		attrs = append(attrs, slog.Any(key, safe[key]))
+	}
+
+	ctx := context.Background()
+	switch operationLogLevel(safe) {
+	case slog.LevelError:
+		slog.LogAttrs(ctx, slog.LevelError, "platform_operation", attrs...)
+	case slog.LevelWarn:
+		slog.LogAttrs(ctx, slog.LevelWarn, "platform_operation", attrs...)
+	default:
+		slog.LogAttrs(ctx, slog.LevelInfo, "platform_operation", attrs...)
+	}
+}
+
+// StartOperation captures a start timestamp and returns a finish function that
+// writes the terminal event with duration and optional error details.
+func StartOperation(operation string, fields map[string]any) func(status string, err error, extra map[string]any) {
+	startedAt := time.Now().UTC()
+	base := cloneMap(fields)
+	if strings.TrimSpace(fmt.Sprint(base["operation_id"])) == "" {
+		base["operation_id"] = NewOperationID()
+	}
+	base["operation_started_at"] = startedAt.Format(time.RFC3339Nano)
+
+	return func(status string, err error, extra map[string]any) {
+		merged := cloneMap(base)
+		for key, value := range extra {
+			merged[key] = value
+		}
+		if strings.TrimSpace(status) == "" {
+			if err != nil {
+				status = "failed"
+			} else {
+				status = "success"
+			}
+		}
+		merged["status"] = status
+		if _, ok := merged["duration_ms"]; !ok {
+			merged["duration_ms"] = time.Since(startedAt).Milliseconds()
+		}
+		merged["operation_finished_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+		if err != nil {
+			merged["error"] = err.Error()
+		}
+		Operation(operation, merged)
+	}
+}
+
+func NewOperationID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return "op_" + hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("op_%d", time.Now().UnixNano())
+}
+
+func operationLogLevel(fields map[string]any) slog.Level {
+	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(fields["status"])))
+	if status == "failed" || status == "error" || strings.TrimSpace(fmt.Sprint(fields["error"])) != "" {
+		return slog.LevelError
+	}
+	if status == "blocked" || status == "cancelled" || status == "degraded" || status == "warning" {
+		return slog.LevelWarn
+	}
+	if code, ok := numericStatus(fields["http_status"]); ok && code >= 400 {
+		if code >= 500 {
+			return slog.LevelError
+		}
+		return slog.LevelWarn
+	}
+	return slog.LevelInfo
+}
+
+func numericStatus(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	default:
+		return 0, false
+	}
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func redactMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = redactValue(key, value)
+	}
+	return out
+}
+
+func redactValue(key string, value any) any {
+	if isSensitiveLogKey(key) {
+		return "[redacted]"
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		return redactMap(v)
+	case map[string]string:
+		out := make(map[string]any, len(v))
+		for nestedKey, nestedValue := range v {
+			out[nestedKey] = redactValue(nestedKey, nestedValue)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = redactValue(key, item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func isSensitiveLogKey(key string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"))
+	if normalized == "" {
+		return false
+	}
+	sensitiveFragments := []string{
+		"password",
+		"passwd",
+		"secret",
+		"token",
+		"api_key",
+		"apikey",
+		"authorization",
+		"cookie",
+		"csrf",
+		"credential",
+		"session",
+	}
+	for _, fragment := range sensitiveFragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	return false
 }

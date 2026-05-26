@@ -27,6 +27,7 @@ import (
 	"unicode"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/applog"
 	"apex-build/internal/budget"
 	"apex-build/internal/metrics"
 	"apex-build/internal/mobile"
@@ -568,6 +569,8 @@ type AIRouter interface {
 type GenerateOptions struct {
 	UserID        uint
 	BuildID       string // For pipeline telemetry correlation.
+	RequestID     string
+	OperationID   string
 	MaxTokens     int
 	Temperature   float64
 	SystemPrompt  string
@@ -769,6 +772,8 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		PowerMode:              powerMode,
 		SubscriptionPlan:       strings.ToLower(strings.TrimSpace(subscriptionPlan)),
 		ProviderMode:           providerMode,
+		RequestID:              strings.TrimSpace(req.RequestID),
+		OperationID:            strings.TrimSpace(req.OperationID),
 		PollToken:              pollToken,
 		PollTokenHash:          pollTokenHash,
 		RequirePreviewReady:    req.RequirePreviewReady,
@@ -813,6 +818,17 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 	build.MaxTokensPerRequest = maxTokens
 
 	am.builds[buildID] = build
+	applog.Operation("build.queue.enqueued", map[string]any{
+		"status":       "success",
+		"build_id":     buildID,
+		"user_id":      userID,
+		"request_id":   build.RequestID,
+		"operation_id": build.OperationID,
+		"mode":         string(mode),
+		"power_mode":   string(powerMode),
+		"queue_depth":  len(am.builds),
+		"prompt_len":   len(effectiveDescription),
+	})
 	if err := am.persistBuildSnapshotCritical(build, nil); err != nil {
 		delete(am.builds, buildID)
 		return nil, fmt.Errorf("persist initial build snapshot: %w", err)
@@ -837,6 +853,15 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	}
 
 	log.Printf("Build %s found, updating status to planning", buildID)
+	applog.Operation("build.queue.dequeued", map[string]any{
+		"status":         "success",
+		"build_id":       build.ID,
+		"user_id":        build.UserID,
+		"request_id":     build.RequestID,
+		"operation_id":   build.OperationID,
+		"queue_wait_ms":  time.Since(build.CreatedAt).Milliseconds(),
+		"current_status": string(build.Status),
+	})
 
 	// Re-fetch the user's current subscription from DB and upgrade the build's
 	// stored plan if it is stale (e.g. build was created on a free plan before
@@ -2206,6 +2231,19 @@ func (am *AgentManager) recoverStaleInProgressTasks(build *Build, idleFor time.D
 			Attempt: recovery.attempt,
 			Success: false,
 			Error:   errors.New(timeoutMessage),
+		})
+		applog.Operation("agent.task.stale_recovery", map[string]any{
+			"status":             "degraded",
+			"build_id":           build.ID,
+			"task_id":            recovery.taskID,
+			"agent_id":           recovery.agentID,
+			"attempt":            recovery.attempt,
+			"timeout_ms":         recovery.timeout.Milliseconds(),
+			"stale_ms":           recovery.staleFor.Milliseconds(),
+			"inactivity_ms":      idleFor.Milliseconds(),
+			"description_len":    len(recovery.description),
+			"synthetic_error":    timeoutMessage,
+			"cancel_signal_sent": true,
 		})
 		am.cancelTaskExecution(recovery.taskID)
 		log.Printf("Build %s: recovered stale task %s (attempt=%d idle=%s timeout=%s)", build.ID, recovery.taskID, recovery.attempt, recovery.staleFor.Round(time.Second), recovery.timeout.Round(time.Second))
@@ -5027,8 +5065,10 @@ func (am *AgentManager) taskDispatcher(ctx context.Context) {
 				return
 			}
 			if task == nil {
+				applog.Operation("agent.task.dispatch", map[string]any{"status": "failed", "error": "nil task"})
 				continue
 			}
+			applog.Operation("agent.task.dispatch", am.taskOperationFields(task, "success", nil))
 			go am.executeTask(task)
 		}
 	}
@@ -5092,13 +5132,18 @@ func (am *AgentManager) safeEnqueueTask(task *Task) bool {
 func (am *AgentManager) enqueueTaskQueue(task *Task) bool {
 	if am == nil || task == nil || am.taskQueue == nil {
 		markTaskQueueEnqueueFailure(task, "task queue unavailable")
+		if am != nil {
+			applog.Operation("agent.task.enqueue", am.taskOperationFields(task, "failed", map[string]any{"error": "task queue unavailable"}))
+		}
 		return false
 	}
 	select {
 	case am.taskQueue <- task:
+		applog.Operation("agent.task.enqueue", am.taskOperationFields(task, "success", nil))
 		return true
 	default:
 		markTaskQueueEnqueueFailure(task, "task queue saturated")
+		applog.Operation("agent.task.enqueue", am.taskOperationFields(task, "failed", map[string]any{"error": "task queue saturated"}))
 		log.Printf("Task queue saturated; failed to enqueue task %s", task.ID)
 		return false
 	}
@@ -5110,16 +5155,110 @@ func (am *AgentManager) enqueueTaskResult(result *TaskResult) {
 	}
 	am.ensureWorkerInfrastructure()
 	if am.resultQueue == nil {
+		applog.Operation("agent.task_result.enqueue", am.taskResultOperationFields(result, "degraded", map[string]any{"handoff": "direct", "error": "result queue unavailable"}))
 		log.Printf("Result queue unavailable; processing task %s directly", result.TaskID)
 		go am.processResultSafely(result)
 		return
 	}
 	select {
 	case am.resultQueue <- result:
+		applog.Operation("agent.task_result.enqueue", am.taskResultOperationFields(result, "success", map[string]any{"handoff": "queue"}))
 	case <-time.After(2 * time.Second):
+		applog.Operation("agent.task_result.enqueue", am.taskResultOperationFields(result, "degraded", map[string]any{"handoff": "direct", "error": "result queue blocked"}))
 		log.Printf("Result queue blocked for task %s; processing result directly to avoid build stall", result.TaskID)
 		go am.processResultSafely(result)
 	}
+}
+
+func (am *AgentManager) taskOperationFields(task *Task, status string, extra map[string]any) map[string]any {
+	fields := map[string]any{"status": status}
+	if task != nil {
+		fields["task_id"] = task.ID
+		fields["task_type"] = string(task.Type)
+		fields["task_status"] = string(task.Status)
+		fields["assigned_to"] = task.AssignedTo
+		fields["retry_count"] = task.RetryCount
+		fields["max_retries"] = task.MaxRetries
+		fields["priority"] = task.Priority
+		fields["description_len"] = len(task.Description)
+		if buildID := am.buildIDForTask(task); buildID != "" {
+			fields["build_id"] = buildID
+		}
+	}
+	for key, value := range extra {
+		fields[key] = value
+	}
+	return fields
+}
+
+func (am *AgentManager) taskResultOperationFields(result *TaskResult, status string, extra map[string]any) map[string]any {
+	fields := map[string]any{"status": status}
+	if result != nil {
+		fields["task_id"] = result.TaskID
+		fields["agent_id"] = result.AgentID
+		fields["attempt"] = result.Attempt
+		fields["success"] = result.Success
+		if result.Error != nil {
+			fields["error"] = result.Error.Error()
+		}
+		if buildID := am.buildIDForAgentOrTask(result.AgentID, result.TaskID); buildID != "" {
+			fields["build_id"] = buildID
+		}
+	}
+	for key, value := range extra {
+		fields[key] = value
+	}
+	return fields
+}
+
+func (am *AgentManager) buildIDForTask(task *Task) string {
+	if am == nil || task == nil {
+		return ""
+	}
+	return am.buildIDForAgentOrTask(task.AssignedTo, task.ID)
+}
+
+func (am *AgentManager) buildIDForAgentOrTask(agentID, taskID string) string {
+	if am == nil {
+		return ""
+	}
+	if strings.TrimSpace(agentID) != "" {
+		am.mu.RLock()
+		if agent := am.agents[agentID]; agent != nil {
+			buildID := agent.BuildID
+			am.mu.RUnlock()
+			return buildID
+		}
+		am.mu.RUnlock()
+	}
+
+	am.mu.RLock()
+	builds := make([]*Build, 0, len(am.builds))
+	for _, build := range am.builds {
+		if build != nil {
+			builds = append(builds, build)
+		}
+	}
+	am.mu.RUnlock()
+	for _, build := range builds {
+		build.mu.RLock()
+		if agentID != "" {
+			if agent := build.Agents[agentID]; agent != nil {
+				buildID := build.ID
+				build.mu.RUnlock()
+				return buildID
+			}
+		}
+		for _, task := range build.Tasks {
+			if task != nil && task.ID == taskID {
+				buildID := build.ID
+				build.mu.RUnlock()
+				return buildID
+			}
+		}
+		build.mu.RUnlock()
+	}
+	return ""
 }
 
 func markTaskQueueEnqueueFailure(task *Task, reason string) {
@@ -5899,6 +6038,67 @@ func (am *AgentManager) failBuildForRecoveredResultPanic(result *TaskResult, rec
 	am.persistCompletedBuild(build, allFiles)
 }
 
+func (am *AgentManager) restoreBuildScopedAgentForResult(result *TaskResult) (*Agent, bool) {
+	if am == nil || result == nil || strings.TrimSpace(result.AgentID) == "" {
+		return nil, false
+	}
+
+	am.mu.RLock()
+	builds := make([]*Build, 0, len(am.builds))
+	for _, build := range am.builds {
+		if build != nil {
+			builds = append(builds, build)
+		}
+	}
+	am.mu.RUnlock()
+
+	for _, build := range builds {
+		build.mu.RLock()
+		agent := build.Agents[result.AgentID]
+		matched := agent != nil && buildHasResultTaskForAgentLocked(build, result, agent)
+		buildID := build.ID
+		build.mu.RUnlock()
+
+		if agent == nil || !matched {
+			continue
+		}
+
+		am.mu.Lock()
+		if am.agents == nil {
+			am.agents = make(map[string]*Agent)
+		}
+		am.agents[agent.ID] = agent
+		am.mu.Unlock()
+
+		applog.Operation("agent.result.restore_scoped_agent", map[string]any{
+			"status":   "success",
+			"build_id": buildID,
+			"agent_id": agent.ID,
+			"task_id":  result.TaskID,
+			"success":  result.Success,
+		})
+		return agent, true
+	}
+
+	return nil, false
+}
+
+func buildHasResultTaskForAgentLocked(build *Build, result *TaskResult, agent *Agent) bool {
+	if build == nil || result == nil || agent == nil {
+		return false
+	}
+	if agent.CurrentTask != nil && agent.CurrentTask.ID == result.TaskID {
+		return true
+	}
+	for _, task := range build.Tasks {
+		if task == nil || task.ID != result.TaskID {
+			continue
+		}
+		return task.AssignedTo == "" || task.AssignedTo == agent.ID
+	}
+	return false
+}
+
 // processResult handles a task result with retry logic and build verification
 func (am *AgentManager) processResult(result *TaskResult) {
 	if result == nil {
@@ -5910,6 +6110,19 @@ func (am *AgentManager) processResult(result *TaskResult) {
 	am.mu.RUnlock()
 
 	if !agentExists {
+		if restored, ok := am.restoreBuildScopedAgentForResult(result); ok {
+			agent = restored
+			agentExists = true
+		}
+	}
+
+	if !agentExists {
+		applog.Operation("agent.result.unknown_agent", map[string]any{
+			"status":   "failed",
+			"agent_id": result.AgentID,
+			"task_id":  result.TaskID,
+			"success":  result.Success,
+		})
 		log.Printf("Warning: result for unknown agent %s", result.AgentID)
 		return
 	}
@@ -27103,6 +27316,8 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 	am.mu.RUnlock()
 
 	closedSubs := make([]chan *WSMessage, 0)
+	delivered := 0
+	skipped := 0
 	for _, ch := range subs {
 		func(sub chan *WSMessage) {
 			defer func() {
@@ -27112,11 +27327,25 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 			}()
 			select {
 			case sub <- msg:
+				delivered++
 			default:
 				// Channel full, skip
+				skipped++
 			}
 		}(ch)
 	}
+
+	applog.Operation("build.websocket.broadcast", map[string]any{
+		"status":            "success",
+		"build_id":          buildID,
+		"message_type":      string(msg.Type),
+		"agent_id":          msg.AgentID,
+		"subscriber_count":  len(subs),
+		"delivered_count":   delivered,
+		"skipped_count":     skipped,
+		"closed_count":      len(closedSubs),
+		"persist_requested": shouldPersist,
+	})
 
 	if len(closedSubs) > 0 {
 		closedSet := make(map[chan *WSMessage]struct{}, len(closedSubs))

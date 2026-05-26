@@ -281,8 +281,8 @@ func TestNormalizeExecutionModelForProvider_QualifiesManagedOllamaCloudOverrides
 	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "deepseek-v4", PowerFast, true); got != "deepseek-v4-flash:cloud" {
 		t.Fatalf("managed deepseek execution model = %q, want deepseek-v4-flash:cloud", got)
 	}
-	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "qwen-3.6-27b", PowerBalanced, true); got != "qwen3.5:cloud" {
-		t.Fatalf("managed qwen execution model = %q, want qwen3.5:cloud", got)
+	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "qwen-3.6-27b", PowerBalanced, true); got != "qwen3.5:397b:cloud" {
+		t.Fatalf("managed qwen execution model = %q, want qwen3.5:397b:cloud", got)
 	}
 	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "gemini-3-flash-preview:cloud", PowerFast, true); got != "gemini-3-flash-preview:cloud" {
 		t.Fatalf("managed ollama-hosted gemini execution model = %q, want gemini-3-flash-preview:cloud", got)

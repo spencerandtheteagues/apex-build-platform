@@ -47,6 +47,17 @@ func ollamaCloudMaxConcurrent() int {
 	return defaultLimit
 }
 
+func newOllamaCloudConcurrencyGate() chan struct{} {
+	if limit := ollamaCloudMaxConcurrent(); limit > 0 {
+		return make(chan struct{}, limit)
+	}
+	return nil
+}
+
+func isOllamaCloudBaseURL(baseURL string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(baseURL)), "ollama.com")
+}
+
 // Ollama uses OpenAI-compatible request/response format
 type ollamaRequest struct {
 	Model           string          `json:"model"`
@@ -122,6 +133,10 @@ func NewOllamaClient(baseURL, apiKey string) *OllamaClient {
 		}
 	}
 	baseURL = normalizeOllamaBaseURL(baseURL)
+	var sem chan struct{}
+	if strings.TrimSpace(apiKey) != "" && isOllamaCloudBaseURL(baseURL) {
+		sem = newOllamaCloudConcurrencyGate()
+	}
 	return &OllamaClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
@@ -132,6 +147,7 @@ func NewOllamaClient(baseURL, apiKey string) *OllamaClient {
 			Provider: ProviderOllama,
 			LastUsed: time.Now(),
 		},
+		concurrent: sem,
 	}
 }
 
@@ -144,10 +160,6 @@ func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
 		baseURL = "https://ollama.com/v1"
 	}
 	baseURL = normalizeOllamaBaseURL(baseURL)
-	var sem chan struct{}
-	if limit := ollamaCloudMaxConcurrent(); limit > 0 {
-		sem = make(chan struct{}, limit)
-	}
 	return &OllamaClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
@@ -158,7 +170,7 @@ func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
 			Provider: ProviderOllama,
 			LastUsed: time.Now(),
 		},
-		concurrent: sem,
+		concurrent: newOllamaCloudConcurrencyGate(),
 	}
 }
 
@@ -400,7 +412,7 @@ func (o *OllamaClient) isOllamaCloudAPI() bool {
 	if strings.TrimSpace(o.apiKey) == "" || o.isMoonshotAPI() {
 		return false
 	}
-	return strings.Contains(strings.ToLower(o.baseURL), "ollama.com")
+	return isOllamaCloudBaseURL(o.baseURL)
 }
 
 func isPlanningOrReasoningCapability(capability AICapability) bool {
@@ -608,9 +620,11 @@ func (o *OllamaClient) normalizeModelAlias(model string) string {
 		case "deepseek-v4-pro":
 			return "deepseek-v4-pro:cloud"
 		case "qwen", "qwen3.5", "qwen-3.5", "qwen-3.6-27b":
-			return "qwen3.5:cloud"
-		case "devstral", "devstral-24b", "devstral-small-24b":
-			return "devstral-small-24b:cloud"
+			return "qwen3.5:397b:cloud"
+		case "qwen3.5:397b", "qwen-3.5-397b":
+			return "qwen3.5:397b:cloud"
+		case "devstral", "devstral-24b", "devstral-small-24b", "devstral-small-2", "devstral-small-2:24b":
+			return "devstral-small-2:24b:cloud"
 		}
 	}
 
@@ -650,6 +664,10 @@ func (o *OllamaClient) makeRequest(ctx context.Context, req *ollamaRequest) (*ol
 
 	if resp.StatusCode != http.StatusOK {
 		switch resp.StatusCode {
+		case 401, 403:
+			return nil, fmt.Errorf("AUTH_ERROR: Ollama request failed with status %d: %s", resp.StatusCode, string(body))
+		case 429:
+			return nil, fmt.Errorf("RATE_LIMITED: Ollama request failed with status %d: %s", resp.StatusCode, string(body))
 		case 404:
 			return nil, fmt.Errorf("MODEL_NOT_FOUND: Model '%s' not installed. Run: ollama pull %s", req.Model, req.Model)
 		case 500, 502, 503, 504:
@@ -695,6 +713,8 @@ func (o *OllamaClient) GetProvider() AIProvider {
 func (o *OllamaClient) Health(ctx context.Context) error {
 	// For Ollama Cloud (OpenAI-compatible), try OpenAI-compatible endpoints first.
 	endpoints := []string{"/v1/models", "/v1/health", "/api/tags"}
+	var lastStatus int
+	var lastBody string
 
 	for _, path := range endpoints {
 		url := o.baseURL + path
@@ -709,19 +729,26 @@ func (o *OllamaClient) Health(ctx context.Context) error {
 
 		resp, err := o.httpClient.Do(req)
 		if err != nil {
+			lastBody = err.Error()
 			continue
 		}
+		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
 		// 200 = healthy, 401 = auth failed (bad key — treat as unhealthy so router falls back)
 		if resp.StatusCode == http.StatusOK {
 			return nil
 		}
-		if resp.StatusCode == http.StatusUnauthorized {
-			return fmt.Errorf("Ollama auth failed (401): API key is invalid or missing")
+		lastStatus = resp.StatusCode
+		lastBody = strings.TrimSpace(string(body))
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return fmt.Errorf("Ollama auth failed (status %d): API key is invalid, expired, or unauthorized: %s", resp.StatusCode, lastBody)
 		}
 	}
 
+	if lastStatus != 0 {
+		return fmt.Errorf("Ollama server not reachable at %s (tried %v; last status %d: %s)", o.baseURL, endpoints, lastStatus, lastBody)
+	}
 	return fmt.Errorf("Ollama server not reachable at %s (tried %v)", o.baseURL, endpoints)
 }
 
@@ -753,7 +780,11 @@ func (o *OllamaClient) GetAvailableModels(ctx context.Context) ([]string, error)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch models: status %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, fmt.Errorf("failed to fetch models: auth failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		return nil, fmt.Errorf("failed to fetch models: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var modelsResp openAIModelsResponse
@@ -879,6 +910,13 @@ func (o *OllamaClient) SetAPIKey(key string) {
 	o.usageMu.Lock()
 	defer o.usageMu.Unlock()
 	o.apiKey = key
+	if strings.TrimSpace(key) != "" && isOllamaCloudBaseURL(o.baseURL) {
+		if o.concurrent == nil {
+			o.concurrent = newOllamaCloudConcurrencyGate()
+		}
+		return
+	}
+	o.concurrent = nil
 }
 
 // GetAPIKey returns the configured API key

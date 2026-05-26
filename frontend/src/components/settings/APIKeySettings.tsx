@@ -397,9 +397,9 @@ export default function APIKeySettings() {
             <Key className="w-5 h-5 text-red-400" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-white">Multi-Provider AI Configuration</h2>
+            <h2 className="text-lg font-semibold text-white">Bring Your Own Keys (BYOK)</h2>
             <p className="text-sm text-gray-400">
-              Enable multiple providers to work together on complex builds
+              Connect your own OpenAI, Anthropic, Google, xAI, or Ollama provider keys. Secret values are never displayed after saving.
             </p>
           </div>
         </div>
@@ -414,9 +414,9 @@ export default function APIKeySettings() {
       <div className="flex items-start gap-3 p-4 rounded-lg bg-gradient-to-r from-red-500/5 to-purple-500/5 border border-red-500/20">
         <Shield className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
         <div className="text-sm text-gray-300">
-          <strong className="text-red-400">Multi-Provider Builds:</strong> Enable multiple AI providers
-          simultaneously. Each can spawn specialized agents — use Claude for architecture, GPT for code,
-          Gemini for docs, and Grok for testing all at once. Keys are encrypted with AES-256-GCM.
+          <strong className="text-red-400">BYOK Multi-Provider:</strong> Use your own keys for OpenAI, Anthropic, Google, xAI, and Ollama.
+          Each provider can spawn specialized agents, and keys are encrypted with AES-256-GCM.
+          Secret values are never shown again after saving.
         </div>
       </div>
 

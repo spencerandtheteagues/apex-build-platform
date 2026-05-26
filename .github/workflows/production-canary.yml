@@ -39,8 +39,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  canary-script-guardrails:
+    name: Canary Script Guardrails
+    if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run canary report unit tests
+        run: bash scripts/test/canary_report_test.sh
+
+      - name: Run canary matrix false-green tests
+        run: bash scripts/test/canary_matrix_guardrail_test.sh
+
   public-launch-smoke:
     name: Public Launch Smoke
+    needs: canary-script-guardrails
     if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -74,6 +90,7 @@ jobs:
 
   launch-verifier-suite:
     name: Launch Verification Scripts
+    needs: canary-script-guardrails
     if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -162,6 +179,7 @@ jobs:
 
   preview-verification-canary:
     name: Preview Verification Canary
+    needs: canary-script-guardrails
     if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -193,6 +211,7 @@ jobs:
 
   platform-build-canary-matrix:
     name: Platform Build Canary (${{ matrix.name }})
+    needs: canary-script-guardrails
     if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -241,6 +260,7 @@ jobs:
           fi
 
       - name: Run platform build canary
+        id: run-canary
         if: ${{ !matrix.requires_paid || steps.paid-creds.outputs.available == 'true' }}
         env:
           BASE_URL: https://api.apex-build.dev/api/v1
@@ -248,6 +268,10 @@ jobs:
           POWER_MODE: ${{ matrix.power_mode }}
           SMOKE_PROFILE: ${{ matrix.smoke_profile }}
           EXPECT_STATUS: completed
+          # Paid full-stack scenarios must prove a real, reachable preview (active + url),
+          # not just a "completed" status — guards against preview false greens.
+          ASSERT_PREVIEW_READY: ${{ matrix.requires_paid && '1' || '0' }}
+          ARTIFACT_DIR: ${{ github.workspace }}/canary-artifacts/${{ matrix.name }}
           LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
@@ -257,8 +281,95 @@ jobs:
           PROJECT_NAME: canary-${{ matrix.name }}
         run: ./scripts/run_platform_build_smoke.sh
 
+      - name: Record canary status marker
+        if: always()
+        env:
+          OUTCOME: ${{ steps.run-canary.outcome }}
+          NAME: ${{ matrix.name }}
+          REQUIRES_PAID: ${{ matrix.requires_paid }}
+        run: |
+          dir="${{ github.workspace }}/canary-artifacts/${NAME}"
+          mkdir -p "$dir"
+          case "$OUTCOME" in
+            success) status=PASSED ;;
+            skipped) status=SKIPPED_NO_CREDS ;;
+            *)       status=FAILED ;;
+          esac
+          echo "$status" > "$dir/STATUS"
+          {
+            echo "scenario=${NAME}"
+            echo "requires_paid=${REQUIRES_PAID}"
+            echo "outcome=${OUTCOME}"
+          } > "$dir/META"
+          echo "Recorded ${NAME}: status=${status} (step outcome=${OUTCOME})"
+
+      - name: Upload platform canary artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-canary-${{ matrix.name }}
+          path: ${{ github.workspace }}/canary-artifacts/${{ matrix.name }}
+          retention-days: 14
+          if-no-files-found: warn
+
+  platform-canary-gate:
+    name: Platform Canary Gate (false-green guard)
+    needs: platform-build-canary-matrix
+    if: ${{ always() && vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download platform canary artifacts
+        uses: actions/download-artifact@v4
+        # Each artifact lands in its own subdir (canary-artifacts/platform-canary-<name>/),
+        # which the gate loop below iterates. Do NOT add merge-multiple: true — it collapses
+        # files into one dir and STATUS/META from different scenarios would collide.
+        with:
+          pattern: platform-canary-*
+          path: canary-artifacts
+
+      - name: Enforce required canaries actually ran and passed
+        env:
+          # Opt-in hard gate: when true, a required paid canary that was skipped or
+          # failed fails this job (prevents a green run hiding skipped paid canaries).
+          # Defaults to warn-only so the pipeline isn't broken before creds are wired.
+          REQUIRE_PAID: ${{ vars.APEX_REQUIRE_PAID_CANARIES }}
+        run: |
+          shopt -s nullglob
+          fail=0
+          found=0
+          for dir in canary-artifacts/*/; do
+            found=$((found + 1))
+            status="$(cat "$dir/STATUS" 2>/dev/null || echo MISSING)"
+            requires_paid="$(sed -n 's/^requires_paid=//p' "$dir/META" 2>/dev/null || echo unknown)"
+            scenario="$(sed -n 's/^scenario=//p' "$dir/META" 2>/dev/null || basename "$dir")"
+            echo "scenario=${scenario} requires_paid=${requires_paid} status=${status}"
+            if [[ "$status" == "FAILED" ]]; then
+              echo "::error::canary ${scenario} FAILED"
+              fail=1
+            fi
+            if [[ "$requires_paid" == "true" && "$status" != "PASSED" ]]; then
+              if [[ "$REQUIRE_PAID" == "true" ]]; then
+                echo "::error::required paid canary ${scenario} did not pass (status=${status})"
+                fail=1
+              else
+                echo "::warning::paid canary ${scenario} is not green (status=${status}); set repo variable APEX_REQUIRE_PAID_CANARIES=true to hard-gate launch."
+              fi
+            fi
+          done
+          if [[ "$found" -eq 0 ]]; then
+            echo "::error::no platform canary artifacts found; the canary matrix did not produce results."
+            exit 1
+          fi
+          if [[ "$fail" -ne 0 ]]; then
+            echo "PLATFORM_CANARY_GATE_FAILED"
+            exit 1
+          fi
+          echo "PLATFORM_CANARY_GATE_OK"
+
   golden-fieldops-live-canary:
     name: Golden FieldOps Live Canary
+    needs: canary-script-guardrails
     if: ${{ vars.APEX_ENABLE_GITHUB_ACTIONS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 150

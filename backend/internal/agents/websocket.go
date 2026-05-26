@@ -351,6 +351,14 @@ func (c *WSConnection) handleMessage(message []byte) {
 	}
 
 	if err := json.Unmarshal(message, &msg); err != nil {
+		applog.Operation("build.websocket.inbound", map[string]any{
+			"status":        "failed",
+			"build_id":      c.buildID,
+			"user_id":       c.userID,
+			"message_bytes": len(message),
+			"failure_stage": "parse",
+			"error":         err.Error(),
+		})
 		log.Printf("Failed to parse WebSocket message: %v", err)
 		return
 	}
@@ -362,74 +370,132 @@ func (c *WSConnection) handleMessage(message []byte) {
 	targetMode := firstNonEmpty(msg.TargetMode, stringValue(msg.Data["target_mode"]))
 	targetAgentID := firstNonEmpty(msg.TargetAgentID, stringValue(msg.Data["target_agent_id"]))
 	targetAgentRole := firstNonEmpty(msg.TargetAgentRole, stringValue(msg.Data["target_agent_role"]))
+	finishInbound := applog.StartOperation("build.websocket.inbound", map[string]any{
+		"build_id":             c.buildID,
+		"user_id":              c.userID,
+		"message_type":         msgType,
+		"command":              command,
+		"message_bytes":        len(message),
+		"content_len":          len(content),
+		"client_token_present": clientToken != "",
+		"checkpoint_present":   firstNonEmpty(msg.CheckpointID, stringValue(msg.Data["checkpoint_id"])) != "",
+		"target_mode":          targetMode,
+		"target_agent_id":      targetAgentID,
+		"target_agent_role":    targetAgentRole,
+	})
+	completeInbound := func(status string, err error, action string, extra map[string]any) {
+		if extra == nil {
+			extra = map[string]any{}
+		}
+		extra["action"] = action
+		finishInbound(status, err, extra)
+	}
 
 	switch msgType {
 	case "user:message", "user_message":
 		if command == "restart_failed" {
 			if err := c.hub.manager.RestartFailedBuildWithClientToken(c.buildID, content, clientToken); err != nil {
+				completeInbound("failed", err, "restart_failed", nil)
 				log.Printf("Failed to restart failed build: %v", err)
+			} else {
+				completeInbound("success", nil, "restart_failed", nil)
 			}
 			return
 		}
 		target := normalizeBuildMessageTarget(targetMode, targetAgentID, targetAgentRole)
 		if err := c.hub.manager.sendTargetedMessageWithClientToken(c.buildID, content, clientToken, target); err != nil {
+			completeInbound("failed", err, "user_message", map[string]any{"target": target})
 			log.Printf("Failed to send message to lead agent: %v", err)
+		} else {
+			completeInbound("success", nil, "user_message", map[string]any{"target": target})
 		}
 
 	case "build:cancel":
 		if err := c.hub.manager.CancelBuild(c.buildID); err != nil {
+			completeInbound("failed", err, "cancel", nil)
 			log.Printf("Failed to cancel build %s: %v", c.buildID, err)
+		} else {
+			completeInbound("success", nil, "cancel", nil)
 		}
 
 	case "build:rollback":
 		checkpointID := firstNonEmpty(msg.CheckpointID, stringValue(msg.Data["checkpoint_id"]))
 		if checkpointID != "" {
 			if err := c.hub.manager.RollbackToCheckpoint(c.buildID, checkpointID); err != nil {
+				completeInbound("failed", err, "rollback", map[string]any{"checkpoint_id": checkpointID})
 				log.Printf("Failed to rollback: %v", err)
+			} else {
+				completeInbound("success", nil, "rollback", map[string]any{"checkpoint_id": checkpointID})
 			}
+		} else {
+			completeInbound("ignored", nil, "rollback", map[string]any{"reason": "missing_checkpoint_id"})
 		}
 
 	case "pause", "build:pause":
 		if _, err := c.hub.manager.PauseBuild(c.buildID, "Paused from WebSocket command"); err != nil {
+			completeInbound("failed", err, "pause", nil)
 			log.Printf("Failed to pause build %s: %v", c.buildID, err)
+		} else {
+			completeInbound("success", nil, "pause", nil)
 		}
 
 	case "resume", "build:resume":
 		if _, err := c.hub.manager.ResumeBuild(c.buildID, "Resumed from WebSocket command"); err != nil {
+			completeInbound("failed", err, "resume", nil)
 			log.Printf("Failed to resume build %s: %v", c.buildID, err)
+		} else {
+			completeInbound("success", nil, "resume", nil)
 		}
 
 	case "command":
 		switch command {
 		case "pause":
 			if _, err := c.hub.manager.PauseBuild(c.buildID, "Paused from WebSocket command"); err != nil {
+				completeInbound("failed", err, "pause", nil)
 				log.Printf("Failed to pause build %s: %v", c.buildID, err)
+			} else {
+				completeInbound("success", nil, "pause", nil)
 			}
 		case "resume":
 			if _, err := c.hub.manager.ResumeBuild(c.buildID, "Resumed from WebSocket command"); err != nil {
+				completeInbound("failed", err, "resume", nil)
 				log.Printf("Failed to resume build %s: %v", c.buildID, err)
+			} else {
+				completeInbound("success", nil, "resume", nil)
 			}
 		case "cancel":
 			if err := c.hub.manager.CancelBuild(c.buildID); err != nil {
+				completeInbound("failed", err, "cancel", nil)
 				log.Printf("Failed to cancel build %s: %v", c.buildID, err)
+			} else {
+				completeInbound("success", nil, "cancel", nil)
 			}
 		case "rollback":
 			checkpointID := firstNonEmpty(msg.CheckpointID, stringValue(msg.Data["checkpoint_id"]))
 			if checkpointID != "" {
 				if err := c.hub.manager.RollbackToCheckpoint(c.buildID, checkpointID); err != nil {
+					completeInbound("failed", err, "rollback", map[string]any{"checkpoint_id": checkpointID})
 					log.Printf("Failed to rollback build %s: %v", c.buildID, err)
+				} else {
+					completeInbound("success", nil, "rollback", map[string]any{"checkpoint_id": checkpointID})
 				}
+			} else {
+				completeInbound("ignored", nil, "rollback", map[string]any{"reason": "missing_checkpoint_id"})
 			}
 		case "start":
+			completeInbound("ignored", nil, "deprecated_start", nil)
 			log.Printf("Ignoring deprecated build:start websocket command for build %s", c.buildID)
 		default:
+			completeInbound("ignored", nil, "unknown_command", map[string]any{"reason": "unknown_command"})
 			log.Printf("Unknown WebSocket command type: %s", command)
 		}
 
 	case "build:start":
+		completeInbound("ignored", nil, "deprecated_start", nil)
 		log.Printf("Ignoring deprecated build:start websocket event for build %s", c.buildID)
 
 	default:
+		completeInbound("ignored", nil, "unknown_message_type", map[string]any{"reason": "unknown_message_type"})
 		log.Printf("Unknown WebSocket message type: %s", msg.Type)
 	}
 }

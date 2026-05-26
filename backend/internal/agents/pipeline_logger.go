@@ -16,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"apex-build/internal/applog"
 )
 
 // Pipeline log category tags.
@@ -90,6 +92,15 @@ func (pl *PipelineLogger) emit(cat, event string, data map[string]any) {
 		return
 	}
 	log.Printf("[APEX_PIPELINE] %s", b)
+	fields := map[string]any{
+		"status":         "success",
+		"build_id":       pl.buildID,
+		"pipeline_seq":   ev.Seq,
+		"pipeline_cat":   cat,
+		"pipeline_event": event,
+		"pipeline_data":  data,
+	}
+	applog.Operation("pipeline."+cat+"."+event, fields)
 }
 
 // ── Build lifecycle ────────────────────────────────────────────────────────

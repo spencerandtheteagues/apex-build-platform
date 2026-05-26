@@ -449,6 +449,16 @@ describe('cookie session compatibility', () => {
     expect(config.headers.Authorization).toBeUndefined()
   })
 
+  it('adds an operation id to outbound request headers for server-side correlation', async () => {
+    const service = new ApiService('/api/v1')
+
+    const interceptor = (service.client.interceptors.request as any).handlers[0].fulfilled
+    const config = await interceptor({ headers: {} })
+
+    expect(config.headers['X-Apex-Operation-ID']).toMatch(/^op_[a-z0-9_-]+$/i)
+    expect(config.headers['X-Apex-Client-Trace-ID']).toBe(config.headers['X-Apex-Operation-ID'])
+  })
+
   it('does not try to refresh the session when login itself returns 401', async () => {
     const service = new ApiService('/api/v1')
     const refreshSpy = vi.spyOn(service, 'refreshToken')

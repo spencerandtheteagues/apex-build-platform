@@ -498,6 +498,8 @@ type Build struct {
 	PowerMode           PowerMode                 `json:"power_mode"`
 	SubscriptionPlan    string                    `json:"subscription_plan,omitempty"`
 	ProviderMode        string                    `json:"provider_mode,omitempty"` // platform or byok
+	RequestID           string                    `json:"request_id,omitempty"`
+	OperationID         string                    `json:"operation_id,omitempty"`
 	PollToken           string                    `json:"-"`
 	PollTokenHash       string                    `json:"-"`
 	RequirePreviewReady bool                      `json:"require_preview_ready,omitempty"`
@@ -882,6 +884,8 @@ type BuildRequest struct {
 	DiffMode               bool                      `json:"diff_mode,omitempty"`        // When true, proposed changes require user approval
 	RoleAssignments        map[string]string         `json:"role_assignments,omitempty"` // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
 	ProviderModelOverrides map[string]string         `json:"provider_model_overrides,omitempty"`
+	RequestID              string                    `json:"-"`
+	OperationID            string                    `json:"-"`
 }
 
 // BuildResponse is returned when a build is created

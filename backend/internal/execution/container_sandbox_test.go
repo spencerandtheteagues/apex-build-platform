@@ -328,6 +328,9 @@ func TestContainerSandboxExecuteWorkspaceCommand(t *testing.T) {
 	defer sandbox.Cleanup()
 
 	workspaceDir := t.TempDir()
+	if err := os.Chmod(workspaceDir, 0777); err != nil {
+		t.Fatalf("Failed to make workspace writable by sandbox user: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(workspaceDir, "main.py"), []byte(`
 import os
 print(os.getenv("PROJECT_GREETING", "missing"))

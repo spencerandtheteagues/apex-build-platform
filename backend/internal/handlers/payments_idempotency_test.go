@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -20,7 +23,11 @@ import (
 // for payments idempotency tests.
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
+	// Named, shared-cache in-memory DB per test so the connection pool
+	// (opened by gorm) and all goroutines see the same tables, but each
+	// test gets its own isolated database.
+	dbName := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", t.Name(), time.Now().UnixNano())
+	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
@@ -32,12 +39,14 @@ func openTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// openTestDBForConcurrency opens an in-memory SQLite database tuned for concurrent
-// writes (WAL + busy timeout) and migrates the tables needed for payments
-// idempotency tests.
+// openTestDBForConcurrency opens a temp-file SQLite database tuned for
+// concurrent writes (WAL + busy timeout) and migrates the tables needed for
+// payments idempotency tests. Uses a real temp file instead of in-memory
+// because WAL mode is only supported for on-disk SQLite databases.
 func openTestDBForConcurrency(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared&_busy_timeout=5000"), &gorm.Config{
+	dbPath := filepath.Join(os.TempDir(), fmt.Sprintf("apex-payments-test-%s_%d.db", t.Name(), time.Now().UnixNano()))
+	db, err := gorm.Open(sqlite.Open(dbPath+"?_busy_timeout=5000"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
@@ -50,14 +59,24 @@ func openTestDBForConcurrency(t *testing.T) *gorm.DB {
 		&models.ProcessedStripeEvent{},
 		&models.CreditLedgerEntry{},
 	))
+	// Clean up DB file when the test finishes.
+	t.Cleanup(func() {
+		_ = sqlDB.Close()
+		_ = os.Remove(dbPath + "-shm")
+		_ = os.Remove(dbPath + "-wal")
+		_ = os.Remove(dbPath)
+	})
 	return db
 }
 
 func seedUser(t *testing.T, db *gorm.DB, balance float64) models.User {
 	t.Helper()
+	// Use unique identifiers so concurrent/sequential tests don't collide on
+	// unique constraints when running against a shared in-memory SQLite.
+	suffix := strconv.FormatInt(time.Now().UnixNano()+int64(balance*1000), 10)
 	u := models.User{
-		Username:      "testuser",
-		Email:         "test@example.com",
+		Username:      "testuser_" + suffix,
+		Email:         "user_" + suffix + "@example.com",
 		PasswordHash:  "hash",
 		CreditBalance: balance,
 		IsActive:      true,

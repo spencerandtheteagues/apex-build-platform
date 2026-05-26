@@ -78,6 +78,8 @@ func (m *PackageCacheManager) MountsForLanguage(language string) []PackageCacheM
 func (m *PackageCacheManager) mount(name, containerPath string, env map[string]string) PackageCacheMount {
 	hostPath := filepath.Join(m.baseDir, sanitizeCacheName(name))
 	_ = os.MkdirAll(hostPath, 0o755)
+	_ = os.Chown(hostPath, sandboxUID, sandboxGID)
+	_ = os.Chmod(hostPath, 0o777)
 	return PackageCacheMount{
 		HostPath:       hostPath,
 		ContainerPath:  containerPath,

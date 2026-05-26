@@ -609,6 +609,8 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	response, err := am.aiRouter.Generate(attemptCtx, provider, prompt, GenerateOptions{
 		UserID:                  build.UserID,
 		BuildID:                 build.ID,
+		RequestID:               build.RequestID,
+		OperationID:             build.OperationID,
 		MaxTokens:               maxTokens,
 		Temperature:             temperature,
 		SystemPrompt:            systemPrompt,

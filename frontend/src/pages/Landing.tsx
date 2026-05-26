@@ -1572,6 +1572,7 @@ const Hero: React.FC<LandingProps> = ({ onGetStarted }) => (
             <li><CheckCircle2 width={18} height={18} /> Cuts token waste by routing each task to the model built for that job.</li>
             <li><CheckCircle2 width={18} height={18} /> Built for complex enterprise apps: auth, billing, data, APIs, tests, review, deploy.</li>
             <li><CheckCircle2 width={18} height={18} /> Gives engineers control surfaces for every serious workflow, not just a prompt box.</li>
+            <li><CheckCircle2 width={18} height={18} /> BYOK on paid plans — connect your own provider keys and cut managed-credit burn.</li>
           </ul>
           <div className="launch-hero-actions">
             <button className="launch-btn launch-btn-primary" onClick={() => onGetStarted('register', 'pro')}>

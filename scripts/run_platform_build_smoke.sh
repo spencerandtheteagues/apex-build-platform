@@ -22,16 +22,64 @@ else
   EFFECTIVE_POWER_MODE="fast"
 fi
 
+# Opt-in: for paid full-stack canaries, assert a real, reachable preview started
+# (active AND url). Default off so the base smoke keeps its current behavior and
+# does not turn red on deployments that don't auto-start previews.
+ASSERT_PREVIEW_READY="${ASSERT_PREVIEW_READY:-0}"
+PREVIEW_POLL_MAX="${PREVIEW_POLL_MAX:-30}"
+PREVIEW_POLL_SECONDS="${PREVIEW_POLL_SECONDS:-3}"
+
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required" >&2
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/canary_report.sh
+source "$SCRIPT_DIR/lib/canary_report.sh"
+
+# Per-scenario artifact dir (caller-overridable, stable not timestamped) so the
+# free/paid scenarios in a matrix run never clobber each other's build JSON and
+# a stale file can't be mistaken for the current build (a false-green vector).
+# Auth/token temp files deliberately stay in /tmp and are NOT placed here, so
+# uploaded artifacts never contain session tokens.
+ARTIFACT_DIR="${ARTIFACT_DIR:-/tmp/apex_canary/${SMOKE_PROFILE}-${EFFECTIVE_POWER_MODE}}"
+mkdir -p "$ARTIFACT_DIR"
+BUILD_START_FILE="$ARTIFACT_DIR/build-start.json"
+BUILD_DETAIL_FILE="$ARTIFACT_DIR/build-detail.json"
+BUILD_COMPLETED_FILE="$ARTIFACT_DIR/build-completed.json"
+PREVIEW_STATUS_FILE="$ARTIFACT_DIR/preview-status.json"
+
+# Summary globals consumed by the EXIT trap so an actionable report is emitted on
+# every exit path (success, assertion failure, timeout, auth failure).
+SUMMARY_LABEL="${SMOKE_PROFILE}/${EFFECTIVE_POWER_MODE}"
+BUILD_ID=""
+FINAL_STATUS=""
+PREVIEW_SUMMARY="unknown (not captured)"
+
 prompt_file=""
 cookie_jar=""
 TOKEN=""
 CSRF_TOKEN=""
+
+emit_canary_summary() {
+  # Best-effort; never let summary emission change the exit code.
+  local provider_models quality_gate
+  provider_models="$(canary_provider_models "$BUILD_DETAIL_FILE" 2>/dev/null || true)"
+  quality_gate="$(canary_jq_first "$BUILD_DETAIL_FILE" '.quality_gate_status' '(if .quality_gate_passed == true then "passed" elif .quality_gate_passed == false then "failed" else empty end)' 2>/dev/null || true)"
+  canary_report_block \
+    "$SUMMARY_LABEL" \
+    "${BUILD_ID:-?}" \
+    "${FINAL_STATUS:-no_terminal_state}" \
+    "${provider_models:-?}" \
+    "${quality_gate:-?}" \
+    "${PREVIEW_SUMMARY:-unknown}" \
+    "$ARTIFACT_DIR" || true
+}
+
 cleanup() {
+  local exit_code=$?
+  { emit_canary_summary; } || true
   if [[ -n "${prompt_file}" && -f "${prompt_file}" ]]; then
     rm -f "${prompt_file}"
   fi
@@ -39,6 +87,7 @@ cleanup() {
     rm -f "${cookie_jar}"
   fi
   rm -f /tmp/apex_refresh.json
+  return "$exit_code"
 }
 trap cleanup EXIT
 
@@ -400,18 +449,62 @@ build_payload="$(jq -n \
 
 curl -sS "${auth_args[@]}" -X POST "$BASE_URL/build/start" \
   -H "Content-Type: application/json" \
-  -d "$build_payload" >/tmp/apex_build_start.json
+  -d "$build_payload" >"$BUILD_START_FILE"
 
-BUILD_ID="$(jq -r '.build_id // empty' /tmp/apex_build_start.json)"
+BUILD_ID="$(jq -r '.build_id // empty' "$BUILD_START_FILE")"
 if [[ -z "$BUILD_ID" ]]; then
   echo "BUILD_START_FAILED"
-  cat /tmp/apex_build_start.json
+  cat "$BUILD_START_FILE"
   exit 1
 fi
 
 echo "BUILD_ID=$BUILD_ID"
 echo "TOKEN_FILE=/tmp/apex_login.json"
 echo "SMOKE_PROFILE=$SMOKE_PROFILE"
+
+fetch_preview_status_file() {
+  local pid="$1"
+  local resp http_code body
+  resp="$(curl -sS -w $'\n%{http_code}' "${auth_args[@]}" "$BASE_URL/preview/status/$pid?sandbox=0" 2>/dev/null || true)"
+  http_code="$(printf '%s' "$resp" | tail -n1)"
+  body="$(printf '%s' "$resp" | sed '$d')"
+  [[ -z "${http_code//[0-9]/}" ]] || http_code=0
+  if printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+    jq --argjson code "${http_code:-0}" '. + {_http_status:$code}' <<<"$body" >"$PREVIEW_STATUS_FILE" 2>/dev/null \
+      || printf '{"_http_status":%s}' "${http_code:-0}" >"$PREVIEW_STATUS_FILE"
+  else
+    printf '{"_http_status":%s}' "${http_code:-0}" >"$PREVIEW_STATUS_FILE"
+  fi
+}
+
+# capture_preview_status records the live preview status into PREVIEW_STATUS_FILE
+# and PREVIEW_SUMMARY (for the summary). When ASSERT_PREVIEW_READY=1 it first asks
+# the backend to start the preview (mirroring the golden runner) then polls.
+capture_preview_status() {
+  local pid start_body
+  pid="$(canary_jq_first "$BUILD_DETAIL_FILE" '.project_id' '.projectID' '.project.id')"
+  if [[ -z "$pid" ]]; then
+    PREVIEW_SUMMARY="unknown (no project_id in build detail)"
+    return 0
+  fi
+  if [[ "$ASSERT_PREVIEW_READY" == "1" ]]; then
+    start_body="$(jq -c '{project_id:(.project_id // .projectID // .project.id), sandbox:false, require_backend:false}' "$BUILD_DETAIL_FILE" 2>/dev/null || echo '{}')"
+    curl -sS "${auth_args[@]}" -X POST "$BASE_URL/preview/fullstack/start" \
+      -H "Content-Type: application/json" -d "$start_body" >/dev/null 2>&1 \
+      || curl -sS "${auth_args[@]}" -X POST "$BASE_URL/preview/start" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -nc --arg p "$pid" '{project_id:($p|tonumber? // $p), sandbox:false}')" >/dev/null 2>&1 || true
+    local i
+    for ((i = 0; i < PREVIEW_POLL_MAX; i++)); do
+      fetch_preview_status_file "$pid"
+      if canary_preview_ready "$PREVIEW_STATUS_FILE"; then break; fi
+      sleep "$PREVIEW_POLL_SECONDS"
+    done
+  else
+    fetch_preview_status_file "$pid"
+  fi
+  PREVIEW_SUMMARY="$(canary_preview_status "$PREVIEW_STATUS_FILE")"
+}
 
 final_status=""
 for _ in $(seq 1 "$MAX_POLLS"); do
@@ -434,12 +527,13 @@ for _ in $(seq 1 "$MAX_POLLS"); do
   fi
   sleep "$POLL_SECONDS"
 done
+FINAL_STATUS="$final_status"  # expose to the EXIT-trap summary
 
-curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >/tmp/apex_build_detail.json || true
-detail_auth_error="$(jq -r '.error // empty' /tmp/apex_build_detail.json 2>/dev/null || true)"
+curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >"$BUILD_DETAIL_FILE" || true
+detail_auth_error="$(jq -r '.error // empty' "$BUILD_DETAIL_FILE" 2>/dev/null || true)"
 if [[ "$detail_auth_error" == "authentication required" || "$detail_auth_error" == "invalid or expired token" ]]; then
   refresh_or_relogin
-  curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >/tmp/apex_build_detail.json || true
+  curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >"$BUILD_DETAIL_FILE" || true
 fi
 echo "FINAL_DETAIL_SUMMARY"
 jq '{
@@ -452,14 +546,18 @@ jq '{
   require_preview_ready,
   files_count:(.files|length),
   reliability_summary:(.orchestration.reliability_summary // null)
-}' /tmp/apex_build_detail.json || cat /tmp/apex_build_detail.json
+}' "$BUILD_DETAIL_FILE" || cat "$BUILD_DETAIL_FILE"
+
+# Capture preview status for the summary (and to drive the opt-in guardrail).
+capture_preview_status
+echo "PREVIEW_STATUS=$PREVIEW_SUMMARY"
 
 if [[ "$final_status" == "completed" ]]; then
-  curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >/tmp/apex_build_completed.json || true
-  completed_auth_error="$(jq -r '.error // empty' /tmp/apex_build_completed.json 2>/dev/null || true)"
+  curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >"$BUILD_COMPLETED_FILE" || true
+  completed_auth_error="$(jq -r '.error // empty' "$BUILD_COMPLETED_FILE" 2>/dev/null || true)"
   if [[ "$completed_auth_error" == "authentication required" || "$completed_auth_error" == "invalid or expired token" ]]; then
     refresh_or_relogin
-    curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >/tmp/apex_build_completed.json || true
+    curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >"$BUILD_COMPLETED_FILE" || true
   fi
   echo "COMPLETED_BUILD_SUMMARY"
   jq '{
@@ -471,14 +569,25 @@ if [[ "$final_status" == "completed" ]]; then
     live,
     resumable,
     reliability_summary:(.orchestration.reliability_summary // null)
-  }' /tmp/apex_build_completed.json || cat /tmp/apex_build_completed.json
-  completed_status="$(jq -r '.status // empty' /tmp/apex_build_completed.json 2>/dev/null || true)"
+  }' "$BUILD_COMPLETED_FILE" || cat "$BUILD_COMPLETED_FILE"
+  completed_status="$(jq -r '.status // empty' "$BUILD_COMPLETED_FILE" 2>/dev/null || true)"
   if [[ "$completed_status" != "completed" ]]; then
     echo "COMPLETED_BUILD_STATUS_MISMATCH=$completed_status"
     exit 1
   fi
 
-  assert_completed_build_contract /tmp/apex_build_detail.json /tmp/apex_build_completed.json
+  assert_completed_build_contract "$BUILD_DETAIL_FILE" "$BUILD_COMPLETED_FILE"
+
+  # False-green guardrail (opt-in): a paid full-stack build that reports
+  # "completed" but has no active, reachable preview is not a real success.
+  if [[ "$ASSERT_PREVIEW_READY" == "1" && "$SMOKE_PROFILE" == "paid_fullstack" ]]; then
+    if ! canary_preview_ready "$PREVIEW_STATUS_FILE"; then
+      echo "ASSERTION_FAILED: paid full-stack build completed but preview is not ready ($PREVIEW_SUMMARY)" >&2
+      exit 1
+    fi
+    echo "PREVIEW_READY_ASSERTED $PREVIEW_SUMMARY"
+  fi
+
   echo "ASSERTIONS_PASSED profile=$SMOKE_PROFILE power_mode=$EFFECTIVE_POWER_MODE"
 fi
 

@@ -14,10 +14,12 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"apex-build/internal/applog"
 	"apex-build/internal/origins"
 
 	"github.com/gin-gonic/gin"
@@ -250,6 +252,106 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
+// OperationTrail emits one redacted, structured event for every HTTP request.
+// It intentionally logs route, status, latency, correlation IDs, and resource
+// IDs without recording request bodies, response bodies, or query values.
+func OperationTrail() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		startedAt := time.Now()
+		requestID := c.GetString("request_id")
+		if requestID == "" {
+			requestID = c.GetHeader("X-Request-ID")
+		}
+		if requestID == "" {
+			requestID = generateRequestID()
+			c.Set("request_id", requestID)
+			c.Header("X-Request-ID", requestID)
+		}
+
+		operationID := c.GetHeader("X-Apex-Operation-ID")
+		if operationID == "" {
+			operationID = applog.NewOperationID()
+		}
+		c.Set("operation_id", operationID)
+		c.Header("X-Apex-Operation-ID", operationID)
+
+		c.Next()
+
+		route := c.FullPath()
+		if route == "" && c.Request != nil && c.Request.URL != nil {
+			route = c.Request.URL.Path
+		}
+		statusCode := c.Writer.Status()
+		status := "success"
+		if statusCode >= http.StatusBadRequest || len(c.Errors) > 0 {
+			status = "failed"
+		}
+
+		fields := map[string]any{
+			"operation_id":         operationID,
+			"request_id":           requestID,
+			"client_trace_id":      c.GetHeader("X-Apex-Client-Trace-ID"),
+			"status":               status,
+			"method":               c.Request.Method,
+			"path":                 c.Request.URL.Path,
+			"route":                route,
+			"query_keys":           sortedQueryKeys(c),
+			"http_status":          statusCode,
+			"duration_ms":          time.Since(startedAt).Milliseconds(),
+			"response_bytes":       c.Writer.Size(),
+			"client_ip":            c.ClientIP(),
+			"user_agent":           c.Request.UserAgent(),
+			"operation_started_at": startedAt.UTC().Format(time.RFC3339Nano),
+		}
+		for key, value := range routeCorrelationFields(c) {
+			fields[key] = value
+		}
+		if len(c.Errors) > 0 {
+			fields["gin_errors"] = c.Errors.Errors()
+		}
+
+		applog.Operation("http.request", fields)
+	}
+}
+
+func sortedQueryKeys(c *gin.Context) []string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return nil
+	}
+	values := c.Request.URL.Query()
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func routeCorrelationFields(c *gin.Context) map[string]any {
+	fields := map[string]any{}
+	for _, spec := range []struct {
+		param string
+		field string
+	}{
+		{param: "buildId", field: "build_id"},
+		{param: "buildID", field: "build_id"},
+		{param: "projectId", field: "project_id"},
+		{param: "projectID", field: "project_id"},
+		{param: "fileId", field: "file_id"},
+		{param: "fileID", field: "file_id"},
+		{param: "sessionId", field: "session_id"},
+		{param: "sessionID", field: "session_id"},
+	} {
+		if value := strings.TrimSpace(c.Param(spec.param)); value != "" {
+			fields[spec.field] = value
+		}
+	}
+	if userID, exists := c.Get("user_id"); exists {
+		fields["user_id"] = userID
+	}
+	return fields
+}
+
 // CORS middleware for handling cross-origin requests
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -261,8 +363,8 @@ func CORS() gin.HandlerFunc {
 		}
 
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With, X-Request-ID")
-		c.Header("Access-Control-Expose-Headers", "X-Request-ID")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With, X-Request-ID, X-Apex-Operation-ID, X-Apex-Client-Trace-ID")
+		c.Header("Access-Control-Expose-Headers", "X-Request-ID, X-Apex-Operation-ID")
 		c.Header("Access-Control-Max-Age", "86400") // 24 hours
 
 		// Handle preflight OPTIONS requests

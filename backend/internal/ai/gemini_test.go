@@ -90,6 +90,68 @@ func TestGeminiGenerateFallsBackFrom31ProTo31ProPreview(t *testing.T) {
 	}
 }
 
+func TestGeminiHealthSendsKeyViaHeaderNotURL(t *testing.T) {
+	t.Parallel()
+
+	const secret = "AIzaSyEXAMPLEexamplekey1234567890abcdEFGH"
+	var seenQuery, seenHeader string
+	client := NewGeminiClient(secret)
+	client.baseURL = "https://gemini.test/v1beta/models"
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		seenQuery = r.URL.RawQuery
+		seenHeader = r.Header.Get("x-goog-api-key")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{}`))),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	if err := client.Health(context.Background()); err != nil {
+		t.Fatalf("Health returned error: %v", err)
+	}
+	if strings.Contains(seenQuery, "key=") || strings.Contains(seenQuery, secret) {
+		t.Fatalf("api key leaked into request URL query: %q", seenQuery)
+	}
+	if seenHeader != secret {
+		t.Fatalf("x-goog-api-key header = %q, want the key", seenHeader)
+	}
+}
+
+func TestGeminiErrorPreservesBodyWithoutLeakingKey(t *testing.T) {
+	t.Parallel()
+
+	const secret = "AIzaSyEXAMPLEexamplekey1234567890abcdEFGH"
+	client := NewGeminiClient(secret)
+	client.baseURL = "https://gemini.test/v1beta/models"
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := []byte(`{"error":{"code":401,"message":"API key not valid. Pass a valid API key. key=` + secret + `","status":"UNAUTHENTICATED"}}`)
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	err := client.Health(context.Background())
+	if err == nil {
+		t.Fatal("expected unauthorized health error")
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "UNAUTHORIZED") {
+		t.Fatalf("error should keep structured prefix, got %q", msg)
+	}
+	if !strings.Contains(msg, "API key not valid") {
+		t.Fatalf("error should preserve provider diagnostic body, got %q", msg)
+	}
+	if strings.Contains(msg, secret) || strings.Contains(msg, "AIza") {
+		t.Fatalf("error leaked api key: %q", msg)
+	}
+	if got := classifyProviderError(err); got != "auth_error" {
+		t.Fatalf("classifyProviderError = %q, want auth_error", got)
+	}
+}
+
 func TestGeminiThinkingBudgetScalesByPowerMode(t *testing.T) {
 	tests := []struct {
 		name      string

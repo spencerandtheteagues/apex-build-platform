@@ -1467,6 +1467,8 @@ func setupRoutes(
 	configureTrustedClientIP(router)
 
 	// Add middleware
+	router.Use(middleware.RequestID())
+	router.Use(middleware.OperationTrail())
 	router.Use(server.CORSMiddleware())
 	router.Use(gin.Recovery())
 	router.Use(middleware.SecurityHeaders())

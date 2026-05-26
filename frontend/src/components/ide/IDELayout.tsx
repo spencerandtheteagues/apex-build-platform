@@ -47,6 +47,9 @@ import SecretsManager from '@/components/secrets/SecretsManager'
 import { BudgetSettings } from '@/components/budget/BudgetSettings'
 import ProtectedPathsEditor from '@/components/project/ProtectedPathsEditor'
 import { EnvironmentPanel } from '@/components/ide/panels/EnvironmentPanel'
+// Direct path (not the editor barrel) so the fallback stays Monaco-free and renders
+// before the lazy editor chunk loads.
+import { EditorLoadingFallback } from '@/components/editor/EditorLoadingFallback'
 
 // Lazy load heavy components for better initial load performance
 // Monaco Editor is ~800KB-1.2MB, XTerminal is ~200KB
@@ -95,16 +98,8 @@ import {
   Globe,
 } from 'lucide-react'
 
-// Loading fallback for lazy-loaded components
-const EditorLoadingFallback = () => (
-  <div className="flex items-center justify-center h-full bg-gray-900/50">
-    <div className="text-center">
-      <Loading size="lg" variant="spinner" />
-      <p className="mt-3 text-sm text-gray-400">Loading editor...</p>
-    </div>
-  </div>
-)
-
+// Loading fallback for lazy-loaded components.
+// EditorLoadingFallback is the shared accessible skeleton imported above.
 const TerminalLoadingFallback = () => (
   <div className="flex items-center justify-center h-full bg-black">
     <div className="text-center">

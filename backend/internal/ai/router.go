@@ -30,6 +30,10 @@ type ProviderHealthDetail struct {
 	// Balance is nil when unknown, 0 when known-depleted, positive when known.
 	// Populated only when we can infer it (e.g. a depleted-credit error implies 0).
 	Balance *float64 `json:"balance"`
+	// Detail is a short, secret-redacted reason for a non-ok status (e.g. the provider's
+	// own error message). Empty when healthy or when no detail is available. Always passed
+	// through redactSecrets so it is safe to surface in the public /health output.
+	Detail string `json:"detail,omitempty"`
 }
 
 // AIRouter intelligently routes AI requests to the optimal provider
@@ -41,6 +45,7 @@ type AIRouter struct {
 	mu           sync.RWMutex
 	healthCheck  map[AIProvider]bool
 	healthStatus map[AIProvider]string // "ok", "no_credits", "auth_error", "timeout", "error", "unknown"
+	healthDetail map[AIProvider]string // secret-redacted last health-check error message
 }
 
 // GetConfiguredProviders returns provider clients that exist in this router,
@@ -134,6 +139,9 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 	}
 	if len(extraKeys) > 2 {
 		ollamaAPIKey = extraKeys[2]
+	}
+	if strings.TrimSpace(ollamaURL) == "" && strings.TrimSpace(ollamaAPIKey) != "" {
+		ollamaURL = "https://ollama.com/v1"
 	}
 	if ollamaURL != "" {
 		clients[ProviderOllama] = NewOllamaClient(ollamaURL, ollamaAPIKey)
@@ -721,6 +729,23 @@ func classifyProviderError(err error) string {
 		return "ok"
 	}
 	msg := strings.ToLower(err.Error())
+
+	// Provider wrappers (gemini.go, grok.go, ...) emit a structured prefix that is the
+	// authoritative signal. Check it first so an appended (sanitized) response body cannot
+	// flip classification — e.g. an auth error whose body happens to mention "quota".
+	switch {
+	case strings.HasPrefix(msg, "unauthorized") || strings.HasPrefix(msg, "forbidden"):
+		return "auth_error"
+	case strings.HasPrefix(msg, "quota_exceeded"):
+		return "no_credits"
+	case strings.HasPrefix(msg, "rate_limit"):
+		// Rate limiting is transient: do not mark the provider known-bad. It surfaces as a
+		// non-"ok" status that temporarily de-prioritizes the provider and is re-checked.
+		return "error"
+	case strings.HasPrefix(msg, "service_error"):
+		return "error"
+	}
+
 	switch {
 	case strings.Contains(msg, "credit balance") ||
 		strings.Contains(msg, "insufficient_funds") ||
@@ -782,8 +807,12 @@ func (r *AIRouter) performHealthChecks() {
 			status := classifyProviderError(err)
 			healthy := (status == "ok")
 
+			// Redact before logging: provider error strings (and any wrapped transport
+			// *url.Error) may contain API keys. Never log the raw error.
+			detail := ""
 			if err != nil {
-				log.Printf("Health check failed for provider %s [%s]: %v", p, status, err)
+				detail = truncateForLog(redactSecrets(err.Error(), ""), maxProviderErrorBody)
+				log.Printf("Health check failed for provider %s [%s]: %s", p, status, detail)
 			} else {
 				log.Printf("Health check passed for provider %s", p)
 			}
@@ -795,8 +824,12 @@ func (r *AIRouter) performHealthChecks() {
 			if r.healthStatus == nil {
 				r.healthStatus = make(map[AIProvider]string)
 			}
+			if r.healthDetail == nil {
+				r.healthDetail = make(map[AIProvider]string)
+			}
 			r.healthCheck[p] = healthy
 			r.healthStatus[p] = status
+			r.healthDetail[p] = detail
 			r.mu.Unlock()
 		}(provider, client)
 	}
@@ -913,9 +946,13 @@ func (r *AIRouter) GetDetailedHealthStatus() map[string]*ProviderHealthDetail {
 		if status == "no_credits" {
 			balance = zeroBalance() // known to be depleted
 		}
+		// Detail is already redacted at capture time in performHealthChecks; redact again
+		// defensively so this stays safe even if populated through another path.
+		detail := redactSecrets(r.healthDetail[provider], "")
 		result[string(provider)] = &ProviderHealthDetail{
 			Status:  status,
 			Balance: balance,
+			Detail:  detail,
 		}
 	}
 	return result

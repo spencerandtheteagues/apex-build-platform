@@ -2,9 +2,110 @@ package ai
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
+
+// healthStubClient is a configurable AIClient for exercising health-check classification
+// and the detail surfaced by GetDetailedHealthStatus.
+type healthStubClient struct {
+	provider AIProvider
+	healthFn func(context.Context) error
+}
+
+func (s *healthStubClient) Generate(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+	return &AIResponse{Provider: s.provider, Content: "ok"}, nil
+}
+func (s *healthStubClient) GetCapabilities() []AICapability {
+	return []AICapability{CapabilityCodeGeneration}
+}
+func (s *healthStubClient) GetProvider() AIProvider { return s.provider }
+func (s *healthStubClient) Health(ctx context.Context) error {
+	if s.healthFn == nil {
+		return nil
+	}
+	return s.healthFn(ctx)
+}
+func (s *healthStubClient) GetUsage() *ProviderUsage {
+	return &ProviderUsage{Provider: s.provider, LastUsed: time.Now()}
+}
+
+func TestClassifyProviderErrorMatrix(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nil is ok", nil, "ok"},
+		{"gemini rate limit prefix is transient error", errors.New("RATE_LIMIT: Gemini API rate limit exceeded - please wait before retrying (status=429)"), "error"},
+		{"gemini quota prefix is no_credits", errors.New("QUOTA_EXCEEDED: Gemini API quota exhausted - add billing or use another provider (status=403)"), "no_credits"},
+		{"gemini unauthorized prefix is auth_error", errors.New("UNAUTHORIZED: invalid Gemini API key (status=401)"), "auth_error"},
+		{"gemini forbidden prefix is auth_error", errors.New("FORBIDDEN: Gemini API access denied - check API key permissions (status=403)"), "auth_error"},
+		{"gemini service error prefix is transient error", errors.New("SERVICE_ERROR: Gemini service temporarily unavailable (status=503)"), "error"},
+		{"grok disabled key forbidden is auth_error", errors.New("FORBIDDEN: Grok API key is disabled - enable or regenerate the key in the xAI console (status 403)"), "auth_error"},
+		{"auth prefix wins over quota mention in body", errors.New("FORBIDDEN: Gemini API access denied (status=403: your quota and billing look fine but key lacks permission)"), "auth_error"},
+		{"timeout heuristic", errors.New("context deadline exceeded"), "timeout"},
+		{"raw model_not_found is auth_error", errors.New(`{"error":{"message":"model does not exist","code":"model_not_found"}}`), "auth_error"},
+		{"unknown body is generic error", errors.New("API_ERROR: Grok request failed (status=520: cloudflare hiccup)"), "error"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := classifyProviderError(tc.err); got != tc.want {
+				t.Fatalf("classifyProviderError(%q) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPerformHealthChecksSurfacesRedactedDetail(t *testing.T) {
+	t.Parallel()
+
+	router := &AIRouter{
+		clients: map[AIProvider]AIClient{
+			ProviderGemini: &healthStubClient{
+				provider: ProviderGemini,
+				healthFn: func(context.Context) error {
+					// Simulate a transport error that leaked the key in the URL query string.
+					return errors.New("failed to make request: Get \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=AIzaSyEXAMPLEexamplekey1234567890abcd\": dial tcp: timeout")
+				},
+			},
+			ProviderClaude: &healthStubClient{provider: ProviderClaude},
+		},
+	}
+
+	router.performHealthChecks()
+
+	detail := router.GetDetailedHealthStatus()
+
+	gemini := detail[string(ProviderGemini)]
+	if gemini == nil {
+		t.Fatal("missing gemini detail")
+	}
+	if gemini.Status != "error" && gemini.Status != "timeout" {
+		t.Fatalf("gemini status = %q, want error/timeout", gemini.Status)
+	}
+	if gemini.Detail == "" {
+		t.Fatal("expected a non-empty diagnostic detail for the failing provider")
+	}
+	if strings.Contains(gemini.Detail, "AIza") || strings.Contains(gemini.Detail, "key=AIza") {
+		t.Fatalf("health detail leaked api key: %q", gemini.Detail)
+	}
+
+	claude := detail[string(ProviderClaude)]
+	if claude == nil || claude.Status != "ok" {
+		t.Fatalf("claude status = %+v, want ok", claude)
+	}
+	if claude.Detail != "" {
+		t.Fatalf("healthy provider should have empty detail, got %q", claude.Detail)
+	}
+}
 
 type routerStubClient struct {
 	generate func(context.Context, *AIRequest) (*AIResponse, error)

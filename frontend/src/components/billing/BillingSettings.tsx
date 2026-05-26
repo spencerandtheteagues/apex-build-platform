@@ -123,6 +123,15 @@ const PACK_CONFIG = [
   { amountUsd: 250, color: '#a855f7', glow: 'rgba(168,85,247,0.3)', border: 'rgba(168,85,247,0.4)', bg: 'rgba(168,85,247,0.05)', label: 'Scale' },
 ]
 
+const PLAN_RANK: Record<string, number> = {
+  free: 0,
+  builder: 1,
+  pro: 2,
+  team: 3,
+  enterprise: 4,
+  owner: 5,
+}
+
 const asNumber = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) ? v : 0
 const asString = (v: unknown): string => typeof v === 'string' ? v : ''
 
@@ -272,24 +281,36 @@ export function BillingSettings() {
 
   const currentPlanType = subscription?.plan_type ?? 'free'
 
+  const isUpgradePlan = (targetType: string) =>
+    (PLAN_RANK[targetType] ?? -1) > (PLAN_RANK[currentPlanType] ?? -1)
+
   const handleUpgrade = async (plan: Plan) => {
-    if (!selfServeReady || !plan.monthly_price_id || isPlaceholderPriceID(plan.monthly_price_id)) {
+    if (!selfServeReady) {
       setError('Self-serve billing is not available right now.')
       return
     }
     setUpgradeLoading(plan.type)
     setError(null)
     const hasActiveSub = subscription?.status === 'active' || subscription?.status === 'trialing'
+    const upgrading = isUpgradePlan(plan.type)
     try {
       if (hasActiveSub && currentPlanType !== 'free') {
         const result = await apiService.changePlan({ plan_type: plan.type, billing_cycle: 'monthly' })
         if (result.success) {
           setSubscription(prev => prev ? { ...prev, plan_type: plan.type, plan_name: plan.name, status: result.data?.status ?? prev.status } : prev)
-          setNotice({ tone: 'success', message: `Switched to ${plan.name}. Prorated charge or credit applied immediately.` })
+          if (upgrading) {
+            setNotice({ tone: 'success', message: `Upgraded to ${plan.name}. You'll be charged the prorated difference immediately.` })
+          } else {
+            setNotice({ tone: 'info', message: `Downgrade scheduled. You'll remain on ${currentPlanType === 'free' ? 'Free' : subscription?.plan_name} until the end of the current period.` })
+          }
         } else {
           setError(result.error || 'Failed to change plan. Please try again.')
         }
       } else {
+        if (!plan.monthly_price_id || isPlaceholderPriceID(plan.monthly_price_id)) {
+          setError('Self-serve billing is not available right now.')
+          return
+        }
         const result = await apiService.createCheckoutSession({ price_id: plan.monthly_price_id })
         if (result.success && result.data?.checkout_url) {
           window.location.href = result.data.checkout_url
@@ -552,11 +573,13 @@ export function BillingSettings() {
                     <div className="rounded-2xl border px-4 py-3 text-center text-sm font-bold" style={{ borderColor: cfg.border, color: cfg.color }}>
                       Active Plan
                     </div>
-                  ) : plan.type === 'free' ? (
+                  ) : plan.type === 'free' && currentPlanType === 'free' ? (
                     <div className="rounded-2xl border border-gray-800 px-4 py-3 text-center text-sm text-gray-500">
                       Default tier
                     </div>
-                  ) : checkoutAvailable ? (
+                  ) : checkoutAvailable || (
+                    (subscription?.status === 'active' || subscription?.status === 'trialing') && currentPlanType !== 'free'
+                  ) ? (
                     <button
                       onClick={() => void handleUpgrade(plan)}
                       disabled={upgradeLoading === plan.type}
@@ -571,14 +594,12 @@ export function BillingSettings() {
                       {upgradeLoading === plan.type ? (
                         <>
                           <Loader2 size={14} className="animate-spin" />
-                          {(subscription?.status === 'active' || subscription?.status === 'trialing') && currentPlanType !== 'free' ? 'Switching…' : 'Redirecting…'}
+                          {isUpgradePlan(plan.type) ? 'Upgrading…' : 'Scheduling…'}
                         </>
                       ) : (
                         <>
                           <CreditCard size={14} />
-                          {(subscription?.status === 'active' || subscription?.status === 'trialing') && currentPlanType !== 'free'
-                              ? `Switch to ${plan.name}`
-                              : `Upgrade to ${plan.name}`}
+                          {isUpgradePlan(plan.type) ? `Upgrade to ${plan.name}` : `Downgrade to ${plan.name}`}
                         </>
                       )}
                     </button>

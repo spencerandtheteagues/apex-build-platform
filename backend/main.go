@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/applog"
 	"apex-build/internal/auth"
 	"apex-build/internal/handlers"
 	"apex-build/internal/middleware"
@@ -119,7 +120,7 @@ func initDB() (*gorm.DB, error) {
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logLevel),
+		Logger: applog.NewGormOperationLogger(logger.Default.LogMode(logLevel)),
 	})
 	if err != nil {
 		return nil, err
@@ -247,6 +248,8 @@ func setupRouter(handler *handlers.Handler) *gin.Engine {
 
 	// Middleware
 	router.Use(gin.Logger())
+	router.Use(middleware.RequestID())
+	router.Use(middleware.OperationTrail())
 	router.Use(gin.Recovery())
 	router.Use(middleware.ErrorHandler())
 	router.Use(middleware.RateLimit())

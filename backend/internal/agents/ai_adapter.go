@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/applog"
 	"apex-build/internal/budget"
 )
 
@@ -358,9 +359,11 @@ func qualifyOllamaCloudModel(model string) string {
 	case "deepseek-v4-pro":
 		return "deepseek-v4-pro:cloud"
 	case "qwen", "qwen3.5", "qwen-3.5", "qwen-3.6-27b":
-		return "qwen3.5:cloud"
-	case "devstral", "devstral-24b", "devstral-small-24b":
-		return "devstral-small-24b:cloud"
+		return "qwen3.5:397b:cloud"
+	case "qwen3.5:397b", "qwen-3.5-397b":
+		return "qwen3.5:397b:cloud"
+	case "devstral", "devstral-24b", "devstral-small-24b", "devstral-small-2", "devstral-small-2:24b":
+		return "devstral-small-2:24b:cloud"
 	default:
 		return trimmed
 	}
@@ -567,6 +570,22 @@ For code files, use this exact format:
 		capability, aiProvider, model, len(fullPrompt), maxTokens)
 
 	plDone := pLog(opts.BuildID).AICallStart(string(aiProvider), model, string(capability), len(fullPrompt), maxTokens)
+	finishOperation := applog.StartOperation("ai.provider.generate", map[string]any{
+		"request_id":         opts.RequestID,
+		"operation_id":       opts.OperationID,
+		"build_id":           opts.BuildID,
+		"user_id":            opts.UserID,
+		"provider":           string(aiProvider),
+		"requested_provider": string(provider),
+		"model":              model,
+		"capability":         string(capability),
+		"role_hint":          opts.RoleHint,
+		"prompt_len":         len(fullPrompt),
+		"max_tokens":         maxTokens,
+		"temperature":        temperature,
+		"use_platform_keys":  opts.UsePlatformKeys,
+		"disable_fallback":   opts.DisableProviderFallback,
+	})
 
 	estimatedCost := 0.0
 	if a.byokManager != nil && opts.UserID > 0 {
@@ -622,6 +641,7 @@ For code files, use this exact format:
 	response, err := targetRouter.Generate(genCtx, request)
 	if err != nil {
 		plDone(0, 0, 0, 0, err)
+		finishOperation("failed", err, map[string]any{"estimated_cost_usd": estimatedCost})
 		if a.budgetEnforcer != nil && budgetReservation != nil {
 			_ = a.budgetEnforcer.ReleaseReservation(budgetReservation.ID)
 		}
@@ -636,7 +656,9 @@ For code files, use this exact format:
 	}
 
 	if response == nil || response.Content == "" {
-		plDone(0, 0, 0, 0, fmt.Errorf("empty response"))
+		emptyErr := fmt.Errorf("empty response")
+		plDone(0, 0, 0, 0, emptyErr)
+		finishOperation("failed", emptyErr, map[string]any{"estimated_cost_usd": estimatedCost})
 		if a.budgetEnforcer != nil && budgetReservation != nil {
 			_ = a.budgetEnforcer.ReleaseReservation(budgetReservation.ID)
 		}
@@ -679,6 +701,15 @@ For code files, use this exact format:
 			outTok = response.Usage.CompletionTokens
 		}
 		plDone(len(response.Content), inTok, outTok, finalCost, nil)
+		finishOperation("success", nil, map[string]any{
+			"response_provider":  string(actualProviderForAIResponse(response, aiProvider)),
+			"response_model":     ai.GetModelUsed(response, request),
+			"response_chars":     len(response.Content),
+			"input_tokens":       inTok,
+			"output_tokens":      outTok,
+			"cost_usd":           finalCost,
+			"estimated_cost_usd": estimatedCost,
+		})
 	}
 
 	log.Printf("AI generation succeeded, response length: %d", len(response.Content))

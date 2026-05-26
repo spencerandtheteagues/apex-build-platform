@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"apex-build/internal/applog"
 	appconfig "apex-build/internal/config"
 	manageddb "apex-build/internal/database"
 	"apex-build/internal/git"
@@ -129,7 +130,7 @@ func waitForDatabasePing(ctx context.Context, pinger sqlHealthPinger, retryInter
 func NewDatabase(config *Config) (*Database, error) {
 	// Configure GORM with custom logger
 	gormConfig := &gorm.Config{
-		Logger: logger.Default.LogMode(resolveGormLogLevel()),
+		Logger: applog.NewGormOperationLogger(logger.Default.LogMode(resolveGormLogLevel())),
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
