@@ -102,3 +102,11 @@ $RECYCLE.BIN/
 .nfs*
 backend/apex-backend
 .audit/
+
+# Agent workspace artifacts
+.openclaw/
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
