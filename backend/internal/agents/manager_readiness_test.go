@@ -958,6 +958,54 @@ export default function App() {
 	}
 }
 
+func TestPlannedFeatureCoverageErrorsAcceptsSupportOpsSignals(t *testing.T) {
+	t.Parallel()
+
+	build := supportOpsFeatureCoverageBuild()
+	files := fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const statuses = ["Backlog", "Ready", "In Progress", "Review", "Done"];
+const tickets = ["SSO login failure", "Stripe billing invoice mismatch", "API-backed SLA automation rule"];
+const customers = ["Northstar Manufacturing", "Luma Health"];
+
+export default function App() {
+  const onDragStart = () => {};
+  const onDrop = () => {};
+  return <main>
+    <section aria-label="Admin Dashboard">
+      <article className="card">Open Tickets metric 42 active support requests</article>
+      <article className="card">SLA compliance metric 96% status summary</article>
+      <article className="card">Billing MRR metric Stripe billing $18K</article>
+      <article className="card">Backlog status 7 tickets</article>
+    </section>
+    <section aria-label="Ticket Workflow Queues Kanban board">
+      <p>Kanban board with draggable cards, drag and drop, status columns, SLA timers, and assignees.</p>
+      {statuses.map((status) => <article key={status} className="column" draggable onDragStart={onDragStart} onDrop={onDrop}>{status}</article>)}
+      {tickets.map((ticket) => <button key={ticket}>Ticket {ticket}</button>)}
+    </section>
+    <section aria-label="Customer Profiles">
+      {customers.map((customer) => <article key={customer}>Customer Profiles searchable customer profile plan health MRR tickets {customer}</article>)}
+    </section>
+    <section aria-label="Analytics">
+      <article>Analytics resolution trends SLA compliance channel mix sentiment agent workload chart</article>
+    </section>
+    <section aria-label="Billing and backend gate">
+      <button>Continue with backend by upgrading</button>
+      <p>Login, Stripe billing, Postgres persistence, and API-backed SLA automation require paid backend functionality.</p>
+    </section>
+    <section aria-label="Settings Page">
+      <label>Provider model routing<input /></label>
+      <label>Status labels<input /></label>
+      <button>Reset Demo Data</button>
+    </section>
+  </main>;
+}`},
+	)
+
+	if errs := plannedFeatureCoverageErrors(build, files); len(errs) != 0 {
+		t.Fatalf("expected support-ops feature signals to pass planned coverage, got %v", errs)
+	}
+}
+
 func TestPlannedFeatureCoverageErrorsAcceptsClientPortalSignals(t *testing.T) {
 	t.Parallel()
 
@@ -1367,6 +1415,92 @@ export default function App() {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsUsesSupportOpsPlannedFeatureRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := supportOpsFeatureCoverageBuild()
+	build.ID = "build-support-ops-planned-feature-coverage-repair"
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `const modules = ["Admin Dashboard", "Ticket Workflow Queues", "Customer Profiles", "Analytics"];
+
+export default function App() {
+  return <main>
+    <h1>Build a customer support operations app</h1>
+    {modules.map((module) => <section key={module}>{module}</section>)}
+  </main>;
+}`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`planned feature coverage failed: "Ticket Workflow Queues" is missing draggable Kanban/pipeline board signals with status columns`,
+			`planned feature coverage failed: "Admin Dashboard" is missing dashboard KPI cards and supporting metric/status signals`,
+		},
+		"planned feature coverage failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected support-ops planned-feature coverage failure to use deterministic workflow repair")
+	}
+	repairedFiles := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range repairedFiles {
+		if sanitizeFilePath(file.Path) == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if strings.TrimSpace(app) == "" {
+		t.Fatalf("expected repaired support-ops app file, got %+v", repairedFiles)
+	}
+	for _, expected := range []string{
+		"Apex SupportOps",
+		"Admin Dashboard",
+		"Ticket Workflow Queues",
+		"Kanban board",
+		"draggable",
+		"drag and drop",
+		"Backlog",
+		"Ready",
+		"In Progress",
+		"Review",
+		"Done",
+		"Customer Profiles",
+		"Stripe billing",
+		"Postgres persistence",
+		"API-backed SLA automation",
+		"Continue with backend by upgrading",
+		"Reset Demo Data",
+	} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired support-ops app to contain %q, got %q", expected, app)
+		}
+	}
+	if errs := plannedFeatureCoverageErrors(build, repairedFiles); len(errs) != 0 {
+		t.Fatalf("expected repaired support-ops app to pass planned-feature coverage, got %v", errs)
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		found := false
+		for _, bundle := range state.PatchBundles {
+			if strings.Contains(bundle.Justification, "planned_feature_coverage_repair") &&
+				strings.Contains(bundle.Justification, "support-ops") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected support-ops planned-feature repair patch bundle, got %+v", state.PatchBundles)
+		}
+	}
+}
+
 func TestApplyDeterministicValidationRepairsUsesClientPortalPlannedFeatureRepair(t *testing.T) {
 	t.Parallel()
 
@@ -1738,6 +1872,31 @@ func crmFeatureCoverageBuild() *Build {
 				{Name: "Deal Detail Page", Description: "Deal detail page with contact info, activity timeline, notes, tasks, next step, and value calculator.", Priority: 80},
 				{Name: "New Deal Form", Description: "New deal form with validation and live forecast calculation.", Priority: 80},
 				{Name: "Settings Page", Description: "Settings page with stages, owners, default probability, and reset demo data.", Priority: 60},
+			},
+		},
+	}
+}
+
+func supportOpsFeatureCoverageBuild() *Build {
+	return &Build{
+		ID:          "build-support-ops-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build Apex SupportOps, a polished full-stack SaaS customer support operations app with login, Stripe billing, Postgres persistence, an admin dashboard, ticket workflow queues, customer profiles, analytics, and API-backed SLA automation. For free accounts, preserve the frontend preview and gate backend runtime honestly.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "frontend",
+			TechStack: TechStack{
+				Frontend: "React",
+			},
+			Features: []Feature{
+				{Name: "Admin Dashboard", Description: "Admin dashboard with open tickets, SLA compliance, high priority queue, billing MRR, backlog, and metric cards.", Priority: 100},
+				{Name: "Ticket Workflow Queues", Description: "Draggable Kanban cards across Backlog, Ready, In Progress, Review, and Done status columns.", Priority: 100},
+				{Name: "Customer Profiles", Description: "Customer profiles with plan, health, MRR, ticket count, and last activity.", Priority: 80},
+				{Name: "Analytics", Description: "Analytics with resolution trends, SLA compliance, channel mix, sentiment, and agent workload.", Priority: 80},
+				{Name: "Billing and Backend Gate", Description: "Frontend upgrade gate explaining login, Stripe billing, Postgres persistence, and API-backed SLA automation require a paid account.", Priority: 80},
+				{Name: "Settings Page", Description: "Settings page with provider model routing, status labels, notification preferences, and reset demo data.", Priority: 60},
 			},
 		},
 	}
@@ -4612,6 +4771,40 @@ func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder
 	}
 	if !foundCreate {
 		t.Fatalf("expected create_file operation for missing local module, got %+v", state.PatchBundles)
+	}
+}
+
+func TestClearStaleImportValidationErrorRecognizesNextAttemptedImportError(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:     "build-stale-next-attempted-import",
+		Status: BuildReviewing,
+		SnapshotFiles: []GeneratedFile{
+			{Path: "package.json", Language: "json", Content: `{"name":"next-stale-import","private":true}`},
+			{Path: "src/lib/auth.ts", Language: "typescript", Content: `import { create } from "zustand";
+
+type AuthState = { signedIn: boolean };
+
+export const useAuthStore = create<AuthState>(() => ({ signedIn: true }));
+`},
+			{Path: "src/app/page.tsx", Language: "typescript", Content: `import { useAuthStore } from "@/lib/auth";
+
+export default function Page() {
+  const signedIn = useAuthStore((state) => state.signedIn);
+  return <main>{signedIn ? "Ready" : "Login"}</main>;
+}
+`},
+		},
+	}
+
+	summary := am.clearStaleImportValidationError(build, []string{
+		`Preview verification build failed: Attempted import error: 'useAuthStore' is not exported from '@/lib/auth' (imported as 'useAuthStore').`,
+	})
+
+	if !strings.Contains(summary, "src/lib/auth.ts exports useAuthStore") {
+		t.Fatalf("expected stale Next attempted import error to clear against current exports, got %q", summary)
 	}
 }
 
