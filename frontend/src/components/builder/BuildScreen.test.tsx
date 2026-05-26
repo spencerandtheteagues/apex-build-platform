@@ -18,7 +18,7 @@ const baseProps = () => ({
     checkpoints: [],
     interaction: undefined,
     currentPhase: "planning",
-    blockers: [],
+    blockers: [] as any[],
     patchBundles: [] as any[],
     historicalLearning: undefined as any,
     promptPackActivationRequests: undefined as any,
