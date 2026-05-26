@@ -8,7 +8,7 @@ This tracker reconciles the master launch plan with the current repository state
 
 - Branch: `main`
 - Local status must be checked with `git status`; this tracker records launch evidence and must not be used as a cleanliness claim.
-- 2026-05-26 orchestrator note: the local tree contains launch-readiness doc, builder onboarding, preview verification surfacing, and placeholder-gate hardening changes that are under local verification before push.
+- 2026-05-26 orchestrator note: the local tree contains backend test-harness reliability changes that made the required serialized backend suite pass under VPS contention. These changes are verified locally but not yet pushed.
 - Push dependency: do not store GitHub, Render, Stripe, provider, or customer secrets in repo files, docs, remotes, or logs.
 
 ## Closed In This Batch
@@ -65,6 +65,7 @@ This tracker reconciles the master launch plan with the current repository state
 
 - 2026-05-26 12:30 UTC: public `/health` reports `ready=true`, `feature_readiness_status=healthy`, and 5/7 providers healthy. Claude, DeepSeek, GLM, GPT-4, and Ollama report `ok`; Gemini reports `error` from depleted credits/rate limit; Grok reports `auth_error` from permissions or spend limit.
 - 2026-05-26 12:30 UTC: public `/health/features` reports `status=healthy`, critical services `6/6 ready`, optional services `40/40 ready`, `code_execution.details.launch_ready=true` through E2B, `preview_service.details.launch_ready=true`, and `preview_runtime_verify` ready with browser proof enabled.
+- 2026-05-26 17:16 UTC: backend TASK-008 gate passed locally on the Kali VPS with `cd backend && go test -p 1 -parallel 4 ./... -timeout 20m` after clearing stale `/tmp` build artifacts; evidence log is `/tmp/backend_full_p1_after_tmp_cleanup_20260526T1650Z.txt`. `cd backend && go build ./...` also passed. The earlier `internal/agents` false-reds were test timing/parallelism issues under VPS contention, not runtime regressions.
 - 2026-05-25: TASK-004 paid balanced full-stack canary functionally passed with build `69d3582e`, `status=completed progress=100 quality_gate_status=passed`, and a live interactive preview. Screenshot/console artifact location is not attached in the current tracker and remains required before treating this as complete launch evidence.
 - Historical 2026-05-10 evidence remains useful for prior verifier behavior: strict Render launch verification passed, mobile launch-safe default verification passed, Stripe invalid-signature/non-paid checkout probes passed, Playwright production launch smoke passed `5 passed / 1 skipped`, and fast live golden proof exited `GOLDEN_BUILD_PASSED`. Real Stripe event replay, controlled billing lifecycle, paid max, rollback, restart recovery, load test, and diverse matrix evidence remain open.
 
@@ -140,8 +141,8 @@ Prior code forced balanced+platform builds to use `ollama/kimi-k2.6:cloud` for L
 ### Updated Launch Blockers
 
 - [ ] **TASK-005**: Max power canary has no recorded pass yet; last documented build was `f360affa` in progress on 2026-05-25
-- [ ] **TASK-006**: Enable `APEX_ENABLE_GITHUB_ACTIONS=true` in GitHub repo variables (requires GitHub admin)
-- [ ] **TASK-007**: Rollback drill execution (requires Render dashboard/API key)
+- [ ] Production canary workflow pass: `APEX_ENABLE_GITHUB_ACTIONS=true` and `RENDER_API_KEY` are configured per 2026-05-26 handoff, but a passing workflow run is not recorded in this tracker.
+- [ ] Rollback drill execution evidence: `scripts/verify-rollback.sh` exists, but a real Render rollback/roll-forward run is not recorded in `docs/launch-runbook.md`.
 - [ ] Stripe webhook replay for all critical events (real events, not just invalid-signature check)
 - [ ] Controlled paid checkout, billing portal, upgrade/downgrade, and cancellation pass in production
 - [ ] Failed-build restart/recovery, export/deploy handoff, diverse prompt matrix, and launch load test evidence

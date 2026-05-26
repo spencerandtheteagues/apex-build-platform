@@ -155,12 +155,12 @@ Priority: P0
 Category: Reliability
 Estimated Time: 8 minutes (config) + watch
 Owner: openclaw
-Status: BLOCKED BY EXTERNAL ADMIN — requires GitHub Actions enablement and repo secrets; paid canaries only hard-fail when `APEX_REQUIRE_PAID_CANARIES=true`
+Status: CONFIG ENABLED / PASS EVIDENCE PENDING — `APEX_ENABLE_GITHUB_ACTIONS=true` and `RENDER_API_KEY` are configured per 2026-05-26 handoff; a passing production-canary workflow run is still required as launch evidence
 
 CONTEXT:
-production-canary.yml exists but APEX_ENABLE_GITHUB_ACTIONS is not enabled, so the canary has
-never run end-to-end against apex-build.dev with strict Render/Stripe secrets. This is the
-automated safety net that prevents shipping a broken deploy.
+production-canary.yml exists and the enabling variable is now configured, but this tracker still
+needs a recorded passing run against apex-build.dev with strict Render/Stripe/canary secrets.
+This is the automated safety net that prevents shipping a broken deploy.
 
 FILES TO CHANGE:
 - None (GitHub repo Actions secrets + variable APEX_ENABLE_GITHUB_ACTIONS=true)
@@ -187,7 +187,7 @@ Priority: P0
 Category: Reliability
 Estimated Time: 10 minutes
 Owner: hernmes
-Status: BLOCKED BY EXTERNAL ADMIN — requires Render dashboard access or `RENDER_API_KEY`
+Status: VERIFIER SCRIPT ADDED / EXECUTION EVIDENCE PENDING — `scripts/verify-rollback.sh` exists; a real rollback/roll-forward drill is still required in `docs/launch-runbook.md`
 
 CONTEXT:
 The tracker lists "rollback drill" as required-but-undone evidence. If a launch-day deploy breaks
@@ -220,9 +220,10 @@ Priority: P0
 Category: Reliability
 Estimated Time: 10 minutes (backend) + parallel (frontend)
 Owner: hernmes
+Status: BACKEND PASS / FRONTEND PENDING — backend passed on 2026-05-26 with `go test -p 1 -parallel 4 ./... -timeout 20m`; frontend gate still needs current evidence
 
 CONTEXT:
-The launch evidence checklist requires `go test ./...`, frontend typecheck/test/lint/build, and
+The launch evidence checklist requires the serialized backend suite, frontend typecheck/test/lint/build, and
 Playwright suites to pass. Backend compiles clean but the test suite must be green on the exact
 commit we ship.
 
@@ -235,14 +236,15 @@ classify each as launch-blocking (build/payment/preview path) or deferrable, and
 tasks. Do not mark launch-ready with red tests on critical paths.
 
 ACCEPTANCE CRITERIA:
-- [ ] cd backend && go test ./... -timeout 12m passes (or only non-critical, documented skips)
+- [x] cd backend && go test -p 1 -parallel 4 ./... -timeout 20m passes
+- [x] cd backend && go build ./... succeeds
 - [ ] cd frontend && npm run typecheck passes
 - [ ] cd frontend && npm run test -- --run passes
 - [ ] cd frontend && npm run build succeeds
 - [ ] Any failure on a build/payment/preview path is escalated as a new P0
 
 VERIFICATION COMMAND:
-cd backend && go test ./... -timeout 12m 2>&1 | tail -20 ; cd ../frontend && npm run typecheck && npm run test -- --run && npm run build 2>&1 | tail -20
+cd backend && go test -p 1 -parallel 4 ./... -timeout 20m 2>&1 | tail -20 ; go build ./... ; cd ../frontend && npm run typecheck && npm run test -- --run && npm run build 2>&1 | tail -20
 ```
 
 ```
