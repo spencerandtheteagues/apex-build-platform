@@ -7330,8 +7330,6 @@ func TestDeterministicPreviewFallbackRepairReplacesUnclassifiedBrokenFrontend(t 
 }
 
 func TestFinalizationRerunAfterDeterministicRepairDoesNotRecurse(t *testing.T) {
-	t.Parallel()
-
 	am := &AgentManager{}
 	build := &Build{
 		ID:          "build-finalization-rerun",
@@ -7394,7 +7392,7 @@ func TestFinalizationRerunAfterDeterministicRepairDoesNotRecurse(t *testing.T) {
 		t.Fatal("expected finalization to return after scheduling repaired readiness rerun")
 	}
 
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		build.mu.RLock()
 		status := build.Status

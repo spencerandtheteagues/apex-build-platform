@@ -52,7 +52,7 @@ func (r *planningHardTimeoutProbeRouter) Generate(ctx context.Context, provider 
 	r.mu.Unlock()
 
 	if provider == ai.ProviderClaude {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(1500 * time.Millisecond)
 		return &ai.AIResponse{Provider: provider, Content: `{"late":true}`, Usage: &ai.Usage{}}, nil
 	}
 	return &ai.AIResponse{Provider: provider, Content: `{"ok":true}`, Usage: &ai.Usage{}}, nil
@@ -88,7 +88,7 @@ func (r *blockingPlanningRouter) GetAvailableProvidersForUser(_ uint) []ai.AIPro
 func (r *blockingPlanningRouter) HasConfiguredProviders() bool { return true }
 
 func TestPlannerRouterAdapterFallsBackWhenPrimaryPlanningProviderTimesOut(t *testing.T) {
-	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "5")
+	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "100")
 
 	router := &planningFallbackProbeRouter{}
 	adapter := &plannerRouterAdapter{
@@ -123,7 +123,7 @@ func TestPlannerRouterAdapterFallsBackWhenPrimaryPlanningProviderTimesOut(t *tes
 }
 
 func TestPlannerRouterAdapterHardTimesOutProviderThatIgnoresContext(t *testing.T) {
-	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "5")
+	t.Setenv("APEX_PLANNING_PROVIDER_TIMEOUT_MS", "250")
 
 	router := &planningHardTimeoutProbeRouter{}
 	adapter := &plannerRouterAdapter{

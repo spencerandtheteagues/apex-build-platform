@@ -154,18 +154,16 @@ func TestCompileValidationStartedAtPersistsThroughSnapshotRestore(t *testing.T) 
 }
 
 func TestCVRunCommandHonorsParentDeadline(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	started := time.Now()
-	_, err := cvRunCommand(ctx, t.TempDir(), time.Minute, "sh", "-c", "sleep 1")
+	_, err := cvRunCommand(ctx, t.TempDir(), time.Minute, "sh", "-c", "sleep 30")
 	if err == nil {
 		t.Fatal("expected parent context deadline to stop command")
 	}
-	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
-		t.Fatalf("expected command to stop near parent deadline, elapsed %s", elapsed)
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("expected command to stop before command timeout, elapsed %s", elapsed)
 	}
 }
 

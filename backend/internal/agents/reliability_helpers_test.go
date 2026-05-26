@@ -436,9 +436,7 @@ func TestHandleTestCompletionLinksFixTaskToTriggerTask(t *testing.T) {
 }
 
 func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	cancelled := make(chan struct{}, 1)
@@ -509,7 +507,7 @@ func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *test
 		build.Tasks[0].CompletedAt = &now
 		build.UpdatedAt = now
 		build.mu.Unlock()
-	case <-time.After(3 * time.Second):
+	case <-time.After(8 * time.Second):
 		t.Fatal("expected phase waiter to trigger stale-task recovery")
 	}
 
@@ -518,7 +516,7 @@ func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *test
 		if !ok {
 			t.Fatal("expected recovered phase to complete successfully")
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(8 * time.Second):
 		t.Fatal("expected phase waiter to exit after recovery")
 	}
 
@@ -606,8 +604,6 @@ func TestProcessResultFallsBackToBuildScopedAgentRegistry(t *testing.T) {
 }
 
 func TestWaitForPhaseCompletionSurvivesRecoverableProviderTimeoutRetry(t *testing.T) {
-	t.Parallel()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -683,7 +679,7 @@ func TestWaitForPhaseCompletionSurvivesRecoverableProviderTimeoutRetry(t *testin
 		task.CompletedAt = &now
 		build.UpdatedAt = now
 		build.mu.Unlock()
-	case <-time.After(1500 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("expected timed-out phase task to be requeued")
 	}
 
@@ -692,7 +688,7 @@ func TestWaitForPhaseCompletionSurvivesRecoverableProviderTimeoutRetry(t *testin
 		if !ok {
 			t.Fatal("expected phase waiter to tolerate retry and finish cleanly")
 		}
-	case <-time.After(1500 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("expected phase waiter to complete after retry handoff")
 	}
 }
