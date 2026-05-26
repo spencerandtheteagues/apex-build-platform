@@ -47,6 +47,11 @@ var chromeMacPaths = []string{
 	"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
 }
 
+// chromeSem serializes headless Chrome launches to one at a time, preventing
+// resource exhaustion (OOM, WebSocket timeouts) on constrained hosts such as a
+// 2-CPU VPS or Render's free tier. Matches the same guard in the test file.
+var chromeSem = make(chan struct{}, 1)
+
 // FindChrome returns the path to a usable Chrome/Chromium binary, or "".
 // Exported so callers (e.g. main.go health reporting) can surface availability.
 func FindChrome() string { return findChrome() }
@@ -282,6 +287,14 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 	if !bv.Available() {
 		return &BrowserPageLoadResult{Skipped: true, Duration: time.Since(start)}
 	}
+
+	// Serialize Chrome launches: wait for the semaphore slot or context cancellation.
+	select {
+	case chromeSem <- struct{}{}:
+	case <-ctx.Done():
+		return &BrowserPageLoadResult{Skipped: true, Duration: time.Since(start)}
+	}
+	defer func() { <-chromeSem }()
 
 	// Hard budget for the entire browser check. Chrome startup can be slow on
 	// saturated CI/VPS hosts, but this remains bounded for launch gates.

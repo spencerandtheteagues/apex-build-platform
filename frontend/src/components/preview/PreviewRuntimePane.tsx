@@ -74,41 +74,53 @@ export default function PreviewRuntimePane({
       )}
 
       {status?.active && previewSrc && (
-        <div
-          className="relative bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300"
-          style={viewportStyle}
-        >
-          {iframeLoading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90 text-gray-700 pointer-events-none">
-              <div className="flex items-center gap-2 text-sm">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Loading app preview...</span>
-              </div>
+        iframeError ? (
+          <div className="flex flex-col items-center justify-center gap-4 w-full h-full">
+            <div className="w-16 h-16 rounded-2xl bg-red-950/40 border border-red-500/30 flex items-center justify-center">
+              <AlertCircle className="w-8 h-8 text-red-400" />
             </div>
-          )}
-          <iframe
-            ref={iframeRef}
-            key={`${refreshKey}-${previewSrc}`}
-            src={previewSrc}
-            className="w-full h-full border-0"
-            title="Live Preview"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
-            onLoad={onIframeLoad}
-            onError={onIframeError}
-          />
-        </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-red-300 mb-1">Preview failed to load</p>
+              <p className="text-xs text-red-500/70 max-w-xs">{iframeError}</p>
+            </div>
+            <button
+              onClick={onStartPreview}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700/60 rounded-lg text-sm text-gray-300 transition-colors"
+            >
+              Restart Preview
+            </button>
+          </div>
+        ) : (
+          <div
+            className="relative bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300"
+            style={viewportStyle}
+          >
+            {iframeLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90 text-gray-700 pointer-events-none">
+                <div className="flex items-center gap-2 text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Loading app preview...</span>
+                </div>
+              </div>
+            )}
+            <iframe
+              ref={iframeRef}
+              key={`${refreshKey}-${previewSrc}`}
+              src={previewSrc}
+              className="w-full h-full border-0"
+              title="Live Preview"
+              sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
+              onLoad={onIframeLoad}
+              onError={onIframeError}
+            />
+          </div>
+        )
       )}
 
       {status?.active && !previewSrc && !error && (
         <div className="flex flex-col items-center justify-center text-gray-400">
           <Loader2 className="w-8 h-8 animate-spin mb-3" />
           <p className="text-sm">{runtimeLabel} preview runtime...</p>
-        </div>
-      )}
-
-      {status?.active && iframeError && !error && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 text-yellow-200 text-sm">
-          {iframeError}
         </div>
       )}
     </div>
