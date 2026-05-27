@@ -822,6 +822,48 @@ func TestVerifyAndNormalizeBuildContractStillBlocksRealFullStackWithoutBackendCo
 	}
 }
 
+
+// TestVerifyAndNormalizeBuildContractNormalizesCanary10LandingPageWithSignupWords verifies that
+// explicit in-memory directives override keyword heuristics like "signup" and "admin-lite"
+// which would otherwise trigger backend-runtime detection.
+func TestVerifyAndNormalizeBuildContractNormalizesCanary10LandingPageWithSignupWords(t *testing.T) {
+	t.Parallel()
+
+	// Exact prompt from prompts/canary/10-landing-page-waitlist-funnel.md
+	intent := &IntentBrief{
+		NormalizedRequest: "Build a production-ready landing page and marketing funnel called LaunchBeacon. It is a premium startup waitlist site for an analytics product. Use React + TypeScript + Tailwind CSS + shadcn/ui. Store all data in memory and do not use external APIs. Must include: Hero section with sharp positioning, CTA buttons, product mockup, trust proof, and responsive layout. Benefits section, feature grid, workflow section, customer proof, pricing preview, FAQ, and final CTA. Waitlist form with validation, success toast, and in-memory signup counter. Demo request modal with fields, validation, and confirmation state. Sticky navigation, smooth scroll interactions, mobile menu, and polished hover states. Admin-lite section or hidden panel showing captured waitlist entries and reset demo data. Use premium visual polish, realistic copy, loading states where appropriate, accessible forms, and no console errors.",
+		AppType:              "web",
+		RequiredCapabilities: nil,
+	}
+	contract := &BuildContract{
+		ID:                  "contract-canary-10-landing",
+		BuildID:             "build-canary-10-landing",
+		AppType:             "fullstack",
+		DeliveryMode:        "full_stack_preview",
+		RoutePageMap:        []ContractRoute{{Path: "/", File: "src/App.tsx", Surface: SurfaceFrontend}},
+		RuntimeContract:     deriveRuntimeContractFromAppType("fullstack"),
+		AcceptanceBySurface: deriveAcceptanceBySurfaceFromAppType("fullstack"),
+		VerificationGates:   deriveVerificationGatesFromAppType("fullstack"),
+	}
+
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected corrected contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected canary #10 prompt (explicit in-memory + no external APIs) to normalize to frontend preview and pass, got blockers %v", report.Blockers)
+	}
+	if verified.AppType != "web" {
+		t.Fatalf("expected corrected app type web, got %q", verified.AppType)
+	}
+	if verified.DeliveryMode != "frontend_preview_only" {
+		t.Fatalf("expected frontend_preview_only delivery, got %q", verified.DeliveryMode)
+	}
+	if verified.APIContract != nil || verified.RuntimeContract.BackendStart != "" || verified.RuntimeContract.BackendBuild != "" {
+		t.Fatalf("expected backend runtime stripped, got api=%+v runtime=%+v", verified.APIContract, verified.RuntimeContract)
+	}
+}
+
 func apiContractHasEndpoint(contract *BuildAPIContract, method string, path string) bool {
 	if contract == nil {
 		return false

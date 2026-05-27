@@ -1257,6 +1257,14 @@ func shouldNormalizeInMemoryContractToFrontendPreview(intent *IntentBrief, contr
 	if intent == nil || !explicitInMemoryPreviewIntent(intent.NormalizedRequest) {
 		return false
 	}
+	// When the user explicitly instructs "store all data in memory" and "do not use external APIs",
+	// honor that explicit contract override. Keyword heuristics (e.g., detecting "signup" or
+	// "auth") are advisory only when the user has given a clear in-memory-only directive.
+	if strongExplicitInMemoryOnlyIntent(intent.NormalizedRequest) {
+		return strings.TrimSpace(contract.AppType) == "" ||
+			strings.EqualFold(strings.TrimSpace(contract.AppType), "web") ||
+			strings.EqualFold(strings.TrimSpace(contract.AppType), "fullstack")
+	}
 	if intentHasExplicitBackendRuntimeRequirement(intent.NormalizedRequest, nil) {
 		return false
 	}

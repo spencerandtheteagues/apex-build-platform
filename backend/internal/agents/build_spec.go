@@ -1271,6 +1271,32 @@ func explicitInMemoryPreviewIntent(description string) bool {
 	return noRuntimeDependency
 }
 
+// strongExplicitInMemoryOnlyIntent detects when the user has given an unambiguous
+// directive to keep everything in-memory with no external runtime. This overrides
+// keyword heuristics like "signup" or "auth" that would otherwise classify the
+// prompt as requiring a backend runtime.
+func strongExplicitInMemoryOnlyIntent(description string) bool {
+	normalized := normalizeDetectionText(description)
+	if normalized == "" {
+		return false
+	}
+
+	// Must have a strong in-memory directive
+	hasStoreMemory := containsAffirmedTerm(normalized, normalizeDetectionText("store all data in memory")) ||
+		containsAffirmedTerm(normalized, normalizeDetectionText("all data stored in memory")) ||
+		containsAffirmedTerm(normalized, normalizeDetectionText("in memory only"))
+
+	// Must explicitly deny external runtime
+	hasNoExternal := strings.Contains(normalized, " no external api ") ||
+		strings.Contains(normalized, " no external apis ") ||
+		strings.Contains(normalized, " do not use external api ") ||
+		strings.Contains(normalized, " do not use external apis ") ||
+		strings.Contains(normalized, " no external dependencies ") ||
+		strings.Contains(normalized, " no database ")
+
+	return hasStoreMemory && hasNoExternal
+}
+
 func convertPlannedFeatures(bundle *autonomous.PlanningBundle) []Feature {
 	if bundle == nil || bundle.Analysis == nil {
 		return nil
