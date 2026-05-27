@@ -252,7 +252,7 @@ func DefaultContainerSandboxConfig() *ContainerSandboxConfig {
 				MemoryLimit: 512 * 1024 * 1024,
 				CPULimit:    1.0,
 				Timeout:     60 * time.Second,
-				PidsLimit:   100,
+				PidsLimit:   256,
 				TmpfsSize:   "128m",
 			},
 			"rust": {
@@ -1523,8 +1523,10 @@ func (s *ContainerSandbox) buildDockerArgs(
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Set user
-	args = append(args, "--user", "sandbox")
+	// Set user by numeric ID so fallback public language images work before the
+	// enhanced apex-sandbox images finish warming. Enhanced images create the
+	// sandbox user with the same UID/GID.
+	args = append(args, "--user", fmt.Sprintf("%d:%d", sandboxUID, sandboxGID))
 
 	// Working directory
 	workDir := opts.WorkDir

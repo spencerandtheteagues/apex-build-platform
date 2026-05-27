@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APEX_LIVE_TEST_MODEL_PROFILE="${APEX_LIVE_TEST_MODEL_PROFILE:-ollama-credit-saver}"
+APEX_LIVE_TEST_MODEL_PROFILE="${APEX_LIVE_TEST_MODEL_PROFILE:-platform}"
 if [[ "$APEX_LIVE_TEST_MODEL_PROFILE" == "ollama-credit-saver" && "${APEX_SKIP_OLLAMA_CREDIT_SAVER_SOURCE:-0}" != "1" && -f scripts/ollama-credit-saver-env.sh ]]; then
   # shellcheck disable=SC1091
   source scripts/ollama-credit-saver-env.sh

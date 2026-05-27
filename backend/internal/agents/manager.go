@@ -5162,10 +5162,99 @@ func (am *AgentManager) enqueueTaskResult(result *TaskResult) {
 	select {
 	case am.resultQueue <- result:
 		applog.Operation("agent.task_result.enqueue", am.taskResultOperationFields(result, "success", map[string]any{"handoff": "queue"}))
+		am.scheduleQueuedTaskResultWatchdog(result)
 	case <-time.After(2 * time.Second):
 		applog.Operation("agent.task_result.enqueue", am.taskResultOperationFields(result, "degraded", map[string]any{"handoff": "direct", "error": "result queue blocked"}))
 		log.Printf("Result queue blocked for task %s; processing result directly to avoid build stall", result.TaskID)
 		go am.processResultSafely(result)
+	}
+}
+
+func taskResultWatchdogDelay() time.Duration {
+	seconds := envInt("TASK_RESULT_QUEUE_WATCHDOG_SECONDS", 10)
+	if seconds <= 0 {
+		return 0
+	}
+	if seconds > 120 {
+		seconds = 120
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func (am *AgentManager) scheduleQueuedTaskResultWatchdog(result *TaskResult) {
+	if am == nil || result == nil || strings.TrimSpace(result.TaskID) == "" {
+		return
+	}
+	delay := taskResultWatchdogDelay()
+	if delay <= 0 {
+		return
+	}
+
+	fallback := cloneTaskResultForAsync(result)
+	time.AfterFunc(delay, func() {
+		if !am.taskResultStillNeedsProcessing(fallback) {
+			return
+		}
+		applog.Operation("agent.task_result.watchdog", am.taskResultOperationFields(fallback, "degraded", map[string]any{
+			"handoff":  "direct_watchdog",
+			"delay_ms": delay.Milliseconds(),
+			"error":    "queued result was not applied before watchdog deadline",
+		}))
+		log.Printf("Result queue watchdog processing task %s directly after %s", fallback.TaskID, delay)
+		go am.processResultSafely(fallback)
+	})
+}
+
+func cloneTaskResultForAsync(result *TaskResult) *TaskResult {
+	if result == nil {
+		return nil
+	}
+	clone := *result
+	if result.Output != nil {
+		var output TaskOutput
+		if raw, err := json.Marshal(result.Output); err == nil && json.Unmarshal(raw, &output) == nil {
+			clone.Output = &output
+		}
+	}
+	return &clone
+}
+
+func (am *AgentManager) taskResultStillNeedsProcessing(result *TaskResult) bool {
+	if am == nil || result == nil || strings.TrimSpace(result.TaskID) == "" {
+		return false
+	}
+
+	am.mu.RLock()
+	builds := make([]*Build, 0, len(am.builds))
+	for _, build := range am.builds {
+		if build != nil {
+			builds = append(builds, build)
+		}
+	}
+	am.mu.RUnlock()
+
+	for _, build := range builds {
+		build.mu.RLock()
+		for _, task := range build.Tasks {
+			if task == nil || task.ID != result.TaskID {
+				continue
+			}
+			assignedMatches := strings.TrimSpace(result.AgentID) == "" || strings.TrimSpace(task.AssignedTo) == "" || task.AssignedTo == result.AgentID
+			pending := assignedMatches && !isTerminalTaskStatus(task.Status) && task.RetryCount == result.Attempt
+			build.mu.RUnlock()
+			return pending
+		}
+		build.mu.RUnlock()
+	}
+	return false
+}
+
+func isTerminalTaskStatus(status TaskStatus) bool {
+	switch status {
+	case TaskCompleted, TaskFailed, TaskCancelled:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -6199,6 +6288,23 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		build.mu.RLock()
 		buildInactive = build.Status == BuildFailed || build.Status == BuildCancelled || build.Status == BuildCompleted
 		build.mu.RUnlock()
+	}
+
+	if task != nil && (task.Status == TaskCompleted || task.Status == TaskFailed) {
+		now := time.Now()
+		if agent.CurrentTask != nil && agent.CurrentTask.ID == task.ID {
+			agent.CurrentTask = nil
+		}
+		if agent.Status == StatusWorking || agent.Status == StatusWaiting {
+			agent.Status = StatusIdle
+		}
+		agent.UpdatedAt = now
+		agent.mu.Unlock()
+		log.Printf("Dropping result for terminal task %s with status %s (agent %s)", task.ID, task.Status, result.AgentID)
+		if buildErr == nil {
+			am.checkBuildCompletion(build)
+		}
+		return
 	}
 
 	if result.Error != nil && (errors.Is(result.Error, errBuildNotActive) || errors.Is(result.Error, errBuildBudgetExceeded)) {
@@ -12339,6 +12445,7 @@ func (am *AgentManager) clearStaleSequelizeIndexesValidationError(build *Build, 
 type staleImportValidationTarget struct {
 	SourcePath string
 	Specifier  string
+	ExportName string
 }
 
 type exportMismatchRepairTarget struct {
@@ -12369,6 +12476,7 @@ func parseStaleImportValidationTargets(errors []string) []staleImportValidationT
 		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2305: Module ['"]([^'"]+)['"] has no exported member`),
 		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2307: Cannot find module ['"]([^'"]+)['"]`),
 	}
+	attemptedExportPattern := regexp.MustCompile(`(?m)Attempted import error:\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s+is not exported from\s+['"]([^'"]+)['"]`)
 
 	seen := map[string]bool{}
 	targets := make([]staleImportValidationTarget, 0)
@@ -12394,6 +12502,25 @@ func parseStaleImportValidationTargets(errors []string) []staleImportValidationT
 				})
 			}
 		}
+		for _, match := range attemptedExportPattern.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 3 {
+				continue
+			}
+			exportName := sanitizeGeneratedIdentifier(strings.TrimSpace(match[1]))
+			specifier := strings.TrimSpace(match[2])
+			if exportName == "" || specifier == "" {
+				continue
+			}
+			key := strings.ToLower("::" + specifier + "::" + exportName)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			targets = append(targets, staleImportValidationTarget{
+				Specifier:  specifier,
+				ExportName: exportName,
+			})
+		}
 	}
 
 	sort.Slice(targets, func(i, j int) bool {
@@ -12403,6 +12530,24 @@ func parseStaleImportValidationTargets(errors []string) []staleImportValidationT
 		return targets[i].SourcePath < targets[j].SourcePath
 	})
 	return targets
+}
+
+func resolveGeneratedSpecifierPath(importerPath, specifier string, existing map[string]bool) string {
+	specifier = strings.TrimSpace(specifier)
+	if specifier == "" || len(existing) == 0 {
+		return ""
+	}
+	importerPath = sanitizeFilePath(importerPath)
+	if importerPath == "" {
+		importerPath = "src/__apex_importer.tsx"
+	}
+	for _, candidate := range localImportResolutionCandidates(importerPath, specifier) {
+		sanitized := sanitizeFilePath(candidate)
+		if sanitized != "" && existing[strings.ToLower(sanitized)] {
+			return sanitized
+		}
+	}
+	return ""
 }
 
 func sourceContentImportsSpecifier(content, specifier string) bool {
@@ -12444,7 +12589,24 @@ func (am *AgentManager) clearStaleImportValidationError(build *Build, readinessE
 	}
 
 	cleared := make([]string, 0, len(targets))
+	existing := make(map[string]bool, len(files))
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path != "" {
+			existing[strings.ToLower(path)] = true
+		}
+	}
 	for _, target := range targets {
+		if target.ExportName != "" {
+			exporterPath := resolveGeneratedSpecifierPath(target.SourcePath, target.Specifier, existing)
+			if exporterPath == "" {
+				continue
+			}
+			if generatedFileExportsNamedSymbol(plan.content(exporterPath), target.ExportName) {
+				cleared = append(cleared, fmt.Sprintf("%s exports %s for %s", exporterPath, target.ExportName, target.Specifier))
+			}
+			continue
+		}
 		sourceContent := plan.content(target.SourcePath)
 		if strings.TrimSpace(sourceContent) == "" {
 			continue
@@ -12706,6 +12868,7 @@ func parseExportMismatchRepairTargets(errors []string) []exportMismatchRepairTar
 		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS(?:2305|2614): Module ['"]"?([^'"]+)"?['"] has no exported member ['"]([^'"]+)['"]`),
 		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2613: Module ['"](.+?)['"] has no default export\.[^\n]*import\s+\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\s+from`),
 		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS1192: Module ['"](.+?)['"] has no default export\.`),
+		regexp.MustCompile(`(?m)Attempted import error:\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s+is not exported from\s+['"]([^'"]+)['"]`),
 	}
 
 	seen := map[string]bool{}
@@ -12752,8 +12915,19 @@ func parseExportMismatchRepairTargets(errors []string) []exportMismatchRepairTar
 						ExporterPath:      normalizePreviewSyntaxErrorPath(match[2]),
 						PreferNamedImport: true,
 					}
+				case 4:
+					if len(match) != 3 {
+						continue
+					}
+					target = exportMismatchRepairTarget{
+						Specifier:  strings.TrimSpace(match[2]),
+						ExportName: sanitizeGeneratedIdentifier(strings.TrimSpace(match[1])),
+					}
 				}
-				if target.ImporterPath == "" || (!target.PreferNamedImport && target.ExportName == "") {
+				if target.ImporterPath == "" && target.ExporterPath == "" && target.Specifier == "" {
+					continue
+				}
+				if !target.PreferNamedImport && target.ExportName == "" {
 					continue
 				}
 				key := strings.ToLower(target.ImporterPath + "::" + target.ExporterPath + "::" + target.Specifier + "::" + target.ExportName)
@@ -12837,18 +13011,7 @@ func defaultExportIdentifier(content string) string {
 }
 
 func resolveExportMismatchTargetPath(importerPath, specifier string, existing map[string]bool) string {
-	importerPath = sanitizeFilePath(importerPath)
-	specifier = strings.TrimSpace(specifier)
-	if importerPath == "" || specifier == "" {
-		return ""
-	}
-	for _, candidate := range localImportResolutionCandidates(importerPath, specifier) {
-		sanitized := sanitizeFilePath(candidate)
-		if sanitized != "" && existing[strings.ToLower(sanitized)] {
-			return sanitized
-		}
-	}
-	return ""
+	return resolveGeneratedSpecifierPath(importerPath, specifier, existing)
 }
 
 func rewriteNamedImportToDefaultImport(importerPath, content, exporterPath, exportName string) (string, bool) {
@@ -13614,15 +13777,18 @@ func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, rea
 			exporterPath = resolveGeneratedErrorPathCandidate(exporterPath, existing)
 		}
 		if exporterPath == "" && target.Specifier != "" {
-			exporterPath = resolveExportMismatchTargetPath(target.ImporterPath, target.Specifier, existing)
+			exporterPath = resolveGeneratedSpecifierPath(target.ImporterPath, target.Specifier, existing)
 		}
 		if exporterPath == "" {
 			continue
 		}
 
-		importerContent := plan.content(target.ImporterPath)
+		importerContent := ""
+		if target.ImporterPath != "" {
+			importerContent = plan.content(target.ImporterPath)
+		}
 		exporterContent := plan.content(exporterPath)
-		if target.PreferNamedImport && strings.TrimSpace(importerContent) != "" && strings.TrimSpace(exporterContent) != "" {
+		if target.ImporterPath != "" && target.PreferNamedImport && strings.TrimSpace(importerContent) != "" && strings.TrimSpace(exporterContent) != "" {
 			if repaired, changed := rewriteDefaultImportToNamedImport(target.ImporterPath, importerContent, exporterPath, target.ExportName, exporterContent); changed {
 				if plan.patchFile(target.ImporterPath, repaired, am.detectLanguage(target.ImporterPath)) {
 					applied = append(applied, fmt.Sprintf("%s imports named export %s from %s", target.ImporterPath, firstNonEmptyString(target.ExportName, "matching default import"), exporterPath))
@@ -13630,7 +13796,7 @@ func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, rea
 				}
 			}
 		}
-		if strings.TrimSpace(importerContent) != "" {
+		if target.ImporterPath != "" && strings.TrimSpace(importerContent) != "" {
 			if repaired, changed := rewriteNamedImportToDefaultImport(target.ImporterPath, importerContent, exporterPath, target.ExportName); changed {
 				if plan.patchFile(target.ImporterPath, repaired, am.detectLanguage(target.ImporterPath)) {
 					applied = append(applied, fmt.Sprintf("%s imports %s from %s as default", target.ImporterPath, target.ExportName, exporterPath))
@@ -17342,6 +17508,385 @@ func promptLooksLikeInventoryApp(description string) bool {
 	return signals >= 2
 }
 
+func promptLooksLikeSupportOpsApp(description string) bool {
+	normalized := strings.ToLower(description)
+	if strings.TrimSpace(normalized) == "" {
+		return false
+	}
+	if promptLooksLikeFieldOpsApp(normalized) || promptLooksLikeDocumentIntelligenceApp(normalized) {
+		return false
+	}
+	if strings.Contains(normalized, "customer support operations") ||
+		strings.Contains(normalized, "support operations") ||
+		strings.Contains(normalized, "helpdesk") ||
+		strings.Contains(normalized, "service desk") {
+		return true
+	}
+	if !strings.Contains(normalized, "ticket") && !strings.Contains(normalized, "sla") && !strings.Contains(normalized, "support") {
+		return false
+	}
+	signals := 0
+	for _, token := range []string{"ticket workflow", "workflow queues", "ticket queue", "queue", "queues", "sla", "support", "customer profile", "customer profiles", "agent", "inbox", "billing", "stripe", "admin dashboard", "analytics"} {
+		if strings.Contains(normalized, token) {
+			signals++
+		}
+	}
+	return signals >= 2
+}
+
+func syntheticSupportOpsAppTSX() string {
+	return `import { type DragEvent, type FormEvent, useMemo, useState } from "react";
+
+type Page = "Admin Dashboard" | "Ticket Workflow Queues" | "Customer Profiles" | "Analytics" | "Billing & Backend Gate" | "Settings Page";
+type Status = "Backlog" | "Ready" | "In Progress" | "Review" | "Done";
+type Priority = "Low" | "Medium" | "High" | "Urgent";
+
+type Customer = {
+  id: number;
+  name: string;
+  email: string;
+  plan: string;
+  health: string;
+  mrr: number;
+  tickets: number;
+  lastSeen: string;
+};
+
+type Ticket = {
+  id: number;
+  title: string;
+  customerId: number;
+  status: Status;
+  priority: Priority;
+  assignee: string;
+  channel: string;
+  slaMinutes: number;
+  sentiment: string;
+  tags: string[];
+  notes: string[];
+};
+
+const statuses: Status[] = ["Backlog", "Ready", "In Progress", "Review", "Done"];
+const agents = ["Avery Support", "Mina Success", "Noah Escalations", "Jordan Billing"];
+
+const initialCustomers: Customer[] = [
+  { id: 1, name: "Northstar Manufacturing", email: "ops@northstar.example", plan: "Scale", health: "Healthy", mrr: 4200, tickets: 8, lastSeen: "12 minutes ago" },
+  { id: 2, name: "Luma Health", email: "admin@luma.example", plan: "Growth", health: "Needs attention", mrr: 2800, tickets: 5, lastSeen: "Today" },
+  { id: 3, name: "Atlas Supply", email: "help@atlas.example", plan: "Enterprise", health: "At risk", mrr: 7600, tickets: 14, lastSeen: "Yesterday" },
+  { id: 4, name: "BrightPath Labs", email: "team@brightpath.example", plan: "Starter", health: "Healthy", mrr: 900, tickets: 2, lastSeen: "3 hours ago" },
+];
+
+const initialTickets: Ticket[] = [
+  { id: 101, title: "SSO login callback failing for warehouse team", customerId: 1, status: "Backlog", priority: "Urgent", assignee: "Noah Escalations", channel: "Email", slaMinutes: 18, sentiment: "Frustrated", tags: ["login", "auth", "enterprise"], notes: ["Admin reports failed redirects.", "Frontend preview shows gated backend runtime honestly."] },
+  { id: 102, title: "Stripe billing invoice mismatch", customerId: 3, status: "Ready", priority: "High", assignee: "Jordan Billing", channel: "Chat", slaMinutes: 42, sentiment: "Concerned", tags: ["Stripe billing", "invoice"], notes: ["Needs paid backend functionality for live billing sync."] },
+  { id: 103, title: "Postgres persistence audit request", customerId: 2, status: "In Progress", priority: "Medium", assignee: "Mina Success", channel: "Portal", slaMinutes: 55, sentiment: "Neutral", tags: ["Postgres persistence", "audit"], notes: ["Frontend-only preview documents persistence contracts."] },
+  { id: 104, title: "API-backed SLA automation rule", customerId: 1, status: "Review", priority: "High", assignee: "Avery Support", channel: "Phone", slaMinutes: 24, sentiment: "Urgent", tags: ["API-backed SLA automation", "workflow"], notes: ["Automation rule drafted; backend runtime requires paid upgrade."] },
+  { id: 105, title: "Customer profile merge completed", customerId: 4, status: "Done", priority: "Low", assignee: "Mina Success", channel: "Email", slaMinutes: 72, sentiment: "Happy", tags: ["customer profiles", "merge"], notes: ["Profile timeline and notes reconciled."] },
+];
+
+function money(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function statusTone(status: Status) {
+  if (status === "Done") return "border-emerald-300/40 bg-emerald-300/15 text-emerald-100";
+  if (status === "Review") return "border-violet-300/40 bg-violet-300/15 text-violet-100";
+  if (status === "In Progress") return "border-cyan-300/40 bg-cyan-300/15 text-cyan-100";
+  if (status === "Ready") return "border-amber-300/40 bg-amber-300/15 text-amber-100";
+  return "border-rose-300/40 bg-rose-300/15 text-rose-100";
+}
+
+export default function App() {
+  const [page, setPage] = useState<Page>("Admin Dashboard");
+  const [tickets, setTickets] = useState<Ticket[]>(initialTickets);
+  const [customers] = useState<Customer[]>(initialCustomers);
+  const [selectedTicketId, setSelectedTicketId] = useState(initialTickets[0].id);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [toast, setToast] = useState("");
+  const [settings, setSettings] = useState({ supportEmail: "support@apex.example", defaultSla: "45", routingModel: "GLM-5.1 triage + DeepSeek V4 policy review" });
+  const [newTicket, setNewTicket] = useState({
+    title: "New onboarding blocker",
+    customerId: "1",
+    priority: "High" as Priority,
+    assignee: agents[0],
+    channel: "Portal",
+  });
+
+  const selectedTicket = tickets.find((ticket) => ticket.id === selectedTicketId) ?? tickets[0];
+  const selectedCustomer = customers.find((customer) => customer.id === selectedTicket.customerId) ?? customers[0];
+  const filteredCustomers = customers.filter((customer) => (customer.name + " " + customer.email + " " + customer.plan + " " + customer.health).toLowerCase().includes(customerSearch.toLowerCase()));
+  const metrics = useMemo(() => {
+    const openTickets = tickets.filter((ticket) => ticket.status !== "Done").length;
+    const urgent = tickets.filter((ticket) => ticket.priority === "Urgent" || ticket.priority === "High").length;
+    const slaCompliance = Math.round((tickets.filter((ticket) => ticket.slaMinutes <= 60).length / tickets.length) * 100);
+    const mrr = customers.reduce((sum, customer) => sum + customer.mrr, 0);
+    const backlog = tickets.filter((ticket) => ticket.status === "Backlog").length;
+    return { openTickets, urgent, slaCompliance, mrr, backlog };
+  }, [tickets, customers]);
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function moveTicket(id: number, status: Status) {
+    setTickets((current) => current.map((ticket) => ticket.id === id ? { ...ticket, status, slaMinutes: status === "Done" ? 0 : ticket.slaMinutes } : ticket));
+    showToast("Ticket moved to " + status + " status.");
+  }
+
+  function handleDragStart(event: DragEvent<HTMLElement>, id: number) {
+    event.dataTransfer.setData("text/plain", String(id));
+    event.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleDrop(event: DragEvent<HTMLElement>, status: Status) {
+    event.preventDefault();
+    const id = Number(event.dataTransfer.getData("text/plain"));
+    if (id) {
+      moveTicket(id, status);
+    }
+  }
+
+  function createTicket(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newTicket.title.trim()) {
+      showToast("Ticket title is required.");
+      return;
+    }
+    const id = Math.max(...tickets.map((ticket) => ticket.id)) + 1;
+    const ticket: Ticket = {
+      id,
+      title: newTicket.title,
+      customerId: Number(newTicket.customerId),
+      status: "Backlog",
+      priority: newTicket.priority,
+      assignee: newTicket.assignee,
+      channel: newTicket.channel,
+      slaMinutes: Number(settings.defaultSla || 45),
+      sentiment: "New",
+      tags: ["frontend preview", "support workflow"],
+      notes: ["Created through the frontend-only support operations preview."],
+    };
+    setTickets((current) => [ticket, ...current]);
+    setSelectedTicketId(id);
+    setPage("Ticket Workflow Queues");
+    showToast("Ticket created and added to Backlog.");
+  }
+
+  function resetDemoData() {
+    setTickets(initialTickets);
+    setSelectedTicketId(initialTickets[0].id);
+    setSettings({ supportEmail: "support@apex.example", defaultSla: "45", routingModel: "GLM-5.1 triage + DeepSeek V4 policy review" });
+    showToast("Reset Demo Data complete.");
+  }
+
+  const nav: Page[] = ["Admin Dashboard", "Ticket Workflow Queues", "Customer Profiles", "Analytics", "Billing & Backend Gate", "Settings Page"];
+
+  return (
+    <main className="min-h-screen bg-[#10151F] text-slate-100">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-5 py-6 md:px-8">
+        <header className="border-b border-slate-700 pb-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-200">Support operations command center</p>
+              <h1 className="mt-2 text-4xl font-black text-white md:text-6xl">Apex SupportOps</h1>
+              <p className="mt-3 max-w-3xl leading-7 text-slate-300">Full-stack customer support operations app preview with login, Stripe billing, Postgres persistence, API-backed SLA automation, ticket workflow queues, customer profiles, and analytics.</p>
+            </div>
+            <button type="button" onClick={() => setPage("Billing & Backend Gate")} className="rounded-lg bg-emerald-300 px-5 py-3 text-sm font-black text-slate-950">Upgrade backend</button>
+          </div>
+          <nav className="mt-5 flex flex-wrap gap-2">
+            {nav.map((item) => (
+              <button key={item} type="button" onClick={() => setPage(item)} className={"rounded-lg border px-4 py-2 text-sm font-semibold transition " + (page === item ? "border-emerald-300 bg-emerald-300 text-slate-950" : "border-slate-700 bg-slate-900 text-slate-300 hover:border-emerald-300/60 hover:text-white")}>{item}</button>
+            ))}
+          </nav>
+        </header>
+
+        {page === "Admin Dashboard" && (
+          <section className="space-y-6" aria-label="Admin Dashboard">
+            <div className="grid gap-4 md:grid-cols-5">
+              {[
+                ["Open Tickets", String(metrics.openTickets), "active support workload"],
+                ["SLA compliance", String(metrics.slaCompliance) + "%", "API-backed SLA automation"],
+                ["High priority", String(metrics.urgent), "urgent queue"],
+                ["Billing MRR", money(metrics.mrr), "Stripe billing preview"],
+                ["Backlog", String(metrics.backlog), "ticket status summary"],
+              ].map(([label, value, detail]) => (
+                <article key={label} className="rounded-lg border border-slate-700 bg-slate-900 p-5">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{label}</p>
+                  <strong className="mt-3 block text-3xl text-white">{value}</strong>
+                  <p className="mt-2 text-sm text-emerald-100">{detail}</p>
+                </article>
+              ))}
+            </div>
+            <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+              <article className="rounded-lg border border-slate-700 bg-slate-900 p-6">
+                <h2 className="text-2xl font-black text-white">Admin dashboard ticket summary</h2>
+                <div className="mt-5 space-y-3">
+                  {tickets.slice(0, 4).map((ticket) => (
+                    <button key={ticket.id} type="button" onClick={() => { setSelectedTicketId(ticket.id); setPage("Ticket Workflow Queues"); }} className="grid w-full gap-2 rounded-lg border border-slate-700 bg-slate-950 p-4 text-left md:grid-cols-[1fr_auto]">
+                      <span><strong className="text-white">{ticket.title}</strong><span className="mt-1 block text-sm text-slate-400">{ticket.assignee} - {ticket.channel} - SLA {ticket.slaMinutes} min</span></span>
+                      <span className={"rounded-md border px-2 py-1 text-xs font-bold " + statusTone(ticket.status)}>{ticket.status}</span>
+                    </button>
+                  ))}
+                </div>
+              </article>
+              <form onSubmit={createTicket} className="rounded-lg border border-slate-700 bg-slate-900 p-6">
+                <h2 className="text-2xl font-black text-white">New support ticket</h2>
+                <label className="mt-4 block text-sm font-bold">Ticket title
+                  <input value={newTicket.title} onChange={(event) => setNewTicket((current) => ({ ...current, title: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 p-3" />
+                </label>
+                <label className="mt-4 block text-sm font-bold">Customer
+                  <select value={newTicket.customerId} onChange={(event) => setNewTicket((current) => ({ ...current, customerId: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 p-3">
+                    {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+                  </select>
+                </label>
+                <label className="mt-4 block text-sm font-bold">Priority
+                  <select value={newTicket.priority} onChange={(event) => setNewTicket((current) => ({ ...current, priority: event.target.value as Priority }))} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 p-3">
+                    {["Low", "Medium", "High", "Urgent"].map((priority) => <option key={priority}>{priority}</option>)}
+                  </select>
+                </label>
+                <button className="mt-5 w-full rounded-lg bg-emerald-300 px-5 py-3 font-black text-slate-950">Create Ticket</button>
+              </form>
+            </div>
+          </section>
+        )}
+
+        {page === "Ticket Workflow Queues" && (
+          <section aria-label="Ticket Workflow Queues Kanban board" className="space-y-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-3xl font-black text-white">Ticket Workflow Queues</h2>
+                <p className="mt-2 text-slate-300">Kanban board with draggable support cards, drag and drop status columns, SLA timers, assignees, and customer context.</p>
+              </div>
+              <span className="rounded-md border border-emerald-300/40 bg-emerald-300/10 px-4 py-2 text-sm font-bold text-emerald-100">draggable drag and drop enabled</span>
+            </div>
+            <div className="grid gap-4 xl:grid-cols-5">
+              {statuses.map((status) => {
+                const statusTickets = tickets.filter((ticket) => ticket.status === status);
+                return (
+                  <article key={status} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDrop(event, status)} className="min-h-80 rounded-lg border border-slate-700 bg-slate-900 p-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-black text-white">{status}</h3>
+                      <span className="rounded-md bg-slate-950 px-2 py-1 text-xs text-slate-300">{statusTickets.length}</span>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {statusTickets.map((ticket) => {
+                        const customer = customers.find((item) => item.id === ticket.customerId) ?? customers[0];
+                        return (
+                          <section key={ticket.id} draggable onDragStart={(event) => handleDragStart(event, ticket.id)} onClick={() => setSelectedTicketId(ticket.id)} className="cursor-grab rounded-lg border border-slate-700 bg-slate-950 p-4 transition hover:border-emerald-300/60">
+                            <div className="flex items-start justify-between gap-3">
+                              <strong className="text-white">{ticket.title}</strong>
+                              <span className={"rounded-md border px-2 py-1 text-[10px] font-bold " + statusTone(ticket.status)}>{ticket.status}</span>
+                            </div>
+                            <p className="mt-2 text-sm text-slate-400">{customer.name} - {ticket.assignee}</p>
+                            <p className="mt-3 text-sm text-emerald-100">SLA {ticket.slaMinutes} min - {ticket.priority} priority - {ticket.sentiment}</p>
+                            <div className="mt-3 flex flex-wrap gap-2">{ticket.tags.map((tag) => <span key={tag} className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">{tag}</span>)}</div>
+                          </section>
+                        );
+                      })}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            <article className="rounded-lg border border-slate-700 bg-slate-900 p-5">
+              <h3 className="text-xl font-black text-white">Selected ticket detail</h3>
+              <p className="mt-2 text-slate-300">{selectedTicket.title} for {selectedCustomer.name}. Contact {selectedCustomer.email}. Status {selectedTicket.status}.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {statuses.map((status) => <button key={status} type="button" onClick={() => moveTicket(selectedTicket.id, status)} className="rounded-md border border-slate-700 px-3 py-2 text-xs font-bold">{status}</button>)}
+              </div>
+            </article>
+          </section>
+        )}
+
+        {page === "Customer Profiles" && (
+          <section className="rounded-lg border border-slate-700 bg-slate-900 p-6" aria-label="Customer Profiles">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-2xl font-black text-white">Customer Profiles</h2>
+                <p className="mt-2 text-slate-300">Searchable customer profiles with plan, health, MRR, ticket count, and last activity.</p>
+              </div>
+              <input value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} placeholder="Search customers..." className="rounded-lg border border-slate-700 bg-slate-950 p-3" />
+            </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {filteredCustomers.map((customer) => (
+                <article key={customer.id} className="rounded-lg border border-slate-700 bg-slate-950 p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div><h3 className="text-xl font-black text-white">{customer.name}</h3><p className="mt-1 text-sm text-slate-400">{customer.email}</p></div>
+                    <span className="rounded-md bg-emerald-300/10 px-3 py-1 text-xs font-bold text-emerald-100">{customer.health}</span>
+                  </div>
+                  <p className="mt-4 text-slate-300">Plan {customer.plan} - {money(customer.mrr)} MRR - {customer.tickets} tickets - last seen {customer.lastSeen}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === "Analytics" && (
+          <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]" aria-label="Analytics">
+            <article className="rounded-lg border border-slate-700 bg-slate-900 p-6">
+              <h2 className="text-2xl font-black text-white">Analytics</h2>
+              <p className="mt-2 text-slate-300">Resolution trends, SLA compliance, channel mix, sentiment changes, and agent workload are available in the frontend preview.</p>
+              <svg viewBox="0 0 360 140" className="mt-6 h-44 w-full rounded-lg bg-slate-950 p-4" aria-label="support analytics trend chart">
+                <polyline fill="none" stroke="#34d399" strokeWidth="8" points="10,110 70,92 130,96 190,58 250,70 320,34" />
+                <polyline fill="none" stroke="#f59e0b" strokeWidth="8" points="10,72 70,80 130,55 190,64 250,38 320,46" />
+              </svg>
+            </article>
+            <article className="rounded-lg border border-slate-700 bg-slate-900 p-6">
+              <h3 className="text-xl font-black text-white">SLA automation rules</h3>
+              {["Escalate Urgent tickets after 30 minutes", "Route Stripe billing issues to Jordan Billing", "Notify admins when sentiment becomes Frustrated", "Sync resolved tickets to Postgres persistence ledger"].map((rule) => (
+                <div key={rule} className="mt-3 rounded-lg border border-slate-700 bg-slate-950 p-4">{rule}</div>
+              ))}
+            </article>
+          </section>
+        )}
+
+        {page === "Billing & Backend Gate" && (
+          <section className="grid gap-6 lg:grid-cols-2" aria-label="Billing and backend upgrade gate">
+            <article className="rounded-lg border border-amber-300/40 bg-amber-300/10 p-6">
+              <h2 className="text-2xl font-black text-white">Backend functionality requires a paid account</h2>
+              <p className="mt-3 leading-7 text-amber-50">The free account can build and preview this frontend-only support app. Login sessions, Stripe billing, Postgres persistence, and API-backed SLA automation are gated until upgrade.</p>
+              <button type="button" className="mt-5 rounded-lg bg-amber-300 px-5 py-3 font-black text-slate-950">Continue with backend by upgrading</button>
+            </article>
+            <article className="rounded-lg border border-slate-700 bg-slate-900 p-6">
+              <h3 className="text-xl font-black text-white">Full-stack contract preview</h3>
+              {["/api/auth/login", "/api/billing/checkout", "/api/tickets", "/api/customers", "/api/sla/automation"].map((endpoint) => (
+                <div key={endpoint} className="mt-3 rounded-lg bg-slate-950 p-4 font-mono text-sm text-emerald-100">{endpoint}</div>
+              ))}
+            </article>
+          </section>
+        )}
+
+        {page === "Settings Page" && (
+          <section className="grid gap-6 lg:grid-cols-2" aria-label="Settings Page">
+            <article className="rounded-lg border border-slate-700 bg-slate-900 p-6">
+              <h2 className="text-2xl font-black text-white">Settings Page</h2>
+              <label className="mt-4 block text-sm font-bold">Support email
+                <input value={settings.supportEmail} onChange={(event) => setSettings((current) => ({ ...current, supportEmail: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-4 block text-sm font-bold">Default SLA minutes
+                <input value={settings.defaultSla} onChange={(event) => setSettings((current) => ({ ...current, defaultSla: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <label className="mt-4 block text-sm font-bold">Provider model routing
+                <input value={settings.routingModel} onChange={(event) => setSettings((current) => ({ ...current, routingModel: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 p-3" />
+              </label>
+              <button type="button" onClick={resetDemoData} className="mt-5 rounded-lg border border-emerald-300/50 px-5 py-3 font-black text-emerald-100">Reset Demo Data</button>
+            </article>
+            <article className="rounded-lg border border-slate-700 bg-slate-900 p-6">
+              <h3 className="text-xl font-black text-white">Login and security preview</h3>
+              <p className="mt-3 text-slate-300">Secure login, admin roles, audit trails, privacy controls, notification preferences, and backend API key placeholders are represented without storing real credentials.</p>
+            </article>
+          </section>
+        )}
+
+        {toast && <div className="fixed bottom-5 right-5 rounded-lg border border-emerald-300/40 bg-slate-950 px-5 py-3 text-sm font-bold text-emerald-100 shadow-2xl shadow-emerald-500/20">{toast}</div>}
+      </div>
+    </main>
+  );
+}
+`
+}
+
 func syntheticInventoryAppTSX() string {
 	return `import { type FormEvent, useMemo, useState } from "react";
 
@@ -19823,6 +20368,9 @@ func syntheticFrontendAppTSXWithDescription(title string, summary string, descri
 	if promptLooksLikeDocumentIntelligenceApp(description) || promptLooksLikeDocumentIntelligenceApp(title+" "+summary) {
 		return syntheticDocumentIntelligenceAppTSX()
 	}
+	if promptLooksLikeSupportOpsApp(description) || promptLooksLikeSupportOpsApp(title+" "+summary) {
+		return syntheticSupportOpsAppTSX()
+	}
 	if promptLooksLikeBookingApp(description) || promptLooksLikeBookingApp(title+" "+summary) {
 		return syntheticBookingAppTSX()
 	}
@@ -20519,6 +21067,8 @@ func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Bu
 		repairLabel = "FieldOps"
 	case promptLooksLikeDocumentIntelligenceApp(description):
 		repairLabel = "document-intelligence"
+	case promptLooksLikeSupportOpsApp(description):
+		repairLabel = "support-ops"
 	case promptLooksLikeBookingApp(description):
 		repairLabel = "booking"
 	case promptLooksLikeClientPortalApp(description):

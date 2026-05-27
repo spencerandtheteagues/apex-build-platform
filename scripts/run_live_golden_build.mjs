@@ -13,6 +13,7 @@ const mode = process.env.MODE || 'full'
 const powerMode = process.env.POWER_MODE || 'balanced'
 const providerMode = process.env.PROVIDER_MODE || process.env.APEX_PROVIDER_MODE || 'platform'
 const modelProfile = process.env.APEX_LIVE_TEST_MODEL_PROFILE || process.env.APEX_AI_TESTING_PROFILE || ''
+const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || process.env.CHROME_EXECUTABLE_PATH || ''
 const projectName = process.env.PROJECT_NAME || `golden-${powerMode}-${Date.now()}`
 const pollSeconds = Number(process.env.POLL_SECONDS || 15)
 const maxPolls = Number(process.env.MAX_POLLS || 240)
@@ -284,8 +285,6 @@ function providerModelOverrides() {
   }
   return {
     ollama: process.env.KIMI_OLLAMA_MODEL || process.env.OLLAMA_MODEL_DEFAULT || 'kimi-k2.6',
-    deepseek: process.env.DEEPSEEK_OLLAMA_MODEL || 'deepseek-v4-pro',
-    glm: process.env.GLM_OLLAMA_MODEL || 'glm-5.1',
   }
 }
 
@@ -807,7 +806,10 @@ function looksLikePlaceholderPreviewText(text) {
 }
 
 async function verifyPreview(url) {
-  const browser = await chromium.launch({ headless: true })
+  const browser = await chromium.launch({
+    headless: true,
+    ...(chromiumExecutablePath ? { executablePath: chromiumExecutablePath } : {}),
+  })
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     extraHTTPHeaders: cookieHeader() ? { Cookie: cookieHeader() } : {},
