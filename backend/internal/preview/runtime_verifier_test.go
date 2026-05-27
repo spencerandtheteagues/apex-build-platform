@@ -397,8 +397,8 @@ func TestRuntimeVerifierDefaultTimeouts(t *testing.T) {
 	if got := httpOnly.runtimeInstallTimeout(httpOnly.runtimeTotalTimeout()); got != 90*time.Second {
 		t.Fatalf("expected default HTTP-only install timeout to be 90s, got %s", got)
 	}
-	if got := httpOnly.runtimeServerReadyTimeout(httpOnly.runtimeTotalTimeout(), httpOnly.runtimeInstallTimeout(httpOnly.runtimeTotalTimeout())); got != 45*time.Second {
-		t.Fatalf("expected default HTTP-only server-ready timeout to be 45s, got %s", got)
+	if got := httpOnly.runtimeServerReadyTimeout(httpOnly.runtimeTotalTimeout(), httpOnly.runtimeInstallTimeout(httpOnly.runtimeTotalTimeout())); got != 60*time.Second {
+		t.Fatalf("expected default HTTP-only server-ready timeout to be 60s, got %s", got)
 	}
 
 	withBrowser := &RuntimeVerifier{browser: &BrowserVerifier{chromePath: "/usr/bin/chromium-browser"}}

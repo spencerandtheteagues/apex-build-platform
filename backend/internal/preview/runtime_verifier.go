@@ -479,9 +479,9 @@ func (rv *RuntimeVerifier) runtimeServerReadyTimeout(total, install time.Duratio
 		}
 	}
 
-	target := 45 * time.Second
+	target := 60 * time.Second
 	if total >= 180*time.Second {
-		target = 60 * time.Second
+		target = 120 * time.Second
 	}
 
 	remaining := total - install

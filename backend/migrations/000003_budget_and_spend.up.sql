@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS spend_events (
     output_tokens INTEGER NOT NULL DEFAULT 0,
     raw_cost NUMERIC(12,6) NOT NULL DEFAULT 0,
     billed_cost NUMERIC(12,6) NOT NULL DEFAULT 0,
-    power_mode VARCHAR(10),
+    power_mode VARCHAR(20),
     duration_ms INTEGER DEFAULT 0,
     status VARCHAR(20) DEFAULT 'success',
     target_file VARCHAR(500),

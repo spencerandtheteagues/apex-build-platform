@@ -14,11 +14,7 @@ import (
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 )
 
-// chromeSem limits concurrent Chrome launches to 1 to prevent resource exhaustion on constrained hosts.
-var chromeSem = make(chan struct{}, 1)
-
-
-// ── filterBrowserNoise ────────────────────────────────────────────────────────
+// filterBrowserNoise
 
 func TestFilterBrowserNoise_RemovesResizeObserver(t *testing.T) {
 	in := []string{

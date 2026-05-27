@@ -570,8 +570,8 @@ type CompletedBuild struct {
 	ProjectName         string                 `json:"project_name" gorm:"size:255"`
 	Description         string                 `json:"description" gorm:"type:text"`
 	Status              string                 `json:"status" gorm:"size:20;index"` // completed, failed, cancelled
-	Mode                string                 `json:"mode" gorm:"size:10"`         // fast, full
-	PowerMode           string                 `json:"power_mode" gorm:"size:10"`   // fast, balanced, max
+	Mode                string                 `json:"mode" gorm:"size:20"`         // fast, full, frontend_preview_only
+	PowerMode           string                 `json:"power_mode" gorm:"size:20"`   // fast, balanced, max
 	TechStack           string                 `json:"tech_stack" gorm:"type:text"` // JSON blob of tech stack
 	TargetPlatform      string                 `json:"target_platform,omitempty" gorm:"size:32;default:'web';index"`
 	MobilePlatforms     []string               `json:"mobile_platforms,omitempty" gorm:"serializer:json"`

@@ -1246,6 +1246,7 @@ func explicitInMemoryPreviewIntent(description string) bool {
 
 	memoryOnly := containsAnyAffirmedTerm(normalized, []string{
 		normalizeDetectionText("all data stored in memory"),
+		normalizeDetectionText("store all data in memory"),
 		normalizeDetectionText("data stored in memory"),
 		normalizeDetectionText("fully in memory"),
 		normalizeDetectionText("in memory mock backend"),
@@ -1261,6 +1262,8 @@ func explicitInMemoryPreviewIntent(description string) bool {
 	noRuntimeDependency := strings.Contains(normalized, " no database ") ||
 		strings.Contains(normalized, " no external api ") ||
 		strings.Contains(normalized, " no external apis ") ||
+		strings.Contains(normalized, " do not use external api ") ||
+		strings.Contains(normalized, " do not use external apis ") ||
 		strings.Contains(normalized, " no real api key ") ||
 		strings.Contains(normalized, " no real api keys ") ||
 		strings.Contains(normalized, " zero external dependencies ")
