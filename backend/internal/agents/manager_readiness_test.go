@@ -5877,6 +5877,95 @@ createRoot(document.getElementById("root")!).render(<App />);
 	}
 }
 
+func TestApplyDeterministicToolchainNormalizationRepairReappliesAfterCompileFailure(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-toolchain-normalization-repair",
+		Status:    BuildReviewing,
+		Mode:      ModeFast,
+		PowerMode: PowerFast,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "pulseboard",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^1.0.0",
+    "vite": "^2.6.4"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/main.tsx",
+				Content: `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+`,
+				IsNew: true,
+			},
+			{Path: "src/App.tsx", Content: `export default function App() { return <div>ready</div>; }`, IsNew: true},
+			{Path: "tsconfig.json", Content: `{"compilerOptions":{"moduleResolution":"Bundler","jsx":"react-jsx"},"include":["src"]}`, IsNew: true},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicToolchainNormalizationRepair(build, []string{
+		`Preview verification build failed: [vite]: Rollup failed to resolve import "react-dom/client" from "src/main.tsx".`,
+		`Preview verification build failed: TypeError: (0 , vite.createFilter) is not a function`,
+	})
+	if bundle == nil {
+		t.Fatalf("expected toolchain normalization repair to trigger")
+	}
+	if !strings.Contains(summary, "tooling") || !strings.Contains(summary, "runtime") {
+		t.Fatalf("expected summary to mention tooling and runtime alignment, got %q", summary)
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatal("expected patch bundle to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	manifestJSON := ""
+	for _, file := range files {
+		if file.Path == "package.json" {
+			manifestJSON = file.Content
+			break
+		}
+	}
+	if manifestJSON == "" {
+		t.Fatal("expected package.json after repair")
+	}
+	var manifest struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal([]byte(manifestJSON), &manifest); err != nil {
+		t.Fatalf("expected repaired package.json to be valid JSON: %v", err)
+	}
+	for _, pkg := range []string{"react", "react-dom"} {
+		if got := manifest.Dependencies[pkg]; got != dependencyVersionHint(pkg) {
+			t.Fatalf("expected %s to align after validation repair, got %q in %s", pkg, got, manifestJSON)
+		}
+	}
+	for _, pkg := range []string{"vite", "@vitejs/plugin-react", "typescript"} {
+		if got := manifest.DevDependencies[pkg]; got != dependencyVersionHint(pkg) {
+			t.Fatalf("expected %s to align after validation repair, got %q in %s", pkg, got, manifestJSON)
+		}
+	}
+}
+
 func TestExtractBrokenGeneratedTestPaths(t *testing.T) {
 	t.Parallel()
 

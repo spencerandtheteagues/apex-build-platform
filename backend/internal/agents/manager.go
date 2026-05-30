@@ -16644,6 +16644,71 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 	return true
 }
 
+func (am *AgentManager) applyDeterministicToolchainNormalizationRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return nil, ""
+	}
+
+	summaries := make([]string, 0, 2)
+	for _, manifestPath := range generatedManifestCandidates(files) {
+		content := plan.content(manifestPath)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+
+		var manifest previewManifest
+		if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+			continue
+		}
+		if manifest.Scripts == nil {
+			manifest.Scripts = map[string]string{}
+		}
+
+		prefix := strings.TrimSuffix(filepath.ToSlash(manifestPath), "package.json")
+		signals := inspectGeneratedPackageSignals(files, prefix)
+		missingPkgs := dedupeStrings(appendGeneratedPackageSignalDependencies(nil, manifest, signals))
+
+		updatedContent := content
+		changes := make([]string, 0, 4)
+		if len(missingPkgs) > 0 {
+			if patched, added := patchManifestDependenciesJSON(updatedContent, missingPkgs); len(added) > 0 {
+				updatedContent = patched
+				changes = append(changes, "deps: "+strings.Join(added, ", "))
+			}
+		}
+		if patched, added := patchViteRunnableScriptsJSON(updatedContent); len(added) > 0 {
+			updatedContent = patched
+			changes = append(changes, "scripts: "+strings.Join(added, ", "))
+		}
+		if patched, aligned := normalizeViteToolchainVersionsJSON(updatedContent); len(aligned) > 0 {
+			updatedContent = patched
+			changes = append(changes, "tooling: "+strings.Join(aligned, ", "))
+		}
+		if patched, aligned := normalizeReactRuntimeVersionsJSON(updatedContent, files, prefix); len(aligned) > 0 {
+			updatedContent = patched
+			changes = append(changes, "runtime: "+strings.Join(aligned, ", "))
+		}
+		if len(changes) == 0 {
+			continue
+		}
+		if !plan.patchFile(manifestPath, updatedContent, "json") {
+			continue
+		}
+		summaries = append(summaries, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(changes, "; ")))
+	}
+
+	if len(summaries) == 0 {
+		return nil, ""
+	}
+	summary := strings.Join(dedupeStrings(summaries), "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "toolchain_normalization_repair: "+summary), summary
+}
+
 // applyDeterministicMixedCodeRepair strips server-framework imports (Express, etc.) from
 // frontend React component files (.tsx/.jsx). These lines are always wrong in a React file.
 func (am *AgentManager) applyDeterministicMixedCodeRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
@@ -22516,6 +22581,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	}
 
 	repairs := []validationRepairSpec{
+		{
+			apply:       am.applyDeterministicToolchainNormalizationRepair,
+			errorFormat: "Final output validation failed: %s (applied toolchain normalization repair: %s)",
+			message:     "Aligned generated package tooling/runtime versions against the current source tree. Re-running final validation before solver recovery.",
+			summaryKey:  "toolchain_normalization_repair",
+		},
 		{
 			apply:       am.applyDeterministicPlannedFeatureCoverageRepair,
 			errorFormat: "Final output validation failed: %s (applied planned feature coverage repair: %s)",
