@@ -686,10 +686,15 @@ func waitForTCPPortOrExit(port int, timeout time.Duration, stop <-chan struct{},
 	return false, false, nil
 }
 
-var viteLocalURLRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+/?`)
+var viteLocalURLRe = regexp.MustCompile(`http://(?:127\.0\.0\.1|localhost):\d+/?`)
+
+func normalizeViteLocalURL(url string) string {
+	url = strings.TrimRight(strings.TrimSpace(url), "/")
+	return strings.Replace(url, "http://localhost:", "http://127.0.0.1:", 1)
+}
 
 func waitForExpectedViteURLOrExit(expectedBaseURL string, timeout time.Duration, stop <-chan struct{}, exitCh <-chan error, logs *bytes.Buffer) (ready bool, exited bool, err error) {
-	expectedBaseURL = strings.TrimRight(strings.TrimSpace(expectedBaseURL), "/")
+	expectedBaseURL = normalizeViteLocalURL(expectedBaseURL)
 	if expectedBaseURL == "" {
 		return false, false, nil
 	}
@@ -725,16 +730,16 @@ func extractViteLocalURL(logs string) string {
 	if match == "" {
 		return ""
 	}
-	return strings.TrimRight(match, "/")
+	return normalizeViteLocalURL(match)
 }
 
 func viteLogsContainExpectedURL(logs string, expectedBaseURL string) bool {
-	expectedBaseURL = strings.TrimRight(strings.TrimSpace(expectedBaseURL), "/")
+	expectedBaseURL = normalizeViteLocalURL(expectedBaseURL)
 	if expectedBaseURL == "" {
 		return false
 	}
 	for _, match := range viteLocalURLRe.FindAllString(logs, -1) {
-		if strings.TrimRight(match, "/") == expectedBaseURL {
+		if normalizeViteLocalURL(match) == expectedBaseURL {
 			return true
 		}
 	}

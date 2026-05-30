@@ -5073,6 +5073,43 @@ func TestClearStaleDependencyValidationAfterTypeDeclarationRepair(t *testing.T) 
 	}
 }
 
+func TestClearStalePackageManifestValidationAfterNameRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-package-manifest-validation",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "pulseboard",
+  "scripts": { "build": "vite build", "dev": "vite" },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.10"
+  }
+}`,
+				IsNew: true,
+			},
+		},
+	}
+
+	summary := am.clearStalePackageManifestValidationError(build, []string{
+		`Preview verification failed: package.json is malformed or missing required fields: missing required field 'name'`,
+	})
+	if !strings.Contains(summary, "stale package manifest validation") {
+		t.Fatalf("expected stale package manifest validation reset summary, got %q", summary)
+	}
+}
+
 func TestClearStaleLocalModuleValidationAfterPlaceholderRepair(t *testing.T) {
 	t.Parallel()
 
@@ -5781,7 +5818,7 @@ func TestApplyDeterministicPreValidationNormalizationAlignsReactDOMClientRuntime
     "dev": "vite"
   },
   "dependencies": {
-    "react": "^17.0.2",
+    "react": "*",
     "react-dom": "^17.0.2"
   },
   "devDependencies": {

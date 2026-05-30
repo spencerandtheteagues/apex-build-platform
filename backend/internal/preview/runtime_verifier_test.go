@@ -578,6 +578,11 @@ func TestExtractViteLocalURL(t *testing.T) {
 	if got := extractViteLocalURL(logs); got != "http://127.0.0.1:50683" {
 		t.Fatalf("expected parsed Vite local URL, got %q", got)
 	}
+
+	localhostLogs := "\n  VITE v5.4.10  ready in 302 ms\n\n  ➜  Local:   http://localhost:50683/\n"
+	if got := extractViteLocalURL(localhostLogs); got != "http://127.0.0.1:50683" {
+		t.Fatalf("expected localhost Vite URL to normalize, got %q", got)
+	}
 }
 
 func TestWaitForExpectedViteURLOrExitRequiresSpawnedURL(t *testing.T) {
@@ -590,6 +595,18 @@ func TestWaitForExpectedViteURLOrExitRequiresSpawnedURL(t *testing.T) {
 		ready, exited, err := waitForExpectedViteURLOrExit("http://127.0.0.1:50683", 300*time.Millisecond, stop, exitCh, &logs)
 		if !ready || exited || err != nil {
 			t.Fatalf("ready=%v exited=%v err=%v, want ready spawned URL", ready, exited, err)
+		}
+	})
+
+	t.Run("localhost alias for spawned url", func(t *testing.T) {
+		stop := make(chan struct{})
+		exitCh := make(chan error, 1)
+		var logs bytes.Buffer
+		logs.WriteString("  Local:   http://localhost:50683/\n")
+
+		ready, exited, err := waitForExpectedViteURLOrExit("http://127.0.0.1:50683", 300*time.Millisecond, stop, exitCh, &logs)
+		if !ready || exited || err != nil {
+			t.Fatalf("ready=%v exited=%v err=%v, want localhost alias ready", ready, exited, err)
 		}
 	})
 

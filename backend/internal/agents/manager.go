@@ -9084,7 +9084,7 @@ func npmVersionMajor(version string) int {
 
 func reactDOMClientNeedsReact18(version string) bool {
 	major := npmVersionMajor(version)
-	return major > 0 && major < 18
+	return major == 0 || major < 18
 }
 
 func normalizeReactRuntimeVersionsJSON(content string, files []GeneratedFile, prefix string) (string, []string) {
@@ -13045,6 +13045,61 @@ func (am *AgentManager) clearStaleDependencyValidationError(build *Build, readin
 
 	sort.Strings(cleared)
 	return "stale dependency validation on " + strings.Join(cleared, "; ")
+}
+
+func readinessErrorsContainPackageManifestNameFailure(readinessErrors []string) bool {
+	for _, errText := range readinessErrors {
+		lower := strings.ToLower(errText)
+		if strings.Contains(lower, "package.json is malformed or missing required fields") &&
+			strings.Contains(lower, "missing required field 'name'") {
+			return true
+		}
+	}
+	return false
+}
+
+func packageManifestHasRequiredName(content string) bool {
+	if strings.TrimSpace(content) == "" {
+		return false
+	}
+	var manifest struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return false
+	}
+	return strings.TrimSpace(manifest.Name) != ""
+}
+
+func (am *AgentManager) clearStalePackageManifestValidationError(build *Build, readinessErrors []string) string {
+	if build == nil || !readinessErrorsContainPackageManifestNameFailure(readinessErrors) {
+		return ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return ""
+	}
+
+	for _, candidate := range []string{
+		"package.json",
+		"frontend/package.json",
+		"client/package.json",
+		"web/package.json",
+		"apps/web/package.json",
+		"apps/frontend/package.json",
+		"packages/web/package.json",
+		"packages/frontend/package.json",
+	} {
+		path := findGeneratedManifestPath(files, []string{candidate})
+		if path == "" {
+			continue
+		}
+		if packageManifestHasRequiredName(plan.content(path)) {
+			return fmt.Sprintf("stale package manifest validation on %s", path)
+		}
+	}
+	return ""
 }
 
 func (am *AgentManager) clearStaleLocalModuleValidationError(build *Build, readinessErrors []string) string {
@@ -22417,6 +22472,21 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			readinessErrors,
 			"Cleared stale package dependency validation against the current package.json. Re-running final validation before solver recovery.",
 			"stale_dependency_validation_reset",
+			summary,
+		)
+		am.checkBuildCompletion(build)
+		return true
+	}
+	if summary := am.clearStalePackageManifestValidationError(build, readinessErrors); summary != "" {
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
+		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale package manifest validation: %s)", errorSummary, summary))
+		am.broadcastValidationRepair(
+			build.ID,
+			now,
+			progress,
+			readinessErrors,
+			"Cleared stale package manifest validation against the current package.json. Re-running final validation before solver recovery.",
+			"stale_package_manifest_validation_reset",
 			summary,
 		)
 		am.checkBuildCompletion(build)
