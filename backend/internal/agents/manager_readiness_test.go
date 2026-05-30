@@ -5754,6 +5754,7 @@ createRoot(document.getElementById("root")!).render(<App />);
 `,
 						},
 						{Path: "src/App.tsx", Content: `export default function App() { return <div>ready</div>; }`},
+						{Path: "tsconfig.json", Content: `{"compilerOptions":{"moduleResolution":"Bundler","jsx":"react-jsx"},"include":["src"]}`},
 					},
 				},
 			},
@@ -5860,7 +5861,8 @@ createRoot(document.getElementById("root")!).render(<App />);
 	}
 
 	var manifest struct {
-		Dependencies map[string]string `json:"dependencies"`
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
 	}
 	if err := json.Unmarshal([]byte(manifestJSON), &manifest); err != nil {
 		t.Fatalf("expected normalized package.json to remain valid JSON: %v", err)
@@ -5869,6 +5871,9 @@ createRoot(document.getElementById("root")!).render(<App />);
 		if got := manifest.Dependencies[pkg]; got != dependencyVersionHint(pkg) {
 			t.Fatalf("expected %s to align with react-dom/client runtime, got %q in %s", pkg, got, manifestJSON)
 		}
+	}
+	if got := manifest.DevDependencies["typescript"]; got != dependencyVersionHint("typescript") {
+		t.Fatalf("expected TypeScript projects to declare modern typescript, got %q in %s", got, manifestJSON)
 	}
 }
 

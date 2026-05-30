@@ -9252,6 +9252,9 @@ func missingManifestDependenciesForGeneratedFiles(files []GeneratedFile, manifes
 }
 
 func appendGeneratedPackageSignalDependencies(missing []string, manifest previewManifest, signals generatedPackageSignals) []string {
+	if signals.usesTypeScript && !manifestDeclaresDependency(manifest, "typescript") {
+		missing = append(missing, "typescript")
+	}
 	if signals.usesPostCSSConfig && !manifestDeclaresDependency(manifest, "postcss") {
 		missing = append(missing, "postcss")
 	}
@@ -15779,6 +15782,7 @@ func manifestUsesJest(manifest previewManifest) bool {
 type generatedPackageSignals struct {
 	hasImportMetaEnv              bool
 	hasNodeTests                  bool
+	usesTypeScript                bool
 	usesTestingLibrary            bool
 	usesJestDOM                   bool
 	usesJestGlobals               bool
@@ -15808,6 +15812,9 @@ func inspectGeneratedPackageSignals(files []GeneratedFile, prefix string) genera
 		}
 		ext := strings.ToLower(filepath.Ext(path))
 		contentLower := strings.ToLower(file.Content)
+		if path == "tsconfig.json" || strings.HasPrefix(path, "tsconfig.") || ext == ".ts" || ext == ".tsx" {
+			signals.usesTypeScript = true
+		}
 		if path == "postcss.config.js" || path == "postcss.config.cjs" || path == "postcss.config.mjs" || path == "postcss.config.ts" {
 			signals.usesPostCSSConfig = true
 			if strings.Contains(contentLower, "tailwindcss") {
