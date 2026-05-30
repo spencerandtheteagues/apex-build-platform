@@ -208,6 +208,13 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", vitePort)
 	ready, exited, exitErr := waitForExpectedViteURLOrExit(baseURL, readyTimeout, stop, viteExitCh, viteLogs)
+	if !ready && !exited {
+		httpFallbackTimeout := 3 * time.Second
+		if readyTimeout < httpFallbackTimeout {
+			httpFallbackTimeout = readyTimeout
+		}
+		ready, exited, exitErr = waitForExpectedViteHTTPOrExit(baseURL, httpFallbackTimeout, stop, viteExitCh)
+	}
 	if !ready {
 		serverLogs := truncateLog(viteLogs.String(), 1500)
 		if exited {
@@ -719,6 +726,40 @@ func waitForExpectedViteURLOrExit(expectedBaseURL string, timeout time.Duration,
 				default:
 				}
 				return true, false, nil
+			}
+		}
+	}
+	return false, false, nil
+}
+
+func waitForExpectedViteHTTPOrExit(expectedBaseURL string, timeout time.Duration, stop <-chan struct{}, exitCh <-chan error) (ready bool, exited bool, err error) {
+	expectedBaseURL = normalizeViteLocalURL(expectedBaseURL)
+	if expectedBaseURL == "" || timeout <= 0 {
+		return false, false, nil
+	}
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(150 * time.Millisecond)
+	defer ticker.Stop()
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		select {
+		case <-stop:
+			return false, false, nil
+		case err := <-exitCh:
+			return false, true, err
+		case <-ticker.C:
+			resp, reqErr := client.Get(expectedBaseURL)
+			if reqErr == nil {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+				_ = resp.Body.Close()
+				if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+					select {
+					case err := <-exitCh:
+						return false, true, err
+					default:
+					}
+					return true, false, nil
+				}
 			}
 		}
 	}

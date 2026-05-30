@@ -655,6 +655,36 @@ func TestWaitForExpectedViteURLOrExitRequiresSpawnedURL(t *testing.T) {
 	})
 }
 
+func TestWaitForExpectedViteHTTPOrExitAcceptsLiveSpawnedPort(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<div id="root"></div>`))
+	}))
+	defer server.Close()
+
+	stop := make(chan struct{})
+	exitCh := make(chan error, 1)
+	ready, exited, err := waitForExpectedViteHTTPOrExit(server.URL, time.Second, stop, exitCh)
+	if !ready || exited || err != nil {
+		t.Fatalf("ready=%v exited=%v err=%v, want HTTP-ready spawned URL", ready, exited, err)
+	}
+}
+
+func TestWaitForExpectedViteHTTPOrExitStillFailsOnSpawnedExit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	stop := make(chan struct{})
+	exitCh := make(chan error, 1)
+	exitCh <- errors.New("vite exited before readiness")
+	ready, exited, err := waitForExpectedViteHTTPOrExit(server.URL, time.Second, stop, exitCh)
+	if ready || !exited || err == nil {
+		t.Fatalf("ready=%v exited=%v err=%v, want spawned exit to win", ready, exited, err)
+	}
+}
+
 func TestApplyAdvisoryBrowserSignalsAddsVisionAndCanaryMetadata(t *testing.T) {
 	rv := &RuntimeVerifier{
 		visionVerifier: &stubRuntimeVisionVerifier{
