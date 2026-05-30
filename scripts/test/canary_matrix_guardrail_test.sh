@@ -10,6 +10,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MATRIX="$REPO_ROOT/scripts/run_platform_canary_matrix.sh"
+SMOKE="$REPO_ROOT/scripts/run_platform_build_smoke.sh"
 PROMPT_MATRIX="$REPO_ROOT/scripts/run_live_prompt_matrix.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -62,6 +63,14 @@ run_prompt_matrix_safe() {
 }
 
 echo "== matrix false-green guardrails (no network) =="
+
+if grep -q 'USER="${LOGIN_USERNAME:-platform${SUFFIX}}"' "$SMOKE"; then
+  fail "platform smoke does not use generated username for email-only login"
+elif grep -q 'Email-only login must not send a generated username' "$SMOKE" && grep -q 'USER=""' "$SMOKE"; then
+  pass "platform smoke preserves email-only login semantics"
+else
+  fail "platform smoke email-only login guardrail missing"
+fi
 
 # Required paid scenarios without credentials must fail as INCOMPLETE, not green.
 run_matrix_safe 1 "CANARY_MATRIX_INCOMPLETE_REQUIRED_SCENARIOS_SKIPPED" \

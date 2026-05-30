@@ -420,7 +420,15 @@ fi
 
 PROMPT="$(cat "$prompt_file")"
 SUFFIX="$(date +%s)"
-USER="${LOGIN_USERNAME:-platform${SUFFIX}}"
+if [[ -n "$LOGIN_USERNAME" ]]; then
+  USER="$LOGIN_USERNAME"
+elif [[ -n "$LOGIN_EMAIL" ]]; then
+  # Email-only login must not send a generated username. The backend gives
+  # username precedence when both fields are present.
+  USER=""
+else
+  USER="platform${SUFFIX}"
+fi
 EMAIL="${LOGIN_EMAIL:-${USER}@example.com}"
 PASS="${LOGIN_PASSWORD:-Passw0rd!Passw0rd!}"
 

@@ -8855,6 +8855,115 @@ func TestClearStaleDependencyValidationClearsSatisfiedPostCSSConfigFailure(t *te
 	}
 }
 
+func TestClearStaleDependencyValidationRejectsPostCSSThemeFunction(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-postcss-theme-function-validation",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "pulseboard",
+  "private": true,
+  "scripts": { "build": "tsc && vite build", "dev": "vite" },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "tailwindcss": "^3.4.3",
+    "postcss": "^8.4.38",
+    "autoprefixer": "^10.4.19"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "postcss.config.cjs",
+				Content: `module.exports = {
+  plugins: {
+    tailwindcss: {
+      theme: theme("colors")
+    },
+    autoprefixer: {}
+  }
+};`,
+				IsNew: true,
+			},
+			{
+				Path:    "tailwind.config.cjs",
+				Content: `module.exports = { content: ["./index.html", "./src/**/*.{ts,tsx}"], theme: { extend: {} }, plugins: [] };`,
+				IsNew:   true,
+			},
+		},
+	}
+
+	summary := am.clearStaleDependencyValidationError(build, []string{
+		`Preview verification build failed: [Failed to load PostCSS config: Failed to load PostCSS config (searchPath: /tmp/apex-preview): [TypeError] theme is not a function`,
+	})
+	if summary != "" {
+		t.Fatalf("expected invalid PostCSS config to remain actionable, got stale-clear summary %q", summary)
+	}
+}
+
+func TestEnsureGeneratedTailwindConfigRewritesPostCSSThemeFunction(t *testing.T) {
+	t.Parallel()
+
+	files := []GeneratedFile{
+		{
+			Path: "package.json",
+			Content: `{
+  "name": "pulseboard",
+  "private": true,
+  "scripts": { "build": "vite build" },
+  "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" },
+  "devDependencies": {
+    "tailwindcss": "^3.4.3",
+    "postcss": "^8.4.38",
+    "autoprefixer": "^10.4.19",
+    "vite": "^5.2.0"
+  }
+}`,
+		},
+		{
+			Path: "postcss.config.cjs",
+			Content: `module.exports = {
+  plugins: {
+    tailwindcss: {
+      theme: theme("colors")
+    },
+    autoprefixer: {}
+  }
+};`,
+		},
+		{
+			Path:    "tailwind.config.cjs",
+			Content: `module.exports = { content: ["./index.html", "./src/**/*.{ts,tsx}"], theme: { extend: {} }, plugins: [] };`,
+		},
+	}
+	plan := newGeneratedFilePatchPlan(files)
+
+	repaired, summary := ensureGeneratedTailwindConfig(plan, files)
+	if repaired == 0 || !strings.Contains(summary, "fixed postcss.config.cjs") {
+		t.Fatalf("expected postcss theme() config to be rewritten, repaired=%d summary=%q", repaired, summary)
+	}
+	content := plan.content("postcss.config.cjs")
+	if strings.Contains(content, "theme(") {
+		t.Fatalf("expected canonical postcss config without theme(), got %s", content)
+	}
+	if !strings.Contains(content, "module.exports") || !strings.Contains(content, "tailwindcss") || !strings.Contains(content, "autoprefixer") {
+		t.Fatalf("expected canonical CommonJS PostCSS config, got %s", content)
+	}
+}
+
 func TestClearStaleDependencyValidationIgnoresDeletedAmbiguousPostCSSConfigs(t *testing.T) {
 	t.Parallel()
 

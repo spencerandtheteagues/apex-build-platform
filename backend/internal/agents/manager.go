@@ -12683,6 +12683,20 @@ func configSyntaxConflictsWithModuleMode(path, content string, packageUsesESM bo
 	return usesESM
 }
 
+func postCSSConfigHasExecutablePluginShape(content string) bool {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return false
+	}
+	// The PostCSS config is evaluated by Node, not Tailwind. Generated configs
+	// sometimes copy Tailwind theme callback examples into postcss.config.*,
+	// producing runtime failures such as "theme is not a function".
+	if regexp.MustCompile(`\btheme\s*\(`).MatchString(content) {
+		return false
+	}
+	return true
+}
+
 func generatedPostCSSConfigSatisfied(files []GeneratedFile, plan *generatedFilePatchPlan, packageUsesESM bool) bool {
 	for _, f := range files {
 		p := filepath.ToSlash(strings.TrimSpace(f.Path))
@@ -12695,6 +12709,7 @@ func generatedPostCSSConfigSatisfied(files []GeneratedFile, plan *generatedFileP
 		}
 		if strings.Contains(content, "tailwindcss") &&
 			strings.Contains(content, "autoprefixer") &&
+			postCSSConfigHasExecutablePluginShape(content) &&
 			!configSyntaxConflictsWithModuleMode(p, content, packageUsesESM) {
 			return true
 		}
@@ -15215,6 +15230,7 @@ func ensureGeneratedTailwindConfig(plan *generatedFilePatchPlan, files []Generat
 		// Check it actually has the Tailwind plugins and uses syntax Node can load.
 		if !strings.Contains(content, "tailwindcss") ||
 			!strings.Contains(content, "autoprefixer") ||
+			!postCSSConfigHasExecutablePluginShape(content) ||
 			configSyntaxConflictsWithModuleMode(canonicalPostCSSPath, content, false) {
 			if plan.patchFile(canonicalPostCSSPath, canonicalPostCSS, "javascript") {
 				repaired++
