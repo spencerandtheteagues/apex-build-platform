@@ -406,7 +406,14 @@ func (am *AgentManager) runPreviewVerificationGate(
 		return false
 	}
 
-	// ── Attempt 1: AI-guided repair task (PRIMARY) ─────────────────────
+	// ── Attempt 1: deterministic toolchain repair for known package conflicts ──
+	if previewFailureLooksLikeToolchainConflict(result) {
+		if am.applyPreviewToolchainNormalizationRepair(build, result, now) {
+			return true
+		}
+	}
+
+	// ── Attempt 2: AI-guided repair task ────────────────────────────────
 	// AI repair is preferred over shell fallback because shell fallback discards
 	// all generated app content and replaces it with a generic recovery page.
 	// Only skip AI repair when AI is unavailable or we've already hit the loop cap.
@@ -414,14 +421,14 @@ func (am *AgentManager) runPreviewVerificationGate(
 		return true // repair task queued, caller should return
 	}
 
-	// ── Attempt 2: Deterministic in-line repair (FALLBACK) ──────────────
+	// ── Attempt 3: Deterministic in-line repair (FALLBACK) ──────────────
 	// Deterministic repairs (fence strip, router patch) are fast, reversible,
 	// and don't discard user app content. Run before shell fallback.
 	if am.applyPreviewDeterministicRepair(build, allFiles, result, now) {
 		return true // repair applied, re-check
 	}
 
-	// ── Attempt 3: Shell fallback (LAST RESORT) ──────────────────────────
+	// ── Attempt 4: Shell fallback (LAST RESORT) ──────────────────────────
 	// Shell fallback replaces the entire app with a generic APEX recovery page.
 	// This should only be used when the generated code is so broken that there's
 	// nothing worth preserving, and AI repair is unavailable.
@@ -482,6 +489,70 @@ func (am *AgentManager) applyPreviewDeterministicRepair(
 		return false
 	}
 	return false
+}
+
+func previewFailureLooksLikeToolchainConflict(result *PreviewVerificationResult) bool {
+	if result == nil {
+		return false
+	}
+	haystack := strings.ToLower(strings.TrimSpace(result.FailureKind + "\n" + result.Details + "\n" + strings.Join(result.RepairHints, "\n")))
+	if !strings.Contains(haystack, "npm install failed") &&
+		!strings.Contains(haystack, "could not resolve dependency") &&
+		!strings.Contains(haystack, "eresolve") &&
+		!strings.Contains(haystack, "peer vite") {
+		return false
+	}
+	return strings.Contains(haystack, "vite") ||
+		strings.Contains(haystack, "@vitejs/plugin-react") ||
+		strings.Contains(haystack, "@vitejs/plugin-react-swc") ||
+		strings.Contains(haystack, "react-dom/client")
+}
+
+func (am *AgentManager) applyPreviewToolchainNormalizationRepair(
+	build *Build,
+	result *PreviewVerificationResult,
+	now time.Time,
+) bool {
+	if build == nil || result == nil {
+		return false
+	}
+	readinessErrors := []string{fmt.Sprintf("Preview verification failed (%s): %s", result.FailureKind, result.Details)}
+	readinessErrors = append(readinessErrors, result.RepairHints...)
+	readinessErrors = append(readinessErrors, result.CanaryErrors...)
+
+	bundle, summary := am.applyDeterministicToolchainNormalizationRepair(build, readinessErrors)
+	if bundle == nil || !am.applyPatchBundleToBuild(build, bundle) {
+		return false
+	}
+	if previewPatchBundleRecordingEnabled(build) {
+		appendPatchBundle(build, *bundle)
+	}
+
+	build.mu.Lock()
+	build.PreviewVerificationAttempts++
+	build.Status = BuildTesting
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	build.Progress = 95
+	build.Error = fmt.Sprintf("Preview verification: aligned generated package tooling/runtime versions. Re-checking. (%s)", result.Details)
+	build.mu.Unlock()
+
+	log.Printf("Build %s: preview toolchain normalization repair applied: %s", build.ID, summary)
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":          "preview_verification",
+			"status":         string(BuildTesting),
+			"repair_type":    "toolchain_normalization",
+			"failure_kind":   result.FailureKind,
+			"repair_summary": summary,
+			"message":        "Preview verification aligned generated package tooling and runtime versions. Re-checking preview readiness.",
+		},
+	})
+	am.checkBuildCompletion(build)
+	return true
 }
 
 func previewFailureLooksLikeShellFallbackCandidate(result *PreviewVerificationResult) bool {

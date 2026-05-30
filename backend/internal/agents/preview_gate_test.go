@@ -335,6 +335,104 @@ func TestRunPreviewVerificationGateMarksRecoveryOnlyAfterPreviewRepairQueues(t *
 	}
 }
 
+func TestRunPreviewVerificationGateRepairsToolchainConflictBeforeSolver(t *testing.T) {
+	taskQueue := make(chan *Task, 1)
+	solver := &Agent{
+		ID:       "solver-preview-toolchain",
+		Role:     RoleSolver,
+		Status:   StatusIdle,
+		BuildID:  "preview-toolchain-repair",
+		Provider: "gpt4",
+	}
+	failResult := &PreviewVerificationResult{
+		Passed:      false,
+		FailureKind: "boot_failed",
+		Details: "npm install failed: exit status 1 -- npm ERR! Found: vite@4.5.14\n" +
+			"npm ERR! Could not resolve dependency:\n" +
+			"npm ERR! peer vite@\"^3.0.0\" from @vitejs/plugin-react@2.2.0",
+	}
+	verifierCalls := 0
+	verifier := &stubPreviewVerifier{result: failResult}
+	verifier.onVerify = func([]VerifiableFile) {
+		verifierCalls++
+		if verifierCalls > 1 {
+			verifier.result = &PreviewVerificationResult{Passed: true}
+		}
+	}
+	manager := &AgentManager{
+		ctx:             context.Background(),
+		agents:          map[string]*Agent{solver.ID: solver},
+		builds:          map[string]*Build{},
+		subscribers:     map[string][]chan *WSMessage{},
+		taskQueue:       taskQueue,
+		previewVerifier: verifier,
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:        solver.BuildID,
+		Status:    BuildReviewing,
+		Progress:  99,
+		UpdatedAt: now,
+		Agents:    map[string]*Agent{solver.ID: solver},
+		Tasks: []*Task{
+			{
+				ID:     "frontend",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{Files: []GeneratedFile{
+					{
+						Path: "package.json",
+						Content: `{
+  "scripts": {"build": "vite build", "dev": "vite", "preview": "vite preview"},
+  "dependencies": {"react": "^18.3.1", "react-dom": "^18.3.1"},
+  "devDependencies": {"vite": "^4.0.0", "@vitejs/plugin-react": "^2.0.0", "typescript": "^5.6.3"}
+}`,
+					},
+					{Path: "index.html", Content: `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`},
+					{Path: "src/main.tsx", Content: `import React from "react"; import ReactDOM from "react-dom/client"; import App from "./App"; ReactDOM.createRoot(document.getElementById("root")!).render(<App />);`},
+					{Path: "src/App.tsx", Content: `export default function App(){ return <div>ready</div>; }`},
+				}},
+			},
+		},
+	}
+	manager.builds[build.ID] = build
+
+	status := BuildCompleted
+	buildError := ""
+	if !manager.runPreviewVerificationGate(build, manager.collectGeneratedFiles(build), &status, &buildError, now) {
+		t.Fatal("expected preview gate to apply toolchain normalization and pause finalization")
+	}
+	if build.PreviewVerificationAttempts != 1 {
+		t.Fatalf("expected preview attempts=1 after toolchain repair, got %d", build.PreviewVerificationAttempts)
+	}
+	if verifierCalls < 1 {
+		t.Fatal("expected preview verifier to run")
+	}
+	for _, task := range build.Tasks {
+		if task.Type == TaskFix {
+			t.Fatalf("expected deterministic toolchain repair not to queue solver task, got %+v", task)
+		}
+	}
+	select {
+	case queued := <-taskQueue:
+		t.Fatalf("expected no solver task to be queued, got %+v", queued)
+	default:
+	}
+
+	filesByPath := map[string]string{}
+	for _, file := range manager.collectGeneratedFiles(build) {
+		filesByPath[file.Path] = file.Content
+	}
+	manifest := filesByPath["package.json"]
+	if !strings.Contains(manifest, `"vite": "`+dependencyVersionHint("vite")+`"`) {
+		t.Fatalf("expected vite to align after preview repair, got %s", manifest)
+	}
+	if !strings.Contains(manifest, `"@vitejs/plugin-react": "`+dependencyVersionHint("@vitejs/plugin-react")+`"`) {
+		t.Fatalf("expected plugin-react to align after preview repair, got %s", manifest)
+	}
+}
+
 func TestRunPreviewVerificationGateUsesDeterministicShellFallbackBeforeSolverForBlankScreen(t *testing.T) {
 	manager := &AgentManager{
 		ctx:         context.Background(),
