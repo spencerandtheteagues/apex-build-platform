@@ -8595,6 +8595,8 @@ func dependencyVersionHint(pkg string) string {
 		return "^1.20.2"
 	case "bcrypt":
 		return "^5.1.1"
+	case "react", "react-dom":
+		return "^18.3.1"
 	case "@vitejs/plugin-react":
 		return "^4.3.4"
 	case "@vitejs/plugin-react-swc":
@@ -9032,6 +9034,111 @@ func normalizeViteToolchainVersionsJSON(content string) (string, []string) {
 	ensureDevDependency("vite", true)
 	ensureDevDependency("@vitejs/plugin-react", hasReactPlugin)
 	ensureDevDependency("@vitejs/plugin-react-swc", hasReactSWCPlugin)
+
+	if len(changes) == 0 {
+		return content, nil
+	}
+
+	sort.Strings(changes)
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return content, nil
+	}
+	return string(updated), changes
+}
+
+func generatedFilesUseReactDOMClient(files []GeneratedFile, prefix string) bool {
+	prefix = strings.ToLower(filepath.ToSlash(strings.TrimSpace(prefix)))
+	for _, file := range files {
+		path := strings.ToLower(filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Path), "./")))
+		if path == "" {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		switch ext {
+		case ".js", ".jsx", ".ts", ".tsx":
+		default:
+			continue
+		}
+		if strings.Contains(file.Content, "react-dom/client") {
+			return true
+		}
+	}
+	return false
+}
+
+func npmVersionMajor(version string) int {
+	match := regexp.MustCompile(`\d+`).FindString(strings.TrimSpace(version))
+	if match == "" {
+		return 0
+	}
+	major, err := strconv.Atoi(match)
+	if err != nil {
+		return 0
+	}
+	return major
+}
+
+func reactDOMClientNeedsReact18(version string) bool {
+	major := npmVersionMajor(version)
+	return major > 0 && major < 18
+}
+
+func normalizeReactRuntimeVersionsJSON(content string, files []GeneratedFile, prefix string) (string, []string) {
+	if strings.TrimSpace(content) == "" || !generatedFilesUseReactDOMClient(files, prefix) {
+		return content, nil
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return content, nil
+	}
+	if manifest == nil {
+		return content, nil
+	}
+
+	getSection := func(name string) map[string]any {
+		if existing, ok := manifest[name].(map[string]any); ok && existing != nil {
+			return existing
+		}
+		section := map[string]any{}
+		manifest[name] = section
+		return section
+	}
+	deps := getSection("dependencies")
+	devDeps := getSection("devDependencies")
+
+	changes := make([]string, 0, 2)
+	ensureRuntimeDependency := func(pkg string) {
+		desired := dependencyVersionHint(pkg)
+		if desired == "" || desired == "*" {
+			return
+		}
+
+		depValue, inDeps := deps[pkg]
+		devValue, inDevDeps := devDeps[pkg]
+		if inDeps && !reactDOMClientNeedsReact18(jsonStringValue(depValue)) {
+			return
+		}
+		if !inDeps && inDevDeps && !reactDOMClientNeedsReact18(jsonStringValue(devValue)) {
+			deps[pkg] = devValue
+			delete(devDeps, pkg)
+			changes = append(changes, fmt.Sprintf("%s -> dependencies", pkg))
+			return
+		}
+
+		if inDevDeps {
+			delete(devDeps, pkg)
+		}
+		deps[pkg] = desired
+		changes = append(changes, fmt.Sprintf("%s -> %s", pkg, desired))
+	}
+
+	ensureRuntimeDependency("react")
+	ensureRuntimeDependency("react-dom")
 
 	if len(changes) == 0 {
 		return content, nil
@@ -16400,6 +16507,11 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 			updatedContent = patched
 			manifestChanged = true
 			manifestChanges = append(manifestChanges, "tooling: "+strings.Join(aligned, ", "))
+		}
+		if patched, aligned := normalizeReactRuntimeVersionsJSON(updatedContent, files, prefix); len(aligned) > 0 {
+			updatedContent = patched
+			manifestChanged = true
+			manifestChanges = append(manifestChanges, "runtime: "+strings.Join(aligned, ", "))
 		}
 		if manifestChanged {
 			if !plan.patchFile(manifestPath, updatedContent, "json") {

@@ -5757,6 +5757,84 @@ createRoot(document.getElementById("root")!).render(<App />);
 	}
 }
 
+func TestApplyDeterministicPreValidationNormalizationAlignsReactDOMClientRuntimeVersions(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-react-dom-client-runtime",
+		Mode: ModeFast,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "pulseboard",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.10"
+  }
+}`,
+						},
+						{
+							Path: "src/main.tsx",
+							Content: `import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+createRoot(document.getElementById("root")!).render(<App />);
+`,
+						},
+						{Path: "src/App.tsx", Content: `export default function App() { return <div>ready</div>; }`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to align React runtime versions")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	manifestJSON := ""
+	for _, file := range files {
+		if file.Path == "package.json" {
+			manifestJSON = file.Content
+			break
+		}
+	}
+	if manifestJSON == "" {
+		t.Fatal("expected package.json to remain present")
+	}
+
+	var manifest struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	if err := json.Unmarshal([]byte(manifestJSON), &manifest); err != nil {
+		t.Fatalf("expected normalized package.json to remain valid JSON: %v", err)
+	}
+	for _, pkg := range []string{"react", "react-dom"} {
+		if got := manifest.Dependencies[pkg]; got != dependencyVersionHint(pkg) {
+			t.Fatalf("expected %s to align with react-dom/client runtime, got %q in %s", pkg, got, manifestJSON)
+		}
+	}
+}
+
 func TestExtractBrokenGeneratedTestPaths(t *testing.T) {
 	t.Parallel()
 
