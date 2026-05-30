@@ -8947,6 +8947,104 @@ func patchManifestDependenciesJSON(content string, pkgs []string) (string, []str
 	return string(updated), added
 }
 
+func normalizeViteToolchainVersionsJSON(content string) (string, []string) {
+	if strings.TrimSpace(content) == "" {
+		return content, nil
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return content, nil
+	}
+	if manifest == nil {
+		return content, nil
+	}
+
+	getSection := func(name string) map[string]any {
+		if existing, ok := manifest[name].(map[string]any); ok && existing != nil {
+			return existing
+		}
+		section := map[string]any{}
+		manifest[name] = section
+		return section
+	}
+	deps := getSection("dependencies")
+	devDeps := getSection("devDependencies")
+
+	hasPackage := func(pkg string) bool {
+		if _, ok := deps[pkg]; ok {
+			return true
+		}
+		if _, ok := devDeps[pkg]; ok {
+			return true
+		}
+		return false
+	}
+	scriptsMentionVite := false
+	if scripts, ok := manifest["scripts"].(map[string]any); ok {
+		for _, value := range scripts {
+			if strings.Contains(strings.ToLower(jsonStringValue(value)), "vite") {
+				scriptsMentionVite = true
+				break
+			}
+		}
+	}
+
+	hasReactPlugin := hasPackage("@vitejs/plugin-react")
+	hasReactSWCPlugin := hasPackage("@vitejs/plugin-react-swc")
+	if !scriptsMentionVite && !hasPackage("vite") && !hasReactPlugin && !hasReactSWCPlugin {
+		return content, nil
+	}
+
+	changes := make([]string, 0, 3)
+	ensureDevDependency := func(pkg string, addIfMissing bool) {
+		desired := dependencyVersionHint(pkg)
+		if desired == "" || desired == "*" {
+			return
+		}
+
+		_, inDeps := deps[pkg]
+		devValue, inDevDeps := devDeps[pkg]
+		if !inDeps && !inDevDeps && !addIfMissing {
+			return
+		}
+
+		if inDeps {
+			delete(deps, pkg)
+			if !inDevDeps || jsonStringValue(devValue) != desired {
+				devDeps[pkg] = desired
+			}
+			changes = append(changes, fmt.Sprintf("%s -> devDependencies %s", pkg, desired))
+			return
+		}
+		if !inDevDeps {
+			devDeps[pkg] = desired
+			changes = append(changes, fmt.Sprintf("%s -> devDependencies %s", pkg, desired))
+			return
+		}
+		if jsonStringValue(devValue) == desired {
+			return
+		}
+		devDeps[pkg] = desired
+		changes = append(changes, fmt.Sprintf("%s -> %s", pkg, desired))
+	}
+
+	ensureDevDependency("vite", true)
+	ensureDevDependency("@vitejs/plugin-react", hasReactPlugin)
+	ensureDevDependency("@vitejs/plugin-react-swc", hasReactSWCPlugin)
+
+	if len(changes) == 0 {
+		return content, nil
+	}
+
+	sort.Strings(changes)
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return content, nil
+	}
+	return string(updated), changes
+}
+
 func patchViteRunnableScriptsJSON(content string) (string, []string) {
 	if strings.TrimSpace(content) == "" {
 		return content, nil
@@ -16297,6 +16395,11 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 			updatedContent = patched
 			manifestChanged = true
 			manifestChanges = append(manifestChanges, "scripts: "+strings.Join(added, ", "))
+		}
+		if patched, aligned := normalizeViteToolchainVersionsJSON(updatedContent); len(aligned) > 0 {
+			updatedContent = patched
+			manifestChanged = true
+			manifestChanges = append(manifestChanges, "tooling: "+strings.Join(aligned, ", "))
 		}
 		if manifestChanged {
 			if !plan.patchFile(manifestPath, updatedContent, "json") {

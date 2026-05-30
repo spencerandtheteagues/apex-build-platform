@@ -5664,6 +5664,99 @@ export default defineConfig({
 	}
 }
 
+func TestApplyDeterministicPreValidationNormalizationAlignsViteReactPluginVersions(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-vite-toolchain-alignment",
+		Mode: ModeFast,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "pulseboard",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^3.0.0"
+  }
+}`,
+						},
+						{
+							Path: "vite.config.ts",
+							Content: `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({ plugins: [react()] });
+`,
+						},
+						{
+							Path: "src/main.tsx",
+							Content: `import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+createRoot(document.getElementById("root")!).render(<App />);
+`,
+						},
+						{Path: "src/App.tsx", Content: `export default function App() { return <div>ready</div>; }`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to align Vite toolchain versions")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	manifestJSON := ""
+	for _, file := range files {
+		if file.Path == "package.json" {
+			manifestJSON = file.Content
+			break
+		}
+	}
+	if manifestJSON == "" {
+		t.Fatal("expected package.json to remain present")
+	}
+
+	var manifest struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal([]byte(manifestJSON), &manifest); err != nil {
+		t.Fatalf("expected normalized package.json to remain valid JSON: %v", err)
+	}
+	if _, exists := manifest.Dependencies["@vitejs/plugin-react"]; exists {
+		t.Fatalf("expected @vitejs/plugin-react to move out of dependencies, got %s", manifestJSON)
+	}
+	if got := manifest.DevDependencies["@vitejs/plugin-react"]; got != dependencyVersionHint("@vitejs/plugin-react") {
+		t.Fatalf("expected compatible @vitejs/plugin-react version, got %q in %s", got, manifestJSON)
+	}
+	if got := manifest.DevDependencies["vite"]; got != dependencyVersionHint("vite") {
+		t.Fatalf("expected compatible vite version, got %q in %s", got, manifestJSON)
+	}
+}
+
 func TestExtractBrokenGeneratedTestPaths(t *testing.T) {
 	t.Parallel()
 
