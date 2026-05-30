@@ -1496,7 +1496,7 @@ func setupRoutes(
 	router.GET("/health/deep", server.DeepHealth)
 	router.GET("/health/features", server.FeatureReadiness)
 	router.GET("/platform/truth", server.PlatformTruth)
-	router.GET("/ready", server.DeepHealth) // Kubernetes readiness probe
+	router.GET("/ready", server.Readiness) // Kubernetes readiness probe
 
 	// API documentation endpoint
 	router.GET("/docs", func(c *gin.Context) {

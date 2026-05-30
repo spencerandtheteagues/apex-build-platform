@@ -1060,3 +1060,30 @@
   - Mobile validation tests proving `mobile/src/api/endpoints.ts` and `mobile/docs/api-contract.json` are required and the JSON manifest must be valid.
   - Full mobile package test suite.
   - Generated Expo dependency-resolution smoke with `MOBILE_GENERATOR_INSTALL_SMOKE=1`.
+
+## Public readiness endpoint
+- Source of truth:
+  - `backend/cmd/main.go` route registration for `/ready`.
+  - `backend/internal/api/handlers.go` lightweight health/readiness handlers.
+  - `backend/internal/startup/registry.go` readiness summary semantics.
+- Producers:
+  - Backend API server returns the current startup/runtime readiness summary.
+  - Startup registry records critical service readiness and optional degradation.
+- Transport:
+  - `GET /ready`.
+  - JSON response includes `status`, `ready`, `database`, `ai_providers`, `healthy_providers`, `total_providers`, `version`, `feature_readiness_status`, and `startup`.
+- Consumers:
+  - Render/Kubernetes-style readiness checks.
+  - `scripts/loadtest.js` public load harness.
+  - Launch Playwright/verifier scripts and operator curl checks.
+- Defaults / zero-value behavior:
+  - Missing startup registry defaults to ready/healthy for local test construction.
+  - `/health/deep` remains the DB-ping monitoring endpoint.
+  - `/ready` must stay cheap under public load and must not perform a fresh per-request DB ping.
+- Backward compatibility risk:
+  - Response shape remains compatible with existing `/health`/`/ready` consumers.
+  - Semantics change is intentionally operational: readiness is based on registry/runtime summary, while deep database probing stays on `/health/deep`.
+- Required tests / validations:
+  - Backend API test proving `/ready` does not invoke runtime DB health checks.
+  - Backend API tests proving `/health/deep` still reports database failure as 503.
+  - k6 guardrail test proving public 5xx is now a hard load-test failure.

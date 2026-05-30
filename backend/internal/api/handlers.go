@@ -99,6 +99,29 @@ func (s *Server) Health(c *gin.Context) {
 	})
 }
 
+// Readiness endpoint - cheap readiness probe for load balancers.
+func (s *Server) Readiness(c *gin.Context) {
+	summary := s.runtimeReadinessSummary(false)
+	aiHealth, healthyProviders := s.aiHealthSnapshot()
+
+	statusCode := http.StatusOK
+	if !summary.Ready {
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	c.JSON(statusCode, gin.H{
+		"status":                   topLevelHealthStatus(summary),
+		"ready":                    summary.Ready,
+		"database":                 primaryDatabaseHealth(summary),
+		"ai_providers":             aiHealth,
+		"healthy_providers":        healthyProviders,
+		"total_providers":          len(aiHealth),
+		"version":                  "1.0.0",
+		"feature_readiness_status": summary.Status,
+		"startup":                  summary,
+	})
+}
+
 // DeepHealth endpoint - Full health check with database ping (for monitoring)
 func (s *Server) DeepHealth(c *gin.Context) {
 	summary := s.runtimeReadinessSummary(true)

@@ -15,7 +15,7 @@ This file is the level 1 scripts contract. Add child docs if script families gro
 - `verify_stripe_launch.mjs`: Stripe billing readiness, config, webhook, checkout, and portal verification.
 - `verify_mobile_external_readiness.mjs`: mobile provider/store readiness evidence gate.
 - `verify_platform_reliability.sh`, `verify-contract.sh`, `verify-repo.sh`: reliability, contract, and repo verification.
-- `loadtest.js`: k6 load harness for TASK-010 launch-concurrency readiness. Default: 200 concurrent unauthenticated landing and health traffic. Opt-in: 50-VU authenticated API (`RUN_AUTH_API=1`), 10 concurrent build starts (`RUN_BUILD_STARTS=1`). Both opt-in scenarios require `LOGIN_EMAIL` and `LOGIN_PASSWORD`. Mutating build traffic never runs by default.
+- `loadtest.js`: k6 load harness for TASK-010 launch-concurrency readiness. Default: 200 concurrent unauthenticated landing and health traffic with zero public 5xx responses required. Opt-in: 50-VU authenticated API (`RUN_AUTH_API=1`), 10 concurrent build starts (`RUN_BUILD_STARTS=1`). Both opt-in scenarios require `LOGIN_EMAIL` and `LOGIN_PASSWORD`. Mutating build traffic never runs by default.
 - `scripts/lib/`: shared shell helpers.
 - `scripts/test/`: tests for script helper behavior and guardrails.
 

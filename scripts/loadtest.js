@@ -26,7 +26,7 @@
 
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
-import { Rate, Trend } from 'k6/metrics';
+import { Counter, Rate, Trend } from 'k6/metrics';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -60,6 +60,7 @@ if (RUN_BUILD_STARTS && (!LOGIN_EMAIL || !LOGIN_PASSWORD)) {
 // ---------------------------------------------------------------------------
 
 const publicErrorRate = new Rate('public_errors');
+const public5xxCount = new Counter('public_5xx_errors');
 const landingP95 = new Trend('landing_p95', true);
 const healthP95 = new Trend('health_p95', true);
 const authApiErrorRate = new Rate('auth_api_errors');
@@ -118,6 +119,7 @@ export const options = {
     landing_p95: ['p(95) < 800'],
     health_p95: ['p(95) < 800'],
     public_errors: ['rate < 0.05'],
+    public_5xx_errors: ['count == 0'],
     // Auth API thresholds
     auth_api_errors: ['rate < 0.01'],
     auth_api_p95: ['p(95) < 2000'],
@@ -235,6 +237,7 @@ export default function publicTrafficScenario() {
     publicErrorRate.add(!ok);
 
     if (res.status >= 500) {
+      public5xxCount.add(1);
       console.error(`LOADTEST: public landing 5xx status=${res.status}`);
     }
   });
@@ -267,6 +270,7 @@ export default function publicTrafficScenario() {
     publicErrorRate.add(!ok);
 
     if (res.status >= 500) {
+      public5xxCount.add(1);
       console.error(`LOADTEST: public health 5xx status=${res.status}`);
     }
   });

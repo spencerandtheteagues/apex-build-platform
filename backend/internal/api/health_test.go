@@ -53,6 +53,55 @@ func TestDeepHealthIncludesReadyFlag(t *testing.T) {
 	require.Equal(t, "degraded", payload["feature_readiness_status"])
 }
 
+func TestReadinessDoesNotPingDatabasePerRequest(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := gormDB.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	server := NewServer(
+		&db.Database{DB: gormDB},
+		auth.NewAuthService("test-jwt-secret-with-sufficient-length-1234567890"),
+		ai.NewAIRouter("", "", ""),
+		nil,
+	)
+	registry := startup.NewRegistry()
+	registry.MarkReady("primary_database", startup.TierCritical, "Database connected at startup", nil)
+	registry.MarkReady("auth_service", startup.TierCritical, "Auth initialized", nil)
+	registry.SetPhase(startup.PhaseReady)
+	server.SetReadinessRegistry(registry)
+
+	readyRecorder := httptest.NewRecorder()
+	readyContext, _ := gin.CreateTestContext(readyRecorder)
+	readyContext.Request = httptest.NewRequest(http.MethodGet, "/ready", nil)
+
+	server.Readiness(readyContext)
+
+	require.Equal(t, http.StatusOK, readyRecorder.Code)
+	var readyPayload map[string]any
+	require.NoError(t, json.Unmarshal(readyRecorder.Body.Bytes(), &readyPayload))
+	require.Equal(t, "healthy", readyPayload["status"])
+	require.Equal(t, true, readyPayload["ready"])
+	require.Equal(t, "connected", readyPayload["database"])
+
+	deepRecorder := httptest.NewRecorder()
+	deepContext, _ := gin.CreateTestContext(deepRecorder)
+	deepContext.Request = httptest.NewRequest(http.MethodGet, "/health/deep", nil)
+
+	server.DeepHealth(deepContext)
+
+	require.Equal(t, http.StatusServiceUnavailable, deepRecorder.Code)
+	var deepPayload map[string]any
+	require.NoError(t, json.Unmarshal(deepRecorder.Body.Bytes(), &deepPayload))
+	require.Equal(t, "unhealthy", deepPayload["status"])
+	require.Equal(t, false, deepPayload["ready"])
+	require.Equal(t, "unavailable", deepPayload["database"])
+}
+
 func TestFeatureReadinessReturnsDegradedSummaryWithHealthyCriticalServices(t *testing.T) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

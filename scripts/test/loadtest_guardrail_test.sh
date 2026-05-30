@@ -104,6 +104,13 @@ else
   fail "Auth API error rate < 1% threshold missing"
 fi
 
+# Public 5xx must be a hard fail, not merely part of the broad public error rate.
+if grep -qE "public_5xx_errors.*count\s*==\s*0" "$LOADTEST"; then
+  pass "Public 5xx threshold requires zero 5xx responses"
+else
+  fail "Public 5xx threshold missing"
+fi
+
 # Build-start failure rate threshold
 if grep -qE "build_start_failures.*rate\s*<\s*0\.01" "$LOADTEST"; then
   pass "Build-start failure rate < 1% threshold present"
