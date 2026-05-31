@@ -433,6 +433,91 @@ func TestRunPreviewVerificationGateRepairsToolchainConflictBeforeSolver(t *testi
 	}
 }
 
+func TestRunPreviewVerificationGateRepairsPlaceholderPreviewBeforeSolver(t *testing.T) {
+	taskQueue := make(chan *Task, 1)
+	solver := &Agent{
+		ID:       "solver-preview-placeholder",
+		Role:     RoleSolver,
+		Status:   StatusIdle,
+		BuildID:  "preview-placeholder-repair",
+		Provider: "gpt4",
+	}
+	verifier := &stubPreviewVerifier{result: &PreviewVerificationResult{
+		Passed:      false,
+		FailureKind: "placeholder_preview",
+		Details:     `app rendered placeholder dashboard content instead of concrete seed data: "Dashboard Clients Projects Settings Loading..."`,
+		RepairHints: []string{"Replace generic KPI labels, Value text, skeleton rows, and placeholder cards with concrete seeded content."},
+	}}
+	verifierCalls := 0
+	verifier.onVerify = func([]VerifiableFile) {
+		verifierCalls++
+		if verifierCalls > 1 {
+			verifier.result = &PreviewVerificationResult{Passed: true}
+		}
+	}
+	manager := &AgentManager{
+		ctx:             context.Background(),
+		agents:          map[string]*Agent{solver.ID: solver},
+		builds:          map[string]*Build{},
+		subscribers:     map[string][]chan *WSMessage{},
+		taskQueue:       taskQueue,
+		previewVerifier: verifier,
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:          solver.BuildID,
+		Description: "Build a polished frontend-only client dashboard called PulseBoard with KPI cards, clients, projects, settings, and realistic seed content.",
+		Status:      BuildReviewing,
+		Progress:    99,
+		UpdatedAt:   now,
+		Agents:      map[string]*Agent{solver.ID: solver},
+		Tasks: []*Task{
+			{
+				ID:     "frontend",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{Files: []GeneratedFile{
+					{Path: "package.json", Content: `{"name":"pulseboard","scripts":{"build":"vite build","dev":"vite"},"dependencies":{"react":"^18.3.1","react-dom":"^18.3.1"},"devDependencies":{"vite":"^5.4.10","@vitejs/plugin-react":"^4.3.4","typescript":"^5.6.3"}}`},
+					{Path: "index.html", Content: `<div id="root"></div><script type="module" src="/src/main.tsx"></script>`},
+					{Path: "src/main.tsx", Content: `import React from "react"; import ReactDOM from "react-dom/client"; import App from "./App"; ReactDOM.createRoot(document.getElementById("root")!).render(<App />);`},
+					{Path: "src/App.tsx", Content: `export default function App(){ return <div>Dashboard Clients Projects Settings Loading...</div>; }`},
+					{Path: "vite.config.ts", Content: `import { defineConfig } from "vite"; import react from "@vitejs/plugin-react"; export default defineConfig({ plugins: [react()] });`},
+				}},
+			},
+		},
+	}
+	manager.builds[build.ID] = build
+
+	status := BuildCompleted
+	buildError := ""
+	if !manager.runPreviewVerificationGate(build, manager.collectGeneratedFiles(build), &status, &buildError, now) {
+		t.Fatal("expected preview gate to apply scaffold placeholder repair and pause finalization")
+	}
+	if build.PreviewVerificationAttempts != 1 {
+		t.Fatalf("expected preview attempts=1 after placeholder repair, got %d", build.PreviewVerificationAttempts)
+	}
+	for _, task := range build.Tasks {
+		if task.Type == TaskFix {
+			t.Fatalf("expected deterministic placeholder repair not to queue solver task, got %+v", task)
+		}
+	}
+	select {
+	case queued := <-taskQueue:
+		t.Fatalf("expected no solver task to be queued, got %+v", queued)
+	default:
+	}
+
+	filesByPath := map[string]string{}
+	for _, file := range manager.collectGeneratedFiles(build) {
+		filesByPath[file.Path] = file.Content
+	}
+	app := strings.ToLower(filesByPath["src/App.tsx"])
+	if strings.Contains(app, "loading...") || !strings.Contains(app, "pulseboard") {
+		t.Fatalf("expected placeholder app shell to be replaced with prompt-specific content, got %s", filesByPath["src/App.tsx"])
+	}
+}
+
 func TestRunPreviewVerificationGateUsesDeterministicShellFallbackBeforeSolverForBlankScreen(t *testing.T) {
 	manager := &AgentManager{
 		ctx:         context.Background(),

@@ -17408,7 +17408,11 @@ func repairNeedsFrontendShell(readinessErrors []string) bool {
 
 func repairNeedsScaffoldReplacement(readinessErrors []string) bool {
 	for _, msg := range readinessErrors {
-		if strings.Contains(strings.ToLower(msg), "deterministic scaffold placeholder content") {
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "deterministic scaffold placeholder content") ||
+			strings.Contains(lower, "placeholder_preview") ||
+			strings.Contains(lower, "placeholder dashboard") ||
+			strings.Contains(lower, "loading-only") {
 			return true
 		}
 	}
@@ -21220,7 +21224,11 @@ func (am *AgentManager) applyDeterministicFrontendScaffoldTruncationRepair(build
 }
 
 func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
-	if build == nil || len(readinessErrors) == 0 || !buildRequestsFrontendSurface(build) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+	needsReplacement := repairNeedsScaffoldReplacement(readinessErrors)
+	if !buildRequestsFrontendSurface(build) && !needsReplacement {
 		return nil, ""
 	}
 
@@ -21229,7 +21237,7 @@ func (am *AgentManager) applyDeterministicScaffoldPlaceholderReplacementRepair(b
 		return nil, ""
 	}
 	placeholderPaths := deterministicScaffoldPlaceholderPaths(files)
-	if !repairNeedsScaffoldReplacement(readinessErrors) && len(placeholderPaths) == 0 {
+	if !needsReplacement && len(placeholderPaths) == 0 {
 		return nil, ""
 	}
 

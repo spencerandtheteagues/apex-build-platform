@@ -412,6 +412,11 @@ func (am *AgentManager) runPreviewVerificationGate(
 			return true
 		}
 	}
+	if previewFailureLooksLikePlaceholderPreview(result) {
+		if am.applyPreviewScaffoldPlaceholderRepair(build, result, now) {
+			return true
+		}
+	}
 
 	// ── Attempt 2: AI-guided repair task ────────────────────────────────
 	// AI repair is preferred over shell fallback because shell fallback discards
@@ -508,6 +513,20 @@ func previewFailureLooksLikeToolchainConflict(result *PreviewVerificationResult)
 		strings.Contains(haystack, "react-dom/client")
 }
 
+func previewFailureLooksLikePlaceholderPreview(result *PreviewVerificationResult) bool {
+	if result == nil {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(result.FailureKind))
+	if kind == "placeholder_preview" || kind == "shell_only_preview" {
+		return true
+	}
+	haystack := strings.ToLower(strings.TrimSpace(result.Details + "\n" + strings.Join(result.RepairHints, "\n")))
+	return strings.Contains(haystack, "placeholder dashboard") ||
+		strings.Contains(haystack, "loading-only") ||
+		strings.Contains(haystack, "template-only shell")
+}
+
 func (am *AgentManager) applyPreviewToolchainNormalizationRepair(
 	build *Build,
 	result *PreviewVerificationResult,
@@ -549,6 +568,53 @@ func (am *AgentManager) applyPreviewToolchainNormalizationRepair(
 			"failure_kind":   result.FailureKind,
 			"repair_summary": summary,
 			"message":        "Preview verification aligned generated package tooling and runtime versions. Re-checking preview readiness.",
+		},
+	})
+	am.checkBuildCompletion(build)
+	return true
+}
+
+func (am *AgentManager) applyPreviewScaffoldPlaceholderRepair(
+	build *Build,
+	result *PreviewVerificationResult,
+	now time.Time,
+) bool {
+	if build == nil || result == nil {
+		return false
+	}
+	readinessErrors := []string{fmt.Sprintf("Preview verification failed (%s): %s", result.FailureKind, result.Details)}
+	readinessErrors = append(readinessErrors, result.RepairHints...)
+	readinessErrors = append(readinessErrors, result.CanaryErrors...)
+
+	bundle, summary := am.applyDeterministicScaffoldPlaceholderReplacementRepair(build, readinessErrors)
+	if bundle == nil || !am.applyPatchBundleToBuild(build, bundle) {
+		return false
+	}
+	if previewPatchBundleRecordingEnabled(build) {
+		appendPatchBundle(build, *bundle)
+	}
+
+	build.mu.Lock()
+	build.PreviewVerificationAttempts++
+	build.Status = BuildTesting
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	build.Progress = 95
+	build.Error = fmt.Sprintf("Preview verification: replaced placeholder preview shell. Re-checking. (%s)", result.Details)
+	build.mu.Unlock()
+
+	log.Printf("Build %s: preview scaffold placeholder repair applied: %s", build.ID, summary)
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":          "preview_verification",
+			"status":         string(BuildTesting),
+			"repair_type":    "scaffold_placeholder_replacement",
+			"failure_kind":   result.FailureKind,
+			"repair_summary": summary,
+			"message":        "Preview verification replaced a placeholder/loading-only shell with a prompt-specific frontend. Re-checking preview readiness.",
 		},
 	})
 	am.checkBuildCompletion(build)
