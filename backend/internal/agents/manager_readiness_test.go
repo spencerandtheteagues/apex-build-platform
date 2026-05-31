@@ -3736,17 +3736,25 @@ func TestLaunchFinalValidationSolverRecoveryDoesNotMutateWhenRecoveryCannotQueue
 func TestRepeatedReadinessErrorClassRequiresThreeAttempts(t *testing.T) {
 	t.Parallel()
 
-	if repeatedReadinessErrorClassExhausted(4, "missing_dependency", "missing_dependency") {
-		t.Fatalf("expected four attempts to allow another recovery pass")
+	// cap=3 mirrors the default (PowerBalanced / PowerFast) solver cap.
+	if repeatedReadinessErrorClassExhausted(2, 3, "missing_dependency", "missing_dependency") {
+		t.Fatalf("expected two attempts to allow another recovery pass")
 	}
-	if !repeatedReadinessErrorClassExhausted(5, "missing_dependency", "missing_dependency") {
-		t.Fatalf("expected fifth repeated attempt to exhaust the repeated class")
+	if !repeatedReadinessErrorClassExhausted(3, 3, "missing_dependency", "missing_dependency") {
+		t.Fatalf("expected third repeated attempt to exhaust the repeated class")
 	}
-	if repeatedReadinessErrorClassExhausted(5, "", "missing_dependency") {
+	if repeatedReadinessErrorClassExhausted(3, 3, "", "missing_dependency") {
 		t.Fatalf("expected empty prior class to avoid exhaustion")
 	}
-	if repeatedReadinessErrorClassExhausted(5, "missing_dependency", "syntax") {
+	if repeatedReadinessErrorClassExhausted(3, 3, "missing_dependency", "syntax") {
 		t.Fatalf("expected different classes to avoid exhaustion")
+	}
+	// PowerMax cap=4: three attempts should NOT yet exhaust the class.
+	if repeatedReadinessErrorClassExhausted(3, 4, "missing_dependency", "missing_dependency") {
+		t.Fatalf("expected three attempts to still allow recovery under PowerMax cap")
+	}
+	if !repeatedReadinessErrorClassExhausted(4, 4, "missing_dependency", "missing_dependency") {
+		t.Fatalf("expected fourth attempt to exhaust repeated class under PowerMax cap")
 	}
 }
 

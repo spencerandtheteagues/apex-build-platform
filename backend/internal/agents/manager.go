@@ -8065,7 +8065,7 @@ func (am *AgentManager) cancelPendingTasks(build *Build) {
 
 func (am *AgentManager) canCreateAutomatedFixTask(build *Build, action string) bool {
 	if build == nil || strings.TrimSpace(action) == "" {
-		return true
+		return false
 	}
 
 	build.mu.RLock()
@@ -8084,7 +8084,7 @@ func (am *AgentManager) canCreateAutomatedFixTask(build *Build, action string) b
 
 	limit := am.maxAutomatedFixLoops(build, action)
 	if limit <= 0 {
-		return true
+		return false
 	}
 
 	count := 0
@@ -8139,8 +8139,10 @@ func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
 		defaultLimit = 1
 		envKey = "BUILD_MAX_REVIEW_FIX_LOOPS"
 	} else if action == "fix_tests" {
+		defaultLimit = 2
 		envKey = "BUILD_MAX_TEST_FIX_LOOPS"
 	} else if action == "fix_integration_contract" {
+		defaultLimit = 1
 		envKey = "BUILD_MAX_INTEGRATION_FIX_LOOPS"
 	} else if action == "solve_build_failure" {
 		defaultLimit = 1
@@ -22393,8 +22395,8 @@ func maxAutomatedRecoveryAttempts(mode PowerMode) int {
 	}
 }
 
-func repeatedReadinessErrorClassExhausted(attempts int, priorErrorClass, currentErrorClass string) bool {
-	return attempts >= 5 && priorErrorClass != "" && priorErrorClass == currentErrorClass
+func repeatedReadinessErrorClassExhausted(attempts int, cap int, priorErrorClass, currentErrorClass string) bool {
+	return attempts >= cap && priorErrorClass != "" && priorErrorClass == currentErrorClass
 }
 
 func deterministicRepairScoringBuild(build *Build) *Build {
@@ -23082,9 +23084,9 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 
 			build.mu.Lock()
 			priorErrorClass := readinessErrorClassFromBuildError(build.Error)
-			// Require 3+ prior recovery attempts before giving up on a repeated error class.
+			// Give up on a repeated error class only after exhausting the solver cap for this power mode.
 			// Missing dependency/import classes often need two partial repairs before the final pass.
-			repeatedClass := repeatedReadinessErrorClassExhausted(build.ReadinessRecoveryAttempts, priorErrorClass, currentErrorClass)
+			repeatedClass := repeatedReadinessErrorClassExhausted(build.ReadinessRecoveryAttempts, maxAutomatedRecoveryAttempts(build.PowerMode), priorErrorClass, currentErrorClass)
 			if repeatedClass {
 				build.Status = BuildFailed
 				build.CompletedAt = &now
