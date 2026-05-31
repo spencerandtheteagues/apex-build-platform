@@ -1771,6 +1771,75 @@ func TestApplyDeterministicValidationRepairsUsesInventoryPlannedFeatureRepair(t 
 	}
 }
 
+func TestApplyDeterministicValidationRepairsUsesAgencyOpsPlannedFeatureRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := agencyOpsFeatureCoverageBuild()
+	build.ID = "build-agency-ops-planned-feature-coverage-repair"
+	build.Status = BuildReviewing
+	build.SnapshotFiles = fieldOpsFeatureCoverageBaseFiles(
+		GeneratedFile{Path: "src/App.tsx", Language: "typescript", Content: `export default function App(){ return <main>Client Portal Approval Center File Vault Message Hub</main>; }`},
+	)
+	build.SnapshotState = BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			Flags: BuildOrchestrationFlags{EnablePatchBundles: true},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`planned feature coverage failed: "Task Board" is missing draggable Kanban/pipeline board signals with status columns`},
+		"planned feature coverage failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected agency-ops planned-feature coverage failure to use deterministic workflow repair")
+	}
+	repairedFiles := am.collectGeneratedFiles(build)
+	var app string
+	for _, file := range repairedFiles {
+		if sanitizeFilePath(file.Path) == "src/App.tsx" {
+			app = file.Content
+			break
+		}
+	}
+	if strings.TrimSpace(app) == "" {
+		t.Fatalf("expected repaired agency-ops app file, got %+v", repairedFiles)
+	}
+	for _, expected := range []string{
+		"Agency Operations",
+		"Dashboard KPI cards",
+		"Task Board",
+		"Kanban board",
+		"draggable drag and drop",
+		"Todo",
+		"In Progress",
+		"Review",
+		"Done",
+		"Client Management",
+	} {
+		if !strings.Contains(app, expected) {
+			t.Fatalf("expected repaired agency-ops app to contain %q, got %q", expected, app)
+		}
+	}
+	if errs := plannedFeatureCoverageErrors(build, repairedFiles); len(errs) != 0 {
+		t.Fatalf("expected repaired agency-ops app to pass planned-feature coverage, got %v", errs)
+	}
+	if state := build.SnapshotState.Orchestration; state != nil && len(state.PatchBundles) != 0 {
+		found := false
+		for _, bundle := range state.PatchBundles {
+			if strings.Contains(bundle.Justification, "planned_feature_coverage_repair") &&
+				strings.Contains(bundle.Justification, "agency-ops") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected agency-ops planned-feature repair patch bundle, got %+v", state.PatchBundles)
+		}
+	}
+}
+
 func TestApplyDeterministicValidationRepairsSkipsGenericPreviewFallbackForNonFieldOpsPlannedFeatureCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -1823,6 +1892,31 @@ func fieldOpsFeatureCoverageBuild() *Build {
 				{Name: "Crew Management", Description: "Manages crews, their members, current jobs, and availability.", Priority: 60},
 				{Name: "Settings Page", Description: "Allows users to configure company settings and reset demo data.", Priority: 60},
 				{Name: "Estimate Swarm Feature", Description: "Launches a modal with AI agents to generate job estimates.", Priority: 100},
+			},
+		},
+	}
+}
+
+func agencyOpsFeatureCoverageBuild() *Build {
+	return &Build{
+		ID:          "build-agency-ops-feature-coverage",
+		Mode:        ModeFull,
+		Description: "Build a production-style multi-tenant agency operations platform with dashboard KPIs, task board, project management, invoice management, client management, REST API, seed data, activity logs, role-based auth, and PostgreSQL persistence.",
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Plan: &BuildPlan{
+			AppType: "fullstack",
+			TechStack: TechStack{
+				Frontend: "React",
+				Backend:  "Express",
+				Database: "PostgreSQL",
+			},
+			Features: []Feature{
+				{Name: "Dashboard with KPIs", Description: "Dashboard KPI cards for active projects, open tasks, outstanding invoices, revenue, and recent activity.", Priority: 100},
+				{Name: "Task Board", Description: "Kanban-style task board with draggable cards across todo, in-progress, review, and done status columns.", Priority: 100},
+				{Name: "Client Management", Description: "Client list and detail views with linked projects, invoices, payments, and activity logs.", Priority: 100},
+				{Name: "Project Management", Description: "Project list and detail views with budgets, team assignment, and linked tasks.", Priority: 100},
 			},
 		},
 	}

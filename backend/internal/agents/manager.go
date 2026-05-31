@@ -17822,6 +17822,30 @@ func promptLooksLikeClientPortalApp(description string) bool {
 	return signals >= 3
 }
 
+func promptLooksLikeAgencyOpsApp(description string) bool {
+	normalized := strings.ToLower(description)
+	if strings.TrimSpace(normalized) == "" {
+		return false
+	}
+	if promptLooksLikeFieldOpsApp(normalized) || promptLooksLikeDocumentIntelligenceApp(normalized) ||
+		promptLooksLikeCRMApp(normalized) || promptLooksLikeClientPortalApp(normalized) {
+		return false
+	}
+	if strings.Contains(normalized, "client portal") || strings.Contains(normalized, " portal") {
+		return false
+	}
+	if !strings.Contains(normalized, "agency") || !strings.Contains(normalized, "operations") {
+		return false
+	}
+	signals := 0
+	for _, token := range []string{"dashboard", "kpi", "task", "tasks", "task board", "project", "projects", "client", "clients", "invoice", "invoices", "activity", "role", "tenant"} {
+		if strings.Contains(normalized, token) {
+			signals++
+		}
+	}
+	return signals >= 3
+}
+
 func promptLooksLikeBookingApp(description string) bool {
 	normalized := strings.ToLower(description)
 	if strings.TrimSpace(normalized) == "" {
@@ -20551,6 +20575,11 @@ func adaptivePreviewProfile(description string) (string, []adaptivePreviewMetric
 			[]adaptivePreviewMetric{{"Active providers", "318", "+24 this month"}, {"Bookings", "1,284", "+17%"}, {"Review score", "4.8", "top tier"}, {"Pending reviews", "16", "5 urgent"}},
 			[]adaptivePreviewModule{{"Discovery", "Search, filter, and compare providers with trust signals.", "cyan"}, {"Provider Ops", "Review onboarding, compliance, availability, and service areas.", "emerald"}, {"Booking Flow", "Convert demand into reservations, deposits, and confirmations.", "amber"}, {"Admin Review", "Resolve disputes, flagged listings, and quality issues.", "rose"}},
 			[]adaptivePreviewRecord{{"Elite Concrete Co.", "Dallas Metro", "Verified", "$18K MRR"}, {"Precision HVAC Pros", "Austin", "Featured", "$11K MRR"}, {"Rapid Clean Team", "Houston", "Review queue", "$7.2K MRR"}, {"Bright Roofing", "San Antonio", "Onboarding", "$9.6K MRR"}}
+	case promptLooksLikeAgencyOpsApp(normalized):
+		return "Agency Operations",
+			[]adaptivePreviewMetric{{"Dashboard KPI cards", "12", "project task invoice status"}, {"Active projects", "19", "+3"}, {"Open tasks", "47", "12 blocked"}, {"Outstanding invoices", "$86K", "8 overdue"}},
+			[]adaptivePreviewModule{{"Dashboard KPIs", "Dashboard overview with KPI cards, project health, invoice status, recent activity, and operational metrics.", "cyan"}, {"Task Board", "Kanban board with draggable drag and drop cards across Todo, In Progress, Review, and Done status columns.", "emerald"}, {"Client Management", "Search clients, review contact details, linked projects, invoices, payments, and activity logs.", "amber"}, {"Project Operations", "Track project detail, team assignment, budgets, due dates, audit activity, and role-based updates.", "rose"}},
+			[]adaptivePreviewRecord{{"Atlas Rebrand", "Mia Chen", "In Progress", "$24,000"}, {"Finch Website", "Drew Lane", "Review", "$18,500"}, {"Evergreen Ads", "Sam Patel", "Done", "$9,800"}, {"Northwind Strategy", "Ava Stone", "Todo", "$31,200"}}
 	case strings.Contains(normalized, "client portal") || strings.Contains(normalized, "agency") || strings.Contains(normalized, "portal"):
 		return "Client Portal",
 			[]adaptivePreviewMetric{{"Active clients", "34", "+5"}, {"Approvals waiting", "12", "4 urgent"}, {"Messages", "86", "92% SLA"}, {"Project health", "91%", "+3 pts"}},
@@ -21435,6 +21464,8 @@ func (am *AgentManager) applyDeterministicPlannedFeatureCoverageRepair(build *Bu
 		repairLabel = "document-intelligence"
 	case promptLooksLikeSupportOpsApp(description):
 		repairLabel = "support-ops"
+	case promptLooksLikeAgencyOpsApp(description):
+		repairLabel = "agency-ops"
 	case promptLooksLikeBookingApp(description):
 		repairLabel = "booking"
 	case promptLooksLikeClientPortalApp(description):
