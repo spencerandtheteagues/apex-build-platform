@@ -87,7 +87,8 @@ import {
   LockKeyhole,
   CreditCard,
   MonitorUp,
-  Smartphone
+  Smartphone,
+  FolderPlus
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
@@ -2085,6 +2086,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [generatedFiles, setGeneratedFiles] = useState<Array<{ path: string; content: string; language: string }>>([])
   const [createdProjectId, setCreatedProjectId] = useState<number | null>(null)
   const [isCreatingProject, setIsCreatingProject] = useState(false)
+  const [isCreatingBlankProject, setIsCreatingBlankProject] = useState(false)
   const [telemetryNow, setTelemetryNow] = useState(() => Date.now())
   const AUTO_STACK_ID = 'auto'
   const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set([AUTO_STACK_ID]))
@@ -6204,6 +6206,24 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setCurrentProject,
   ])
 
+  // Create a blank project and open it in the IDE editor
+  const startBlankProject = useCallback(async () => {
+    if (isCreatingBlankProject) return
+    setIsCreatingBlankProject(true)
+    try {
+      const project = await apiService.createProject({
+        name: `Blank Project ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+        language: 'javascript',
+        description: '',
+      })
+      onNavigateToIDE?.({ target: 'editor', projectId: project.id })
+    } catch (err) {
+      console.error('[APEX] Failed to create blank project:', err)
+    } finally {
+      setIsCreatingBlankProject(false)
+    }
+  }, [isCreatingBlankProject, onNavigateToIDE])
+
   const openCompletedBuild = async (buildId: string, action: 'resume' | 'open_files' = 'resume') => {
     try {
       const completed = await apiService.getCompletedBuild(buildId)
@@ -7458,7 +7478,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     isLoading={isBuilding}
                   />
 
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-3">
                     <button
                       type="button"
                       onClick={() => setShowImportModal(true)}
@@ -7474,6 +7494,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     >
                       <Github className="h-5 w-5" />
                       Import from GitHub
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startBlankProject}
+                      disabled={isCreatingBlankProject}
+                      className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-slate-200 transition-all hover:border-sky-300/25 hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {isCreatingBlankProject ? (
+                        <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                      ) : (
+                        <FolderPlus className="h-5 w-5" />
+                      )}
+                      Start blank
                     </button>
                   </div>
                 </div>

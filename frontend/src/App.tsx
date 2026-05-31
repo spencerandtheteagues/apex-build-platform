@@ -61,6 +61,7 @@ const HelpCenterModal = lazy(() =>
   import('./components/help/HelpCenter').then((m) => ({ default: m.HelpCenter }))
 )
 const UsageDashboard = lazy(() => import('./components/usage/UsageDashboard'))
+const OnboardingTour = lazy(() => import('./components/builder/OnboardingTour').then(m => ({ default: m.OnboardingTour })))
 const ExternalDeploymentPanel = lazy(() => import('./components/deployment/ExternalDeploymentPanel'))
 const CodeSearch = lazy(() => import('./components/search/CodeSearch'))
 const AgentPanel = lazy(() => import('./components/agent/AgentPanel'))
@@ -127,6 +128,7 @@ const getInitialRouteState = (): {
   projectId: number | null
   currentView: AppView
   showLanding: boolean
+  pendingImportUrl: string | null
 } => {
   const projectId = getProjectIdFromPath()
   if (typeof window === 'undefined') {
@@ -134,6 +136,7 @@ const getInitialRouteState = (): {
       projectId,
       currentView: projectId ? 'ide' : 'builder',
       showLanding: projectId == null,
+      pendingImportUrl: null,
     }
   }
 
@@ -145,26 +148,33 @@ const getInitialRouteState = (): {
   const wantsAdmin = pathname === '/admin'
   const wantsIDE = pathname === '/ide'
 
-  if (projectId) {
-    return { projectId, currentView: 'ide', showLanding: false }
-  }
-  if (wantsIDE) {
-    return { projectId: null, currentView: 'ide', showLanding: false }
-  }
-  if (wantsBilling) {
-    return { projectId: null, currentView: 'settings', showLanding: false }
-  }
-  if (wantsSpending) {
-    return { projectId: null, currentView: 'spending', showLanding: false }
-  }
-  if (wantsExplore) {
-    return { projectId: null, currentView: 'explore', showLanding: false }
-  }
-  if (wantsAdmin) {
-    return { projectId: null, currentView: 'admin', showLanding: false }
+  // Deep-link: /import/github.com/owner/repo
+  if (pathname.startsWith('/import/')) {
+    const repoPath = pathname.slice('/import/'.length)
+    const repoUrl = repoPath.startsWith('github.com/') ? `https://${repoPath}` : repoPath
+    return { projectId: null, currentView: 'builder', showLanding: false, pendingImportUrl: repoUrl }
   }
 
-  return { projectId: null, currentView: 'builder', showLanding: true }
+  if (projectId) {
+    return { projectId, currentView: 'ide', showLanding: false, pendingImportUrl: null }
+  }
+  if (wantsIDE) {
+    return { projectId: null, currentView: 'ide', showLanding: false, pendingImportUrl: null }
+  }
+  if (wantsBilling) {
+    return { projectId: null, currentView: 'settings', showLanding: false, pendingImportUrl: null }
+  }
+  if (wantsSpending) {
+    return { projectId: null, currentView: 'spending', showLanding: false, pendingImportUrl: null }
+  }
+  if (wantsExplore) {
+    return { projectId: null, currentView: 'explore', showLanding: false, pendingImportUrl: null }
+  }
+  if (wantsAdmin) {
+    return { projectId: null, currentView: 'admin', showLanding: false, pendingImportUrl: null }
+  }
+
+  return { projectId: null, currentView: 'builder', showLanding: true, pendingImportUrl: null }
 }
 
 const addVisitedView = (views: Set<AppView>, view: AppView): Set<AppView> => {
@@ -251,6 +261,8 @@ function App() {
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set([initialRouteRef.current.currentView]))
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false)
   const [showGitHubImport, setShowGitHubImport] = useState(false)
+  const [gitHubImportUrl, setGitHubImportUrl] = useState<string | null>(() => initialRouteRef.current.pendingImportUrl)
+  const pendingImportUrlRef = useRef<string | null>(initialRouteRef.current.pendingImportUrl)
   const [showLanding, setShowLanding] = useState(initialRouteRef.current.showLanding)
   const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false)
   const [recoverableProjectId, setRecoverableProjectId] = useState<number | null>(null)
@@ -588,6 +600,20 @@ function App() {
       setPendingPlanType(null)
     }
   }, [isAuthenticated, navigateToView, pendingPlanType])
+
+  // After auth, open GitHub import wizard if user arrived via /import/ deep-link
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const url = pendingImportUrlRef.current
+    if (!url) return
+    pendingImportUrlRef.current = null
+    setGitHubImportUrl(url)
+    setShowGitHubImport(true)
+    // Replace /import/... in history with / so back-nav doesn't re-trigger
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/import/')) {
+      window.history.replaceState({}, '', '/')
+    }
+  }, [isAuthenticated])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -1423,6 +1449,14 @@ function App() {
                 <Rocket className="w-4 h-4" />
                 <span className="hidden sm:inline text-sm font-medium">New Build</span>
               </button>
+              <button
+                onClick={() => setShowGitHubImport(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-700/60 bg-transparent text-gray-400 transition-all duration-200 hover:border-sky-500/40 hover:text-sky-200 hover:bg-sky-500/08"
+                title="Import from GitHub"
+              >
+                <Github className="w-4 h-4" />
+                <span className="hidden lg:inline text-sm font-medium">Import</span>
+              </button>
               <div className="hidden xl:block">
                 <CostTicker />
               </div>
@@ -1715,7 +1749,13 @@ function App() {
           <ErrorBoundary>
             <Suspense fallback={<ViewLoadingFallback label="Loading Import Wizard..." />}>
               <div className="flex min-h-full items-center justify-center">
-                <GitHubImportWizard onClose={() => setShowGitHubImport(false)} />
+                <GitHubImportWizard
+                  initialUrl={gitHubImportUrl ?? undefined}
+                  onClose={() => {
+                    setShowGitHubImport(false)
+                    setGitHubImportUrl(null)
+                  }}
+                />
               </div>
             </Suspense>
           </ErrorBoundary>
@@ -1724,6 +1764,11 @@ function App() {
 
       {legalDocumentModal}
       {helpCenterModal}
+
+      {/* First-run onboarding tour — self-gates on localStorage(apex_onboarding_completed) */}
+      <Suspense fallback={null}>
+        <OnboardingTour />
+      </Suspense>
 
       {/* Floating Help Button */}
       <Suspense fallback={null}>

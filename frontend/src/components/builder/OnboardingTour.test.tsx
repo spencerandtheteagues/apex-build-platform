@@ -8,6 +8,35 @@ import { onboardingStarters } from './onboardingStarters'
 
 const ONBOARDING_KEY = 'apex_onboarding_completed'
 
+const installLocalStorageMock = () => {
+  const store = new Map<string, string>()
+  const storage = {
+    getItem: vi.fn((key: string) => store.get(String(key)) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(String(key), String(value))
+    }),
+    removeItem: vi.fn((key: string) => {
+      store.delete(String(key))
+    }),
+    clear: vi.fn(() => {
+      store.clear()
+    }),
+    key: vi.fn((index: number) => Array.from(store.keys())[index] ?? null),
+    get length() {
+      return store.size
+    },
+  } as Storage
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: storage,
+  })
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: storage,
+  })
+}
+
 const advanceToStarterStep = () => {
   for (let i = 0; i < 5; i += 1) {
     fireEvent.click(screen.getByText('Next'))
@@ -16,6 +45,7 @@ const advanceToStarterStep = () => {
 
 describe('OnboardingTour', () => {
   beforeEach(() => {
+    installLocalStorageMock()
     localStorage.clear()
     vi.useFakeTimers()
   })

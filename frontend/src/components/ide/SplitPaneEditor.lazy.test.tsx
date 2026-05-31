@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Stub the heavy Monaco editor so the lazy import resolves to something harmless
 // in jsdom (no canvas/workers). forwardRef because SplitPaneEditor passes a ref.
@@ -15,9 +15,48 @@ vi.mock('@/components/editor/MonacoEditor', async () => {
   }
 })
 
-import { SplitPaneEditor } from './SplitPaneEditor'
 import type { PaneLayout } from '@/hooks/usePaneManager'
 import type { File as ProjectFile } from '@/types'
+
+let SplitPaneEditor: typeof import('./SplitPaneEditor').SplitPaneEditor
+
+const installLocalStorageMock = () => {
+  const store = new Map<string, string>()
+  const storage = {
+    getItem: vi.fn((key: string) => store.get(String(key)) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(String(key), String(value))
+    }),
+    removeItem: vi.fn((key: string) => {
+      store.delete(String(key))
+    }),
+    clear: vi.fn(() => {
+      store.clear()
+    }),
+    key: vi.fn((index: number) => Array.from(store.keys())[index] ?? null),
+    get length() {
+      return store.size
+    },
+  } as Storage
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: storage,
+  })
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: storage,
+  })
+}
+
+beforeAll(async () => {
+  installLocalStorageMock()
+  ;({ SplitPaneEditor } = await import('./SplitPaneEditor'))
+})
+
+beforeEach(() => {
+  installLocalStorageMock()
+})
 
 function makeLayout(): PaneLayout {
   const file = { id: 1, name: 'index.ts' } as unknown as ProjectFile

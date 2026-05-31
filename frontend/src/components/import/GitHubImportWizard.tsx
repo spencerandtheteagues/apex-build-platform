@@ -88,14 +88,16 @@ const frameworkConfig: Record<string, { name: string; color: string }> = {
 interface GitHubImportWizardProps {
   onClose?: () => void;
   onImported?: (projectId: number) => void;
+  /** Pre-fill the URL input; automatically triggers validation when provided */
+  initialUrl?: string;
 }
 
-export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose, onImported }) => {
+export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose, onImported, initialUrl }) => {
   const { user } = useStore();
   const canPublishProjects = user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type);
   // State
   const [step, setStep] = useState<ImportStep>('url');
-  const [url, setUrl] = useState('');
+  const [url, setUrl] = useState(initialUrl ?? '');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [validation, setValidation] = useState<RepoValidation | null>(null);
@@ -146,6 +148,14 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose,
       setStep('url');
     }
   }, [token]);
+
+  // Auto-validate when pre-filled via deep-link (runs once on mount)
+  useEffect(() => {
+    if (initialUrl) {
+      void validateUrl(initialUrl);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle URL input change with debounce
   useEffect(() => {
