@@ -92,3 +92,54 @@ func TestOpenAIGenerateNormalizesUnavailableCodexOverride(t *testing.T) {
 		t.Fatalf("response content = %q, want ok", resp.Content)
 	}
 }
+
+func TestOpenAIGenerateClampsGPT41MaxTokens(t *testing.T) {
+	t.Parallel()
+
+	client := NewOpenAIClient("test-key")
+	client.baseURL = "https://openai.test/v1/chat/completions"
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.Contains(r.URL.Path, "/chat/completions") {
+			t.Fatalf("expected chat completions endpoint, got %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed reading request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed unmarshalling request body: %v", err)
+		}
+		if got := payload["model"]; got != "gpt-4.1" {
+			t.Fatalf("OpenAI request model = %v, want gpt-4.1", got)
+		}
+		maxTokens, ok := payload["max_tokens"].(float64)
+		if !ok {
+			t.Fatalf("max_tokens missing or non-numeric: %v", payload["max_tokens"])
+		}
+		if got := int(maxTokens); got != 16384 {
+			t.Fatalf("max_tokens = %d, want 16384", got)
+		}
+		response := []byte(`{"id":"chat_test","model":"gpt-4.1","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewReader(response)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	resp, err := client.Generate(context.Background(), &AIRequest{
+		ID:         "gpt41-cap",
+		Provider:   ProviderGPT4,
+		Model:      "gpt-4.1",
+		Capability: CapabilityTesting,
+		Prompt:     "Write tests",
+		MaxTokens:  18000,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if resp.Content != "ok" {
+		t.Fatalf("response content = %q, want ok", resp.Content)
+	}
+}

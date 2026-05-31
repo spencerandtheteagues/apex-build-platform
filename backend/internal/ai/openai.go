@@ -140,7 +140,7 @@ func (o *OpenAIClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 
 	// Create OpenAI API request — o1/o3/o4 reasoning models require
 	// max_completion_tokens; standard chat models use max_tokens.
-	maxTok := o.getMaxTokens(req)
+	maxTok := o.getMaxTokens(req, model)
 	openAIReq := &openAIRequest{
 		Model:       model,
 		Messages:    messages,
@@ -564,23 +564,41 @@ func (o *OpenAIClient) GetUsage() *ProviderUsage {
 	}
 }
 
-// getMaxTokens determines appropriate max tokens based on request
-func (o *OpenAIClient) getMaxTokens(req *AIRequest) int {
+// getMaxTokens determines appropriate max tokens based on request and clamps
+// model-specific output ceilings before the request reaches OpenAI.
+func (o *OpenAIClient) getMaxTokens(req *AIRequest, model string) int {
+	maxTokens := 0
 	if req.MaxTokens > 0 {
-		return req.MaxTokens
+		maxTokens = req.MaxTokens
+	} else {
+		switch req.Capability {
+		case CapabilityCodeCompletion:
+			maxTokens = 300
+		case CapabilityCodeGeneration:
+			maxTokens = 2500
+		case CapabilityTesting:
+			maxTokens = 3000
+		case CapabilityRefactoring:
+			maxTokens = 2000
+		default:
+			maxTokens = 1500
+		}
 	}
 
-	switch req.Capability {
-	case CapabilityCodeCompletion:
-		return 300
-	case CapabilityCodeGeneration:
-		return 2500
-	case CapabilityTesting:
-		return 3000
-	case CapabilityRefactoring:
-		return 2000
+	if cap := openAICompletionTokenCap(model); cap > 0 && maxTokens > cap {
+		return cap
+	}
+	return maxTokens
+}
+
+func openAICompletionTokenCap(model string) int {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(normalized, "gpt-4.1"),
+		strings.HasPrefix(normalized, "gpt-4o"):
+		return 16384
 	default:
-		return 1500
+		return 0
 	}
 }
 
