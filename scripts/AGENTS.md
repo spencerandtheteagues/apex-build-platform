@@ -13,6 +13,7 @@ This file is the level 1 scripts contract. Add child docs if script families gro
 - `run_live_golden_build.mjs`, `run_live_golden_canary_matrix.sh`, `run_live_prompt_matrix.sh`, `run_platform_build_smoke.sh`, `run_platform_canary_matrix.sh`: live and local build quality gates.
 - `verify_render_launch_env.mjs`: Render blueprint, service, env, health, and readiness verification.
 - `verify_stripe_launch.mjs`: Stripe billing readiness, config, webhook, checkout, and portal verification.
+- `verify_no_credit_launch.mjs`: no-AI-credit production smoke for health, frontend shell, admin entitlements, billing config, and optional throwaway free-account entitlement proof.
 - `verify_mobile_external_readiness.mjs`: mobile provider/store readiness evidence gate.
 - `verify_platform_reliability.sh`, `verify-contract.sh`, `verify-repo.sh`: reliability, contract, and repo verification.
 - `loadtest.js`: k6 load harness for TASK-010 launch-concurrency readiness. Default: 200 concurrent unauthenticated landing and health traffic with zero public 5xx responses required. Opt-in: 50-VU authenticated API (`RUN_AUTH_API=1`), 10 concurrent build starts (`RUN_BUILD_STARTS=1`). Both opt-in scenarios require `LOGIN_EMAIL` and `LOGIN_PASSWORD`. Mutating build traffic never runs by default.
