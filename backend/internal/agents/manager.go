@@ -16647,8 +16647,30 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 	return true
 }
 
+func readinessErrorsNeedToolchainNormalization(readinessErrors []string) bool {
+	for _, errText := range readinessErrors {
+		lower := strings.ToLower(strings.TrimSpace(errText))
+		if lower == "" {
+			continue
+		}
+		if strings.Contains(lower, "missing runnable scripts") ||
+			strings.Contains(lower, "react-dom/client") ||
+			strings.Contains(lower, "createfilter") ||
+			(strings.Contains(lower, "could not resolve dependency") && strings.Contains(lower, "@vitejs/plugin-react")) ||
+			(strings.Contains(lower, "peer vite@") && strings.Contains(lower, "@vitejs/plugin-react")) ||
+			strings.Contains(lower, "tsconfig") ||
+			strings.Contains(lower, "tailwind") ||
+			strings.Contains(lower, "postcss") ||
+			strings.Contains(lower, "shadcn") ||
+			strings.Contains(lower, "import.meta.env") {
+			return true
+		}
+	}
+	return false
+}
+
 func (am *AgentManager) applyDeterministicToolchainNormalizationRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
-	if build == nil || len(readinessErrors) == 0 {
+	if build == nil || len(readinessErrors) == 0 || !readinessErrorsNeedToolchainNormalization(readinessErrors) {
 		return nil, ""
 	}
 
@@ -22520,6 +22542,13 @@ func (am *AgentManager) broadcastValidationRepair(
 	})
 }
 
+func (am *AgentManager) maybeRevalidateAfterDeterministicRepair(build *Build) {
+	if am == nil || build == nil || am.aiRouter == nil {
+		return
+	}
+	am.checkBuildCompletion(build)
+}
+
 func (am *AgentManager) applyDeterministicValidationRepairs(
 	build *Build,
 	readinessErrors []string,
@@ -22543,7 +22572,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			"sequelize_unique_keys_validation_reset",
 			summary,
 		)
-		am.checkBuildCompletion(build)
+		am.maybeRevalidateAfterDeterministicRepair(build)
 		return true
 	}
 	if summary := am.clearStaleSequelizeIndexesValidationError(build, readinessErrors); summary != "" {
@@ -22558,7 +22587,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			"sequelize_indexes_validation_reset",
 			summary,
 		)
-		am.checkBuildCompletion(build)
+		am.maybeRevalidateAfterDeterministicRepair(build)
 		return true
 	}
 	if summary := am.clearStaleImportValidationError(build, readinessErrors); summary != "" {
@@ -22573,7 +22602,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			"stale_import_validation_reset",
 			summary,
 		)
-		am.checkBuildCompletion(build)
+		am.maybeRevalidateAfterDeterministicRepair(build)
 		return true
 	}
 	if summary := am.clearStaleDependencyValidationError(build, readinessErrors); summary != "" {
@@ -22588,7 +22617,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			"stale_dependency_validation_reset",
 			summary,
 		)
-		am.checkBuildCompletion(build)
+		am.maybeRevalidateAfterDeterministicRepair(build)
 		return true
 	}
 	if summary := am.clearStalePackageManifestValidationError(build, readinessErrors); summary != "" {
@@ -22603,7 +22632,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			"stale_package_manifest_validation_reset",
 			summary,
 		)
-		am.checkBuildCompletion(build)
+		am.maybeRevalidateAfterDeterministicRepair(build)
 		return true
 	}
 	if summary := am.clearStaleLocalModuleValidationError(build, readinessErrors); summary != "" {
@@ -22618,7 +22647,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			"stale_local_module_validation_reset",
 			summary,
 		)
-		am.checkBuildCompletion(build)
+		am.maybeRevalidateAfterDeterministicRepair(build)
 		return true
 	}
 
@@ -22802,7 +22831,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			"preview_fallback_repair",
 			fallbackSummary,
 		)
-		am.checkBuildCompletion(build)
+		am.maybeRevalidateAfterDeterministicRepair(build)
 		return true
 	}
 	if !am.applyPatchBundleToBuild(build, candidate.bundle) {
@@ -22819,7 +22848,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 		message = fmt.Sprintf(message, candidate.summary)
 	}
 	am.broadcastValidationRepair(build.ID, now, progress, readinessErrors, message, candidate.spec.summaryKey, candidate.summary)
-	am.checkBuildCompletion(build)
+	am.maybeRevalidateAfterDeterministicRepair(build)
 	return true
 
 }
