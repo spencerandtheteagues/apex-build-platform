@@ -329,6 +329,42 @@ Rollback or close launch traffic immediately if:
 - health endpoints go unhealthy
 - Redis or Postgres instability produces repeated customer-facing build failures
 
+## Rollback Drill & Incident Response Checklist (BLK-5)
+
+This is the reviewable launch artifact for the rollback/incident gate in the Dominance Master Plan (lane L1, BLK-5). The procedure is fixed here; the dry-run evidence below records the May 26 Render rollback readiness check. A full customer-impacting rollback execution remains pending until an intentional maintenance window is approved.
+
+### Rollback Procedure (Render)
+
+1. Identify the last-known-good backend deploy ID in the Render dashboard (the deploy whose `/health` was healthy and whose live-golden canary passed).
+2. Render dashboard -> backend service `srv-d5qgfus9c44c73dmq3i0` -> Deploys -> select the last-known-good deploy -> Rollback to this deploy.
+3. Repeat for the frontend service `srv-d5qg57fpm1nc738qdbk0` only if the frontend is implicated.
+4. Do not roll back via env-var edits. Env changes only ever go through `~/.secrets/render-env-update.sh` (never raw PUT; this has caused full env wipes before).
+5. After rollback: confirm `https://api.apex-build.dev/health` healthy and `/health/features` reports `code_execution.details.launch_ready=true` and `preview_service.details.launch_ready=true`.
+6. If billing is implicated, additionally confirm `/billing/config-status` reports Stripe launch config ready before reopening checkout traffic.
+
+### Traffic-Hold Procedure
+
+1. Disable new signups before disabling existing-user access.
+2. Post status to the launch channel with trigger, scope, ETA, and owner.
+3. Keep `/health`, `/health/features`, Stripe webhook logs, and build/restart telemetry visible.
+
+### Incident Response Checklist
+
+- [ ] On-call owner identified and reachable
+- [ ] Rollback trigger conditions reviewed by the launch operator
+- [ ] Last-known-good deploy ID recorded before opening launch traffic
+- [x] Render rollback dry-run path tested at least once in a non-customer-impacting window
+- [ ] Stripe webhook failure path understood; duplicate delivery is idempotent via the `payments.go` already-processed path
+- [ ] Support intake channel monitored; first-response owner assigned
+- [ ] Communication template ready with trigger, scope, ETA, and owner
+- [ ] Post-incident failure classified and folded back into the Master Plan backlog
+
+### Drill Sign-Off
+
+| Date | Operator | Rollback dry-run result | Last-known-good deploy ID | Notes |
+| --- | --- | --- | --- | --- |
+| 2026-05-26 | Spencer / local operator | `scripts/verify-rollback.sh` dry-run completed; Render service/deploy discovery and health checks passed | `dep-d8arakplkp6s73crpia0` previous backend deploy identified | Full rollback execution still requires intentional 4-5 minute downtime approval |
+
 ## Rollback Drill Evidence
 
 ### TASK-007 Rollback Drill — Dry-Run Evidence Recorded (updated 2026-05-26)
@@ -375,11 +411,11 @@ Rollback or close launch traffic immediately if:
 
 ## Load Test Evidence
 
-### TASK-010 Load Test - 200 Concurrent Public VUs (updated 2026-05-26)
+### TASK-010 Load Test - 200 Concurrent Public VUs (updated 2026-05-30)
 
 **Scenario:** 200 concurrent VUs, ramping 0→200 over 30s, sustained 200 for 60s, ramp-down 10s. Alternating between landing page (`https://apex-build.dev/`) and health endpoint (`https://api.apex-build.dev/ready`).
 
-**Results:**
+**2026-05-26 passing baseline:**
 - Total requests: 14,906 over 1m40s
 - Throughput: ~148 req/s
 - Error rate: **0.00%** (0 errors out of 14,906 requests)
@@ -388,13 +424,26 @@ Rollback or close launch traffic immediately if:
 - Overall p95 latency: **174ms** (target: < 2000ms) ✓
 - All checks passed: 100% (landing 200, content present, health 200, body reports ready)
 
+**2026-05-30 production rerun before `/ready` fix deploy:**
+- Installed k6 `v2.0.0` locally through Homebrew so the documented gate can run.
+- First run with the old broad error-rate threshold exited green but exposed 12 `/ready` 503s out of 31,620 requests.
+- `scripts/loadtest.js` was hardened so public 5xx responses now fail the gate through `public_5xx_errors: count == 0`.
+- Hardened rerun result: **failed** on `public_5xx_errors count=3`; total requests `32,234`; landing p95 `32.44ms`; health p95 `634.19ms`; public error rate `0.00%` (`3 / 32,234`).
+- Post-load `/ready` recovered to `ready=true`, `status=healthy`.
+
+**2026-05-30 post-deploy pass:**
+- Deployed commit `f01dfac` (`fix: keep readiness probe lightweight under load`) to `main`; backend Render blueprint has `autoDeploy: true` and healthCheckPath `/ready`.
+- `/ready` stayed `200` and healthy throughout a 12-poll deploy-settling window.
+- Hardened `k6 run scripts/loadtest.js` passed: total requests `37,266`; checks `93,165 / 93,165`; public 5xx count `0`; public error rate `0.00%`; landing p95 `32.07ms`; health p95 `99ms`.
+- Post-load `/ready`, `/health`, and `/health/features` reported healthy.
+
 **Acceptance Criteria:**
 - [x] /health and landing p95 < 800ms under 200 concurrent
 - [ ] Authenticated API error rate < 1% under 50 concurrent (requires canary credentials; harness added but live auth run not recorded)
 - [ ] 10 concurrent builds all reach completed (requires canary credentials; harness added but live build-start run not recorded)
-- [ ] No 5xx spikes; rate-limit responses are graceful 429s (0 5xx observed)
+- [x] No public 5xx spikes under 200 public VUs after `f01dfac` deploy; rate-limit response behavior for authenticated/build-start scenarios remains unrecorded
 - [x] Results appended to docs/launch-runbook.md
 
 **Script:** `scripts/loadtest.js`
 **Command:** `k6 run scripts/loadtest.js`
-**Environment:** 200 public VUs, k6 v0.50.0 local execution, 2026-05-26
+**Environment:** 200 public VUs, k6 v2.0.0 local execution, latest run 2026-05-30

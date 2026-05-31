@@ -20,6 +20,17 @@ The 2026-05-25 build-stall audit produced fixes that are now reflected in launch
 
 ### Current evidence baseline
 
+- As of 2026-05-30, production health remains green: `/health` ready/healthy, `/health/features` phase ready, critical 6/6, optional 40/40, Redis connected, Stripe launch config ready, E2B execution launch-ready, preview Docker launch-ready, and browser runtime proof ready.
+- Strict Render launch verification and safe Stripe launch verification passed locally on 2026-05-30; controlled billing lifecycle and real webhook replay remain open.
+- Local launch verification is green on 2026-05-30: `bash scripts/verify_all.sh` passed backend build/vet/test plus frontend typecheck/Vitest/lint/build, and the serialized backend gate passed with `go test -p 1 -parallel 4 ./... -timeout 20m`.
+- Safe production Playwright checks passed on 2026-05-30: launch smoke `5 passed / 1 skipped` and preview verification health wiring `3 passed / 4 skipped`. Authenticated build-generation checks remain skipped until verified canary credentials are supplied.
+- Public k6 load testing on 2026-05-30 exposed intermittent production `/ready` 503s under 200 public VUs. Commit `f01dfac` hardened the k6 gate to fail on any public 5xx and routed `/ready` through a lightweight readiness handler instead of per-request DB pinging.
+- After deploying `f01dfac`, the hardened public 200-VU k6 gate passed with `public_5xx_errors count=0`, landing p95 `32.07ms`, and health p95 `99ms`. Public load evidence is green; authenticated API and build-start load evidence remain credential-gated.
+- After the local `/ready` change, `bash scripts/verify_all.sh` is green and public generated Playwright smoke passed against production. Static Render/mobile verifiers also pass in no-secret mode, but strict Render/mobile evidence remains credential-gated.
+- Ollama Cloud model discovery sees `kimi-k2.6`, `glm-5.1`, and `deepseek-v4-pro`, but all generation attempts are blocked by the `apexbuildai` account weekly usage limit. Do not queue Ollama-pinned live canaries until the quota is raised or extra usage is added.
+- A fresh non-Ollama free frontend live canary was attempted on 2026-05-30 but build start was rejected with `email_not_verified` for the disposable account. A later disposable free canary account was verified through the admin path and reached build execution, proving the auth prerequisite can be cleared without storing canary credentials.
+- Free frontend canaries on 2026-05-30 exposed, then closed, a sequence of preview blockers: stale React/Vite/plugin manifests, Vite/plugin peer conflicts, missed Vite ready logs under Render churn, and placeholder/loading-only first screens. Commits `aaee9d6`, `18171c4`, `e049318`, and `eae9320` add deterministic repair coverage for those cases.
+- Post-deploy free frontend canary `ddf92e65-9817-4141-933a-7d0a2eac0fe3` passed on 2026-05-31 UTC: completed at 100%, quality gate passed, reliability summary clean, 22 generated files. The smoke did not assert an already-running preview instance (`preview/status` was not active), but internal `require_preview_ready` completed successfully.
 - Git identity and stale orphan-build cleanup are already handled.
 - TASK-004 paid balanced full-stack canary functionally passed on 2026-05-25 with build `69d3582e`; screenshot/console artifact archival remains open in the launch tracker.
 - Free-fast and fast frontend-only canaries have prior passing evidence.
@@ -29,10 +40,12 @@ The 2026-05-25 build-stall audit produced fixes that are now reflected in launch
 ### Priority action queue
 
 1. Keep local verification green on the current tree before pushing.
-2. Pass and document TASK-005 max-power full-stack canary after the latest code is deployed and paid canary credentials/provider budget are available.
-3. Verify free vs paid preview gating with a fresh free account and a paid canary account; record evidence without storing credentials.
-4. Complete Stripe launch evidence through controlled live checkout, billing portal, upgrade/downgrade, cancellation, and real webhook replay. Use credentials from the secret manager or admin-controlled environment only.
-5. Complete production canary, rollback drill, failed-build restart, load test, and the diverse prompt matrix when required GitHub/Render/Stripe/admin access is available.
+2. Provision reusable verified launch canary credentials for one free account and one paid account; store them only in the approved secret manager or transient operator environment, never in repo files. Disposable admin-verified free accounts are acceptable for one-off proof but are not a durable launch gate.
+3. Clear the Ollama Cloud quota block before running Ollama-pinned live canaries; then use `kimi-k2.6`, `glm-5.1`, and `deepseek-v4-pro` as the first three model-specific live proofs.
+4. Pass and document TASK-005 max-power full-stack canary after the latest code is deployed and paid canary credentials/provider budget are available.
+5. Verify paid preview gating with the paid canary account now that the verified free frontend path has fresh passing evidence.
+6. Complete Stripe launch evidence through controlled live checkout, billing portal, upgrade/downgrade, cancellation, and real webhook replay. Use credentials from the secret manager or admin-controlled environment only.
+7. Complete production canary, rollback drill, failed-build restart, authenticated build-load, and the diverse prompt matrix when required GitHub/Render/Stripe/admin access is available.
 
 Do not skip docs. The docs-first contract in `AGENTS.md` is binding: update launch docs when evidence, blockers, or stable workflows change. The rule is to avoid claiming readiness before evidence exists, not to postpone documentation until later.
 

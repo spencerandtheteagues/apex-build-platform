@@ -27,7 +27,10 @@ if [[ ! -f "$MANIFEST" ]]; then
 fi
 pass "manifest file exists at $MANIFEST"
 
-mapfile -t prompt_files < <(find "$PROMPT_DIR" -maxdepth 1 -type f -name '*.md' ! -name 'matrix-manifest.*' | sort)
+prompt_files=()
+while IFS= read -r prompt_file; do
+  prompt_files+=("$prompt_file")
+done < <(find "$PROMPT_DIR" -maxdepth 1 -type f -name '*.md' ! -name 'matrix-manifest.*' | sort)
 prompt_count="${#prompt_files[@]}"
 
 # Run full validation in a single Node process.

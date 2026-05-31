@@ -122,7 +122,7 @@ fi
 
 echo
 echo "===== CANARY MATRIX RESULTS ====="
-for line in "${RESULTS[@]}"; do
+for line in ${RESULTS[@]+"${RESULTS[@]}"}; do
   echo "  $line"
 done
 echo "================================="
@@ -133,7 +133,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo
     echo "| result | scenario |"
     echo "| --- | --- |"
-    for line in "${RESULTS[@]}"; do
+    for line in ${RESULTS[@]+"${RESULTS[@]}"}; do
       printf '| %s | %s |\n' "${line%% *}" "${line#* }"
     done
     echo
