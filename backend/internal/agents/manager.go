@@ -25278,7 +25278,16 @@ func (am *AgentManager) recoverStalledPhasedExecution(build *Build) bool {
 		}
 	}
 	if currentIndex == -1 {
-		return false
+		// Transient progress phases, such as provider incident consensus, can be
+		// persisted as the current phase even though they are not execution
+		// phases. Recover by inferring the latest real phase whose tasks exist
+		// and are terminal, then continue the phased pipeline from there.
+		inferredIndex, inferredOrdinal := inferLastTerminalExecutionPhase(build, phases)
+		if inferredIndex == -1 {
+			return false
+		}
+		currentIndex = inferredIndex
+		currentOrdinal = inferredOrdinal
 	}
 	if !executionPhaseTasksTerminal(build, phases[currentIndex]) {
 		return false
@@ -25306,6 +25315,32 @@ func (am *AgentManager) recoverStalledPhasedExecution(build *Build) bool {
 	log.Printf("Build %s: recovered stalled phased execution by finalizing the phased pipeline", build.ID)
 	am.finalizePhasedPipeline(build)
 	return true
+}
+
+func inferLastTerminalExecutionPhase(build *Build, phases []executionPhase) (int, int) {
+	if build == nil || len(phases) == 0 {
+		return -1, 0
+	}
+
+	lastIndex := -1
+	lastOrdinal := 0
+	ordinal := 0
+	for i, phase := range phases {
+		if len(phase.agents) == 0 {
+			continue
+		}
+		ordinal++
+		if !executionPhaseHasAnyTask(build, phase) {
+			continue
+		}
+		if !executionPhaseTasksTerminal(build, phase) {
+			continue
+		}
+		lastIndex = i
+		lastOrdinal = ordinal
+	}
+
+	return lastIndex, lastOrdinal
 }
 
 // queuePlanTasks creates and queues tasks in phased order so upstream outputs
@@ -34854,7 +34889,11 @@ func (am *AgentManager) runFailureConsensus(
 	fallbackDecision := am.strategyToDecision(defaultStrategy)
 	build.mu.RLock()
 	description := build.Description
+	stablePhase := strings.TrimSpace(build.SnapshotState.CurrentPhase)
 	build.mu.RUnlock()
+	if stablePhase == "" {
+		stablePhase = "validation"
+	}
 	historySummary := ""
 	if agent != nil {
 		historySummary = summarizeFailureFingerprintInsight(
@@ -35031,9 +35070,10 @@ func (am *AgentManager) runFailureConsensus(
 		BuildID:   build.ID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"phase":   "Incident Consensus",
-			"status":  string(BuildReviewing),
-			"message": fmt.Sprintf("Team vote selected %s", winning),
+			"phase":     "Incident Consensus",
+			"phase_key": stablePhase,
+			"status":    string(BuildReviewing),
+			"message":   fmt.Sprintf("Team vote selected %s", winning),
 		},
 	})
 

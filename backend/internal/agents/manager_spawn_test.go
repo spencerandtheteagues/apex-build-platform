@@ -397,6 +397,103 @@ func TestRecoverStalledPhasedExecutionStartsNextPhaseAfterFrontend(t *testing.T)
 	}
 }
 
+func TestRecoverStalledPhasedExecutionInfersPhaseAfterTransientConsensus(t *testing.T) {
+	t.Setenv("APEX_PARALLEL_MID_PHASE", "true")
+	t.Setenv("APEX_TEST_GENERATION", "true")
+
+	oldUpdatedAt := time.Now().Add(-2 * time.Minute).UTC()
+	build := &Build{
+		ID:          "build-transient-consensus-phase",
+		Description: "Build a production-style agency operations platform",
+		Status:      BuildInProgress,
+		UpdatedAt:   oldUpdatedAt,
+		Agents: map[string]*Agent{
+			"architect-1": {ID: "architect-1", BuildID: "build-transient-consensus-phase", Role: RoleArchitect, Status: StatusCompleted},
+			"frontend-1":  {ID: "frontend-1", BuildID: "build-transient-consensus-phase", Role: RoleFrontend, Status: StatusCompleted},
+			"database-1":  {ID: "database-1", BuildID: "build-transient-consensus-phase", Role: RoleDatabase, Status: StatusCompleted},
+			"backend-1":   {ID: "backend-1", BuildID: "build-transient-consensus-phase", Role: RoleBackend, Status: StatusCompleted},
+			"testing-1":   {ID: "testing-1", BuildID: "build-transient-consensus-phase", Role: RoleTesting, Status: StatusIdle},
+			"review-1":    {ID: "review-1", BuildID: "build-transient-consensus-phase", Role: RoleReviewer, Status: StatusIdle},
+		},
+		Tasks: []*Task{
+			{
+				ID:          "task-architecture",
+				Type:        TaskArchitecture,
+				Description: "Lock the contract",
+				AssignedTo:  "architect-1",
+				Status:      TaskCompleted,
+				CreatedAt:   oldUpdatedAt.Add(-2 * time.Minute),
+				CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-90 * time.Second)),
+			},
+			{
+				ID:          "task-frontend",
+				Type:        TaskGenerateUI,
+				Description: "Build the frontend UI",
+				AssignedTo:  "frontend-1",
+				Status:      TaskCompleted,
+				CreatedAt:   oldUpdatedAt.Add(-90 * time.Second),
+				CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-75 * time.Second)),
+			},
+			{
+				ID:          "task-database",
+				Type:        TaskGenerateSchema,
+				Description: "Build the schema",
+				AssignedTo:  "database-1",
+				Status:      TaskCompleted,
+				CreatedAt:   oldUpdatedAt.Add(-75 * time.Second),
+				CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-65 * time.Second)),
+			},
+			{
+				ID:          "task-backend",
+				Type:        TaskGenerateAPI,
+				Description: "Build the backend",
+				AssignedTo:  "backend-1",
+				Status:      TaskCompleted,
+				CreatedAt:   oldUpdatedAt.Add(-75 * time.Second),
+				CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-60 * time.Second)),
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			CurrentPhase: "Incident Consensus",
+		},
+	}
+
+	am := &AgentManager{
+		builds:      map[string]*Build{build.ID: build},
+		agents:      map[string]*Agent{},
+		taskQueue:   make(chan *Task, 4),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+	}
+	for id, agent := range build.Agents {
+		am.agents[id] = agent
+	}
+
+	if ok := am.recoverStalledPhasedExecution(build); !ok {
+		t.Fatal("expected stalled phased execution to recover from transient consensus phase")
+	}
+	if build.SnapshotState.CurrentPhase != "integration" {
+		t.Fatalf("expected build to move to integration, got %q", build.SnapshotState.CurrentPhase)
+	}
+	if build.Status != BuildTesting {
+		t.Fatalf("expected build to move into testing status, got %s", build.Status)
+	}
+	if len(build.Tasks) != 5 {
+		t.Fatalf("expected recovery to append the integration task, got %d tasks", len(build.Tasks))
+	}
+
+	nextTask := build.Tasks[len(build.Tasks)-1]
+	if nextTask.Type != TaskTest {
+		t.Fatalf("expected next task type %s, got %s", TaskTest, nextTask.Type)
+	}
+	if nextTask.AssignedTo != "testing-1" {
+		t.Fatalf("expected integration task to be assigned to testing-1, got %q", nextTask.AssignedTo)
+	}
+	if nextTask.Status != TaskInProgress {
+		t.Fatalf("expected integration task to be in progress, got %s", nextTask.Status)
+	}
+}
+
 func ptrTimeSpawn(t time.Time) *time.Time {
 	return &t
 }
