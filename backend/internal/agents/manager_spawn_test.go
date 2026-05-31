@@ -494,6 +494,63 @@ func TestRecoverStalledPhasedExecutionInfersPhaseAfterTransientConsensus(t *test
 	}
 }
 
+func TestSelfHealReadableActiveBuildRecoversTerminalPhaseTasks(t *testing.T) {
+	t.Setenv("APEX_PARALLEL_MID_PHASE", "true")
+	t.Setenv("APEX_TEST_GENERATION", "true")
+
+	oldUpdatedAt := time.Now().Add(-2 * time.Minute).UTC()
+	build := &Build{
+		ID:          "build-readable-self-heal-phase",
+		Description: "Build a production-style agency operations platform",
+		Status:      BuildInProgress,
+		UpdatedAt:   oldUpdatedAt,
+		Agents: map[string]*Agent{
+			"architect-1": {ID: "architect-1", BuildID: "build-readable-self-heal-phase", Role: RoleArchitect, Status: StatusCompleted},
+			"frontend-1":  {ID: "frontend-1", BuildID: "build-readable-self-heal-phase", Role: RoleFrontend, Status: StatusCompleted},
+			"database-1":  {ID: "database-1", BuildID: "build-readable-self-heal-phase", Role: RoleDatabase, Status: StatusCompleted},
+			"backend-1":   {ID: "backend-1", BuildID: "build-readable-self-heal-phase", Role: RoleBackend, Status: StatusCompleted},
+			"testing-1":   {ID: "testing-1", BuildID: "build-readable-self-heal-phase", Role: RoleTesting, Status: StatusIdle},
+			"review-1":    {ID: "review-1", BuildID: "build-readable-self-heal-phase", Role: RoleReviewer, Status: StatusIdle},
+		},
+		Tasks: []*Task{
+			{ID: "task-architecture", Type: TaskArchitecture, AssignedTo: "architect-1", Status: TaskCompleted, CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-90 * time.Second))},
+			{ID: "task-frontend", Type: TaskGenerateUI, AssignedTo: "frontend-1", Status: TaskCompleted, CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-75 * time.Second))},
+			{ID: "task-database", Type: TaskGenerateSchema, AssignedTo: "database-1", Status: TaskCompleted, CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-65 * time.Second))},
+			{ID: "task-backend", Type: TaskGenerateAPI, AssignedTo: "backend-1", Status: TaskCompleted, CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-60 * time.Second))},
+		},
+		SnapshotState: BuildSnapshotState{
+			CurrentPhase: "parallel_core",
+		},
+	}
+
+	am := &AgentManager{
+		builds:      map[string]*Build{build.ID: build},
+		agents:      map[string]*Agent{},
+		taskQueue:   make(chan *Task, 4),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+	}
+	for id, agent := range build.Agents {
+		am.agents[id] = agent
+	}
+
+	am.selfHealReadableActiveBuild(build)
+
+	if build.SnapshotState.CurrentPhase != "integration" {
+		t.Fatalf("expected readable self-heal to start integration, got %q", build.SnapshotState.CurrentPhase)
+	}
+	if build.Status != BuildTesting {
+		t.Fatalf("expected readable self-heal to move build into testing, got %s", build.Status)
+	}
+	if len(build.Tasks) != 5 {
+		t.Fatalf("expected readable self-heal to append integration task, got %d tasks", len(build.Tasks))
+	}
+	nextTask := build.Tasks[len(build.Tasks)-1]
+	if nextTask.Type != TaskTest || nextTask.AssignedTo != "testing-1" || nextTask.Status != TaskInProgress {
+		t.Fatalf("expected in-progress testing task assigned to testing-1, got %+v", nextTask)
+	}
+}
+
 func ptrTimeSpawn(t time.Time) *time.Time {
 	return &t
 }

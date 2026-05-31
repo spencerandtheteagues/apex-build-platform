@@ -2279,6 +2279,9 @@ func (am *AgentManager) selfHealReadableActiveBuild(build *Build) {
 	}
 
 	if idleFor >= 30*time.Second {
+		if am.recoverStalledPhasedExecution(build) {
+			return
+		}
 		am.checkBuildCompletion(build)
 	}
 }
