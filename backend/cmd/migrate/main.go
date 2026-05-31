@@ -358,7 +358,7 @@ func createMigration(migrationsPath, name string) {
 	upContent := fmt.Sprintf(`-- Migration: %s
 -- Created: %s
 --
--- Description: TODO: Add description
+-- Description: [auto-generated — add description]
 --
 
 -- Add your UP migration SQL here

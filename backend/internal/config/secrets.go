@@ -773,12 +773,34 @@ func MustValidateSecrets() *SecretsConfig {
 
 // MustGetSecret returns the value of a secret or panics if not set.
 // Only use this during initialization when the secret is absolutely required.
+//
+// NOTE: Prefer ValidateRequiredSecrets at startup so ALL missing vars are
+// reported in a single human-readable error rather than one panic per var.
+// MustGetSecret retains its panic contract for legacy call sites and cases
+// where the caller genuinely cannot continue without that specific value.
 func MustGetSecret(envVar string) string {
 	value := os.Getenv(envVar)
 	if value == "" {
 		panic(fmt.Sprintf("FATAL: Required secret %s is not set", envVar))
 	}
 	return value
+}
+
+// ValidateRequiredSecrets checks that every env var in vars is non-empty.
+// It collects ALL missing vars and returns a single human-readable error so
+// operators can fix everything in one deployment rather than playing whack-a-mole.
+// Returns nil if all vars are present.
+func ValidateRequiredSecrets(vars ...string) error {
+	var missing []string
+	for _, v := range vars {
+		if os.Getenv(v) == "" {
+			missing = append(missing, v)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("missing required environment variable(s): %s", strings.Join(missing, ", "))
 }
 
 // GetSecretWithDefault returns a secret value or a default for development.

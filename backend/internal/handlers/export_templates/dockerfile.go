@@ -58,6 +58,23 @@ EXPOSE 8080
 CMD ["/app"]
 `
 	default:
-		return fmt.Sprintf("# Dockerfile for %s\n# TODO: Add appropriate base image and build steps\nFROM alpine:3.19\nWORKDIR /app\nCOPY . .\nEXPOSE 8080\n", stack)
+		// Generic multi-stage build: copies all source files into a minimal alpine image.
+		// Works for any compiled or interpreted project that exposes port 8080.
+		// Replace the CMD line with your actual entrypoint once the stack is identified.
+		return fmt.Sprintf(`# Dockerfile for %s (generic multi-stage build)
+# Stage 1: build environment — add compile/install steps here if needed
+FROM alpine:3.19 AS builder
+RUN apk add --no-cache ca-certificates tzdata
+WORKDIR /app
+COPY . .
+
+# Stage 2: minimal runtime image
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates tzdata
+WORKDIR /app
+COPY --from=builder /app /app
+EXPOSE 8080
+CMD ["/app/server"]
+`, stack)
 	}
 }

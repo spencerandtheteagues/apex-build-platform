@@ -7,7 +7,8 @@ import (
 
 // NewFromEnv returns R2Provider if R2_ACCOUNT_ID+R2_ACCESS_KEY_ID+R2_SECRET_ACCESS_KEY+R2_BUCKET_NAME are all set,
 // otherwise returns LocalProvider with baseDir from UPLOAD_DIR env (default "./uploads").
-func NewFromEnv() Provider {
+// Returns an error (instead of panicking) so the caller can emit a clear diagnostic and exit cleanly.
+func NewFromEnv() (Provider, error) {
 	// Check R2 environment variables
 	accountID := os.Getenv("R2_ACCOUNT_ID")
 	accessKeyID := os.Getenv("R2_ACCESS_KEY_ID")
@@ -21,7 +22,7 @@ func NewFromEnv() Provider {
 			fmt.Printf("Warning: R2 credentials provided but failed to initialize R2 provider (%v), falling back to local storage\n", err)
 		} else {
 			fmt.Printf("Storage: Using Cloudflare R2 (bucket: %s)\n", bucketName)
-			return r2Provider
+			return r2Provider, nil
 		}
 	}
 
@@ -33,10 +34,9 @@ func NewFromEnv() Provider {
 
 	localProvider, err := NewLocalProvider(uploadDir)
 	if err != nil {
-		// This should rarely fail, but if it does, panic as we need storage
-		panic(fmt.Sprintf("Failed to initialize local storage provider: %v", err))
+		return nil, fmt.Errorf("failed to initialize local storage provider (dir: %s): %w", uploadDir, err)
 	}
 
 	fmt.Printf("Storage: Using local disk (dir: %s)\n", uploadDir)
-	return localProvider
+	return localProvider, nil
 }

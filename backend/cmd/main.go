@@ -1068,7 +1068,10 @@ func main() {
 	server.SetEmailService(emailSvc)
 
 	// Initialize Storage Provider (R2 or local fallback)
-	storageProvider := storage.NewFromEnv()
+	storageProvider, err := storage.NewFromEnv()
+	if err != nil {
+		log.Fatalf("storage init failed: %v", err)
+	}
 	server.SetStorageProvider(storageProvider)
 
 	// Setup routes
