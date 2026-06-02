@@ -147,12 +147,18 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 		clients[ProviderOllama] = NewOllamaClient(ollamaURL, ollamaAPIKey)
 	}
 
+	overrideConfiguredWithEmulation := shouldOverrideConfiguredClientsWithOllamaEmulation()
 	for provider, emulation := range configuredOllamaEmulations() {
-		if _, exists := clients[provider]; exists {
+		if _, exists := clients[provider]; exists && !overrideConfiguredWithEmulation {
 			continue
 		}
+		_, replaced := clients[provider]
 		clients[provider] = newAliasedOllamaProviderClient(provider, emulation.URL, ollamaAPIKey, emulation.Model)
-		log.Printf("Local provider emulation enabled: slot=%s -> ollama(%s, model=%s)", provider, emulation.URL, emulation.Model)
+		if replaced {
+			log.Printf("Local provider emulation override enabled: slot=%s -> ollama(%s, model=%s)", provider, emulation.URL, emulation.Model)
+		} else {
+			log.Printf("Local provider emulation enabled: slot=%s -> ollama(%s, model=%s)", provider, emulation.URL, emulation.Model)
+		}
 	}
 
 	config := DefaultRouterConfig()

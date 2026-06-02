@@ -133,6 +133,37 @@ func TestOllamaCreditSaverTestingProfileEmulatesOpenModelSlots(t *testing.T) {
 	}
 }
 
+func TestOllamaCreditSaverTestingProfileOverridesConfiguredProviderClients(t *testing.T) {
+	t.Setenv("APEX_AI_TESTING_PROFILE", "ollama-credit-saver")
+	t.Setenv("OLLAMA_URL", "http://127.0.0.1:11434")
+	t.Setenv("KIMI_OLLAMA_MODEL", "kimi-k2.6")
+	t.Setenv("QWEN_OLLAMA_MODEL", "qwen3:latest")
+	t.Setenv("GLM_OLLAMA_MODEL", "glm-5.1")
+	t.Setenv("DEEPSEEK_OLLAMA_MODEL", "deepseek-v4-pro")
+
+	router := NewAIRouter(
+		"configured-claude-key",
+		"configured-openai-key",
+		"configured-gemini-key",
+		"configured-grok-key",
+		"http://127.0.0.1:11434",
+		"",
+	)
+
+	for _, provider := range []AIProvider{ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok, ProviderDeepSeek, ProviderGLM} {
+		client, ok := router.clients[provider]
+		if !ok {
+			t.Fatalf("expected %s slot to be configured", provider)
+		}
+		if _, ok := client.(*providerAliasClient); !ok {
+			t.Fatalf("expected %s slot to be ollama-backed provider alias in credit-saver profile, got %T", provider, client)
+		}
+		if got := client.GetProvider(); got != provider {
+			t.Fatalf("expected %s alias to report its provider slot, got %s", provider, got)
+		}
+	}
+}
+
 func TestOllamaClientRespectsDocumentedModelOverrideEnv(t *testing.T) {
 	t.Setenv("OLLAMA_MODEL_BALANCED", "kimi-k2.6")
 

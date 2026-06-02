@@ -131,6 +131,18 @@ func configuredOllamaEmulations() map[AIProvider]struct {
 	return out
 }
 
+func shouldOverrideConfiguredClientsWithOllamaEmulation() bool {
+	if ollamaCreditSaverTestingProfileEnabled() {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(firstEnv("APEX_OLLAMA_EMULATION_OVERRIDE_CONFIGURED", "APEX_PROVIDER_EMULATION_OVERRIDE_EXISTING"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func firstEnv(keys ...string) string {
 	for _, key := range keys {
 		if strings.TrimSpace(key) == "" {

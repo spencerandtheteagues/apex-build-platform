@@ -451,11 +451,9 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 			}
 
 			if hasActiveKey && !allowEmergencyFallback {
-				// Strict policy: disable platform models to save costs
-				if provider == ProviderClaude || provider == ProviderGPT4 ||
-					provider == ProviderGemini || provider == ProviderGrok {
-					continue
-				}
+				// Strict policy: disable all platform models to save costs and
+				// preserve the user's BYOK provider boundary.
+				continue
 			} else if hasActiveKey && allowEmergencyFallback {
 				// Emergency fallback policy: add platform models as fallback only
 				// They will only be used if BYOK provider fails completely
