@@ -131,6 +131,27 @@ func TestOllamaCloudKeepsReasoningForPlanningAndPadsTokenBudget(t *testing.T) {
 		t.Fatalf("balanced planning max_tokens = %d, want visible+reasoning budget 8096", got)
 	}
 
+	maxCodegen := &AIRequest{
+		Capability: CapabilityCodeGeneration,
+		Model:      "kimi-k2.6",
+		MaxTokens:  12000,
+		PowerMode:  "max",
+	}
+	effort = cloudClient.reasoningEffort(maxCodegen, "kimi-k2.6:cloud")
+	if effort != "none" {
+		t.Fatalf("max code generation reasoningEffort() = %q, want none", effort)
+	}
+	if got := cloudClient.thinkEnabled(maxCodegen, effort); got == nil || *got {
+		t.Fatalf("max code generation thinkEnabled() = %v, want false pointer", got)
+	}
+	budget = cloudClient.reasoningTokenBudget(maxCodegen, effort)
+	if budget != 0 {
+		t.Fatalf("max code generation reasoning budget = %d, want 0", budget)
+	}
+	if got := cloudClient.getMaxTokens(maxCodegen, budget); got != 12000 {
+		t.Fatalf("max code generation max_tokens = %d, want visible budget 12000", got)
+	}
+
 	maxPlan := &AIRequest{
 		Capability: CapabilityArchitecture,
 		Model:      "kimi-k2.6",

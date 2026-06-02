@@ -319,6 +319,11 @@ func (o *OllamaClient) reasoningEffort(req *AIRequest, model string) string {
 		return strings.ToLower(strings.TrimSpace(override))
 	}
 
+	switch req.Capability {
+	case CapabilityCodeGeneration, CapabilityCodeCompletion, CapabilityTesting, CapabilityRefactoring:
+		return "none"
+	}
+
 	switch mode {
 	case "max":
 		return "high"
