@@ -822,7 +822,6 @@ func TestVerifyAndNormalizeBuildContractStillBlocksRealFullStackWithoutBackendCo
 	}
 }
 
-
 // TestVerifyAndNormalizeBuildContractNormalizesCanary10LandingPageWithSignupWords verifies that
 // explicit in-memory directives override keyword heuristics like "signup" and "admin-lite"
 // which would otherwise trigger backend-runtime detection.
@@ -831,7 +830,7 @@ func TestVerifyAndNormalizeBuildContractNormalizesCanary10LandingPageWithSignupW
 
 	// Exact prompt from prompts/canary/10-landing-page-waitlist-funnel.md
 	intent := &IntentBrief{
-		NormalizedRequest: "Build a production-ready landing page and marketing funnel called LaunchBeacon. It is a premium startup waitlist site for an analytics product. Use React + TypeScript + Tailwind CSS + shadcn/ui. Store all data in memory and do not use external APIs. Must include: Hero section with sharp positioning, CTA buttons, product mockup, trust proof, and responsive layout. Benefits section, feature grid, workflow section, customer proof, pricing preview, FAQ, and final CTA. Waitlist form with validation, success toast, and in-memory signup counter. Demo request modal with fields, validation, and confirmation state. Sticky navigation, smooth scroll interactions, mobile menu, and polished hover states. Admin-lite section or hidden panel showing captured waitlist entries and reset demo data. Use premium visual polish, realistic copy, loading states where appropriate, accessible forms, and no console errors.",
+		NormalizedRequest:    "Build a production-ready landing page and marketing funnel called LaunchBeacon. It is a premium startup waitlist site for an analytics product. Use React + TypeScript + Tailwind CSS + shadcn/ui. Store all data in memory and do not use external APIs. Must include: Hero section with sharp positioning, CTA buttons, product mockup, trust proof, and responsive layout. Benefits section, feature grid, workflow section, customer proof, pricing preview, FAQ, and final CTA. Waitlist form with validation, success toast, and in-memory signup counter. Demo request modal with fields, validation, and confirmation state. Sticky navigation, smooth scroll interactions, mobile menu, and polished hover states. Admin-lite section or hidden panel showing captured waitlist entries and reset demo data. Use premium visual polish, realistic copy, loading states where appropriate, accessible forms, and no console errors.",
 		AppType:              "web",
 		RequiredCapabilities: nil,
 	}
@@ -861,6 +860,52 @@ func TestVerifyAndNormalizeBuildContractNormalizesCanary10LandingPageWithSignupW
 	}
 	if verified.APIContract != nil || verified.RuntimeContract.BackendStart != "" || verified.RuntimeContract.BackendBuild != "" {
 		t.Fatalf("expected backend runtime stripped, got api=%+v runtime=%+v", verified.APIContract, verified.RuntimeContract)
+	}
+}
+
+func TestVerifyAndNormalizeBuildContractNormalizesSimulatedEcommerceOrderPrompt(t *testing.T) {
+	t.Parallel()
+
+	intent := &IntentBrief{
+		NormalizedRequest: "Build a production-ready ecommerce storefront called Northline Goods. It is a curated outdoor gear shop with product discovery, cart, and simulated order placement. Use React, TypeScript, Tailwind CSS, and shadcn/ui. Store all data in memory. Do not add payment provider integration, subscription features, webhook handling, real checkout services, environment-secret requirements, or external APIs. The final order step is a local demo confirmation only. Must include: Storefront home, product catalog, product detail view, cart page, order form flow, and account/orders page.",
+		AppType:           "web",
+		RequiredCapabilities: []CapabilityRequirement{
+			CapabilityAPI,
+			CapabilityBilling,
+			CapabilityExternalAPI,
+		},
+	}
+	contract := &BuildContract{
+		ID:                  "contract-simulated-ecommerce-order",
+		BuildID:             "build-simulated-ecommerce-order",
+		AppType:             "fullstack",
+		DeliveryMode:        "full_stack_preview",
+		RoutePageMap:        []ContractRoute{{Path: "/", File: "src/App.tsx", Surface: SurfaceFrontend}},
+		APIContract:         &BuildAPIContract{BackendPort: 3001, APIBaseURL: "http://localhost:3001"},
+		RuntimeContract:     deriveRuntimeContractFromAppType("fullstack"),
+		AcceptanceBySurface: deriveAcceptanceBySurfaceFromAppType("fullstack"),
+		VerificationGates:   deriveVerificationGatesFromAppType("fullstack"),
+		TruthBySurface: map[string][]TruthTag{
+			string(SurfaceFrontend):    {TruthScaffolded},
+			string(SurfaceBackend):     {TruthScaffolded, TruthNeedsBackendRuntime},
+			string(SurfaceIntegration): {TruthPartiallyWired, TruthNeedsExternalAPI},
+			string(SurfaceDeployment):  {TruthScaffolded, TruthNeedsSecrets},
+			string(SurfaceGlobal):      {TruthBlocked, TruthNeedsExternalAPI},
+		},
+	}
+
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected corrected contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected simulated in-memory ecommerce prompt to verify as frontend preview, got blockers %v", report.Blockers)
+	}
+	if verified.AppType != "web" || verified.DeliveryMode != "frontend_preview_only" {
+		t.Fatalf("expected frontend preview normalization, got app_type=%q delivery=%q", verified.AppType, verified.DeliveryMode)
+	}
+	if verified.APIContract != nil || hasSurface(verified.AcceptanceBySurface, SurfaceBackend) || hasSurface(verified.AcceptanceBySurface, SurfaceIntegration) {
+		t.Fatalf("expected runtime surfaces stripped, got api=%+v acceptance=%+v", verified.APIContract, verified.AcceptanceBySurface)
 	}
 }
 

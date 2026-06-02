@@ -2,7 +2,10 @@
 set -euo pipefail
 
 # Source this before local/live AI-backed canaries to route model-heavy testing
-# through one Ollama-compatible endpoint instead of managed cloud-provider keys.
+# through one Ollama-compatible endpoint instead of managed flagship-provider
+# keys. Backend builds with this profile replace configured Claude/GPT/Gemini/
+# Grok provider slots with Ollama-backed aliases; the provider slot names remain
+# intact for routing telemetry, but actual generation calls go to Ollama.
 #
 # Usage:
 #   source scripts/ollama-credit-saver-env.sh
@@ -18,10 +21,36 @@ export APEX_LIVE_TEST_MODEL_PROFILE="${APEX_LIVE_TEST_MODEL_PROFILE:-ollama-cred
 export OLLAMA_URL="${OLLAMA_URL:-${OLLAMA_HOST:-http://127.0.0.1:11434}}"
 export OLLAMA_HOST="${OLLAMA_HOST:-$OLLAMA_URL}"
 
-export KIMI_OLLAMA_MODEL="${KIMI_OLLAMA_MODEL:-kimi-k2.6}"
-export GLM_OLLAMA_MODEL="${GLM_OLLAMA_MODEL:-glm-5.1}"
-export DEEPSEEK_OLLAMA_MODEL="${DEEPSEEK_OLLAMA_MODEL:-deepseek-v4-pro}"
-export QWEN_OLLAMA_MODEL="${QWEN_OLLAMA_MODEL:-qwen3:latest}"
+is_local_ollama_url() {
+  case "$1" in
+    http://127.0.0.1:*|http://localhost:*|http://0.0.0.0:*|http://[::1]:*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+detect_local_ollama_model() {
+  local cli_host list_output
+  cli_host="${OLLAMA_URL%/v1}"
+  if ! is_local_ollama_url "$cli_host" || ! command -v ollama >/dev/null 2>&1; then
+    return 0
+  fi
+  list_output="$(OLLAMA_HOST="$cli_host" ollama list 2>/dev/null || true)"
+  awk 'NR > 1 && $1 != "" { print $1; exit }' <<<"$list_output"
+}
+
+LOCAL_OLLAMA_MODEL="${APEX_LOCAL_OLLAMA_MODEL:-${OLLAMA_LOCAL_MODEL:-}}"
+if [[ -z "$LOCAL_OLLAMA_MODEL" ]]; then
+  LOCAL_OLLAMA_MODEL="$(detect_local_ollama_model)"
+fi
+
+export KIMI_OLLAMA_MODEL="${KIMI_OLLAMA_MODEL:-${LOCAL_OLLAMA_MODEL:-kimi-k2.6}}"
+export GLM_OLLAMA_MODEL="${GLM_OLLAMA_MODEL:-${LOCAL_OLLAMA_MODEL:-glm-5.1}}"
+export DEEPSEEK_OLLAMA_MODEL="${DEEPSEEK_OLLAMA_MODEL:-${LOCAL_OLLAMA_MODEL:-deepseek-v4-pro}}"
+export QWEN_OLLAMA_MODEL="${QWEN_OLLAMA_MODEL:-${LOCAL_OLLAMA_MODEL:-qwen3:latest}}"
 
 # Plain Ollama provider defaults: Kimi is the orchestrator / planning model.
 export OLLAMA_MODEL_DEFAULT="${OLLAMA_MODEL_DEFAULT:-$KIMI_OLLAMA_MODEL}"

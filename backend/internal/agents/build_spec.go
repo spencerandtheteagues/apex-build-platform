@@ -1259,16 +1259,26 @@ func explicitInMemoryPreviewIntent(description string) bool {
 		return false
 	}
 
-	noRuntimeDependency := strings.Contains(normalized, " no database ") ||
+	noRuntimeDependency := explicitNoExternalRuntimeDependency(normalized)
+
+	return noRuntimeDependency
+}
+
+func explicitNoExternalRuntimeDependency(normalized string) bool {
+	return strings.Contains(normalized, " no database ") ||
 		strings.Contains(normalized, " no external api ") ||
 		strings.Contains(normalized, " no external apis ") ||
+		strings.Contains(normalized, " without external api ") ||
+		strings.Contains(normalized, " without external apis ") ||
 		strings.Contains(normalized, " do not use external api ") ||
 		strings.Contains(normalized, " do not use external apis ") ||
+		strings.Contains(normalized, " do not add external api ") ||
+		strings.Contains(normalized, " do not add external apis ") ||
+		(strings.Contains(normalized, " do not add ") && strings.Contains(normalized, " external api ")) ||
+		(strings.Contains(normalized, " do not add ") && strings.Contains(normalized, " external apis ")) ||
 		strings.Contains(normalized, " no real api key ") ||
 		strings.Contains(normalized, " no real api keys ") ||
 		strings.Contains(normalized, " zero external dependencies ")
-
-	return noRuntimeDependency
 }
 
 // strongExplicitInMemoryOnlyIntent detects when the user has given an unambiguous
@@ -1287,12 +1297,8 @@ func strongExplicitInMemoryOnlyIntent(description string) bool {
 		containsAffirmedTerm(normalized, normalizeDetectionText("in memory only"))
 
 	// Must explicitly deny external runtime
-	hasNoExternal := strings.Contains(normalized, " no external api ") ||
-		strings.Contains(normalized, " no external apis ") ||
-		strings.Contains(normalized, " do not use external api ") ||
-		strings.Contains(normalized, " do not use external apis ") ||
-		strings.Contains(normalized, " no external dependencies ") ||
-		strings.Contains(normalized, " no database ")
+	hasNoExternal := explicitNoExternalRuntimeDependency(normalized) ||
+		strings.Contains(normalized, " no external dependencies ")
 
 	return hasStoreMemory && hasNoExternal
 }

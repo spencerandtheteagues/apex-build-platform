@@ -21,6 +21,7 @@ This file is the level 1 GitHub automation contract. Add child docs only if work
 - Workflows must not print secrets. Use GitHub secrets and masked output.
 - Production canaries must verify live URLs and launch readiness honestly, and they must fail when critical checks fail.
 - Manually requested launch-evidence jobs must fail when their required secrets or credentials are absent; optional scheduled coverage may skip unavailable paid/external checks only when launch docs describe that limitation.
+- When `APEX_REQUIRE_PAID_CANARIES=true`, production canary workflows must require existing verified paid canary credentials, must not use disposable smoke registration as paid evidence, and must fail skipped paid build/golden canaries.
 - Use the repo-supported Node and Go versions consistently with `docs/development.md` and package configs.
 - Keep workflow names, required secrets, required variables, and manual dispatch inputs documented in launch docs when they affect launch evidence.
 

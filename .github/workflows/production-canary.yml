@@ -60,6 +60,15 @@ jobs:
       - name: Run prompt matrix fixture breadth guardrail
         run: bash scripts/test/prompt_matrix_fixture_breadth_test.sh
 
+      - name: Run Ollama credit-saver env guardrail
+        run: bash scripts/test/ollama_credit_saver_env_test.sh
+
+      - name: Run Render launch verifier guardrail
+        run: bash scripts/test/render_launch_guardrail_test.sh
+
+      - name: Run production canary workflow guardrail
+        run: bash scripts/test/production_canary_workflow_guardrail_test.sh
+
   public-launch-smoke:
     name: Public Launch Smoke
     needs: canary-script-guardrails
@@ -118,9 +127,19 @@ jobs:
           APEX_STRIPE_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           APEX_STRIPE_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           APEX_STRIPE_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+          REQUIRE_PAID_CANARIES: ${{ vars.APEX_REQUIRE_PAID_CANARIES }}
           RUN_CHECKOUT_PROBES: ${{ github.event_name == 'workflow_dispatch' && inputs.run_checkout_probes == true && 'true' || 'false' }}
           RUN_PORTAL_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_portal_probe == true && 'true' || 'false' }}
         run: |
+          if [[ "$REQUIRE_PAID_CANARIES" == "true" ]]; then
+            if [[ -z "$APEX_STRIPE_PASSWORD" || ( -z "$APEX_STRIPE_USERNAME" && -z "$APEX_STRIPE_EMAIL" ) ]]; then
+              echo "::error::APEX_REQUIRE_PAID_CANARIES=true requires an existing verified paid canary account via APEX_CANARY_USERNAME or APEX_CANARY_EMAIL plus APEX_CANARY_PASSWORD."
+              exit 1
+            fi
+            export APEX_STRIPE_REGISTER_SMOKE_USER=0
+            export APEX_STRIPE_RUN_PORTAL=1
+          fi
+
           if [[ "$RUN_CHECKOUT_PROBES" == "true" ]]; then
             export APEX_STRIPE_RUN_CHECKOUT=1
             export APEX_STRIPE_RUN_CREDIT_CHECKOUT=1
@@ -255,12 +274,17 @@ jobs:
         env:
           APEX_CANARY_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           APEX_CANARY_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+          REQUIRE_PAID: ${{ vars.APEX_REQUIRE_PAID_CANARIES }}
         run: |
           if [[ -n "$APEX_CANARY_EMAIL" && -n "$APEX_CANARY_PASSWORD" ]]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
             if [[ "${{ matrix.requires_paid }}" == "true" ]]; then
+              if [[ "$REQUIRE_PAID" == "true" ]]; then
+                echo "::error::APEX_REQUIRE_PAID_CANARIES=true requires APEX_CANARY_EMAIL/APEX_CANARY_PASSWORD for paid platform canaries."
+                exit 1
+              fi
               echo "Skipping paid platform canary because APEX_CANARY_EMAIL/APEX_CANARY_PASSWORD are not configured."
             fi
           fi
@@ -282,6 +306,10 @@ jobs:
           LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
           LOGIN_FULL_NAME: APEX Canary
+          PROVIDER_MODE: ${{ matrix.requires_paid && 'byok' || 'platform' }}
+          APEX_BYOK_OLLAMA_ONLY: ${{ matrix.requires_paid && '1' || '0' }}
+          APEX_ROLE_ASSIGNMENTS_JSON: ${{ matrix.requires_paid && '{"architect":"ollama","coder":"ollama","tester":"ollama","devops":"ollama"}' || '' }}
+          APEX_LIVE_TEST_MODEL_PROFILE: ${{ matrix.requires_paid && 'ollama' || 'platform' }}
           POLL_SECONDS: ${{ matrix.poll_seconds }}
           MAX_POLLS: ${{ matrix.max_polls }}
           PROJECT_NAME: canary-${{ matrix.name }}
@@ -388,11 +416,16 @@ jobs:
         env:
           APEX_CANARY_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           APEX_CANARY_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+          REQUIRE_PAID: ${{ vars.APEX_REQUIRE_PAID_CANARIES }}
         run: |
           if [[ -n "$APEX_CANARY_EMAIL" && -n "$APEX_CANARY_PASSWORD" ]]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
+            if [[ "$REQUIRE_PAID" == "true" ]]; then
+              echo "::error::APEX_REQUIRE_PAID_CANARIES=true requires APEX_CANARY_EMAIL/APEX_CANARY_PASSWORD for the golden live canary."
+              exit 1
+            fi
             echo "Skipping golden live canary because APEX_CANARY_EMAIL/APEX_CANARY_PASSWORD are not configured."
           fi
 
@@ -430,6 +463,10 @@ jobs:
           LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+          PROVIDER_MODE: byok
+          APEX_BYOK_OLLAMA_ONLY: '1'
+          APEX_ROLE_ASSIGNMENTS_JSON: '{"architect":"ollama","coder":"ollama","tester":"ollama","devops":"ollama"}'
+          APEX_LIVE_TEST_MODEL_PROFILE: ollama
         run: ./scripts/run_live_golden_canary_matrix.sh
 
       - name: Upload golden canary artifacts
@@ -498,6 +535,10 @@ jobs:
           LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+          PROVIDER_MODE: byok
+          APEX_BYOK_OLLAMA_ONLY: '1'
+          APEX_ROLE_ASSIGNMENTS_JSON: '{"architect":"ollama","coder":"ollama","tester":"ollama","devops":"ollama"}'
+          APEX_LIVE_TEST_MODEL_PROFILE: ollama
         run: ./scripts/run_live_prompt_matrix.sh
 
       - name: Upload prompt matrix artifacts

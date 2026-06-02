@@ -288,6 +288,26 @@ function providerModelOverrides() {
   }
 }
 
+function roleAssignments() {
+  const raw = process.env.ROLE_ASSIGNMENTS_JSON || process.env.APEX_ROLE_ASSIGNMENTS_JSON || ''
+  if (raw.trim()) {
+    try {
+      return JSON.parse(raw)
+    } catch (error) {
+      throw new Error(`Invalid ROLE_ASSIGNMENTS_JSON: ${error.message}`)
+    }
+  }
+  if (/^(1|true|yes|on)$/i.test(String(process.env.APEX_BYOK_OLLAMA_ONLY || process.env.BYOK_OLLAMA_ONLY || '').trim())) {
+    return {
+      architect: 'ollama',
+      coder: 'ollama',
+      tester: 'ollama',
+      devops: 'ollama',
+    }
+  }
+  return undefined
+}
+
 function normalizeText(value) {
   return String(value || '')
     .toLowerCase()
@@ -636,6 +656,10 @@ async function startBuild() {
   const overrides = providerModelOverrides()
   if (overrides && Object.keys(overrides).length > 0) {
     payload.provider_model_overrides = overrides
+  }
+  const assignments = roleAssignments()
+  if (assignments && Object.keys(assignments).length > 0) {
+    payload.role_assignments = assignments
   }
   const data = await request('/build/start', { method: 'POST', body: payload })
   buildPollToken = typeof data?.poll_token === 'string' ? data.poll_token : ''

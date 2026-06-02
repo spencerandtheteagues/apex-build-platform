@@ -13,6 +13,31 @@ LOGIN_PASSWORD="${LOGIN_PASSWORD:-}"
 LOGIN_FULL_NAME="${LOGIN_FULL_NAME:-Platform Test}"
 EXPECT_STATUS="${EXPECT_STATUS:-completed}"
 ASSERT_FRONTEND_FILES="${ASSERT_FRONTEND_FILES:-}"
+APEX_LIVE_TEST_MODEL_PROFILE="${APEX_LIVE_TEST_MODEL_PROFILE:-${APEX_AI_TESTING_PROFILE:-platform}}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq is required" >&2
+  exit 1
+fi
+
+if [[ "$APEX_LIVE_TEST_MODEL_PROFILE" == "ollama-credit-saver" && "${APEX_SKIP_OLLAMA_CREDIT_SAVER_SOURCE:-0}" != "1" && -f "$SCRIPT_DIR/ollama-credit-saver-env.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/ollama-credit-saver-env.sh"
+fi
+
+PROVIDER_MODE="${PROVIDER_MODE:-${APEX_PROVIDER_MODE:-platform}}"
+ROLE_ASSIGNMENTS_JSON="${ROLE_ASSIGNMENTS_JSON:-${APEX_ROLE_ASSIGNMENTS_JSON:-}}"
+PROVIDER_MODEL_OVERRIDES_JSON="${PROVIDER_MODEL_OVERRIDES_JSON:-${APEX_PROVIDER_MODEL_OVERRIDES_JSON:-}}"
+
+if [[ -z "$ROLE_ASSIGNMENTS_JSON" && "${APEX_BYOK_OLLAMA_ONLY:-${BYOK_OLLAMA_ONLY:-0}}" =~ ^(1|true|yes|on)$ ]]; then
+  ROLE_ASSIGNMENTS_JSON='{"architect":"ollama","coder":"ollama","tester":"ollama","devops":"ollama"}'
+fi
+
+if [[ -z "$PROVIDER_MODEL_OVERRIDES_JSON" && "$APEX_LIVE_TEST_MODEL_PROFILE" =~ ^(ollama-credit-saver|ollama|credit-saver)$ ]]; then
+  PROVIDER_MODEL_OVERRIDES_JSON="$(jq -n --arg model "${KIMI_OLLAMA_MODEL:-${OLLAMA_MODEL_DEFAULT:-kimi-k2.6}}" '{ollama:$model}')"
+fi
 
 if [[ -n "${POWER_MODE:-}" ]]; then
   EFFECTIVE_POWER_MODE="$POWER_MODE"
@@ -29,12 +54,6 @@ ASSERT_PREVIEW_READY="${ASSERT_PREVIEW_READY:-0}"
 PREVIEW_POLL_MAX="${PREVIEW_POLL_MAX:-30}"
 PREVIEW_POLL_SECONDS="${PREVIEW_POLL_SECONDS:-3}"
 
-if ! command -v jq >/dev/null 2>&1; then
-  echo "jq is required" >&2
-  exit 1
-fi
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/canary_report.sh
 source "$SCRIPT_DIR/lib/canary_report.sh"
 
@@ -452,8 +471,25 @@ build_payload="$(jq -n \
   --arg d "$PROMPT" \
   --arg mode "$MODE" \
   --arg power "$EFFECTIVE_POWER_MODE" \
+  --arg provider "$PROVIDER_MODE" \
   --arg project "$PROJECT_NAME" \
-  '{description:$d,prompt:$d,mode:$mode,power_mode:$power,provider_mode:"platform",require_preview_ready:true,project_name:$project}')"
+  '{description:$d,prompt:$d,mode:$mode,power_mode:$power,provider_mode:$provider,require_preview_ready:true,project_name:$project}')"
+
+if [[ -n "$ROLE_ASSIGNMENTS_JSON" ]]; then
+  if ! jq -e 'type == "object"' <<<"$ROLE_ASSIGNMENTS_JSON" >/dev/null; then
+    echo "ROLE_ASSIGNMENTS_JSON_INVALID: expected a JSON object" >&2
+    exit 1
+  fi
+  build_payload="$(jq --argjson roles "$ROLE_ASSIGNMENTS_JSON" '. + {role_assignments:$roles}' <<<"$build_payload")"
+fi
+
+if [[ -n "$PROVIDER_MODEL_OVERRIDES_JSON" ]]; then
+  if ! jq -e 'type == "object"' <<<"$PROVIDER_MODEL_OVERRIDES_JSON" >/dev/null; then
+    echo "PROVIDER_MODEL_OVERRIDES_JSON_INVALID: expected a JSON object" >&2
+    exit 1
+  fi
+  build_payload="$(jq --argjson overrides "$PROVIDER_MODEL_OVERRIDES_JSON" '. + {provider_model_overrides:$overrides}' <<<"$build_payload")"
+fi
 
 curl -sS "${auth_args[@]}" -X POST "$BASE_URL/build/start" \
   -H "Content-Type: application/json" \

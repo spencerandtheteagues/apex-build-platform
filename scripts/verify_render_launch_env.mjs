@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 
 const usage = `Usage:
   node scripts/verify_render_launch_env.mjs
@@ -74,6 +75,135 @@ const truncate = (value, max = 600) => {
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
 
+const stripYamlComment = (line) => {
+  let quote = ''
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i]
+    if (quote) {
+      if (char === quote && line[i - 1] !== '\\') quote = ''
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (char === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
+      return line.slice(0, i)
+    }
+  }
+  return line
+}
+
+const parseYamlScalar = (raw) => {
+  const value = trim(raw)
+  if (value === '') return ''
+  if (value === '[]') return []
+  if (value === '{}') return {}
+  if (value === 'true') return true
+  if (value === 'false') return false
+  if (/^-?\d+$/.test(value)) return Number.parseInt(value, 10)
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1)
+  }
+  return value
+}
+
+const splitYamlKeyValue = (content) => {
+  let quote = ''
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i]
+    if (quote) {
+      if (char === quote && content[i - 1] !== '\\') quote = ''
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (char === ':') {
+      return [content.slice(0, i).trim(), content.slice(i + 1).trim()]
+    }
+  }
+  return [content.trim(), '']
+}
+
+const nextContainerFor = (lines, index) => {
+  for (let i = index + 1; i < lines.length; i += 1) {
+    if (lines[i].indent <= lines[index].indent) break
+    return lines[i].content.startsWith('- ') ? [] : {}
+  }
+  return {}
+}
+
+const parseSimpleYAML = (content) => {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => {
+      const withoutComment = stripYamlComment(line)
+      return {
+        indent: withoutComment.match(/^\s*/)?.[0].length || 0,
+        content: withoutComment.trimEnd().trim(),
+      }
+    })
+    .filter((line) => line.content.length > 0)
+
+  const root = {}
+  const stack = [{ indent: -1, value: root }]
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    while (stack.length > 1 && line.indent <= stack[stack.length - 1].indent) {
+      stack.pop()
+    }
+
+    const parent = stack[stack.length - 1].value
+    if (line.content.startsWith('- ')) {
+      if (!Array.isArray(parent)) {
+        throw new Error(`fallback YAML parser expected an array at line "${line.content}"`)
+      }
+      const itemContent = line.content.slice(2).trim()
+      if (!itemContent) {
+        const item = nextContainerFor(lines, index)
+        parent.push(item)
+        if (item && typeof item === 'object') stack.push({ indent: line.indent, value: item })
+        continue
+      }
+
+      const [key, value] = splitYamlKeyValue(itemContent)
+      const item = {}
+      parent.push(item)
+      if (!key) {
+        throw new Error(`fallback YAML parser could not read list item "${line.content}"`)
+      }
+      if (value === '') {
+        const child = nextContainerFor(lines, index)
+        item[key] = child
+      } else {
+        item[key] = parseYamlScalar(value)
+      }
+      stack.push({ indent: line.indent, value: item })
+      continue
+    }
+
+    if (!parent || Array.isArray(parent) || typeof parent !== 'object') {
+      throw new Error(`fallback YAML parser expected an object at line "${line.content}"`)
+    }
+    const [key, value] = splitYamlKeyValue(line.content)
+    if (!key) {
+      throw new Error(`fallback YAML parser could not read key from "${line.content}"`)
+    }
+    if (value === '') {
+      const child = nextContainerFor(lines, index)
+      parent[key] = child
+      if (child && typeof child === 'object') stack.push({ indent: line.indent, value: child })
+    } else {
+      parent[key] = parseYamlScalar(value)
+    }
+  }
+
+  return root
+}
+
 const loadBlueprint = (filePath) => {
   const ruby = `
     require "yaml"
@@ -90,7 +220,8 @@ const loadBlueprint = (filePath) => {
     const output = execFileSync('ruby', ['-e', ruby, filePath], { encoding: 'utf8' })
     return JSON.parse(output)
   } catch (error) {
-    throw new Error(`failed to parse ${filePath} with Ruby YAML: ${error.message}`)
+    note(`Ruby YAML parser unavailable or failed; using built-in render.yaml fallback parser (${error.message})`)
+    return parseSimpleYAML(readFileSync(filePath, 'utf8'))
   }
 }
 
