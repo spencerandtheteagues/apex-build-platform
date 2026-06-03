@@ -1,5 +1,36 @@
 # OpenRouter Integration + Auto Model Selection Plan
 
+## IMPLEMENTATION STATUS (last updated: 2026-06-03, commit 09321ad)
+
+### ✅ COMPLETED (backend)
+- `backend/internal/ai/openrouter_catalog.go` — 70+ curated models with quality scores, free tier flagged, `catalogScore()` algorithmic selector
+- `backend/internal/ai/openrouter_selector.go` — 3-tier auto-selection: (1) GPT-5.5 dispatcher via OpenRouter, (2) deepseek-v4-pro fallback via OpenRouter, (3) Ollama cloud DeepSeek fallback, (4) pure catalog scoring
+- `backend/internal/ai/openrouter.go` — Full `AIClient` implementation; `FetchLiveModels()` for frontend picker; hard-blocks `anthropic/*`; free-only gating; cost tracking
+- `backend/internal/api/openrouter.go` — `GET /api/ai/openrouter/models` with 5-min cache + catalog fallback
+- `backend/internal/ai/types.go` — `ProviderOpenRouter` constant added; `DefaultRouterConfig` updated (OpenRouter is now default for code/test/refactor/debug); OpenRouter in all fallback chains
+- `backend/internal/ai/model.go` — `ParseProvider` updated
+- `backend/internal/ai/router.go` — `NewAIRouter` wires OpenRouter via `extraKeys[3]`; `GetConfiguredProviders` updated
+- `backend/cmd/main.go` — `AppConfig.OpenRouterAPIKey`, `loadConfig()` reads `OPENROUTER_API_KEY`, passes to `NewAIRouter`, logs startup
+
+### ❌ REMAINING (frontend)
+1. **Auto mode button** — add "Auto ✦" to the power mode strip (Balanced / Max / Auto) in `AppBuilder`
+   - Sends `power_mode: "auto"`, `provider: "openrouter"`, `model: "auto"` in build request
+2. **Manual OpenRouter picker modal** — full model browser per agent role
+   - Calls `GET /api/ai/openrouter/models`, searchable, filterable (Free toggle, category, sort)
+   - `FREE` badge on free models, cost shown per 1M tokens
+3. **`ModelRoleConfig.tsx` provider strip** — add `[OpenRouter ▾]` and `[Auto ✦]` buttons alongside existing providers
+4. **Build transparency** — show selected model slug + estimated cost per phase in build progress UI
+   - Data comes from `resp.metadata.model` already set in `openrouter.go`
+
+### ❌ REMAINING (deployment)
+- Set `OPENROUTER_API_KEY` in Render environment variables
+  - Key is in `~/.secrets/api-keys.sh` on the dev machine
+
+### ❌ REMAINING (testing)
+- `OPENROUTER_TEST_MODEL=moonshotai/kimi-k2.6:free` — run canary build end-to-end for free
+- Verify GPT-5.5 dispatcher actually returns valid model IDs (integration test)
+- Confirm `isAnthropicModel()` hard-guard works in production
+
 ## Goal
 
 1. Add OpenRouter as a unified provider gateway for all non-Claude, non-Ollama models — one API key instead of separate OpenAI/Gemini/Grok keys.
