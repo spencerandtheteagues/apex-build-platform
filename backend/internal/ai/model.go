@@ -48,7 +48,7 @@ func ActualProvider(resp *AIResponse, fallback ...AIProvider) AIProvider {
 func ParseProvider(value string) AIProvider {
 	provider := AIProvider(strings.TrimSpace(value))
 	switch provider {
-	case ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok, ProviderOllama, ProviderDeepSeek, ProviderGLM:
+	case ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok, ProviderOllama, ProviderDeepSeek, ProviderGLM, ProviderOpenRouter:
 		return provider
 	default:
 		return ""

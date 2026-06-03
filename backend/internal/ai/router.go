@@ -61,6 +61,7 @@ func (r *AIRouter) GetConfiguredProviders() []AIProvider {
 	preferred := []AIProvider{
 		ProviderOllama,
 		ProviderClaude,
+		ProviderOpenRouter,
 		ProviderGPT4,
 		ProviderGemini,
 		ProviderGrok,
@@ -143,8 +144,20 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 	if strings.TrimSpace(ollamaURL) == "" && strings.TrimSpace(ollamaAPIKey) != "" {
 		ollamaURL = "https://ollama.com/v1"
 	}
+	var ollamaClient *OllamaClient
 	if ollamaURL != "" {
-		clients[ProviderOllama] = NewOllamaClient(ollamaURL, ollamaAPIKey)
+		ollamaClient = NewOllamaClient(ollamaURL, ollamaAPIKey)
+		clients[ProviderOllama] = ollamaClient
+	}
+
+	// OpenRouter key is extraKeys[3]
+	openRouterKey := ""
+	if len(extraKeys) > 3 {
+		openRouterKey = normalizeAPIKey(extraKeys[3])
+	}
+	if openRouterKey != "" {
+		clients[ProviderOpenRouter] = NewOpenRouterClient(openRouterKey, ollamaClient)
+		log.Printf("OpenRouter provider enabled (%d models available)", 344)
 	}
 
 	overrideConfiguredWithEmulation := shouldOverrideConfiguredClientsWithOllamaEmulation()

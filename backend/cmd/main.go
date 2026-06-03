@@ -221,7 +221,7 @@ func main() {
 	authService.SetDB(database.DB)
 	startupRegistry.MarkReady("auth_service", startup.TierCritical, "Authentication service initialized", nil)
 
-	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok, Ollama).
+	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok, Ollama, OpenRouter).
 	// Ollama is enabled whenever OLLAMA_BASE_URL is set — in any environment.
 	// In development with Ollama-only mode (OLLAMA_BASE_URL set, no cloud keys), cloud
 	// keys from the OS environment are suppressed so only the local/cloud Ollama model
@@ -232,6 +232,7 @@ func main() {
 	openaiKey := appConfig.OpenAIAPIKey
 	geminiKey := appConfig.GeminiAPIKey
 	grokKey := appConfig.GrokAPIKey
+	openRouterKey := appConfig.OpenRouterAPIKey
 
 	// Ollama Cloud / managed mode: if OLLAMA_API_KEY is set (even in production),
 	// enable the Ollama provider with the provided key and base URL.
@@ -265,7 +266,11 @@ func main() {
 		grokKey,
 		ollamaRouterURL,
 		ollamaAPIKey,
+		openRouterKey,
 	)
+	if openRouterKey != "" {
+		log.Printf("OPENROUTER: Provider enabled — 300+ models available via unified gateway")
+	}
 
 	// If Ollama Cloud BYOK is enabled, upgrade the Ollama client to cloud mode
 	if ollamaCloudEnabled && ollamaRouterURL != "" {
@@ -1235,8 +1240,9 @@ type AppConfig struct {
 	OpenAIAPIKey  string
 	GeminiAPIKey  string
 	GrokAPIKey    string
-	OllamaBaseURL string // Ollama server URL; local (http://localhost:11434) or cloud (https://ollama.com/v1)
-	OllamaAPIKey  string // Ollama Pro cloud API key; leave empty for local installs
+	OllamaBaseURL    string // Ollama server URL; local (http://localhost:11434) or cloud (https://ollama.com/v1)
+	OllamaAPIKey     string // Ollama Pro cloud API key; leave empty for local installs
+	OpenRouterAPIKey string // OpenRouter API key — enables 300+ models via unified gateway
 
 	// Authentication (fallback for development)
 	JWTSecret string
@@ -1275,8 +1281,9 @@ func loadConfig() *AppConfig {
 		OpenAIAPIKey:  getEnvAny([]string{"OPENAI_API_KEY", "CHATGPT_API_KEY", "GPT_API_KEY", "OPENAI_PLATFORM_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN", "OPENAI_SECRET_KEY"}, ""),
 		GeminiAPIKey:  getEnvAny([]string{"GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GOOGLE_GEMINI_API_KEY"}, ""),
 		GrokAPIKey:    getEnv("XAI_API_KEY", ""),
-		OllamaBaseURL: getEnvAny([]string{"OLLAMA_BASE_URL", "OLLAMA_URL", "OLLAMA_HOST"}, ""),
-		OllamaAPIKey:  getEnv("OLLAMA_API_KEY", ""),
+		OllamaBaseURL:    getEnvAny([]string{"OLLAMA_BASE_URL", "OLLAMA_URL", "OLLAMA_HOST"}, ""),
+		OllamaAPIKey:     getEnv("OLLAMA_API_KEY", ""),
+		OpenRouterAPIKey: getEnvAny([]string{"OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"}, ""),
 		JWTSecret:     jwtSecret,
 		Port:          getEnv("PORT", "8080"),
 		Environment:   environment,
@@ -1616,6 +1623,7 @@ func setupRoutes(
 			{
 				ai.POST("/generate", server.AIGenerate)
 				ai.GET("/usage", server.GetAIUsage)
+				ai.GET("/openrouter/models", server.GetOpenRouterModels)
 			}
 
 			// Project endpoints - using OptimizedHandler for better performance

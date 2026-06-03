@@ -9,13 +9,14 @@ import (
 type AIProvider string
 
 const (
-	ProviderClaude   AIProvider = "claude"
-	ProviderGPT4     AIProvider = "gpt4"
-	ProviderGemini   AIProvider = "gemini"
-	ProviderGrok     AIProvider = "grok"
-	ProviderOllama   AIProvider = "ollama"
-	ProviderDeepSeek AIProvider = "deepseek"
-	ProviderGLM      AIProvider = "glm"
+	ProviderClaude      AIProvider = "claude"
+	ProviderGPT4        AIProvider = "gpt4"
+	ProviderGemini      AIProvider = "gemini"
+	ProviderGrok        AIProvider = "grok"
+	ProviderOllama      AIProvider = "ollama"
+	ProviderDeepSeek    AIProvider = "deepseek"
+	ProviderGLM         AIProvider = "glm"
+	ProviderOpenRouter  AIProvider = "openrouter"
 )
 
 // AICapability represents different AI use cases
@@ -158,64 +159,67 @@ type RouterConfig struct {
 func DefaultRouterConfig() *RouterConfig {
 	config := &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
-			CapabilityCodeGeneration:        ProviderGPT4,
+			CapabilityCodeGeneration:        ProviderOpenRouter,
 			CapabilityNaturalLanguageToCode: ProviderClaude,
 			CapabilityCodeReview:            ProviderClaude,
-			CapabilityCodeCompletion:        ProviderGPT4,
-			CapabilityDebugging:             ProviderGrok,
+			CapabilityCodeCompletion:        ProviderOpenRouter,
+			CapabilityDebugging:             ProviderOpenRouter,
 			CapabilityExplanation:           ProviderClaude,
-			CapabilityRefactoring:           ProviderGPT4,
-			CapabilityTesting:               ProviderGemini,
+			CapabilityRefactoring:           ProviderOpenRouter,
+			CapabilityTesting:               ProviderOpenRouter,
 			CapabilityDocumentation:         ProviderClaude,
 			CapabilityArchitecture:          ProviderClaude,
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
-			ProviderOllama:   {ProviderClaude, ProviderGPT4, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok},
-			ProviderClaude:   {ProviderGPT4, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok, ProviderOllama},
-			ProviderGPT4:     {ProviderClaude, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok, ProviderOllama},
-			ProviderGemini:   {ProviderClaude, ProviderGPT4, ProviderGLM, ProviderDeepSeek, ProviderGrok, ProviderOllama},
-			ProviderGrok:     {ProviderDeepSeek, ProviderGPT4, ProviderClaude, ProviderGemini, ProviderGLM, ProviderOllama},
-			ProviderDeepSeek: {ProviderGLM, ProviderGPT4, ProviderClaude, ProviderGemini, ProviderOllama},
-			ProviderGLM:      {ProviderDeepSeek, ProviderGemini, ProviderGPT4, ProviderClaude, ProviderOllama},
+			ProviderOpenRouter: {ProviderClaude, ProviderGPT4, ProviderGemini, ProviderDeepSeek, ProviderGrok, ProviderOllama},
+			ProviderOllama:     {ProviderOpenRouter, ProviderClaude, ProviderGPT4, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok},
+			ProviderClaude:     {ProviderOpenRouter, ProviderGPT4, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok, ProviderOllama},
+			ProviderGPT4:       {ProviderOpenRouter, ProviderClaude, ProviderGemini, ProviderDeepSeek, ProviderGLM, ProviderGrok, ProviderOllama},
+			ProviderGemini:     {ProviderOpenRouter, ProviderClaude, ProviderGPT4, ProviderGLM, ProviderDeepSeek, ProviderGrok, ProviderOllama},
+			ProviderGrok:       {ProviderOpenRouter, ProviderDeepSeek, ProviderGPT4, ProviderClaude, ProviderGemini, ProviderGLM, ProviderOllama},
+			ProviderDeepSeek:   {ProviderOpenRouter, ProviderGLM, ProviderGPT4, ProviderClaude, ProviderGemini, ProviderOllama},
+			ProviderGLM:        {ProviderOpenRouter, ProviderDeepSeek, ProviderGemini, ProviderGPT4, ProviderClaude, ProviderOllama},
 		},
 		LoadBalancing: map[AIProvider]float64{
-			ProviderClaude:   0.25,
-			ProviderGPT4:     0.25,
-			ProviderGemini:   0.18,
-			ProviderGrok:     0.12,
-			ProviderOllama:   0.08,
-			ProviderDeepSeek: 0.07,
-			ProviderGLM:      0.05,
+			ProviderOpenRouter: 0.35,
+			ProviderClaude:     0.25,
+			ProviderGPT4:       0.15,
+			ProviderGemini:     0.10,
+			ProviderGrok:       0.05,
+			ProviderOllama:     0.05,
+			ProviderDeepSeek:   0.03,
+			ProviderGLM:        0.02,
 		},
 		RateLimits: map[AIProvider]int{
-			ProviderClaude:   100,  // requests per minute
-			ProviderGPT4:     80,   // requests per minute
-			ProviderGemini:   120,  // requests per minute
-			ProviderGrok:     100,  // requests per minute
-			ProviderOllama:   1000, // Local — no real limit
-			ProviderDeepSeek: 120,
-			ProviderGLM:      120,
+			ProviderOpenRouter: 200,  // OpenRouter handles rate limiting per-model internally
+			ProviderClaude:     100,
+			ProviderGPT4:       80,
+			ProviderGemini:     120,
+			ProviderGrok:       100,
+			ProviderOllama:     1000,
+			ProviderDeepSeek:   120,
+			ProviderGLM:        120,
 		},
 		CostThresholds: map[AIProvider]float64{
-			ProviderClaude:   0, // no per-request limit; budget enforcer handles overall spend
-			ProviderGPT4:     0,
-			ProviderGemini:   0,
-			ProviderGrok:     0,
-			ProviderOllama:   0,
-			ProviderDeepSeek: 0,
-			ProviderGLM:      0,
+			ProviderOpenRouter: 0,
+			ProviderClaude:     0,
+			ProviderGPT4:       0,
+			ProviderGemini:     0,
+			ProviderGrok:       0,
+			ProviderOllama:     0,
+			ProviderDeepSeek:   0,
+			ProviderGLM:        0,
 		},
-		// Enable emergency fallback for BYOK scenarios to prevent build failures
 		EnableBYOKEmergencyFallback: true,
-		// Retry local models multiple times before falling back to cloud
 		MaxRetryAttempts: map[AIProvider]int{
-			ProviderClaude:   2, // Cloud providers get fewer retries
-			ProviderGPT4:     2, // Cloud providers get fewer retries
-			ProviderGemini:   2, // Cloud providers get fewer retries
-			ProviderGrok:     2, // Cloud providers get fewer retries
-			ProviderOllama:   5, // Local model gets more retries (network/startup issues)
-			ProviderDeepSeek: 2,
-			ProviderGLM:      2,
+			ProviderOpenRouter: 2,
+			ProviderClaude:     2,
+			ProviderGPT4:       2,
+			ProviderGemini:     2,
+			ProviderGrok:       2,
+			ProviderOllama:     5,
+			ProviderDeepSeek:   2,
+			ProviderGLM:        2,
 		},
 	}
 	applyOllamaCreditSaverTestingProfile(config)
@@ -238,7 +242,7 @@ func applyOllamaCreditSaverTestingProfile(config *RouterConfig) {
 		CapabilityDocumentation:         ProviderClaude,
 		CapabilityArchitecture:          ProviderClaude,
 	}
-	preferred := []AIProvider{ProviderClaude, ProviderGPT4, ProviderGLM, ProviderDeepSeek, ProviderGemini, ProviderGrok, ProviderOllama}
+	preferred := []AIProvider{ProviderClaude, ProviderOpenRouter, ProviderGPT4, ProviderGLM, ProviderDeepSeek, ProviderGemini, ProviderGrok, ProviderOllama}
 	config.FallbackOrder = map[AIProvider][]AIProvider{}
 	for _, provider := range preferred {
 		fallbacks := make([]AIProvider, 0, len(preferred)-1)
