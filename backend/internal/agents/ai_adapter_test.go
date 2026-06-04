@@ -118,6 +118,21 @@ func TestNormalizeProviderModelOverrideAcceptsOpenRouterFreeModels(t *testing.T)
 	}
 }
 
+func TestPartitionPlatformProvidersByHealthIncludesOpenRouter(t *testing.T) {
+	t.Parallel()
+
+	healthy, degraded := partitionPlatformProvidersByHealth(map[ai.AIProvider]bool{
+		ai.ProviderOpenRouter: true,
+	})
+
+	if len(degraded) != 0 {
+		t.Fatalf("degraded providers = %v, want none", degraded)
+	}
+	if len(healthy) != 1 || healthy[0] != ai.ProviderOpenRouter {
+		t.Fatalf("healthy providers = %v, want [openrouter]", healthy)
+	}
+}
+
 func TestNormalizeExecutionModelForProvider_DowngradesFlagshipOverridesInBalanced(t *testing.T) {
 	t.Parallel()
 

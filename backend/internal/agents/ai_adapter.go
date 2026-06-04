@@ -406,6 +406,7 @@ type AIRouterAdapter struct {
 
 var platformProviderPreferenceOrder = []ai.AIProvider{
 	ai.ProviderClaude,
+	ai.ProviderOpenRouter,
 	ai.ProviderGPT4,
 	ai.ProviderGemini,
 	ai.ProviderGrok,
