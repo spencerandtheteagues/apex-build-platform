@@ -1278,7 +1278,13 @@ func explicitNoExternalRuntimeDependency(normalized string) bool {
 		(strings.Contains(normalized, " do not add ") && strings.Contains(normalized, " external apis ")) ||
 		strings.Contains(normalized, " no real api key ") ||
 		strings.Contains(normalized, " no real api keys ") ||
-		strings.Contains(normalized, " zero external dependencies ")
+		strings.Contains(normalized, " zero external dependencies ") ||
+		// "do not use real payments or external APIs" — payment simulation canary pattern
+		strings.Contains(normalized, " do not use real payments ") ||
+		// "simulate payment locally" — explicit signal of simulated (not real) billing
+		strings.Contains(normalized, " simulate payment locally ") ||
+		// "do not use real X or external APIs" — general form
+		(strings.Contains(normalized, " do not use real ") && strings.Contains(normalized, " external api"))
 }
 
 // strongExplicitInMemoryOnlyIntent detects when the user has given an unambiguous
