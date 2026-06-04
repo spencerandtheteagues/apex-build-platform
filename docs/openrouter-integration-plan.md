@@ -12,14 +12,14 @@
 - `backend/internal/ai/router.go` — `NewAIRouter` wires OpenRouter via `extraKeys[3]`; `GetConfiguredProviders` updated
 - `backend/cmd/main.go` — `AppConfig.OpenRouterAPIKey`, `loadConfig()` reads `OPENROUTER_API_KEY`, passes to `NewAIRouter`, logs startup
 
-### ❌ REMAINING (frontend)
-1. **Auto mode button** — add "Auto ✦" to the power mode strip (Balanced / Max / Auto) in `AppBuilder`
+### ✅ COMPLETE (frontend)
+1. ✅ **Auto mode button** — added "Auto ❆" as 4th power mode button (grid-cols-4) in both launch and full-build panels
    - Sends `power_mode: "auto"`, `provider: "openrouter"`, `model: "auto"` in build request
-2. **Manual OpenRouter picker modal** — full model browser per agent role
+2. ✅ **Manual OpenRouter picker modal** — `OpenRouterModelPicker.tsx` (searchable, filterable by tier/free, sortable)
    - Calls `GET /api/ai/openrouter/models`, searchable, filterable (Free toggle, category, sort)
    - `FREE` badge on free models, cost shown per 1M tokens
-3. **`ModelRoleConfig.tsx` provider strip** — add `[OpenRouter ▾]` and `[Auto ✦]` buttons alongside existing providers
-4. **Build transparency** — show selected model slug + estimated cost per phase in build progress UI
+3. ✅ **`ModelRoleConfig.tsx` provider strip** — added OpenRouter provider card + Auto ✦ quick-assign strip per role
+4. ⚠️ **Build transparency** — deferred; backend already sets `resp.metadata.model` but frontend phase display unchanged
    - Data comes from `resp.metadata.model` already set in `openrouter.go`
 
 ### ❌ REMAINING (deployment)
