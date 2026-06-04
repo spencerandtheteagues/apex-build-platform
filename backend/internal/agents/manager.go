@@ -1391,14 +1391,14 @@ func (am *AgentManager) getAvailableProvidersWithGracePeriodForBuild(build *Buil
 	if build != nil && !am.buildUsesPlatformKeys(build) {
 		providers := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
 		providers = am.retainRecentSuccessfulBuildProviders(build, providers)
-		providers = constrainProvidersToSingleRoleAssignmentPin(build, providers)
+		providers = am.constrainProvidersToBuildPin(build, providers)
 		if len(providers) == 0 {
 			log.Printf("No BYOK providers available for user %d", build.UserID)
 		}
 		return providers
 	}
 	providers := am.retainRecentSuccessfulBuildProviders(build, hostedPlatformProviders(am.getAvailableProvidersWithGracePeriod()))
-	return constrainProvidersToSingleRoleAssignmentPin(build, providers)
+	return am.constrainProvidersToBuildPin(build, providers)
 }
 
 func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []ai.AIProvider {
@@ -1407,21 +1407,46 @@ func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []a
 	}
 	if build != nil && !am.buildUsesPlatformKeys(build) {
 		providers := am.retainRecentSuccessfulBuildProviders(build, am.aiRouter.GetAvailableProvidersForUser(build.UserID))
-		return constrainProvidersToSingleRoleAssignmentPin(build, providers)
+		return am.constrainProvidersToBuildPin(build, providers)
 	}
 	providers := am.retainRecentSuccessfulBuildProviders(build, hostedPlatformProviders(am.aiRouter.GetAvailableProviders()))
-	return constrainProvidersToSingleRoleAssignmentPin(build, providers)
+	return am.constrainProvidersToBuildPin(build, providers)
 }
 
-func constrainProvidersToSingleRoleAssignmentPin(build *Build, providers []ai.AIProvider) []ai.AIProvider {
+func (am *AgentManager) constrainProvidersToBuildPin(build *Build, providers []ai.AIProvider) []ai.AIProvider {
 	pinned, ok := singleProviderPinnedByBuildPolicy(build)
 	if !ok {
 		return providers
 	}
 	if !providerListContains(providers, pinned) {
+		if am != nil && am.buildUsesPlatformKeys(build) && providerListContains(am.getConfiguredPlatformProviders(), pinned) {
+			log.Printf("Pinned provider %s is configured but not currently healthy; keeping it for build %s because build policy forbids provider fallback", pinned, buildIDForLog(build))
+			return []ai.AIProvider{pinned}
+		}
 		return nil
 	}
 	return []ai.AIProvider{pinned}
+}
+
+func (am *AgentManager) getConfiguredPlatformProviders() []ai.AIProvider {
+	if am == nil || am.aiRouter == nil {
+		return nil
+	}
+	type configuredProviderLister interface {
+		GetConfiguredProviders() []ai.AIProvider
+	}
+	lister, ok := am.aiRouter.(configuredProviderLister)
+	if !ok {
+		return nil
+	}
+	return hostedPlatformProviders(lister.GetConfiguredProviders())
+}
+
+func buildIDForLog(build *Build) string {
+	if build == nil {
+		return ""
+	}
+	return build.ID
 }
 
 func singleProviderPinnedByBuildPolicy(build *Build) (ai.AIProvider, bool) {

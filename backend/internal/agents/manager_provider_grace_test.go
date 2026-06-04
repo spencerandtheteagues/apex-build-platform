@@ -11,6 +11,7 @@ import (
 type stubAIRouter struct {
 	providers             []ai.AIProvider
 	userProviders         []ai.AIProvider
+	configuredProviders   []ai.AIProvider
 	hasConfiguredProvider bool
 }
 
@@ -32,6 +33,13 @@ func (s *stubAIRouter) GetAvailableProvidersForUser(userID uint) []ai.AIProvider
 
 func (s *stubAIRouter) HasConfiguredProviders() bool {
 	return s.hasConfiguredProvider
+}
+
+func (s *stubAIRouter) GetConfiguredProviders() []ai.AIProvider {
+	if s.configuredProviders != nil {
+		return append([]ai.AIProvider(nil), s.configuredProviders...)
+	}
+	return s.GetAvailableProviders()
 }
 
 func TestGetAvailableProvidersWithGracePeriod_FailsFastWhenNoneConfigured(t *testing.T) {
@@ -116,6 +124,28 @@ func TestGetCurrentlyAvailableProvidersForBuild_ConstrainedByOpenRouterFreeOverr
 	got := am.getCurrentlyAvailableProvidersForBuild(build)
 	if len(got) != 1 || got[0] != ai.ProviderOpenRouter {
 		t.Fatalf("expected OpenRouter-free override to pin providers to [openrouter], got %v", got)
+	}
+}
+
+func TestGetCurrentlyAvailableProvidersForBuild_OpenRouterFreeOverrideUsesConfiguredPinnedProvider(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderGPT4, ai.ProviderClaude},
+			configuredProviders:   []ai.AIProvider{ai.ProviderOpenRouter, ai.ProviderGPT4, ai.ProviderClaude},
+			hasConfiguredProvider: true,
+		},
+	}
+
+	build := &Build{
+		ProviderMode: "platform",
+		ProviderModelOverrides: map[string]string{
+			"openrouter": "moonshotai/kimi-k2.6:free",
+		},
+	}
+
+	got := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(got) != 1 || got[0] != ai.ProviderOpenRouter {
+		t.Fatalf("expected configured OpenRouter-free override to pin providers to [openrouter], got %v", got)
 	}
 }
 
