@@ -35265,7 +35265,7 @@ func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, erro
 	}
 	// No consensus when retries are exhausted — the outcome is always permanent failure.
 	// Avoids running expensive AI calls while holding agent.mu when no retry will follow.
-	if task.RetryCount >= task.MaxRetries {
+	if task.MaxRetries > 0 && task.RetryCount >= task.MaxRetries {
 		return false
 	}
 	errorLower := strings.ToLower(errorMsg)
