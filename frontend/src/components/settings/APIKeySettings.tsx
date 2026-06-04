@@ -481,18 +481,28 @@ export default function APIKeySettings() {
 
                   {/* Status badges */}
                   <div className="flex items-center gap-2">
-                    {isConfigured && isValid && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/30">
-                        <CheckCircle className="w-3 h-3" /> Valid
+                    {isConfigured ? (
+                      <span className={cn(
+                        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border',
+                        isValid
+                          ? 'bg-green-500/10 text-green-400 border-green-500/40'
+                          : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/40'
+                      )}>
+                        {isValid ? (
+                          <>
+                            <CheckCircle className="w-3 h-3" /> Connected
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="w-3 h-3" /> Connected — verify
+                          </>
+                        )}
                       </span>
-                    )}
-                    {isConfigured && !isValid && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/10 text-yellow-400 border border-yellow-500/30">
-                        <XCircle className="w-3 h-3" /> Check key
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-800/80 text-gray-400 border border-gray-700">
+                        <div className="w-2 h-2 rounded-full bg-gray-600" />
+                        Not connected
                       </span>
-                    )}
-                    {!isConfigured && (
-                      <span className="text-xs text-gray-500">Platform key fallback</span>
                     )}
                   </div>
                 </div>
@@ -534,8 +544,13 @@ export default function APIKeySettings() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 h-10 px-4 rounded-lg border border-gray-700/50 bg-gray-800/30 flex items-center text-sm text-gray-500 font-mono">
-                        {'•'.repeat(24)}
+                      <div className="flex-1 h-10 px-4 rounded-lg border border-gray-700/50 bg-gray-800/30 flex items-center text-sm text-gray-500">
+                        <span className="font-mono text-gray-500">{'•'.repeat(20)}</span>
+                        {isActive && (
+                          <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-500/10 text-green-400 border border-green-500/30">
+                            active
+                          </span>
+                        )}
                       </div>
                       <button
                         onClick={() => handleValidateKey(provider.id)}

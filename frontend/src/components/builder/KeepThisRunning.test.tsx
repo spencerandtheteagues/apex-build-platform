@@ -8,6 +8,7 @@ import * as apiModule from '@/services/api'
 
 const getAlwaysOnStatusSpy = vi.spyOn(apiModule.apiService, 'getAlwaysOnStatus')
 const setAlwaysOnSpy = vi.spyOn(apiModule.apiService, 'setAlwaysOn')
+const getNativeDeploymentsSpy = vi.spyOn(apiModule.apiService, 'getNativeDeployments')
 
 const paidProps = () => ({
   projectId: 42,
@@ -40,8 +41,10 @@ const defaultStatus = () => ({
 beforeEach(() => {
   getAlwaysOnStatusSpy.mockReset()
   setAlwaysOnSpy.mockReset()
+  getNativeDeploymentsSpy.mockReset()
   getAlwaysOnStatusSpy.mockResolvedValue(defaultStatus())
   setAlwaysOnSpy.mockResolvedValue({ success: true, always_on: true, message: 'enabled' })
+  getNativeDeploymentsSpy.mockResolvedValue({ deployments: [], total: 0, page: 1, limit: 20 })
 })
 
 describe('KeepThisRunning — free user', () => {
@@ -51,15 +54,60 @@ describe('KeepThisRunning — free user', () => {
     expect(screen.getByRole('button', { name: /Upgrade to enable/i })).toBeTruthy()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(getAlwaysOnStatusSpy).not.toHaveBeenCalled()
+    expect(getNativeDeploymentsSpy).not.toHaveBeenCalled()
   })
 })
 
 describe('KeepThisRunning — paid user without deploymentId', () => {
-  it('shows deploy-first prompt and no toggle', () => {
+  it('discovers deployments before falling back to the deploy-first prompt', async () => {
     render(<KeepThisRunning {...paidProps()} deploymentId={null} />)
-    expect(screen.getByText(/Deploy or publish first to enable always-on/i)).toBeTruthy()
+
+    expect(screen.getByText(/Checking deployment status/i)).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByText(/Deploy or publish first to enable always-on/i)).toBeTruthy()
+    })
     expect(screen.queryByRole('button', { name: /disable always-on|enable always-on/i })).toBeNull()
+    expect(getNativeDeploymentsSpy).toHaveBeenCalledWith(42, 1, 20)
     expect(getAlwaysOnStatusSpy).not.toHaveBeenCalled()
+  })
+
+  it('uses a discovered healthy deployment for always-on status', async () => {
+    getNativeDeploymentsSpy.mockResolvedValueOnce({
+      deployments: [
+        {
+          id: 'dep-cold',
+          status: 'stopped',
+          container_status: 'stopped',
+        },
+        {
+          id: 'dep-healthy',
+          status: 'running',
+          container_status: 'healthy',
+        },
+      ],
+      total: 2,
+      page: 1,
+      limit: 20,
+    } as any)
+    getAlwaysOnStatusSpy.mockResolvedValueOnce({
+      always_on: true,
+      always_on_enabled: '2026-05-26T00:00:00Z',
+      last_keep_alive: '2026-05-26T01:00:00Z',
+      keep_alive_interval: 60,
+      sleep_after_minutes: 30,
+      restart_count: 0,
+      max_restarts: 5,
+      container_status: 'healthy',
+      uptime_seconds: 60,
+    })
+
+    render(<KeepThisRunning {...paidProps()} deploymentId={null} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Running')).toBeTruthy()
+    })
+    expect(getNativeDeploymentsSpy).toHaveBeenCalledWith(42, 1, 20)
+    expect(getAlwaysOnStatusSpy).toHaveBeenCalledWith(42, 'dep-healthy')
   })
 })
 

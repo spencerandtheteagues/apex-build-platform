@@ -6,7 +6,7 @@ import type * as MonacoTypes from 'monaco-editor'
 import { monaco } from '@monaco-runtime'
 import { ensureMonacoLanguageSupport } from '@monaco-language-support'
 import { cn } from '@/lib/utils'
-import { useStore } from '@/hooks/useStore'
+import { useIsTeamPlan, useStore } from '@/hooks/useStore'
 import { useCollaboration, RemoteCursor } from '@/hooks/useCollaboration'
 import collaborationService, { type Operation } from '@/services/collaboration'
 import { MultiplayerCursors, UserPresenceIndicator } from './MultiplayerCursors'
@@ -318,6 +318,12 @@ const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
     const currentFileRef = useRef<{ fileId?: number; fileName?: string }>({ fileId: file?.id, fileName: file?.name })
 
     const { theme, currentProject, room } = useStore()
+    const isTeamPlan = useIsTeamPlan()
+
+    // Collaboration is only available for Team, Enterprise, and Owner plans
+    const collabEnabled = enableCollaboration && isTeamPlan
+    const collaborationRoomId = collabEnabled ? roomId || room?.room_id : undefined
+    const collaborationProjectId = collabEnabled ? projectId || currentProject?.id : undefined
 
     // Safely extract theme id
     const themeId = typeof theme === 'object' && theme !== null && 'id' in theme
@@ -344,8 +350,8 @@ const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
       getAllCursors,
       getCursorsForFile,
     } = useCollaboration({
-      roomId: roomId || room?.room_id,
-      projectId: projectId || currentProject?.id,
+      roomId: collaborationRoomId,
+      projectId: collaborationProjectId,
       fileId,
       fileName,
       onCursorUpdate: useCallback((cursor: RemoteCursor) => {
@@ -451,7 +457,7 @@ const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
           onChange?.(currentValue)
 
           // Notify collaboration about typing
-          if (enableCollaboration) {
+          if (collabEnabled) {
             startTyping()
 
             const currentFile = currentFileRef.current
@@ -467,7 +473,7 @@ const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
         // Cursor position change handler for collaboration
         editorInstance.onDidChangeCursorPosition((e: MonacoCursorPositionEvent) => {
           const currentFile = currentFileRef.current
-          if (enableCollaboration && currentFile.fileId && currentFile.fileName) {
+          if (collabEnabled && currentFile.fileId && currentFile.fileName) {
             collaborationService.updateCursor(
               currentFile.fileId,
               currentFile.fileName,
@@ -479,7 +485,7 @@ const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
 
         // Selection change handler for collaboration
         editorInstance.onDidChangeCursorSelection((e: MonacoCursorSelectionEvent) => {
-          if (enableCollaboration) {
+          if (collabEnabled) {
             const selection = e.selection
             if (selection.isEmpty()) {
               clearSelection()
@@ -839,7 +845,7 @@ const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
 
           <div className="flex items-center space-x-2">
             {/* Collaboration indicators */}
-            {enableCollaboration && isCollabConnected && activeUsers.length > 0 && (
+            {collabEnabled && isCollabConnected && activeUsers.length > 0 && (
               <div className="flex items-center space-x-2 mr-2">
                 <UserPresenceIndicator
                   users={fileCursors}
@@ -857,7 +863,7 @@ const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
               </div>
             )}
 
-            {enableCollaboration && isCollabConnected && (
+            {collabEnabled && isCollabConnected && (
               <Badge variant="success" size="xs">
                 Live
               </Badge>
@@ -963,7 +969,7 @@ const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
           />
 
           {/* Multiplayer Cursors */}
-          {enableCollaboration && editor && (
+          {collabEnabled && editor && (
             <MultiplayerCursors
               editor={editor}
               cursors={fileCursors}

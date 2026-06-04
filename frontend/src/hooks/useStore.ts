@@ -1656,6 +1656,17 @@ export const useAuth = () => useStore(
   }))
 )
 
+// Plan / subscription selectors
+export const useIsTeamPlan = () =>
+  useStore((state) =>
+    state.user?.subscription_type === 'team'
+    || state.user?.subscription_type === 'enterprise'
+    || state.user?.subscription_type === 'owner'
+  )
+
+export const useSubscriptionType = () =>
+  useStore((state) => state.user?.subscription_type ?? 'free')
+
 export const useProjectsState = () => useStore(
   useShallow((state) => ({
     projects: state.projects,

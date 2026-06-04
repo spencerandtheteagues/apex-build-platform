@@ -1,5 +1,5 @@
 // APEX-BUILD Onboarding Tour
-// First-time user guided walkthrough explaining the app build process
+// First-time user guided walkthrough that ends in a guided first-run flow
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
@@ -9,14 +9,11 @@ import {
   Zap,
   Cpu,
   MessageSquare,
-  Eye,
   ChevronRight,
   ChevronLeft,
   X,
   CheckCircle2,
   Bot,
-  FileCode,
-  Download,
   Code2,
   LayoutTemplate,
   ListTodo,
@@ -94,16 +91,16 @@ const tourSteps: TourStep[] = [
     tip: 'You can chat with the Lead agent during the build to ask questions or request changes.',
   },
   {
-    title: 'Get Your App',
-    description: 'When the build completes, you can open your project in the full IDE, download as ZIP, or deploy directly.',
-    icon: <FileCode className="w-8 h-8" />,
+    title: 'What Are You Building?',
+    description: 'Choose a guided starter to jump into your first build right away, or open a blank workspace to start from scratch.',
+    icon: <Sparkles className="w-8 h-8" />,
     details: [
-      'Open in IDE — Full code editor with file tree, terminal, and preview',
-      'Download ZIP — Get all generated files as a downloadable archive',
-      'Edit & Iterate — Modify any file and rebuild specific parts',
-      'Deploy — One-click deployment to Vercel, Netlify, or Render',
+      'Each starter pre-fills the builder with a production-ready prompt',
+      'Builds begin immediately after you select a starter or choose blank',
+      'You can refine the prompt, change settings, or edit the generated app',
+      'Every build produces a working preview you can inspect and share',
     ],
-    tip: 'Every build is saved to your account. Come back anytime to view, edit, or download previous builds.',
+    tip: 'Starters use Fast mode for rapid iteration. Switch to Full or Max Power for deeper backend and architecture work.',
   },
 ]
 
@@ -176,10 +173,8 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({
   const handleNext = useCallback(() => {
     if (currentStep < tourSteps.length - 1) {
       setCurrentStep(prev => prev + 1)
-    } else {
-      handleClose()
     }
-  }, [currentStep, handleClose])
+  }, [currentStep])
 
   const handlePrev = useCallback(() => {
     if (currentStep > 0) {
@@ -370,19 +365,17 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({
             ))}
           </div>
 
-          <button
-            type="button"
-            onClick={handleNext}
-            className={cn(
-              'flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-medium transition-all',
-              isLast
-                ? 'bg-gradient-to-r from-red-600 to-orange-600 text-white hover:from-red-500 hover:to-orange-500 shadow-lg shadow-red-500/20'
-                : 'bg-gray-800 text-white hover:bg-gray-700'
-            )}
-          >
-            {isLast ? 'Continue to builder' : 'Next'}
-            <ChevronRight className="w-4 h-4" />
-          </button>
+          {/* Only show Next button for non-last steps; last step requires explicit starter/blank selection */}
+          {!isLast && (
+            <button
+              type="button"
+              onClick={handleNext}
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-medium transition-all bg-gray-800 text-white hover:bg-gray-700"
+            >
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>

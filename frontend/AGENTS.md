@@ -37,6 +37,7 @@ When child docs exist, list them here and keep parent/child contracts synchroniz
 - Build UI must reflect the backend source of truth. Do not invent completed, passed, or deployable states in the client.
 - First-run onboarding must push users toward a successful first build with realistic starter prompts and a clear blank-workspace escape hatch.
 - Generated app previews must be inspectable, interactive, and visually complete. Frontend UI should surface preview verification failures instead of presenting broken iframes as success.
+- Collaboration and presence surfaces are Team/Enterprise/Owner plan features. Lower-tier sessions must not join collaboration rooms or send cursor/edit operations just because an editor component is mounted.
 - Billing and usage UI must derive plans, limits, credits, and cost status from backend contracts. Avoid hardcoded pricing or stale launch-special copy.
 - Shared state updates must avoid empty IDs, duplicate build records, stale progress, or cross-user leakage.
 - UI must be responsive, accessible enough for keyboard/screen-reader basics, and text must fit within controls across supported viewport sizes.

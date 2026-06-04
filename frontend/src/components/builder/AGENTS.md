@@ -23,6 +23,7 @@ This is the highest-leverage frontend surface for launch. It must help a new use
 - Completed builds must preserve quality-gate and verification evidence when restored from status/detail endpoints.
 - Preview and placeholder failures are launch-blocking signals. Surface them as repair/verification issues instead of letting a green progress state hide them.
 - Preview-specific warning banners must be tied to preview-relevant quality-gate stages or verification reports. Do not label backend-only or billing-only failures as preview launch blockers.
+- Post-build persistent-preview controls must use a real deployment id. If the builder lacks an explicit deployment id, discover an existing project deployment before showing a deploy-first state; never call always-on endpoints with missing or fake ids.
 - Onboarding may guide users toward starter prompts, but it must preserve a blank-workspace escape hatch for users who want the IDE directly.
 - Blank-workspace actions must pass an explicit `projectId: null` intent through the app shell and land on `/ide`; they must not silently reopen the active or last project.
 - Dismissing onboarding should be deterministic and test-covered. `forceShow` must override stored completion for support, demos, and regression tests.

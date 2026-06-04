@@ -136,6 +136,10 @@ vi.mock('@/components/ide/GitPanel', () => ({
   GitPanel: () => <div>Git Panel</div>,
 }))
 
+vi.mock('@/components/ide/PackageManager', () => ({
+  PackageManager: () => <div>Package Manager</div>,
+}))
+
 vi.mock('@/components/ide/SplitPaneEditor', () => ({
   SplitPaneEditor: React.forwardRef((_props: any, _ref) => <div>Split Pane Editor</div>),
 }))
@@ -187,6 +191,15 @@ describe('IDELayout preview workspace', () => {
     fireEvent.click(deployTab)
 
     expect(await screen.findByText('Deployment Panel')).toBeTruthy()
+  })
+
+  it('renders the dependencies panel from the left sidebar', async () => {
+    render(<IDELayout launchTarget="editor" />)
+
+    const depsTab = await screen.findByRole('button', { name: /deps/i })
+    fireEvent.click(depsTab)
+
+    expect(await screen.findByText('Package Manager')).toBeTruthy()
   })
 
   it('resets stale split preview state when a new launch request targets dashboard', async () => {

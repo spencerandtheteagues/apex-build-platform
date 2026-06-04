@@ -71,7 +71,7 @@ Owner: openclaw
 TASK-002: Create live Stripe webhook endpoint and replay all critical events
 Priority: P0
 Category: Billing
-Status: PARTIAL — endpoint is live and processing real payments; 2026-06-04 safe verifier confirmed payments ready and invalid-signature rejection; controlled replay of all critical real event types is still required
+Status: PARTIAL — endpoint is live, invalid signatures are rejected, and non-paid Checkout session probes pass; controlled replay of all critical event types is still required
 Owner: openclaw
 ```
 
@@ -79,7 +79,7 @@ Owner: openclaw
 TASK-003: Execute one controlled live paid checkout end-to-end with a real card
 Priority: P0
 Category: Billing
-Status: PARTIAL — real customer payment observed 2026-05-25; 2026-06-04 safe verifier created live subscription and credit checkout sessions without completing payment; controlled paid checkout, portal, plan-change, cancellation, and webhook replay evidence still required
+Status: PARTIAL — real customer payment observed 2026-05-25 and non-paid subscription/credit Checkout session creation passed on 2026-06-02; controlled paid checkout completion, portal, plan-change, cancellation, and webhook replay evidence still required
 Owner: openclaw
 ```
 
@@ -122,6 +122,7 @@ Priority: P0
 Category: Build-Quality
 Estimated Time: 10 minutes
 Owner: openclaw
+Status: BLOCKED — 2026-06-02 BYOK/Ollama paid-max substitute attempt reached production build `8ae1326f-bb88-4e2d-b452-f2afae15a6df` but failed before generation because Ollama Cloud returned HTTP 429 session usage limit for account `apexbuildai`; local VPS Ollama routing is now hardened for installed model discovery, but flagship/production-reachable paid-max evidence remains open
 
 CONTEXT:
 Max-power routing (Claude Opus, GPT, Gemini Pro, Grok, Kimi/local) is our premium tier and the
@@ -155,30 +156,28 @@ Priority: P0
 Category: Reliability
 Estimated Time: 8 minutes (config) + watch
 Owner: openclaw
-Status: GITHUB ACCOUNT BILLING LOCK / LOCAL BYPASS REQUIRED — `APEX_ENABLE_GITHUB_ACTIONS=true`, Render secrets, and canary email/password secrets are configured; a passing production-canary workflow run is still required. As of 2026-06-04, the Hermes `GITHUB_TOKEN` authenticates as `spencerandtheteagues` on GitHub Free with admin access to this public repo, Actions enabled, and repo variables readable (`APEX_REQUIRE_PAID_CANARIES=false`). The latest failed check-run annotation is GitHub's account-level refusal: "The job was not started because your account is locked due to a billing issue." This is not a missing GitHub Pro plan and not an Apex paid-canary setting.
+Status: CONFIG ENABLED / STRICT PAID-CANARY GUARDRAILS ADDED / STRICT RENDER ENV VERIFIED LOCALLY / PASS EVIDENCE PENDING — `APEX_ENABLE_GITHUB_ACTIONS=true` and `RENDER_API_KEY` are configured per 2026-05-26 handoff; a passing production-canary workflow run is still required as launch evidence
 
 CONTEXT:
-production-canary.yml exists and the enabling variable is configured, but this tracker still needs
-a recorded passing run against apex-build.dev with strict Render/Stripe/canary secrets. This is the
-automated safety net that prevents shipping a broken deploy. GitHub-hosted execution is blocked by
-GitHub's account billing lock even though the account is on the Free plan and the repo is public.
-Until GitHub unlocks Actions for the account, use local/Hermes/Render execution for canary evidence
-instead of waiting on GitHub-hosted runners.
+production-canary.yml exists and the enabling variable is now configured, but this tracker still
+needs a recorded passing run against apex-build.dev with strict Render/Stripe/canary secrets.
+This is the automated safety net that prevents shipping a broken deploy.
 
 FILES TO CHANGE:
 - None (GitHub repo Actions secrets + variable APEX_ENABLE_GITHUB_ACTIONS=true)
 
 EXACT CHANGE REQUIRED:
-Confirm repo secrets: RENDER_API_KEY, RENDER_BACKEND_SERVICE_ID, RENDER_FRONTEND_SERVICE_ID, and any
-Stripe/canary secrets the workflow expects (see production-canary.yml). `APEX_REQUIRE_PAID_CANARIES`
-is currently `false`; set it to `true` only when intentionally treating paid canaries as a hard
-workflow gate. After GitHub billing is unlocked, manually dispatch the workflow with paid canary
-credentials present. Before that, run the same launch checks locally or through Hermes/Render and
-record artifacts in the tracker.
+Set repo secrets: RENDER_API_KEY, RENDER_BACKEND_SERVICE_ID, RENDER_FRONTEND_SERVICE_ID, and any
+Stripe/canary secrets the workflow expects (see production-canary.yml). With
+`APEX_REQUIRE_PAID_CANARIES=true`, the Stripe verifier requires an existing paid canary account
+that can open the billing portal, and paid build canaries fail instead of skipping when
+credentials are absent. Set repo variables
+APEX_ENABLE_GITHUB_ACTIONS=true and APEX_REQUIRE_PAID_CANARIES=true when using the workflow as
+launch evidence. Manually dispatch the workflow with paid canary credentials present.
 
 ACCEPTANCE CRITERIA:
 - [ ] "Launch Verification Scripts" job passes (Stripe + Render + mobile verifiers)
-- [ ] Strict Render env verification passes without printing secret values
+- [x] Strict Render env verification passes without printing secret values (local Render API verifier passed 2026-06-02 05:05 UTC; GitHub workflow evidence still pending)
 - [ ] Public launch smoke enforces runtime launch readiness and passes
 - [ ] No secret value appears in any workflow log
 
@@ -192,27 +191,33 @@ Priority: P0
 Category: Reliability
 Estimated Time: 10 minutes
 Owner: hernmes
-Status: COMPLETE — production rollback -> roll-forward drill was executed and documented on 2026-06-04. No further live rollback drill should run without explicit operator approval for that exact action.
+Status: DRY-RUN-FIRST ROLLBACK SCRIPT ADDED / RENDER API DRY-RUN PASSED / EXECUTION EVIDENCE PENDING — `scripts/run_render_rollback_drill.mjs` uses Render's current rollback API and exact deploy-id confirmations; a real rollback/roll-forward drill is still required in `docs/launch-runbook.md`
 
 CONTEXT:
-The rollback drill evidence is now documented in `docs/launch-runbook.md`. If a launch-day deploy
-breaks builds or payments, use the documented procedure and current deploy metadata. This is no
-longer an open launch task.
+The tracker lists "rollback drill" as required-but-undone evidence. If a launch-day deploy breaks
+builds or payments, we must be able to roll back to a known-good commit in under 5 minutes with
+confidence. Never tested = unknown blast radius. The 2026-06-02 Render API dry-run selected
+current live deploy `dep-d8dqqkbrjlhs73bh6qj0` and rollback target
+`dep-d8dqbfvlk1mc73dl2ibg`, but did not execute rollback or roll-forward.
 
 FILES TO CHANGE:
-- docs/launch-runbook.md (append a dated "Rollback Drill" evidence section)
+- docs/launch-runbook.md (append a dated "Rollback Drill" evidence section after execution)
+- scripts/run_render_rollback_drill.mjs (already added as dry-run-first tooling)
 
 EXACT CHANGE REQUIRED:
-Do not rerun the live drill without explicit operator approval. For future incidents, read current
-and prior known-good deploy IDs/commits from Render deploy metadata immediately before action,
-roll back to the selected deploy, verify health, roll forward when appropriate, and record deploy
-IDs/timestamps.
+1. Read the current and prior known-good deploy IDs/commits from Render deploy metadata immediately
+before the drill. 2. Dry-run `scripts/run_render_rollback_drill.mjs` and copy its exact rollback
+and roll-forward deploy IDs into `APEX_RENDER_CONFIRM_ROLLBACK_DEPLOY_ID` and
+`APEX_RENDER_CONFIRM_ROLL_FORWARD_DEPLOY_ID`. 3. Execute the script during the approved window,
+which calls Render `POST /services/{id}/rollback` for rollback and roll-forward. 4. Confirm
+/health returns healthy and a smoke build still works. 5. Record start/end timestamps, deploy IDs,
+commit IDs, and total downtime in launch-runbook.md.
 
 ACCEPTANCE CRITERIA:
-- [x] Rollback to prior deploy completed and health was verified
-- [x] Total rollback/roll-forward cycle observed under the 5-minute target
-- [x] Roll-forward restored current code cleanly
-- [x] Evidence section added to docs/launch-runbook.md with timestamps and deploy IDs
+- [ ] Rollback to prior deploy completes and /health is healthy
+- [ ] Total time-to-rollback measured and < 5 minutes
+- [ ] Roll-forward restores current code cleanly
+- [ ] Evidence section added to docs/launch-runbook.md with timestamps and deploy IDs
 
 VERIFICATION COMMAND:
 grep -A5 "Rollback Drill" docs/launch-runbook.md
@@ -224,7 +229,7 @@ Priority: P0
 Category: Reliability
 Estimated Time: 10 minutes (backend) + parallel (frontend)
 Owner: hernmes
-Status: BACKEND PASS / FRONTEND PENDING — backend passed on 2026-05-26 with `go test -p 1 -parallel 4 ./... -timeout 20m`; frontend gate still needs current evidence
+Status: BACKEND PASS / FRONTEND PASS ON DIRTY LAUNCH TREE — backend serialized tests and build passed locally on 2026-06-02 after stopping stale agent processes; frontend typecheck, full Vitest, lint, and build also passed locally on 2026-06-02. Re-run aggregate backend+frontend on the final launch commit if more code changes land.
 
 CONTEXT:
 The launch evidence checklist requires the serialized backend suite, frontend typecheck/test/lint/build, and
@@ -242,9 +247,9 @@ tasks. Do not mark launch-ready with red tests on critical paths.
 ACCEPTANCE CRITERIA:
 - [x] cd backend && go test -p 1 -parallel 4 ./... -timeout 20m passes
 - [x] cd backend && go build ./... succeeds
-- [ ] cd frontend && npm run typecheck passes
-- [ ] cd frontend && npm run test -- --run passes
-- [ ] cd frontend && npm run build succeeds
+- [x] cd frontend && npm run typecheck passes
+- [x] cd frontend && npm run test -- --run passes
+- [x] cd frontend && npm run build succeeds
 - [ ] Any failure on a build/payment/preview path is escalated as a new P0
 
 VERIFICATION COMMAND:
@@ -587,6 +592,7 @@ Priority: P1
 Category: IDE
 Estimated Time: 10 minutes
 Owner: openclaw
+Status: COMPLETE — existing package manager is now exposed as a Dependencies sidebar tab in the IDE; focused IDELayout test and frontend typecheck passed on 2026-06-02
 
 CONTEXT:
 Replit auto-detects imports and shows a package manager UI. backend/internal/packages and
@@ -602,13 +608,13 @@ via the packages API. Phase 1: read-only listing with a refresh. Register as a s
 IDE next to the file explorer.
 
 ACCEPTANCE CRITERIA:
-- [ ] A Dependencies tab appears in the IDE sidebar
-- [ ] It lists current project packages with versions
-- [ ] Empty/blank projects show a graceful empty state
-- [ ] No regression: file explorer and other sidebar tabs still work
+- [x] A Dependencies tab appears in the IDE sidebar
+- [x] It lists current project packages with versions
+- [x] Empty/blank projects show a graceful empty state
+- [x] No regression: file explorer and other sidebar tabs still work
 
 VERIFICATION COMMAND:
-grep -rn "Dependencies\|packages" frontend/src/components/ide/ | head && cd frontend && npm run typecheck 2>&1 | tail -5
+cd frontend && npm run test -- --run src/components/ide/IDELayout.test.tsx && npm run typecheck
 ```
 
 ```
@@ -707,6 +713,7 @@ Priority: P1
 Category: Reliability
 Estimated Time: 8 minutes
 Owner: hernmes
+Status: COMPLETE — 2026-06-02 no-credit audit passed; public landing copy has no native/store GA claims, authenticated mobile surfaces label native binaries/store upload as gated/separate, and live platform truth keeps mobile source beta plus EAS/store paths gated
 
 CONTEXT:
 Native mobile builds/store upload remain gated beta until real EAS/Apple/Google evidence exists.
@@ -721,13 +728,17 @@ implying native builds or store publishing is either removed, or clearly labeled
 soon". Run verify_mobile_external_readiness.mjs.
 
 ACCEPTANCE CRITERIA:
-- [ ] No public copy claims live native iOS/Android builds or store publishing as GA
-- [ ] Any mobile claim is labeled beta/coming-soon
-- [ ] verify_mobile_external_readiness.mjs passes its launch-safe gate
-- [ ] Source/export + Expo Web preview claims (which are true) remain
+- [x] No public copy claims live native iOS/Android builds or store publishing as GA
+- [x] Any mobile claim is labeled beta/coming-soon
+- [x] verify_mobile_external_readiness.mjs passes its launch-safe gate
+- [x] Source/export + Expo Web preview claims (which are true) remain
+
+EVIDENCE:
+2026-06-02: `node scripts/verify_mobile_external_readiness.mjs` passed the default launch-safe gate; `APEX_MOBILE_CHECK_LIVE=1 node scripts/verify_mobile_external_readiness.mjs` passed live platform truth for `mobile_source_generation=flagged_beta`, `mobile_eas_builds=gated`, and `mobile_store_submission=gated`. Focused grep found no `frontend/src/pages/Landing.tsx` native App Store / Google Play / native-build GA claims. Authenticated mobile project copy separates Expo Web preview, native binaries, and store upload as gated workflows.
 
 VERIFICATION COMMAND:
-node scripts/verify_mobile_external_readiness.mjs && grep -in "app store\|google play\|native app\|native build" frontend/src/pages/Landing.tsx
+node scripts/verify_mobile_external_readiness.mjs
+! grep -in "app store\|google play\|native app\|native build" frontend/src/pages/Landing.tsx
 ```
 
 ```

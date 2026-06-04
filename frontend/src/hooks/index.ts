@@ -30,6 +30,8 @@ export {
   useIsConnected,
   useCollaborationUsers,
   useConnectedUsers,
+  useIsTeamPlan,
+  useSubscriptionType,
 } from './useStore'
 
 // Collaboration hook

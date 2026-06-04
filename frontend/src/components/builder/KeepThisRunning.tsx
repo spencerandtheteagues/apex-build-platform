@@ -2,12 +2,12 @@
 // TASK-104: Surfaces persistent-preview / always-on as a post-build action.
 // Reuses apiService.getAlwaysOnStatus and apiService.setAlwaysOn.
 // Paid users see an active toggle; free users see an upgrade prompt.
-// If deploymentId is missing, shows a "Deploy first" state instead of a fake API call.
+// If deploymentId is missing, auto-discovers the first running deployment.
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { apiService, AlwaysOnStatus } from '@/services/api'
-import { Badge } from '@/components/ui/Badge'
+import { Badge } from '@/components/ui'
 import {
   Zap,
   Power,
@@ -29,16 +29,57 @@ export interface KeepThisRunningProps {
 
 export const KeepThisRunning: React.FC<KeepThisRunningProps> = ({
   projectId,
-  deploymentId,
+  deploymentId: explicitDeploymentId,
   isPaid,
   buildCompleted,
   className,
 }) => {
+  const [discoveredDeploymentId, setDiscoveredDeploymentId] = useState<string | null>(null)
+  const [discoveringDeployment, setDiscoveringDeployment] = useState(false)
   const [enabled, setEnabled] = useState(false)
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<AlwaysOnStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showBreakdown, setShowBreakdown] = useState(false)
+  const discoveryAttemptedRef = useRef(false)
+
+  // Resolve effective deploymentId: explicit > discovered > pending discovery
+  const deploymentId = explicitDeploymentId || discoveredDeploymentId
+
+  // Auto-discover deployments when projectId is available but deploymentId is not
+  useEffect(() => {
+    if (!isPaid || !projectId || explicitDeploymentId) return
+    if (discoveryAttemptedRef.current) return
+    discoveryAttemptedRef.current = true
+
+    const discoverDeployment = async () => {
+      setDiscoveringDeployment(true)
+      try {
+        const response = await apiService.getNativeDeployments(projectId, 1, 20)
+        const deployments = response?.deployments || []
+        // Prefer a running deployment, then any deployment
+        const running = deployments.find(
+          (d) => d.status === 'running' && d.container_status === 'healthy'
+        )
+        const target = running || deployments[0] || null
+        if (target) {
+          setDiscoveredDeploymentId(target.id)
+        }
+      } catch {
+        // Non-fatal: deployment discovery failed, component degrades gracefully
+      } finally {
+        setDiscoveringDeployment(false)
+      }
+    }
+
+    void discoverDeployment()
+  }, [isPaid, projectId, explicitDeploymentId])
+
+  // Reset discovery when identifiers change
+  useEffect(() => {
+    discoveryAttemptedRef.current = false
+    setDiscoveredDeploymentId(null)
+  }, [projectId, explicitDeploymentId])
 
   const canCallApi = isPaid && Boolean(projectId && deploymentId)
 
@@ -50,7 +91,6 @@ export const KeepThisRunning: React.FC<KeepThisRunningProps> = ({
       setEnabled(data.always_on)
       setError(null)
     } catch (err: any) {
-      // Defensive: if the endpoint 404s (deployment not yet provisioned), treat as not available.
       if (err?.response?.status === 404) {
         setStatus(null)
         setEnabled(false)
@@ -112,7 +152,7 @@ export const KeepThisRunning: React.FC<KeepThisRunningProps> = ({
     }
     if (!isOn || s === 'stopped') {
       return (
-        <Badge variant="neutral" icon={<Power size={10} />} className="text-[10px]">
+        <Badge variant="outline" icon={<Power size={10} />} className="text-[10px] border-gray-600 text-gray-400 bg-gray-950/50">
           Cold
         </Badge>
       )
@@ -153,7 +193,29 @@ export const KeepThisRunning: React.FC<KeepThisRunningProps> = ({
     )
   }
 
-  // ── Paid user but no deploymentId yet: "Deploy first" state ────────────────
+  // ── Paid user, still discovering deployment ────────────────────────────────
+  if (discoveringDeployment) {
+    return (
+      <div
+        className={cn(
+          'shrink-0 flex items-center gap-3 px-3 py-2 border-t border-sky-500/10 bg-slate-950/80',
+          className
+        )}
+      >
+        <div className="flex items-center gap-2 text-gray-400">
+          <Zap className="w-4 h-4 text-cyan-400" />
+          <span className="text-xs font-medium text-cyan-100">Keep this app running</span>
+        </div>
+        <span className="text-[10px] text-gray-500">—</span>
+        <RefreshCw className="w-3 h-3 text-cyan-400 animate-spin" />
+        <span className="text-[10px] text-gray-400">
+          Checking deployment status...
+        </span>
+      </div>
+    )
+  }
+
+  // ── Paid user but no deploymentId & discovery failed: "Deploy first" state ──
   if (isPaid && !canCallApi) {
     return (
       <div
@@ -179,7 +241,7 @@ export const KeepThisRunning: React.FC<KeepThisRunningProps> = ({
   return (
     <div
       className={cn(
-        'shrink-0 flex items-center gap-3 px-3 py-2 border-t border-sky-500/10 bg-slate-950/80',
+        'shrink-0 relative flex items-center gap-3 px-3 py-2 border-t border-sky-500/10 bg-slate-950/80',
         className
       )}
     >

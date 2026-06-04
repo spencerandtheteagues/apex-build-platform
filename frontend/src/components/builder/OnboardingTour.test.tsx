@@ -137,20 +137,17 @@ describe('OnboardingTour', () => {
     expect(onComplete).toHaveBeenCalledTimes(1)
   })
 
-  it('marks onboarding complete when continuing to the builder from the last step', () => {
+  it('requires an explicit starter or blank-workspace action on the last step', () => {
     const onComplete = vi.fn()
 
-    render(<OnboardingTour forceShow onComplete={onComplete} />)
+    render(<OnboardingTour forceShow onOpenBlankWorkspace={vi.fn()} onComplete={onComplete} />)
 
     advanceToStarterStep()
-    fireEvent.click(screen.getByText('Continue to builder'))
 
-    act(() => {
-      vi.advanceTimersByTime(300)
-    })
-
-    expect(localStorage.getItem(ONBOARDING_KEY)).toBe('true')
-    expect(onComplete).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('Continue to builder')).toBeNull()
+    expect(screen.getByRole('button', { name: /prefill prompt: portfolio site/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /open blank workspace/i })).toBeTruthy()
+    expect(onComplete).not.toHaveBeenCalled()
   })
 
   it('keeps fast starter prompts scoped to frontend-only builds', () => {

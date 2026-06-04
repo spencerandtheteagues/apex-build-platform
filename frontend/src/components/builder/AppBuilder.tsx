@@ -7826,6 +7826,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     Migrate from Replit
                   </Button>
 
+                  <div className="mt-3 pt-3 border-t border-gray-800/60">
+                    <p className="text-xs text-gray-500 mb-3">Prefer to start from scratch or explore the IDE first?</p>
+                  </div>
+
                   <Button
                     onClick={() => setShowGitHubImport(true)}
                     variant="outline"

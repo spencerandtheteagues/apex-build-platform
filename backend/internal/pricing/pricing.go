@@ -8,7 +8,7 @@
 //   - RawCost = actual API cost for the specific model based on token usage
 //   - profitMargin = our markup (default 1.5 = 50%), configurable via APEX_PROFIT_MARGIN
 //   - powerSurcharge = extra charge for power modes that use more resources
-//     (fast=1.0, balanced=1.12, max=1.25) — reflects actual orchestration overhead
+//     (fast=1.0, balanced=1.12, max=1.25, auto=1.25) — reflects actual orchestration overhead
 //     with a small margin buffer. Model routing already selects more expensive
 //     models for higher power modes; the surcharge covers retries, longer context
 //     windows, and heavier orchestration.
@@ -30,6 +30,7 @@ const (
 	ModeFast     = "fast"
 	ModeBalanced = "balanced"
 	ModeMax      = "max"
+	ModeAuto     = "auto" // OpenRouter dispatcher — picks best model automatically
 )
 
 // ModelPricing defines per-1M token pricing for a model.
@@ -142,6 +143,82 @@ func newEngineFromEnv() *Engine {
 					"glm-4.5": {InputPer1M: 0.20, OutputPer1M: 0.60},
 				},
 			},
+			// OpenRouter — pass-through to 300+ models via OpenAI-compatible API.
+			// Model IDs use OpenRouter's full "org/model" format.
+			// Default covers mid-tier pro models; free models bill $0 raw cost.
+			"openrouter": {
+				Default: ModelPricing{InputPer1M: 0.70, OutputPer1M: 2.00},
+				Models: map[string]ModelPricing{
+					// Elite tier
+					"openai/gpt-5.5":              {InputPer1M: 5.00, OutputPer1M: 30.00},
+					"openai/gpt-5.5-pro":          {InputPer1M: 30.00, OutputPer1M: 180.00},
+					"openai/o3-pro":               {InputPer1M: 20.00, OutputPer1M: 80.00},
+					"openai/gpt-5.4":              {InputPer1M: 2.50, OutputPer1M: 15.00},
+					"openai/gpt-5.4-pro":          {InputPer1M: 30.00, OutputPer1M: 180.00},
+					"google/gemini-2.5-pro":       {InputPer1M: 1.25, OutputPer1M: 10.00},
+					// Pro tier
+					"openai/gpt-5.3-codex":        {InputPer1M: 1.75, OutputPer1M: 14.00},
+					"openai/gpt-5.2-codex":        {InputPer1M: 1.75, OutputPer1M: 14.00},
+					"openai/gpt-5.1-codex":        {InputPer1M: 1.25, OutputPer1M: 10.00},
+					"openai/gpt-5.1":              {InputPer1M: 1.25, OutputPer1M: 10.00},
+					"openai/gpt-5":                {InputPer1M: 1.25, OutputPer1M: 10.00},
+					"openai/o3":                   {InputPer1M: 2.00, OutputPer1M: 8.00},
+					"openai/o4-mini":              {InputPer1M: 1.10, OutputPer1M: 4.40},
+					"openai/o4-mini-high":         {InputPer1M: 1.10, OutputPer1M: 4.40},
+					"openai/gpt-4.1":              {InputPer1M: 2.00, OutputPer1M: 8.00},
+					"deepseek/deepseek-v4-pro":    {InputPer1M: 0.435, OutputPer1M: 0.87},
+					"deepseek/deepseek-r1-0528":   {InputPer1M: 0.50, OutputPer1M: 2.15},
+					"deepseek/deepseek-r1":        {InputPer1M: 0.70, OutputPer1M: 2.50},
+					"x-ai/grok-4.20":              {InputPer1M: 1.25, OutputPer1M: 2.50},
+					"x-ai/grok-4.20-multi-agent":  {InputPer1M: 2.00, OutputPer1M: 6.00},
+					"x-ai/grok-build-0.1":         {InputPer1M: 1.00, OutputPer1M: 2.00},
+					"google/gemini-3.5-flash":     {InputPer1M: 1.50, OutputPer1M: 9.00},
+					"google/gemini-3.1-pro-preview": {InputPer1M: 2.00, OutputPer1M: 12.00},
+					"mistralai/mistral-medium-3-5": {InputPer1M: 1.50, OutputPer1M: 7.50},
+					"qwen/qwen3-235b-a22b":        {InputPer1M: 0.455, OutputPer1M: 1.82},
+					"qwen/qwen3-coder-plus":       {InputPer1M: 0.65, OutputPer1M: 3.25},
+					"moonshotai/kimi-k2.6":        {InputPer1M: 0.684, OutputPer1M: 3.42},
+					// Balanced tier
+					"openai/gpt-5-mini":           {InputPer1M: 0.25, OutputPer1M: 2.00},
+					"openai/gpt-5.1-codex-mini":   {InputPer1M: 0.25, OutputPer1M: 2.00},
+					"openai/gpt-4.1-mini":         {InputPer1M: 0.40, OutputPer1M: 1.60},
+					"openai/gpt-4o":               {InputPer1M: 2.50, OutputPer1M: 10.00},
+					"google/gemini-2.5-flash":     {InputPer1M: 0.30, OutputPer1M: 2.50},
+					"google/gemini-2.5-flash-lite": {InputPer1M: 0.10, OutputPer1M: 0.40},
+					"deepseek/deepseek-v3.2":      {InputPer1M: 0.2288, OutputPer1M: 0.3432},
+					"deepseek/deepseek-v4-flash":  {InputPer1M: 0.0983, OutputPer1M: 0.1966},
+					"deepseek/deepseek-chat-v3.1": {InputPer1M: 0.21, OutputPer1M: 0.79},
+					"qwen/qwen3-coder":            {InputPer1M: 0.22, OutputPer1M: 1.80},
+					"qwen/qwen3-max":              {InputPer1M: 0.78, OutputPer1M: 3.90},
+					"meta-llama/llama-4-maverick": {InputPer1M: 0.15, OutputPer1M: 0.60},
+					"meta-llama/llama-4-scout":    {InputPer1M: 0.08, OutputPer1M: 0.30},
+					"mistralai/devstral-2512":     {InputPer1M: 0.40, OutputPer1M: 2.00},
+					"mistralai/codestral-2508":    {InputPer1M: 0.30, OutputPer1M: 0.90},
+					"mistralai/mistral-large-2512": {InputPer1M: 0.50, OutputPer1M: 1.50},
+					"amazon/nova-premier-v1":      {InputPer1M: 2.50, OutputPer1M: 12.50},
+					"amazon/nova-pro-v1":          {InputPer1M: 0.80, OutputPer1M: 3.20},
+					// Fast tier
+					"openai/gpt-5-nano":           {InputPer1M: 0.05, OutputPer1M: 0.40},
+					"openai/gpt-4.1-nano":         {InputPer1M: 0.10, OutputPer1M: 0.40},
+					"openai/gpt-4o-mini":          {InputPer1M: 0.15, OutputPer1M: 0.60},
+					"qwen/qwen3-coder-flash":      {InputPer1M: 0.195, OutputPer1M: 0.975},
+					"google/gemini-3.1-flash-lite": {InputPer1M: 0.25, OutputPer1M: 1.50},
+					"mistralai/mistral-small-3.2-24b-instruct": {InputPer1M: 0.075, OutputPer1M: 0.20},
+					"meta-llama/llama-3.3-70b-instruct": {InputPer1M: 0.10, OutputPer1M: 0.32},
+					"amazon/nova-lite-v1":         {InputPer1M: 0.06, OutputPer1M: 0.24},
+					"amazon/nova-micro-v1":        {InputPer1M: 0.035, OutputPer1M: 0.14},
+					"microsoft/phi-4":             {InputPer1M: 0.065, OutputPer1M: 0.14},
+					// Free tier — $0 raw cost; we still apply routing fee
+					"moonshotai/kimi-k2.6:free":   {InputPer1M: 0.00, OutputPer1M: 0.00},
+					"openai/gpt-oss-120b:free":    {InputPer1M: 0.00, OutputPer1M: 0.00},
+					"openai/gpt-oss-20b:free":     {InputPer1M: 0.00, OutputPer1M: 0.00},
+					"qwen/qwen3-coder:free":       {InputPer1M: 0.00, OutputPer1M: 0.00},
+					"meta-llama/llama-3.3-70b-instruct:free": {InputPer1M: 0.00, OutputPer1M: 0.00},
+					"meta-llama/llama-3.2-3b-instruct:free": {InputPer1M: 0.00, OutputPer1M: 0.00},
+					"google/gemma-4-31b-it:free":  {InputPer1M: 0.00, OutputPer1M: 0.00},
+					"openrouter/free":             {InputPer1M: 0.00, OutputPer1M: 0.00},
+				},
+			},
 		},
 
 		// Our profit margin: 1.5 = 50% markup on API cost.
@@ -155,6 +232,7 @@ func newEngineFromEnv() *Engine {
 			ModeFast:     1.00, // no surcharge — single-pass, minimal orchestration
 			ModeBalanced: 1.12, // 12% — retry loops, extended context, multi-step validation
 			ModeMax:      1.25, // 25% — full orchestration: retries, long context, parallel agents, verification
+			ModeAuto:     1.25, // same as max — dispatcher picks premium models with full orchestration
 		},
 
 		byokRoutingFeePer1M:  0.25,
@@ -168,6 +246,7 @@ func newEngineFromEnv() *Engine {
 	engine.powerSurcharges[ModeFast] = getEnvFloat("APEX_POWER_SURCHARGE_FAST", engine.powerSurcharges[ModeFast])
 	engine.powerSurcharges[ModeBalanced] = getEnvFloat("APEX_POWER_SURCHARGE_BALANCED", engine.powerSurcharges[ModeBalanced])
 	engine.powerSurcharges[ModeMax] = getEnvFloat("APEX_POWER_SURCHARGE_MAX", engine.powerSurcharges[ModeMax])
+	engine.powerSurcharges[ModeAuto] = getEnvFloat("APEX_POWER_SURCHARGE_AUTO", engine.powerSurcharges[ModeAuto])
 
 	return engine
 }
@@ -281,6 +360,18 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 			return "glm-5.1"
 		}
 		return "glm-4.5"
+	case "openrouter":
+		// Auto mode uses the dispatcher sentinel; other modes pick a tier-appropriate model.
+		if mode == ModeAuto {
+			return "auto"
+		}
+		if mode == ModeMax {
+			return "openai/gpt-5.5"
+		}
+		if mode == ModeBalanced {
+			return "deepseek/deepseek-v4-pro"
+		}
+		return "openai/gpt-5-nano"
 	default:
 		return ""
 	}
@@ -337,6 +428,8 @@ func normalizePowerMode(mode string, fallback string) string {
 		return ModeBalanced
 	case "fast", "cheap", "economy":
 		return ModeFast
+	case "auto":
+		return ModeAuto
 	}
 	if fallback != "" {
 		return normalizePowerMode(fallback, ModeFast)

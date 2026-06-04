@@ -39,6 +39,7 @@ import { DatabasePanel } from '@/components/ide/panels/DatabasePanel'
 import { DeploymentPanel } from '@/components/deployment'
 import { SearchPanel } from '@/components/ide/SearchPanel'
 import { GitPanel } from '@/components/ide/GitPanel'
+import { PackageManager } from '@/components/ide/PackageManager'
 import { SplitPaneEditor, SplitPaneEditorRef } from '@/components/ide/SplitPaneEditor'
 import { usePaneManager } from '@/hooks/usePaneManager'
 import APIKeySettings from '@/components/settings/APIKeySettings'
@@ -96,6 +97,7 @@ import {
   LockKeyhole,
   CreditCard,
   Globe,
+  Package as PackageIcon,
 } from 'lucide-react'
 
 // Loading fallback for lazy-loaded components.
@@ -151,7 +153,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
   const [leftPanelState, setLeftPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [rightPanelState, setRightPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [bottomPanelState, setBottomPanelState] = useState<PanelState>('collapsed')
-  const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git' | 'history'>('explorer')
+  const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git' | 'dependencies' | 'history'>('explorer')
   const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'deploy' | 'external_deploy' | 'chat' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
   const [showPreview, setShowPreview] = useState(false)
@@ -680,6 +682,13 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
       case 'git':
         return (
           <GitPanel
+            projectId={currentProject?.id}
+            className="h-full border-0"
+          />
+        )
+      case 'dependencies':
+        return (
+          <PackageManager
             projectId={currentProject?.id}
             className="h-full border-0"
           />
@@ -1422,6 +1431,16 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
                       title="Git"
                     >
                       Git
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeLeftTab === 'dependencies' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveLeftTab('dependencies')}
+                      icon={<PackageIcon size={14} />}
+                      className={idePanelTabClass(activeLeftTab === 'dependencies')}
+                      title="Dependencies"
+                    >
+                      Deps
                     </Button>
                     <Button
                       size="sm"
