@@ -2704,6 +2704,17 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		available[p] = true
 	}
 
+	// Auto mode: pin all roles to OpenRouter dispatcher so the GPT-5.5 auto-selector
+	// chooses the best model per request rather than static per-role assignments.
+	if build != nil && build.PowerMode == PowerAuto && available[ai.ProviderOpenRouter] {
+		log.Printf("PowerAuto: routing all %d roles to OpenRouter dispatcher", len(roles))
+		for _, role := range roles {
+			assignments[role] = ai.ProviderOpenRouter
+		}
+		am.logProviderAssignments(build, assignments)
+		return assignments
+	}
+
 	// When the user is explicitly using BYOK/local Ollama, keep Ollama primary
 	// across the build to honor owned compute and avoid platform spend. In
 	// platform mode hosted Ollama must not bypass role-specialized scorecard
