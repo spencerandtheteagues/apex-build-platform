@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -486,5 +487,64 @@ func TestGenerateTaskOutputWithProvider_TracksActualResponseProvider(t *testing.
 	}
 	if got := taskOutputMetricString(candidate.Output, "requested_provider"); got != "ollama" {
 		t.Fatalf("requested_provider metric = %q, want ollama", got)
+	}
+}
+
+func TestGenerateTaskOutputWithProviderRejectsNonFreeOpenRouterActualForPinnedBuild(t *testing.T) {
+	router := &waterfallProbeRouter{
+		response: &ai.AIResponse{
+			Provider: ai.ProviderOpenRouter,
+			Content:  "// File: src/App.tsx\n```typescript\nexport default function App() { return <main>ok</main>; }\n```",
+			Metadata: map[string]any{
+				"model": "openai/o3-2025-04-16",
+			},
+			Usage: &ai.Usage{},
+		},
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		builds:   map[string]*Build{},
+	}
+
+	build := &Build{
+		ID:           "build-openrouter-free-pin",
+		UserID:       22,
+		PowerMode:    PowerBalanced,
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+		RoleAssignments: map[string]string{
+			"architect": "openrouter",
+			"coder":     "openrouter",
+			"tester":    "openrouter",
+			"devops":    "openrouter",
+		},
+		ProviderModelOverrides: map[string]string{
+			"openrouter": "moonshotai/kimi-k2.6:free",
+		},
+	}
+	agent := &Agent{
+		ID:       "agent-openrouter-free-pin",
+		Role:     RoleArchitect,
+		Provider: ai.ProviderOpenRouter,
+		BuildID:  build.ID,
+		Model:    "moonshotai/kimi-k2.6:free",
+	}
+	task := &Task{
+		ID:          "task-openrouter-free-pin",
+		Type:        TaskGenerateUI,
+		Description: "Generate UI",
+	}
+	build.Agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	_, err := am.generateTaskOutputWithProvider(context.Background(), build, agent, task, "prompt", "system", ai.ProviderOpenRouter, 1200, 0.1)
+	if err == nil {
+		t.Fatal("expected OpenRouter-free policy violation")
+	}
+	if !strings.Contains(err.Error(), "OpenRouter free-model policy violation") {
+		t.Fatalf("expected OpenRouter-free policy violation, got %v", err)
+	}
+	if router.lastOpts.ModelOverride != "moonshotai/kimi-k2.6:free" {
+		t.Fatalf("expected request to stay pinned to free OpenRouter model, got %+v", router.lastOpts)
 	}
 }

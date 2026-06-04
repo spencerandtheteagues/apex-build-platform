@@ -540,11 +540,23 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		waterfallStage = "manual_override"
 		waterfallReason = "provider_model_override"
 	}
+	openRouterFreePolicy := false
+	if provider == ai.ProviderOpenRouter {
+		if freeModel, ok := openRouterFreePolicyModelForBuild(build); ok {
+			model = freeModel
+			openRouterFreePolicy = true
+			waterfallStage = "manual_override"
+			waterfallReason = "openrouter_free_model_pin"
+		}
+	}
 
 	model = normalizeExecutionModelForProvider(provider, model, callPowerMode, am.buildUsesPlatformKeys(build))
 	if managedPlatformOllama && waterfallStage != "manual_override" {
 		waterfallStage = "managed_ollama"
 		waterfallReason = "platform_ollama_cloud_default"
+	}
+	if openRouterFreePolicy && !isOpenRouterFreeModel(model) {
+		return nil, fmt.Errorf("OpenRouter free-model policy violation: requested model %q is not free", model)
 	}
 
 	if am.budgetEnforcer != nil {
@@ -631,6 +643,9 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	providerUsed := firstNonEmptyProvider(response.Provider, provider)
 	actualProviderUsed := actualProviderForAIResponse(response, providerUsed, provider)
 	modelUsed := firstNonEmptyString(ai.GetModelUsed(response, &ai.AIRequest{Model: model}), model)
+	if openRouterFreePolicy && actualProviderUsed == ai.ProviderOpenRouter && !isOpenRouterFreeModel(modelUsed) {
+		return nil, fmt.Errorf("OpenRouter free-model policy violation: requested %q but actual model %q was reported", model, modelUsed)
+	}
 
 	if am.spendTracker != nil && response.Usage != nil {
 		projectID := build.ProjectID

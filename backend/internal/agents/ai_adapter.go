@@ -113,6 +113,19 @@ func selectModelForPowerMode(provider ai.AIProvider, mode PowerMode) string {
 	return "" // Empty string = let the AI client pick its own default
 }
 
+func isOpenRouterFreeModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return normalized == "openrouter/free" || strings.Contains(normalized, ":free")
+}
+
+func defaultOpenRouterFreeModel(mode PowerMode) string {
+	model := selectModelForPowerMode(ai.ProviderOpenRouter, mode)
+	if isOpenRouterFreeModel(model) {
+		return model
+	}
+	return "moonshotai/kimi-k2.6:free"
+}
+
 func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(model))
 	if normalized == "" || normalized == "auto" || provider == "" {
@@ -307,6 +320,11 @@ func selectBuildModelForProviderLocked(build *Build, provider ai.AIProvider) str
 	if build != nil && build.PowerMode != "" {
 		mode = build.PowerMode
 	}
+	if provider == ai.ProviderOpenRouter {
+		if model, ok := openRouterFreePolicyModelForBuildLocked(build); ok {
+			return model
+		}
+	}
 	if override := providerModelOverrideForBuildLocked(build, provider); override != "" {
 		return normalizeExecutionModelForProvider(provider, override, mode, build != nil && strings.TrimSpace(strings.ToLower(build.ProviderMode)) != "byok")
 	}
@@ -323,6 +341,28 @@ func selectBuildModelForProvider(build *Build, provider ai.AIProvider) string {
 	build.mu.RLock()
 	defer build.mu.RUnlock()
 	return selectBuildModelForProviderLocked(build, provider)
+}
+
+func openRouterFreePolicyModelForBuild(build *Build) (string, bool) {
+	if build == nil {
+		return "", false
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	return openRouterFreePolicyModelForBuildLocked(build)
+}
+
+func openRouterFreePolicyModelForBuildLocked(build *Build) (string, bool) {
+	if build == nil {
+		return "", false
+	}
+	if override := normalizeProviderModelOverride(ai.ProviderOpenRouter, build.ProviderModelOverrides[string(ai.ProviderOpenRouter)]); isOpenRouterFreeModel(override) {
+		return override, true
+	}
+	if pinned, ok := singleProviderPinnedByRoleAssignmentMap(build.RoleAssignments); ok && pinned == ai.ProviderOpenRouter {
+		return defaultOpenRouterFreeModel(build.PowerMode), true
+	}
+	return "", false
 }
 
 func selectOllamaModelOverride(mode PowerMode) string {

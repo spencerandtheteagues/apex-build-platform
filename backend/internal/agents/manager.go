@@ -1426,6 +1426,10 @@ func singleProviderPinnedByRoleAssignments(build *Build) (ai.AIProvider, bool) {
 	build.mu.RLock()
 	assignments := cloneStringMap(build.RoleAssignments)
 	build.mu.RUnlock()
+	return singleProviderPinnedByRoleAssignmentMap(assignments)
+}
+
+func singleProviderPinnedByRoleAssignmentMap(assignments map[string]string) (ai.AIProvider, bool) {
 	if len(assignments) == 0 {
 		return "", false
 	}

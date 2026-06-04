@@ -19,6 +19,21 @@ type RoutingWaterfallDecision struct {
 
 func planRoutingWaterfall(build *Build, task *Task, provider ai.AIProvider) RoutingWaterfallDecision {
 	triage := triageTaskForWaterfall(task)
+	if provider == ai.ProviderOpenRouter {
+		if model, ok := openRouterFreePolicyModelForBuild(build); ok {
+			targetMode := PowerBalanced
+			if build != nil && build.PowerMode != "" && build.PowerMode != PowerAuto {
+				targetMode = build.PowerMode
+			}
+			return RoutingWaterfallDecision{
+				Stage:     "manual_override",
+				PowerMode: targetMode,
+				Model:     model,
+				Reason:    "openrouter_free_model_pin",
+				Triage:    triage,
+			}
+		}
+	}
 	if build != nil && build.PowerMode == PowerMax {
 		model := selectModelForPowerMode(provider, PowerMax)
 		return RoutingWaterfallDecision{

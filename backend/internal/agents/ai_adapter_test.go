@@ -82,6 +82,23 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 	}
 }
 
+func TestSelectBuildModelForProviderLocked_OpenRouterRolePinUsesFreeModelWithoutOverride(t *testing.T) {
+	build := &Build{
+		PowerMode:    PowerAuto,
+		ProviderMode: "platform",
+		RoleAssignments: map[string]string{
+			"architect": "openrouter",
+			"coder":     "openrouter",
+			"tester":    "openrouter",
+			"devops":    "openrouter",
+		},
+	}
+
+	if got := selectBuildModelForProviderLocked(build, ai.ProviderOpenRouter); got != "moonshotai/kimi-k2.6:free" {
+		t.Fatalf("OpenRouter-only role pin selected model %q, want free model", got)
+	}
+}
+
 func TestNormalizeProviderModelOverrideDowngradesUnavailableOpenAIMaxAlias(t *testing.T) {
 	t.Parallel()
 
