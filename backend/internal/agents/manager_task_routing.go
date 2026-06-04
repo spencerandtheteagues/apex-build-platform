@@ -643,8 +643,13 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	providerUsed := firstNonEmptyProvider(response.Provider, provider)
 	actualProviderUsed := actualProviderForAIResponse(response, providerUsed, provider)
 	modelUsed := firstNonEmptyString(ai.GetModelUsed(response, &ai.AIRequest{Model: model}), model)
-	if openRouterFreePolicy && actualProviderUsed == ai.ProviderOpenRouter && !isOpenRouterFreeModel(modelUsed) {
-		return nil, fmt.Errorf("OpenRouter free-model policy violation: requested %q but actual model %q was reported", model, modelUsed)
+	if openRouterFreePolicy {
+		if actualProviderUsed != ai.ProviderOpenRouter {
+			return nil, fmt.Errorf("OpenRouter free-model policy violation: requested %q with OpenRouter but actual provider %q was reported", model, actualProviderUsed)
+		}
+		if !isOpenRouterFreeModel(modelUsed) {
+			return nil, fmt.Errorf("OpenRouter free-model policy violation: requested %q but actual model %q was reported", model, modelUsed)
+		}
 	}
 
 	if am.spendTracker != nil && response.Usage != nil {

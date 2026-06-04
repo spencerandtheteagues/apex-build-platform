@@ -287,6 +287,100 @@ func TestGenerateCanDisableInternalFallback(t *testing.T) {
 	}
 }
 
+func TestGenerateWithDisabledFallbackRejectsUnavailableExplicitProvider(t *testing.T) {
+	t.Parallel()
+
+	fallbackCalls := 0
+
+	router := &AIRouter{
+		clients: map[AIProvider]AIClient{
+			ProviderGPT4: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					fallbackCalls++
+					return &AIResponse{Provider: req.Provider, Content: "fallback should not run"}, nil
+				},
+			},
+		},
+		config: DefaultRouterConfig(),
+		healthStatus: map[AIProvider]string{
+			ProviderGPT4: "ok",
+		},
+		healthCheck: map[AIProvider]bool{
+			ProviderGPT4: true,
+		},
+	}
+
+	_, err := router.Generate(context.Background(), &AIRequest{
+		ID:              "no-fallback-unavailable-explicit-provider",
+		Provider:        ProviderOpenRouter,
+		Capability:      CapabilityCodeGeneration,
+		Prompt:          "Build a dashboard",
+		DisableFallback: true,
+	})
+	if err == nil {
+		t.Fatal("expected unavailable explicit provider error")
+	}
+	if !strings.Contains(err.Error(), "provider openrouter unavailable") {
+		t.Fatalf("expected unavailable openrouter error, got %v", err)
+	}
+	if fallbackCalls != 0 {
+		t.Fatalf("fallback calls = %d, want 0 when fallback is disabled", fallbackCalls)
+	}
+}
+
+func TestGenerateWithDisabledFallbackRejectsUnhealthyExplicitProvider(t *testing.T) {
+	t.Parallel()
+
+	fallbackCalls := 0
+	openRouterCalls := 0
+
+	router := &AIRouter{
+		clients: map[AIProvider]AIClient{
+			ProviderOpenRouter: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					openRouterCalls++
+					return &AIResponse{Provider: req.Provider, Content: "unhealthy primary should not run"}, nil
+				},
+			},
+			ProviderGPT4: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					fallbackCalls++
+					return &AIResponse{Provider: req.Provider, Content: "fallback should not run"}, nil
+				},
+			},
+		},
+		config: DefaultRouterConfig(),
+		healthStatus: map[AIProvider]string{
+			ProviderOpenRouter: "auth_error",
+			ProviderGPT4:       "ok",
+		},
+		healthCheck: map[AIProvider]bool{
+			ProviderOpenRouter: false,
+			ProviderGPT4:       true,
+		},
+	}
+
+	_, err := router.Generate(context.Background(), &AIRequest{
+		ID:              "no-fallback-unhealthy-explicit-provider",
+		Provider:        ProviderOpenRouter,
+		Capability:      CapabilityCodeGeneration,
+		Prompt:          "Build a dashboard",
+		DisableFallback: true,
+	})
+	if err == nil {
+		t.Fatal("expected unhealthy explicit provider error")
+	}
+	if !strings.Contains(err.Error(), "provider openrouter unhealthy") {
+		t.Fatalf("expected unhealthy openrouter error, got %v", err)
+	}
+	if openRouterCalls != 0 {
+		t.Fatalf("openrouter calls = %d, want 0 when provider is definitively unhealthy", openRouterCalls)
+	}
+	if fallbackCalls != 0 {
+		t.Fatalf("fallback calls = %d, want 0 when fallback is disabled", fallbackCalls)
+	}
+}
+
 func TestGenerateReroutesWhenDefaultProviderExceedsCostThreshold(t *testing.T) {
 	t.Parallel()
 

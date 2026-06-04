@@ -244,6 +244,9 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to select provider: %w", err)
 	}
+	if req.DisableFallback && req.Provider != "" && provider != req.Provider {
+		return nil, fmt.Errorf("provider fallback disabled: requested %s but selected %s", req.Provider, provider)
+	}
 
 	// Get the client for the selected provider
 	client, exists := r.clients[provider]
@@ -292,7 +295,11 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 			case <-time.After(backoff):
 			}
 		}
-		response, genErr = r.generateWithAttemptBudget(ctx, provider, client, primaryReq, 1+len(r.config.FallbackOrder[provider]))
+		attemptsRemaining := 1
+		if !req.DisableFallback {
+			attemptsRemaining += len(r.config.FallbackOrder[provider])
+		}
+		response, genErr = r.generateWithAttemptBudget(ctx, provider, client, primaryReq, attemptsRemaining)
 		if genErr == nil || !isTransientError(genErr) {
 			break
 		}
@@ -522,20 +529,27 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 	// Respect explicit provider requests when possible (with fallbacks)
 	if req.Provider != "" {
 		requested := req.Provider
-		if r.isAvailable(requested) {
-			knownBad := false
-			if status, ok := r.healthStatus[requested]; ok {
-				knownBad = status == "no_credits" || status == "auth_error"
+		if !r.isAvailable(requested) {
+			if req.DisableFallback {
+				return "", fmt.Errorf("provider %s unavailable", requested)
 			}
-			if !knownBad {
-				if allowed, estimatedCost, threshold := r.providerAllowedByCost(req, requested); allowed {
-					return requested, nil
-				} else if req.DisableFallback {
-					return "", fmt.Errorf("estimated cost %.6f exceeds threshold %.6f for provider %s", estimatedCost, threshold, requested)
-				} else {
-					log.Printf("Provider %s estimated cost %.6f exceeds threshold %.6f; trying fallback", requested, estimatedCost, threshold)
+		} else {
+			status := r.healthStatus[requested]
+			knownBad := status == "no_credits" || status == "auth_error"
+			if knownBad {
+				if req.DisableFallback {
+					return "", fmt.Errorf("provider %s unhealthy: %s", requested, status)
 				}
+			} else if allowed, estimatedCost, threshold := r.providerAllowedByCost(req, requested); allowed {
+				return requested, nil
+			} else if req.DisableFallback {
+				return "", fmt.Errorf("estimated cost %.6f exceeds threshold %.6f for provider %s", estimatedCost, threshold, requested)
+			} else {
+				log.Printf("Provider %s estimated cost %.6f exceeds threshold %.6f; trying fallback", requested, estimatedCost, threshold)
 			}
+		}
+		if req.DisableFallback {
+			return "", fmt.Errorf("provider %s unavailable or unhealthy", requested)
 		}
 		if fallbacks, ok := r.config.FallbackOrder[requested]; ok {
 			for _, provider := range fallbacks {
