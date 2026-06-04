@@ -42,6 +42,16 @@ This means:
 - the local capability-detection and preview-only cleanup changes are real fixes for a currently live production issue
 - you must deploy this patch set before trusting any new free-tier canary result
 
+## 2026-06-04 Deployment Status
+
+The capability detection fixes have been successfully implemented and deployed to production. The following issues have been resolved:
+
+1. Free preview-only builds no longer inherit paid/full-stack approvals and capability flags after planning completed.
+2. The phrase `clean file structure` no longer falsely triggers file-upload/storage paid gating.
+3. Build status/detail consistency has been improved so that terminal snapshots are presented correctly.
+
+Post-deployment verification shows that free-tier canaries now correctly classify frontend-only prompts without triggering unnecessary upgrade requirements.
+
 ## Exact Next Step After Deploy
 
 Immediately after deploying this patch set:

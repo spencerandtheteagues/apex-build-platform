@@ -1,6 +1,6 @@
 # Apex Build Launch Readiness Tracker
 
-Date: 2026-05-26
+| Date: 2026-06-04
 
 This tracker reconciles the master launch plan with the current repository state. Code, tests, production config, and live canary evidence remain authoritative.
 
@@ -10,6 +10,7 @@ This tracker reconciles the master launch plan with the current repository state
 - Local status must be checked with `git status`; this tracker records launch evidence and must not be used as a cleanliness claim.
 - 2026-05-26 orchestrator note: the local tree contains backend test-harness reliability changes that made the required serialized backend suite pass under VPS contention. These changes are verified locally but not yet pushed.
 - Push dependency: do not store GitHub, Render, Stripe, provider, or customer secrets in repo files, docs, remotes, or logs.
+- 2026-06-04 capability detection fixes: Free preview-only builds capability detection fixes have been implemented and deployed. The phrase "clean file structure" no longer falsely triggers file-upload/storage paid gating. Free preview-only builds no longer inherit paid/full-stack approvals and capability flags after planning is completed.
 
 ## Closed In This Batch
 
