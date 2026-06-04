@@ -98,6 +98,29 @@ func TestGetCurrentlyAvailableProvidersForBuild_ConstrainedBySingleRoleAssignmen
 	}
 }
 
+func TestGetCurrentlyAvailableProvidersForBuild_SingleRoleAssignmentPinDoesNotFallbackWhenUnavailable(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderGPT4, ai.ProviderClaude},
+			hasConfiguredProvider: true,
+		},
+	}
+
+	build := &Build{
+		ProviderMode: "platform",
+		RoleAssignments: map[string]string{
+			"architect": "openrouter",
+			"coder":     "openrouter",
+			"tester":    "openrouter",
+			"devops":    "openrouter",
+		},
+	}
+
+	if got := am.getCurrentlyAvailableProvidersForBuild(build); len(got) != 0 {
+		t.Fatalf("expected no fallback providers when pinned provider unavailable, got %v", got)
+	}
+}
+
 func TestGetCurrentlyAvailableProvidersForBuild_MixedRoleAssignmentsKeepAvailableFallbacks(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubAIRouter{

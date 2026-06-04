@@ -199,6 +199,29 @@ func TestCreateBuildNormalizesUnavailableOpenAIProviderModelOverride(t *testing.
 	}
 }
 
+func TestCreateBuildDerivesOpenRouterRolePinFromFreeModelOverride(t *testing.T) {
+	manager := &AgentManager{
+		builds: make(map[string]*Build),
+	}
+
+	build, err := manager.CreateBuild(1, "owner", &BuildRequest{
+		Description:  "Build a production-ready operations dashboard",
+		ProviderMode: "platform",
+		PowerMode:    PowerBalanced,
+		ProviderModelOverrides: map[string]string{
+			"openrouter": "qwen/qwen3-coder:free",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateBuild returned error: %v", err)
+	}
+	for _, category := range []UserRoleCategory{CategoryArchitect, CategoryCoder, CategoryTester, CategoryDevOps} {
+		if got := build.RoleAssignments[string(category)]; got != string(ai.ProviderOpenRouter) {
+			t.Fatalf("derived role assignment %s = %q, want openrouter; assignments=%+v", category, got, build.RoleAssignments)
+		}
+	}
+}
+
 func TestCreateBuildUpgradesLowerTierOverridesInMax(t *testing.T) {
 	manager := &AgentManager{
 		builds: make(map[string]*Build),

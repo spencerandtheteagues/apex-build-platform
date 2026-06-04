@@ -762,6 +762,8 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 	mobileFramework := effectiveMobileFramework(req.MobileFramework, targetPlatform)
 	mobileReleaseLevel := effectiveMobileReleaseLevel(req.MobileReleaseLevel, targetPlatform)
 	pollToken, pollTokenHash := newBuildPollToken()
+	providerModelOverrides := normalizeProviderModelOverridesForPowerMode(req.ProviderModelOverrides, powerMode)
+	roleAssignments := deriveRoleAssignmentsForFreeOpenRouterOverride(req.RoleAssignments, providerModelOverrides)
 
 	build := &Build{
 		ID:                     buildID,
@@ -784,8 +786,8 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		MobileReleaseLevel:     mobileReleaseLevel,
 		MobileCapabilities:     mobileCapabilities,
 		MobileAppSpec:          req.MobileAppSpec,
-		RoleAssignments:        req.RoleAssignments,
-		ProviderModelOverrides: normalizeProviderModelOverridesForPowerMode(req.ProviderModelOverrides, powerMode),
+		RoleAssignments:        roleAssignments,
+		ProviderModelOverrides: providerModelOverrides,
 		Agents:                 make(map[string]*Agent),
 		Tasks:                  make([]*Task, 0),
 		Checkpoints:            make([]*Checkpoint, 0),
@@ -1413,8 +1415,11 @@ func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []a
 
 func constrainProvidersToSingleRoleAssignmentPin(build *Build, providers []ai.AIProvider) []ai.AIProvider {
 	pinned, ok := singleProviderPinnedByRoleAssignments(build)
-	if !ok || !providerListContains(providers, pinned) {
+	if !ok {
 		return providers
+	}
+	if !providerListContains(providers, pinned) {
+		return nil
 	}
 	return []ai.AIProvider{pinned}
 }
@@ -1450,6 +1455,21 @@ func singleProviderPinnedByRoleAssignmentMap(assignments map[string]string) (ai.
 		}
 	}
 	return pinned, true
+}
+
+func deriveRoleAssignmentsForFreeOpenRouterOverride(assignments map[string]string, overrides map[string]string) map[string]string {
+	if len(assignments) > 0 {
+		return cloneStringMap(assignments)
+	}
+	if !isOpenRouterFreeModel(overrides[string(ai.ProviderOpenRouter)]) {
+		return nil
+	}
+	return map[string]string{
+		string(CategoryArchitect): string(ai.ProviderOpenRouter),
+		string(CategoryCoder):     string(ai.ProviderOpenRouter),
+		string(CategoryTester):    string(ai.ProviderOpenRouter),
+		string(CategoryDevOps):    string(ai.ProviderOpenRouter),
+	}
 }
 
 func (am *AgentManager) retainRecentSuccessfulBuildProviders(build *Build, providers []ai.AIProvider) []ai.AIProvider {
