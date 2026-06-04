@@ -98,6 +98,27 @@ func TestGetCurrentlyAvailableProvidersForBuild_ConstrainedBySingleRoleAssignmen
 	}
 }
 
+func TestGetCurrentlyAvailableProvidersForBuild_ConstrainedByOpenRouterFreeOverride(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderOpenRouter, ai.ProviderGPT4, ai.ProviderClaude},
+			hasConfiguredProvider: true,
+		},
+	}
+
+	build := &Build{
+		ProviderMode: "platform",
+		ProviderModelOverrides: map[string]string{
+			"openrouter": "qwen/qwen3-coder:free",
+		},
+	}
+
+	got := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(got) != 1 || got[0] != ai.ProviderOpenRouter {
+		t.Fatalf("expected OpenRouter-free override to pin providers to [openrouter], got %v", got)
+	}
+}
+
 func TestGetCurrentlyAvailableProvidersForBuild_SingleRoleAssignmentPinDoesNotFallbackWhenUnavailable(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubAIRouter{

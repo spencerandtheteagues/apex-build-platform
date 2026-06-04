@@ -1414,7 +1414,7 @@ func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []a
 }
 
 func constrainProvidersToSingleRoleAssignmentPin(build *Build, providers []ai.AIProvider) []ai.AIProvider {
-	pinned, ok := singleProviderPinnedByRoleAssignments(build)
+	pinned, ok := singleProviderPinnedByBuildPolicy(build)
 	if !ok {
 		return providers
 	}
@@ -1422,6 +1422,16 @@ func constrainProvidersToSingleRoleAssignmentPin(build *Build, providers []ai.AI
 		return nil
 	}
 	return []ai.AIProvider{pinned}
+}
+
+func singleProviderPinnedByBuildPolicy(build *Build) (ai.AIProvider, bool) {
+	if pinned, ok := singleProviderPinnedByRoleAssignments(build); ok {
+		return pinned, true
+	}
+	if _, ok := openRouterFreePolicyModelForBuild(build); ok {
+		return ai.ProviderOpenRouter, true
+	}
+	return "", false
 }
 
 func singleProviderPinnedByRoleAssignments(build *Build) (ai.AIProvider, bool) {
