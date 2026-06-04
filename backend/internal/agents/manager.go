@@ -34919,6 +34919,8 @@ func isProviderLevelFailureMessage(errorMsg string) bool {
 		strings.Contains(msg, "timeout") ||
 		strings.Contains(msg, "deadline exceeded") ||
 		strings.Contains(msg, "context deadline") ||
+		strings.Contains(msg, "context canceled") ||
+		strings.Contains(msg, "context.canceled") ||
 		strings.Contains(msg, "request timed out") ||
 		strings.Contains(msg, "client timeout") ||
 		strings.Contains(msg, "upstream timeout") ||
@@ -35259,6 +35261,11 @@ func (am *AgentManager) runFailureConsensus(
 
 func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, errorMsg string, retryStrategy string) bool {
 	if build == nil || task == nil {
+		return false
+	}
+	// No consensus when retries are exhausted — the outcome is always permanent failure.
+	// Avoids running expensive AI calls while holding agent.mu when no retry will follow.
+	if task.RetryCount >= task.MaxRetries {
 		return false
 	}
 	errorLower := strings.ToLower(errorMsg)
