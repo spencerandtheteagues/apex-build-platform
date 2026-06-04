@@ -53,6 +53,12 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerBalanced: "glm-5.1",
 		PowerFast:     "glm-5.1",
 	},
+	ai.ProviderOpenRouter: {
+		PowerAuto:     "auto",
+		PowerMax:      "openai/gpt-5.5",
+		PowerBalanced: "deepseek/deepseek-v4-pro",
+		PowerFast:     "openai/gpt-5-nano",
+	},
 }
 
 var flagshipModelsByProvider = map[ai.AIProvider]map[string]bool{
@@ -80,6 +86,11 @@ var flagshipModelsByProvider = map[ai.AIProvider]map[string]bool{
 	ai.ProviderGLM: {
 		"glm-5.1":       true,
 		"glm-5.1:cloud": true,
+	},
+	ai.ProviderOpenRouter: {
+		"openai/gpt-5.5":     true,
+		"openai/gpt-5.5-pro": true,
+		"openai/gpt-5.4-pro": true,
 	},
 }
 

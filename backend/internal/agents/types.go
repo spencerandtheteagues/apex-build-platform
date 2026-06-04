@@ -575,12 +575,13 @@ const (
 	PowerMax      PowerMode = "max"      // Highest-quality configured provider routes
 	PowerBalanced PowerMode = "balanced" // Mid-tier quality/speed balance (Sonnet 4.6, GPT-4.1, Gemini 3 Flash, Grok 3)
 	PowerFast     PowerMode = "fast"     // Cheapest mini tier (Haiku 4.5, GPT-4o-mini, Gemini 2.5 Flash Lite, Grok 3 Mini)
+	PowerAuto     PowerMode = "auto"     // OpenRouter dispatcher — auto-selects best model via GPT-5.5
 )
 
 // CreditMultiplier returns the credit usage multiplier for a power mode
 func (pm PowerMode) CreditMultiplier() float64 {
 	switch pm {
-	case PowerMax:
+	case PowerMax, PowerAuto:
 		return 2.0 // 2.0x credits — premium models
 	case PowerBalanced:
 		return 1.8 // 1.8x credits — mid-tier models

@@ -80,7 +80,7 @@ func estimatedRequestCostUSDForBuild(build *Build) float64 {
 	}
 
 	switch build.PowerMode {
-	case PowerMax:
+	case PowerMax, PowerAuto:
 		return 0.15
 	case PowerBalanced:
 		return 0.06
@@ -2937,7 +2937,8 @@ func (am *AgentManager) selectLeadProvider(providers []ai.AIProvider) ai.AIProvi
 	// Ollama: Local model (capability depends on underlying model, assume good but not top)
 
 	capabilityRank := map[ai.AIProvider]int{
-		ai.ProviderClaude: 5, // Highest capability for reasoning and planning
+		ai.ProviderClaude:      5, // Highest capability for reasoning and planning
+		ai.ProviderOpenRouter: 5, // Auto-dispatcher routes to best available model
 		ai.ProviderGPT4:   4, // Strong for code generation and complex tasks
 		ai.ProviderGrok:   4, // grok-4.20-reasoning: frontier reasoning + coding model
 		ai.ProviderGemini: 3, // Good general purpose
