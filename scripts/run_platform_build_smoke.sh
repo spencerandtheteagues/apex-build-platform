@@ -563,6 +563,34 @@ capture_preview_status() {
   PREVIEW_SUMMARY="$(canary_preview_status "$PREVIEW_STATUS_FILE")"
 }
 
+assert_openrouter_free_actuals() {
+  if [[ ! "$APEX_LIVE_TEST_MODEL_PROFILE" =~ ^(openrouter-free|openrouter-free-canary|free-openrouter)$ ]]; then
+    return 0
+  fi
+  local violations
+  violations="$(jq -c '
+    [
+      (.agents // [] | .[]? | {surface:"agent", role, provider, model}),
+      (.orchestration.failure_fingerprints // [] | .[]? | {surface:"failure_fingerprint", task_shape, provider, model})
+    ]
+    | map(select((.provider // "") != ""))
+    | map(select(
+        (.provider != "openrouter")
+        or (
+          ((.model // "") != "")
+          and ((.model // "") != "auto")
+          and (((.model // "") | contains(":free")) | not)
+        )
+      ))
+  ' "$BUILD_DETAIL_FILE" 2>/dev/null || echo '[]')"
+  if [[ "$violations" != "[]" ]]; then
+    echo "ASSERTION_FAILED: openrouter-free profile used non-free or non-OpenRouter provider actuals" >&2
+    echo "$violations" | jq . >&2 || echo "$violations" >&2
+    exit 1
+  fi
+  echo "OPENROUTER_FREE_ACTUALS_ASSERTED"
+}
+
 final_status=""
 for _ in $(seq 1 "$MAX_POLLS"); do
   status_json="$(curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID/status" || true)"
@@ -634,6 +662,7 @@ if [[ "$final_status" == "completed" ]]; then
   fi
 
   assert_completed_build_contract "$BUILD_DETAIL_FILE" "$BUILD_COMPLETED_FILE"
+  assert_openrouter_free_actuals
 
   # False-green guardrail (opt-in): a paid full-stack build that reports
   # "completed" but has no active, reachable preview is not a real success.

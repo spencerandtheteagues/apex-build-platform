@@ -1389,12 +1389,14 @@ func (am *AgentManager) getAvailableProvidersWithGracePeriodForBuild(build *Buil
 	if build != nil && !am.buildUsesPlatformKeys(build) {
 		providers := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
 		providers = am.retainRecentSuccessfulBuildProviders(build, providers)
+		providers = constrainProvidersToSingleRoleAssignmentPin(build, providers)
 		if len(providers) == 0 {
 			log.Printf("No BYOK providers available for user %d", build.UserID)
 		}
 		return providers
 	}
-	return am.retainRecentSuccessfulBuildProviders(build, hostedPlatformProviders(am.getAvailableProvidersWithGracePeriod()))
+	providers := am.retainRecentSuccessfulBuildProviders(build, hostedPlatformProviders(am.getAvailableProvidersWithGracePeriod()))
+	return constrainProvidersToSingleRoleAssignmentPin(build, providers)
 }
 
 func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []ai.AIProvider {
@@ -1402,9 +1404,48 @@ func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []a
 		return nil
 	}
 	if build != nil && !am.buildUsesPlatformKeys(build) {
-		return am.retainRecentSuccessfulBuildProviders(build, am.aiRouter.GetAvailableProvidersForUser(build.UserID))
+		providers := am.retainRecentSuccessfulBuildProviders(build, am.aiRouter.GetAvailableProvidersForUser(build.UserID))
+		return constrainProvidersToSingleRoleAssignmentPin(build, providers)
 	}
-	return am.retainRecentSuccessfulBuildProviders(build, hostedPlatformProviders(am.aiRouter.GetAvailableProviders()))
+	providers := am.retainRecentSuccessfulBuildProviders(build, hostedPlatformProviders(am.aiRouter.GetAvailableProviders()))
+	return constrainProvidersToSingleRoleAssignmentPin(build, providers)
+}
+
+func constrainProvidersToSingleRoleAssignmentPin(build *Build, providers []ai.AIProvider) []ai.AIProvider {
+	pinned, ok := singleProviderPinnedByRoleAssignments(build)
+	if !ok || !providerListContains(providers, pinned) {
+		return providers
+	}
+	return []ai.AIProvider{pinned}
+}
+
+func singleProviderPinnedByRoleAssignments(build *Build) (ai.AIProvider, bool) {
+	if build == nil {
+		return "", false
+	}
+	build.mu.RLock()
+	assignments := cloneStringMap(build.RoleAssignments)
+	build.mu.RUnlock()
+	if len(assignments) == 0 {
+		return "", false
+	}
+
+	required := []UserRoleCategory{CategoryArchitect, CategoryCoder, CategoryTester, CategoryDevOps}
+	var pinned ai.AIProvider
+	for _, category := range required {
+		provider := ai.AIProvider(strings.TrimSpace(strings.ToLower(assignments[string(category)])))
+		if provider == "" {
+			return "", false
+		}
+		if pinned == "" {
+			pinned = provider
+			continue
+		}
+		if provider != pinned {
+			return "", false
+		}
+	}
+	return pinned, true
 }
 
 func (am *AgentManager) retainRecentSuccessfulBuildProviders(build *Build, providers []ai.AIProvider) []ai.AIProvider {
@@ -2948,12 +2989,12 @@ func (am *AgentManager) selectLeadProvider(providers []ai.AIProvider) ai.AIProvi
 	// Ollama: Local model (capability depends on underlying model, assume good but not top)
 
 	capabilityRank := map[ai.AIProvider]int{
-		ai.ProviderClaude:      5, // Highest capability for reasoning and planning
+		ai.ProviderClaude:     5, // Highest capability for reasoning and planning
 		ai.ProviderOpenRouter: 5, // Auto-dispatcher routes to best available model
-		ai.ProviderGPT4:   4, // Strong for code generation and complex tasks
-		ai.ProviderGrok:   4, // grok-4.20-reasoning: frontier reasoning + coding model
-		ai.ProviderGemini: 3, // Good general purpose
-		ai.ProviderOllama: 1, // Local model (good but depends on specific model)
+		ai.ProviderGPT4:       4, // Strong for code generation and complex tasks
+		ai.ProviderGrok:       4, // grok-4.20-reasoning: frontier reasoning + coding model
+		ai.ProviderGemini:     3, // Good general purpose
+		ai.ProviderOllama:     1, // Local model (good but depends on specific model)
 	}
 
 	var bestProvider ai.AIProvider

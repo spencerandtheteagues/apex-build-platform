@@ -75,7 +75,9 @@ fi
 if grep -q 'PROVIDER_MODE="${PROVIDER_MODE:-${APEX_PROVIDER_MODE:-platform}}"' "$SMOKE" \
   && grep -q 'openrouter-free-canary-env.sh' "$SMOKE" \
   && grep -q 'role_assignments' "$SMOKE" \
-  && grep -q 'provider_model_overrides' "$SMOKE"; then
+  && grep -q 'provider_model_overrides' "$SMOKE" \
+  && grep -q 'assert_openrouter_free_actuals' "$SMOKE" \
+  && grep -q 'OPENROUTER_FREE_ACTUALS_ASSERTED' "$SMOKE"; then
   pass "platform smoke supports free OpenRouter routing controls"
 else
   fail "platform smoke free OpenRouter routing controls missing"

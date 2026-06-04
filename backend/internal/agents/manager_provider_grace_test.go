@@ -74,6 +74,54 @@ func TestGetCurrentlyAvailableProvidersForBuild_UsesBYOKProviders(t *testing.T) 
 	}
 }
 
+func TestGetCurrentlyAvailableProvidersForBuild_ConstrainedBySingleRoleAssignmentPin(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderOpenRouter, ai.ProviderGPT4, ai.ProviderClaude},
+			hasConfiguredProvider: true,
+		},
+	}
+
+	build := &Build{
+		ProviderMode: "platform",
+		RoleAssignments: map[string]string{
+			"architect": "openrouter",
+			"coder":     "openrouter",
+			"tester":    "openrouter",
+			"devops":    "openrouter",
+		},
+	}
+
+	got := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(got) != 1 || got[0] != ai.ProviderOpenRouter {
+		t.Fatalf("expected single pinned provider [openrouter], got %v", got)
+	}
+}
+
+func TestGetCurrentlyAvailableProvidersForBuild_MixedRoleAssignmentsKeepAvailableFallbacks(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderOpenRouter, ai.ProviderGPT4, ai.ProviderClaude},
+			hasConfiguredProvider: true,
+		},
+	}
+
+	build := &Build{
+		ProviderMode: "platform",
+		RoleAssignments: map[string]string{
+			"architect": "openrouter",
+			"coder":     "gpt4",
+			"tester":    "openrouter",
+			"devops":    "openrouter",
+		},
+	}
+
+	got := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(got) != 3 {
+		t.Fatalf("expected mixed assignments to keep all available providers, got %v", got)
+	}
+}
+
 func TestGetCurrentlyAvailableProvidersForBuild_RetainsRecentSuccessfulOllama(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubAIRouter{
