@@ -1968,6 +1968,72 @@ func TestStartBuildAllowsHostedOllamaRoleAssignments(t *testing.T) {
 	}
 }
 
+func TestStartBuildAllowsHostedOpenRouterFreeCanaryRouting(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.User{
+		ID:                 1,
+		Username:           "builder-user",
+		Email:              "builder@example.com",
+		PasswordHash:       "hashed",
+		IsVerified:         true,
+		SubscriptionType:   "builder",
+		SubscriptionStatus: "active",
+		CreditBalance:      25,
+	}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		db:          db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderOpenRouter},
+			userProviders: []ai.AIProvider{ai.ProviderOpenRouter},
+		},
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"description":   "Build a full stack analytics dashboard with auth and a database.",
+		"provider_mode": "platform",
+		"role_assignments": map[string]string{
+			"architect": "openrouter",
+			"coder":     "openrouter",
+			"tester":    "openrouter",
+			"devops":    "openrouter",
+		},
+		"provider_model_overrides": map[string]string{
+			"openrouter": "moonshotai/kimi-k2.6:free",
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response BuildResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	build, err := am.GetBuild(response.BuildID)
+	if err != nil {
+		t.Fatalf("expected created build in manager: %v", err)
+	}
+	if got := build.RoleAssignments["coder"]; got != "openrouter" {
+		t.Fatalf("coder assignment = %q, want openrouter; assignments=%+v", got, build.RoleAssignments)
+	}
+	if got := build.ProviderModelOverrides["openrouter"]; got != "moonshotai/kimi-k2.6:free" {
+		t.Fatalf("openrouter model override = %q, want moonshotai/kimi-k2.6:free; overrides=%+v", got, build.ProviderModelOverrides)
+	}
+}
+
 func TestSetProviderModelOverrideAllowsHostedOllama(t *testing.T) {
 	am := &AgentManager{
 		builds:      make(map[string]*Build),

@@ -67,6 +67,9 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 		{name: "gemini max uses pro before preview", provider: ai.ProviderGemini, mode: PowerMax, want: "gemini-3.1-pro"},
 		{name: "grok max uses 4.20", provider: ai.ProviderGrok, mode: PowerMax, want: "grok-4.20-0309-reasoning"},
 		{name: "ollama fast uses kimi", provider: ai.ProviderOllama, mode: PowerFast, want: "kimi-k2.6"},
+		{name: "openrouter max stays on free model", provider: ai.ProviderOpenRouter, mode: PowerMax, want: "moonshotai/kimi-k2.6:free"},
+		{name: "openrouter balanced stays on free model", provider: ai.ProviderOpenRouter, mode: PowerBalanced, want: "moonshotai/kimi-k2.6:free"},
+		{name: "openrouter fast stays on free model", provider: ai.ProviderOpenRouter, mode: PowerFast, want: "moonshotai/kimi-k2.6:free"},
 	}
 
 	for _, tt := range tests {
@@ -101,6 +104,17 @@ func TestNormalizeProviderModelOverrideUpgradesClaudeOpusMaxAlias(t *testing.T) 
 	}
 	if got := normalizeModelForProvider(ai.ProviderClaude, "claude-opus-4-6", PowerMax); got != "claude-opus-4-7" {
 		t.Fatalf("stale claude opus model = %q, want claude-opus-4-7", got)
+	}
+}
+
+func TestNormalizeProviderModelOverrideAcceptsOpenRouterFreeModels(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeProviderModelOverride(ai.ProviderOpenRouter, "moonshotai/kimi-k2.6:free"); got != "moonshotai/kimi-k2.6:free" {
+		t.Fatalf("OpenRouter free override = %q, want moonshotai/kimi-k2.6:free", got)
+	}
+	if got := normalizeProviderModelOverride(ai.ProviderOpenRouter, "anthropic/claude-opus-4.8"); got != "" {
+		t.Fatalf("Anthropic OpenRouter override = %q, want rejected empty override", got)
 	}
 }
 

@@ -35,11 +35,12 @@ grep -q "APEX_REQUIRE_PAID_CANARIES=true requires APEX_CANARY_EMAIL/APEX_CANARY_
 grep -q "required paid canary .* did not pass" "$WORKFLOW" || fail "platform canary gate must fail unpaid/skipped paid canaries when strict mode is on"
 pass "strict paid canary mode prevents skipped build canaries from going green"
 
-grep -q "PROVIDER_MODE:.*byok" "$WORKFLOW" || fail "paid build canaries must request BYOK provider mode"
-grep -q "APEX_BYOK_OLLAMA_ONLY:.*1" "$WORKFLOW" || fail "paid build canaries must force Ollama-only role assignments"
-grep -q '"architect":"ollama","coder":"ollama","tester":"ollama","devops":"ollama"' "$WORKFLOW" || fail "paid build canaries must assign all user-facing roles to Ollama"
-grep -q "APEX_LIVE_TEST_MODEL_PROFILE:.*ollama" "$WORKFLOW" || fail "paid build canaries must label Ollama model profile"
-pass "paid build canaries are wired for BYOK/Ollama routing"
+grep -q "PROVIDER_MODE:.*platform" "$WORKFLOW" || fail "paid build canaries must use platform provider mode"
+grep -q "APEX_BYOK_OLLAMA_ONLY:.*0" "$WORKFLOW" || fail "paid build canaries must not force Ollama-only routing"
+grep -q '"architect":"openrouter","coder":"openrouter","tester":"openrouter","devops":"openrouter"' "$WORKFLOW" || fail "paid build canaries must assign all user-facing roles to OpenRouter"
+grep -q '"openrouter":"moonshotai/kimi-k2.6:free"' "$WORKFLOW" || fail "paid build canaries must pin the free OpenRouter model"
+grep -q "APEX_LIVE_TEST_MODEL_PROFILE:.*openrouter-free" "$WORKFLOW" || fail "paid build canaries must label the OpenRouter free model profile"
+pass "paid build canaries are wired for free OpenRouter routing"
 
 if grep -q "APEX_STRIPE_REGISTER_SMOKE_USER: '1'.*APEX_REQUIRE_PAID_CANARIES" "$WORKFLOW"; then
   fail "workflow should not encode disposable smoke registration as strict-mode evidence"

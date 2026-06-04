@@ -73,12 +73,12 @@ else
 fi
 
 if grep -q 'PROVIDER_MODE="${PROVIDER_MODE:-${APEX_PROVIDER_MODE:-platform}}"' "$SMOKE" \
-  && grep -q 'APEX_BYOK_OLLAMA_ONLY' "$SMOKE" \
+  && grep -q 'openrouter-free-canary-env.sh' "$SMOKE" \
   && grep -q 'role_assignments' "$SMOKE" \
   && grep -q 'provider_model_overrides' "$SMOKE"; then
-  pass "platform smoke supports BYOK/Ollama routing controls"
+  pass "platform smoke supports free OpenRouter routing controls"
 else
-  fail "platform smoke BYOK/Ollama routing controls missing"
+  fail "platform smoke free OpenRouter routing controls missing"
 fi
 
 # Required paid scenarios without credentials must fail as INCOMPLETE, not green.

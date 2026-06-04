@@ -281,6 +281,11 @@ function providerModelOverrides() {
     }
   }
   if (!/^(ollama-credit-saver|ollama|credit-saver)$/i.test(modelProfile.trim())) {
+    if (/^(openrouter-free|openrouter-free-canary|free-openrouter)$/i.test(modelProfile.trim())) {
+      return {
+        openrouter: process.env.APEX_OPENROUTER_FREE_MODEL || process.env.OPENROUTER_FREE_MODEL || 'moonshotai/kimi-k2.6:free',
+      }
+    }
     return undefined
   }
   return {
@@ -303,6 +308,14 @@ function roleAssignments() {
       coder: 'ollama',
       tester: 'ollama',
       devops: 'ollama',
+    }
+  }
+  if (/^(openrouter-free|openrouter-free-canary|free-openrouter)$/i.test(modelProfile.trim())) {
+    return {
+      architect: 'openrouter',
+      coder: 'openrouter',
+      tester: 'openrouter',
+      devops: 'openrouter',
     }
   }
   return undefined

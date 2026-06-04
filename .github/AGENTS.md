@@ -22,6 +22,7 @@ This file is the level 1 GitHub automation contract. Add child docs only if work
 - Production canaries must verify live URLs and launch readiness honestly, and they must fail when critical checks fail.
 - Manually requested launch-evidence jobs must fail when their required secrets or credentials are absent; optional scheduled coverage may skip unavailable paid/external checks only when launch docs describe that limitation.
 - When `APEX_REQUIRE_PAID_CANARIES=true`, production canary workflows must require existing verified paid canary credentials, must not use disposable smoke registration as paid evidence, and must fail skipped paid build/golden canaries.
+- Paid canary, golden, and prompt-matrix jobs must route paid/full-stack build traffic through the OpenRouter-free testing profile by default: `PROVIDER_MODE=platform`, all build roles assigned to `openrouter`, and `APEX_PROVIDER_MODEL_OVERRIDES_JSON` pinned to a `:free` OpenRouter model. Do not switch these jobs back to paid flagship providers or BYOK/Ollama without an explicit operator decision and launch-doc update.
 - Use the repo-supported Node and Go versions consistently with `docs/development.md` and package configs.
 - Keep workflow names, required secrets, required variables, and manual dispatch inputs documented in launch docs when they affect launch evidence.
 

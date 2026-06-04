@@ -6,6 +6,10 @@ if [[ "$APEX_LIVE_TEST_MODEL_PROFILE" == "ollama-credit-saver" && "${APEX_SKIP_O
   # shellcheck disable=SC1091
   source scripts/ollama-credit-saver-env.sh
 fi
+if [[ "$APEX_LIVE_TEST_MODEL_PROFILE" =~ ^(openrouter-free|openrouter-free-canary|free-openrouter)$ && "${APEX_SKIP_OPENROUTER_FREE_SOURCE:-0}" != "1" && -f scripts/openrouter-free-canary-env.sh ]]; then
+  # shellcheck disable=SC1091
+  source scripts/openrouter-free-canary-env.sh
+fi
 
 BASE_URL="${BASE_URL:-https://api.apex-build.dev/api/v1}"
 PROMPT_FILE="${PROMPT_FILE:-prompts/golden/apex-fieldops-ai.md}"

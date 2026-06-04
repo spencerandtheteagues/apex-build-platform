@@ -34,6 +34,14 @@ PROJECT_NAME_PREFIX="${PROJECT_NAME_PREFIX:-platform-canary}"
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "$APEX_LIVE_TEST_MODEL_PROFILE" =~ ^(openrouter-free|openrouter-free-canary|free-openrouter)$ && "${APEX_SKIP_OPENROUTER_FREE_SOURCE:-0}" != "1" && -f "$SCRIPT_DIR/openrouter-free-canary-env.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/openrouter-free-canary-env.sh"
+  PROVIDER_MODE="${PROVIDER_MODE:-${APEX_PROVIDER_MODE:-platform}}"
+  ROLE_ASSIGNMENTS_JSON="${ROLE_ASSIGNMENTS_JSON:-${APEX_ROLE_ASSIGNMENTS_JSON:-}}"
+  PROVIDER_MODEL_OVERRIDES_JSON="${PROVIDER_MODEL_OVERRIDES_JSON:-${APEX_PROVIDER_MODEL_OVERRIDES_JSON:-}}"
+  APEX_BYOK_OLLAMA_ONLY="${APEX_BYOK_OLLAMA_ONLY:-${BYOK_OLLAMA_ONLY:-0}}"
+fi
 # shellcheck source=lib/canary_report.sh
 source "$SCRIPT_DIR/lib/canary_report.sh"
 

@@ -31,7 +31,8 @@ This file is the level 1 scripts contract. Add child docs if script families gro
 - Scripts that generate screenshots or artifacts should write them to `/tmp` or an ignored path unless a checked-in fixture is intentionally required.
 - Placeholder-preview heuristics in live canary scripts must stay behaviorally aligned with backend preview verification. When one changes, update the other and run both focused test/syntax gates.
 - Prompt matrix scripts that support a launch-count claim must expose an expected-count guard and fail before live runs when discovered prompts or expanded power modes would produce an empty or undersized matrix.
-- Live canary scripts, including `run_platform_build_smoke.sh`, may support BYOK-only model-spend controls such as `ROLE_ASSIGNMENTS_JSON`, `APEX_ROLE_ASSIGNMENTS_JSON`, provider model overrides, and `APEX_BYOK_OLLAMA_ONLY=1`. Use them with `PROVIDER_MODE=byok` when paid tests must exercise the user's Ollama key instead of platform flagship providers; record that evidence as BYOK/Ollama path coverage, not as flagship provider health.
+- Live canary scripts, including `run_platform_build_smoke.sh`, must support the OpenRouter-free paid-testing profile through `scripts/openrouter-free-canary-env.sh`, `APEX_LIVE_TEST_MODEL_PROFILE=openrouter-free`, all build roles assigned to `openrouter`, and `provider_model_overrides.openrouter` pinned to a `:free` OpenRouter model. Use this profile for paid canary builds and paid testing unless a human explicitly approves paid flagship-provider spend; record that evidence as paid/full-stack behavior under OpenRouter-free routing, not as flagship provider health.
+- BYOK/Ollama model-spend controls such as `ROLE_ASSIGNMENTS_JSON`, `APEX_ROLE_ASSIGNMENTS_JSON`, provider model overrides, and `APEX_BYOK_OLLAMA_ONLY=1` may still be used for explicit BYOK/Ollama coverage. Use them with `PROVIDER_MODE=byok` only when the launch evidence is intentionally BYOK/Ollama path coverage.
 - Keep Node scripts compatible with the repo-supported Node version from docs and CI.
 
 ## Development Guidance
@@ -49,6 +50,7 @@ Run focused script tests where available:
 ```bash
 bash scripts/test/canary_matrix_guardrail_test.sh
 bash scripts/test/canary_report_test.sh
+bash scripts/test/openrouter_free_canary_env_test.sh
 bash scripts/test/render_launch_guardrail_test.sh
 bash scripts/test/production_canary_workflow_guardrail_test.sh
 ```

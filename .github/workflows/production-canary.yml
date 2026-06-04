@@ -63,6 +63,9 @@ jobs:
       - name: Run Ollama credit-saver env guardrail
         run: bash scripts/test/ollama_credit_saver_env_test.sh
 
+      - name: Run OpenRouter free canary env guardrail
+        run: bash scripts/test/openrouter_free_canary_env_test.sh
+
       - name: Run Render launch verifier guardrail
         run: bash scripts/test/render_launch_guardrail_test.sh
 
@@ -306,10 +309,11 @@ jobs:
           LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
           LOGIN_FULL_NAME: APEX Canary
-          PROVIDER_MODE: ${{ matrix.requires_paid && 'byok' || 'platform' }}
-          APEX_BYOK_OLLAMA_ONLY: ${{ matrix.requires_paid && '1' || '0' }}
-          APEX_ROLE_ASSIGNMENTS_JSON: ${{ matrix.requires_paid && '{"architect":"ollama","coder":"ollama","tester":"ollama","devops":"ollama"}' || '' }}
-          APEX_LIVE_TEST_MODEL_PROFILE: ${{ matrix.requires_paid && 'ollama' || 'platform' }}
+          PROVIDER_MODE: platform
+          APEX_BYOK_OLLAMA_ONLY: '0'
+          APEX_ROLE_ASSIGNMENTS_JSON: ${{ matrix.requires_paid && '{"architect":"openrouter","coder":"openrouter","tester":"openrouter","devops":"openrouter"}' || '' }}
+          APEX_PROVIDER_MODEL_OVERRIDES_JSON: ${{ matrix.requires_paid && '{"openrouter":"moonshotai/kimi-k2.6:free"}' || '' }}
+          APEX_LIVE_TEST_MODEL_PROFILE: ${{ matrix.requires_paid && 'openrouter-free' || 'platform' }}
           POLL_SECONDS: ${{ matrix.poll_seconds }}
           MAX_POLLS: ${{ matrix.max_polls }}
           PROJECT_NAME: canary-${{ matrix.name }}
@@ -463,10 +467,11 @@ jobs:
           LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
-          PROVIDER_MODE: byok
-          APEX_BYOK_OLLAMA_ONLY: '1'
-          APEX_ROLE_ASSIGNMENTS_JSON: '{"architect":"ollama","coder":"ollama","tester":"ollama","devops":"ollama"}'
-          APEX_LIVE_TEST_MODEL_PROFILE: ollama
+          PROVIDER_MODE: platform
+          APEX_BYOK_OLLAMA_ONLY: '0'
+          APEX_ROLE_ASSIGNMENTS_JSON: '{"architect":"openrouter","coder":"openrouter","tester":"openrouter","devops":"openrouter"}'
+          APEX_PROVIDER_MODEL_OVERRIDES_JSON: '{"openrouter":"moonshotai/kimi-k2.6:free"}'
+          APEX_LIVE_TEST_MODEL_PROFILE: openrouter-free
         run: ./scripts/run_live_golden_canary_matrix.sh
 
       - name: Upload golden canary artifacts
@@ -535,10 +540,11 @@ jobs:
           LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
-          PROVIDER_MODE: byok
-          APEX_BYOK_OLLAMA_ONLY: '1'
-          APEX_ROLE_ASSIGNMENTS_JSON: '{"architect":"ollama","coder":"ollama","tester":"ollama","devops":"ollama"}'
-          APEX_LIVE_TEST_MODEL_PROFILE: ollama
+          PROVIDER_MODE: platform
+          APEX_BYOK_OLLAMA_ONLY: '0'
+          APEX_ROLE_ASSIGNMENTS_JSON: '{"architect":"openrouter","coder":"openrouter","tester":"openrouter","devops":"openrouter"}'
+          APEX_PROVIDER_MODEL_OVERRIDES_JSON: '{"openrouter":"moonshotai/kimi-k2.6:free"}'
+          APEX_LIVE_TEST_MODEL_PROFILE: openrouter-free
         run: ./scripts/run_live_prompt_matrix.sh
 
       - name: Upload prompt matrix artifacts

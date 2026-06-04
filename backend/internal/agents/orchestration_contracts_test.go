@@ -44,6 +44,18 @@ func TestCompileIntentBriefFromRequestDetectsCapabilities(t *testing.T) {
 	}
 }
 
+func TestHostedPlatformProvidersIncludesOpenRouter(t *testing.T) {
+	t.Parallel()
+
+	got := hostedPlatformProviders([]ai.AIProvider{ai.ProviderOpenRouter})
+	if len(got) != 1 || got[0] != ai.ProviderOpenRouter {
+		t.Fatalf("hosted OpenRouter providers = %v, want [openrouter]", got)
+	}
+	if !providerHostedEligible("platform", ai.ProviderOpenRouter) {
+		t.Fatal("expected OpenRouter to be eligible in platform provider mode")
+	}
+}
+
 func TestCompileIntentBriefFromRequestHonorsNegatedBackendRequirements(t *testing.T) {
 	req := &BuildRequest{
 		Description: "Build a simple static marketing website. Frontend only. No backend. No database. No auth. No billing. No realtime.",

@@ -27,6 +27,11 @@ if [[ "$APEX_LIVE_TEST_MODEL_PROFILE" == "ollama-credit-saver" && "${APEX_SKIP_O
   source "$SCRIPT_DIR/ollama-credit-saver-env.sh"
 fi
 
+if [[ "$APEX_LIVE_TEST_MODEL_PROFILE" =~ ^(openrouter-free|openrouter-free-canary|free-openrouter)$ && "${APEX_SKIP_OPENROUTER_FREE_SOURCE:-0}" != "1" && -f "$SCRIPT_DIR/openrouter-free-canary-env.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/openrouter-free-canary-env.sh"
+fi
+
 PROVIDER_MODE="${PROVIDER_MODE:-${APEX_PROVIDER_MODE:-platform}}"
 ROLE_ASSIGNMENTS_JSON="${ROLE_ASSIGNMENTS_JSON:-${APEX_ROLE_ASSIGNMENTS_JSON:-}}"
 PROVIDER_MODEL_OVERRIDES_JSON="${PROVIDER_MODEL_OVERRIDES_JSON:-${APEX_PROVIDER_MODEL_OVERRIDES_JSON:-}}"
@@ -37,6 +42,14 @@ fi
 
 if [[ -z "$PROVIDER_MODEL_OVERRIDES_JSON" && "$APEX_LIVE_TEST_MODEL_PROFILE" =~ ^(ollama-credit-saver|ollama|credit-saver)$ ]]; then
   PROVIDER_MODEL_OVERRIDES_JSON="$(jq -n --arg model "${KIMI_OLLAMA_MODEL:-${OLLAMA_MODEL_DEFAULT:-kimi-k2.6}}" '{ollama:$model}')"
+fi
+
+if [[ -z "$ROLE_ASSIGNMENTS_JSON" && "$APEX_LIVE_TEST_MODEL_PROFILE" =~ ^(openrouter-free|openrouter-free-canary|free-openrouter)$ ]]; then
+  ROLE_ASSIGNMENTS_JSON='{"architect":"openrouter","coder":"openrouter","tester":"openrouter","devops":"openrouter"}'
+fi
+
+if [[ -z "$PROVIDER_MODEL_OVERRIDES_JSON" && "$APEX_LIVE_TEST_MODEL_PROFILE" =~ ^(openrouter-free|openrouter-free-canary|free-openrouter)$ ]]; then
+  PROVIDER_MODEL_OVERRIDES_JSON="$(jq -n --arg model "${APEX_OPENROUTER_FREE_MODEL:-moonshotai/kimi-k2.6:free}" '{openrouter:$model}')"
 fi
 
 if [[ -n "${POWER_MODE:-}" ]]; then

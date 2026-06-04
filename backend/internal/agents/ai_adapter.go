@@ -55,9 +55,9 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 	},
 	ai.ProviderOpenRouter: {
 		PowerAuto:     "auto",
-		PowerMax:      "openai/gpt-5.5",
-		PowerBalanced: "deepseek/deepseek-v4-pro",
-		PowerFast:     "openai/gpt-5-nano",
+		PowerMax:      "moonshotai/kimi-k2.6:free",
+		PowerBalanced: "moonshotai/kimi-k2.6:free",
+		PowerFast:     "moonshotai/kimi-k2.6:free",
 	},
 }
 
@@ -136,6 +136,8 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 		return strings.HasPrefix(normalized, "deepseek-")
 	case ai.ProviderGLM:
 		return strings.HasPrefix(normalized, "glm-")
+	case ai.ProviderOpenRouter:
+		return strings.Contains(normalized, "/") && !strings.HasPrefix(normalized, "anthropic/") && !strings.HasPrefix(normalized, "~anthropic/")
 	case ai.ProviderOllama:
 		if strings.HasSuffix(normalized, ":cloud") {
 			for _, ollamaCloudPrefix := range []string{

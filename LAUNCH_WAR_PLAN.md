@@ -167,13 +167,15 @@ FILES TO CHANGE:
 - None (GitHub repo Actions secrets + variable APEX_ENABLE_GITHUB_ACTIONS=true)
 
 EXACT CHANGE REQUIRED:
-Set repo secrets: RENDER_API_KEY, RENDER_BACKEND_SERVICE_ID, RENDER_FRONTEND_SERVICE_ID, and any
-Stripe/canary secrets the workflow expects (see production-canary.yml). With
-`APEX_REQUIRE_PAID_CANARIES=true`, the Stripe verifier requires an existing paid canary account
-that can open the billing portal, and paid build canaries fail instead of skipping when
-credentials are absent. Set repo variables
-APEX_ENABLE_GITHUB_ACTIONS=true and APEX_REQUIRE_PAID_CANARIES=true when using the workflow as
-launch evidence. Manually dispatch the workflow with paid canary credentials present.
+Confirm repo secrets: RENDER_API_KEY, RENDER_BACKEND_SERVICE_ID, RENDER_FRONTEND_SERVICE_ID, and any
+Stripe/canary secrets the workflow expects (see production-canary.yml). `APEX_REQUIRE_PAID_CANARIES`
+is currently `false`; set it to `true` only when intentionally treating paid canaries as a hard
+workflow gate. After GitHub billing is unlocked, manually dispatch the workflow with paid canary
+credentials present. Before that, run the same launch checks locally or through Hermes/Render and
+record artifacts in the tracker. Paid canary and paid-testing jobs must use the OpenRouter-free
+profile by default (`PROVIDER_MODE=platform`, all build roles assigned to `openrouter`, and
+`APEX_PROVIDER_MODEL_OVERRIDES_JSON={"openrouter":"moonshotai/kimi-k2.6:free"}`) unless the human
+explicitly approves paid flagship-provider spend.
 
 ACCEPTANCE CRITERIA:
 - [ ] "Launch Verification Scripts" job passes (Stripe + Render + mobile verifiers)
@@ -229,7 +231,7 @@ Priority: P0
 Category: Reliability
 Estimated Time: 10 minutes (backend) + parallel (frontend)
 Owner: hernmes
-Status: BACKEND PASS / FRONTEND PASS ON DIRTY LAUNCH TREE — backend serialized tests and build passed locally on 2026-06-02 after stopping stale agent processes; frontend typecheck, full Vitest, lint, and build also passed locally on 2026-06-02. Re-run aggregate backend+frontend on the final launch commit if more code changes land.
+Status: BACKEND PASS / FRONTEND PASS EVIDENCE RECORDED — backend passed 2026-05-26 (`go test -p 1 -parallel 4 ./... -timeout 20m`) and frontend passed 2026-06-04 with Vitest (`38` test files, `269` tests). Re-run aggregate backend+frontend on the final launch commit if more code changes land.
 
 CONTEXT:
 The launch evidence checklist requires the serialized backend suite, frontend typecheck/test/lint/build, and
