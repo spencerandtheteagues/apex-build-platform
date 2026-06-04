@@ -1,5 +1,7 @@
 package ai
 
+import "strings"
+
 // CatalogModel describes an OpenRouter model with quality and cost metadata.
 // Quality scores (0.0–1.0) are curated estimates based on provider benchmarks,
 // community evals, and observed performance — not automated measurements.
@@ -24,7 +26,7 @@ type CatalogModel struct {
 // isAnthropicModel returns true for any model that must route through direct Anthropic API.
 // These are explicitly blocked from OpenRouter routing.
 func isAnthropicModel(id string) bool {
-	return len(id) >= 10 && (id[:10] == "anthropic/" || id[:11] == "~anthropic/")
+	return strings.HasPrefix(id, "anthropic/") || strings.HasPrefix(id, "~anthropic/")
 }
 
 // OpenRouterCatalog returns the curated model catalog.
