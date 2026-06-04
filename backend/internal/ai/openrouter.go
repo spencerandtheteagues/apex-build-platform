@@ -74,7 +74,7 @@ func NewOpenRouterClient(apiKey string, ollamaFallback *OllamaClient) *OpenRoute
 	apiKey = normalizeAPIKey(apiKey)
 	return &OpenRouterClient{
 		apiKey:     apiKey,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 10 * time.Minute},
 		selector:   NewAutoSelector(apiKey, ollamaFallback),
 		usage: &ProviderUsage{
 			Provider: ProviderOpenRouter,

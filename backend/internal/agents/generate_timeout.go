@@ -24,8 +24,15 @@ func defaultGenerateTimeout(provider ai.AIProvider, mode PowerMode) time.Duratio
 		}
 	}
 
+	// OpenRouter auto mode routes through free/variable-latency models that can take
+	// longer than typical paid APIs. Give it max-tier headroom so slow free-tier
+	// responses don't trip stale-task recovery and cause unnecessary retries.
+	if provider == ai.ProviderOpenRouter && mode == PowerAuto {
+		return 5 * time.Minute
+	}
+
 	switch mode {
-	case PowerMax:
+	case PowerMax, PowerAuto:
 		return 5 * time.Minute
 	case PowerBalanced:
 		return 3 * time.Minute
