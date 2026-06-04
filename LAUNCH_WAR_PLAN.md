@@ -71,7 +71,7 @@ Owner: openclaw
 TASK-002: Create live Stripe webhook endpoint and replay all critical events
 Priority: P0
 Category: Billing
-Status: PARTIAL — endpoint is live and processing real payments; controlled replay of all critical event types is still required
+Status: PARTIAL — endpoint is live and processing real payments; 2026-06-04 safe verifier confirmed payments ready and invalid-signature rejection; controlled replay of all critical real event types is still required
 Owner: openclaw
 ```
 
@@ -79,7 +79,7 @@ Owner: openclaw
 TASK-003: Execute one controlled live paid checkout end-to-end with a real card
 Priority: P0
 Category: Billing
-Status: PARTIAL — real customer payment observed 2026-05-25; controlled checkout, portal, plan-change, cancellation, and webhook replay evidence still required
+Status: PARTIAL — real customer payment observed 2026-05-25; 2026-06-04 safe verifier created live subscription and credit checkout sessions without completing payment; controlled paid checkout, portal, plan-change, cancellation, and webhook replay evidence still required
 Owner: openclaw
 ```
 
@@ -155,21 +155,26 @@ Priority: P0
 Category: Reliability
 Estimated Time: 8 minutes (config) + watch
 Owner: openclaw
-Status: CONFIG ENABLED / PASS EVIDENCE PENDING — `APEX_ENABLE_GITHUB_ACTIONS=true` and `RENDER_API_KEY` are configured per 2026-05-26 handoff; a passing production-canary workflow run is still required as launch evidence
+Status: GITHUB ACCOUNT BILLING LOCK / LOCAL BYPASS REQUIRED — `APEX_ENABLE_GITHUB_ACTIONS=true`, Render secrets, and canary email/password secrets are configured; a passing production-canary workflow run is still required. As of 2026-06-04, the Hermes `GITHUB_TOKEN` authenticates as `spencerandtheteagues` on GitHub Free with admin access to this public repo, Actions enabled, and repo variables readable (`APEX_REQUIRE_PAID_CANARIES=false`). The latest failed check-run annotation is GitHub's account-level refusal: "The job was not started because your account is locked due to a billing issue." This is not a missing GitHub Pro plan and not an Apex paid-canary setting.
 
 CONTEXT:
-production-canary.yml exists and the enabling variable is now configured, but this tracker still
-needs a recorded passing run against apex-build.dev with strict Render/Stripe/canary secrets.
-This is the automated safety net that prevents shipping a broken deploy.
+production-canary.yml exists and the enabling variable is configured, but this tracker still needs
+a recorded passing run against apex-build.dev with strict Render/Stripe/canary secrets. This is the
+automated safety net that prevents shipping a broken deploy. GitHub-hosted execution is blocked by
+GitHub's account billing lock even though the account is on the Free plan and the repo is public.
+Until GitHub unlocks Actions for the account, use local/Hermes/Render execution for canary evidence
+instead of waiting on GitHub-hosted runners.
 
 FILES TO CHANGE:
 - None (GitHub repo Actions secrets + variable APEX_ENABLE_GITHUB_ACTIONS=true)
 
 EXACT CHANGE REQUIRED:
-Set repo secrets: RENDER_API_KEY, RENDER_BACKEND_SERVICE_ID, RENDER_FRONTEND_SERVICE_ID, and any
-Stripe/canary secrets the workflow expects (see production-canary.yml). Set repo variables
-APEX_ENABLE_GITHUB_ACTIONS=true and APEX_REQUIRE_PAID_CANARIES=true when using the workflow as
-launch evidence. Manually dispatch the workflow with paid canary credentials present.
+Confirm repo secrets: RENDER_API_KEY, RENDER_BACKEND_SERVICE_ID, RENDER_FRONTEND_SERVICE_ID, and any
+Stripe/canary secrets the workflow expects (see production-canary.yml). `APEX_REQUIRE_PAID_CANARIES`
+is currently `false`; set it to `true` only when intentionally treating paid canaries as a hard
+workflow gate. After GitHub billing is unlocked, manually dispatch the workflow with paid canary
+credentials present. Before that, run the same launch checks locally or through Hermes/Render and
+record artifacts in the tracker.
 
 ACCEPTANCE CRITERIA:
 - [ ] "Launch Verification Scripts" job passes (Stripe + Render + mobile verifiers)
@@ -187,28 +192,27 @@ Priority: P0
 Category: Reliability
 Estimated Time: 10 minutes
 Owner: hernmes
-Status: VERIFIER SCRIPT ADDED / EXECUTION EVIDENCE PENDING — `scripts/verify-rollback.sh` exists; a real rollback/roll-forward drill is still required in `docs/launch-runbook.md`
+Status: COMPLETE — production rollback -> roll-forward drill was executed and documented on 2026-06-04. No further live rollback drill should run without explicit operator approval for that exact action.
 
 CONTEXT:
-The tracker lists "rollback drill" as required-but-undone evidence. If a launch-day deploy breaks
-builds or payments, we must be able to roll back to a known-good commit in under 5 minutes with
-confidence. Never tested = unknown blast radius.
+The rollback drill evidence is now documented in `docs/launch-runbook.md`. If a launch-day deploy
+breaks builds or payments, use the documented procedure and current deploy metadata. This is no
+longer an open launch task.
 
 FILES TO CHANGE:
 - docs/launch-runbook.md (append a dated "Rollback Drill" evidence section)
 
 EXACT CHANGE REQUIRED:
-1. Read the current and prior known-good deploy IDs/commits from Render deploy metadata immediately
-before the drill. 2. In Render, trigger a manual redeploy of the prior successful deploy
-(rollback). 3. Confirm /health returns healthy and a smoke build still works. 4. Roll forward to
-current. 5. Record start/end timestamps, deploy IDs, commit IDs, and total downtime in
-launch-runbook.md.
+Do not rerun the live drill without explicit operator approval. For future incidents, read current
+and prior known-good deploy IDs/commits from Render deploy metadata immediately before action,
+roll back to the selected deploy, verify health, roll forward when appropriate, and record deploy
+IDs/timestamps.
 
 ACCEPTANCE CRITERIA:
-- [ ] Rollback to prior deploy completes and /health is healthy
-- [ ] Total time-to-rollback measured and < 5 minutes
-- [ ] Roll-forward restores current code cleanly
-- [ ] Evidence section added to docs/launch-runbook.md with timestamps and deploy IDs
+- [x] Rollback to prior deploy completed and health was verified
+- [x] Total rollback/roll-forward cycle observed under the 5-minute target
+- [x] Roll-forward restored current code cleanly
+- [x] Evidence section added to docs/launch-runbook.md with timestamps and deploy IDs
 
 VERIFICATION COMMAND:
 grep -A5 "Rollback Drill" docs/launch-runbook.md

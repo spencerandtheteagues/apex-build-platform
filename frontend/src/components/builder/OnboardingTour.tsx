@@ -18,6 +18,9 @@ import {
   FileCode,
   Download,
   Code2,
+  LayoutTemplate,
+  ListTodo,
+  PanelsTopLeft,
 } from 'lucide-react'
 import { onboardingStarters, type OnboardingStarter } from './onboardingStarters'
 
@@ -109,6 +112,7 @@ interface OnboardingTourProps {
   onStarterSelect?: (starter: OnboardingStarter) => void
   onOpenBlankWorkspace?: () => void
   forceShow?: boolean
+  onPromptPrefill?: (prompt: string, mode: 'fast' | 'full') => void
 }
 
 export const OnboardingTour: React.FC<OnboardingTourProps> = ({
@@ -116,6 +120,7 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({
   onStarterSelect,
   onOpenBlankWorkspace,
   forceShow = false,
+  onPromptPrefill,
 }) => {
   const [isVisible, setIsVisible] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
@@ -156,9 +161,12 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({
   }, [completeTour])
 
   const handleStarterSelect = useCallback((starter: OnboardingStarter) => {
+    if (onPromptPrefill) {
+      onPromptPrefill(starter.prompt, starter.mode);
+    }
     onStarterSelect?.(starter)
     handleClose()
-  }, [handleClose, onStarterSelect])
+  }, [handleClose, onStarterSelect, onPromptPrefill])
 
   const handleOpenBlankWorkspace = useCallback(() => {
     onOpenBlankWorkspace?.()
