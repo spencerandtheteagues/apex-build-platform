@@ -791,7 +791,7 @@ export class ApiService {
     description: string
     prompt?: string
     mode: 'fast' | 'full'
-    power_mode?: 'fast' | 'balanced' | 'max'
+    power_mode?: 'fast' | 'balanced' | 'max' | 'auto'
     provider_mode?: 'platform' | 'byok'
     require_preview_ready?: boolean
     tech_stack?: {

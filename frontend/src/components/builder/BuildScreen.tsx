@@ -229,7 +229,7 @@ interface ChatMsgItem {
 }
 
 interface ProviderPanelItem {
-  provider: "claude" | "gpt4" | "gemini" | "grok" | "ollama";
+  provider: "claude" | "gpt4" | "gemini" | "grok" | "ollama" | "openrouter";
   liveModelName: string;
   available: boolean;
   status:

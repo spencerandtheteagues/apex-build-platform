@@ -220,7 +220,7 @@ interface BuildState {
   checkpoints: Checkpoint[]
   description: string
   availableProviders?: string[]
-  powerMode?: 'fast' | 'balanced' | 'max'
+  powerMode?: 'fast' | 'balanced' | 'max' | 'auto'
   providerModelOverrides?: Partial<Record<SupportedBuildProvider, string>>
   currentPhase?: string
   qualityGateRequired?: boolean
@@ -460,7 +460,7 @@ const isActiveBuildStatus = (status?: string) =>
   status === 'reviewing' ||
   status === 'awaiting_review'
 
-type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
+type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'openrouter'
 
 type ProviderModelTier = {
   id: string
@@ -485,7 +485,7 @@ type ProviderPanelState = {
   multipleLiveModels: boolean
 }
 
-const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini', 'grok', 'ollama']
+const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini', 'grok', 'ollama', 'openrouter']
 const MAX_AI_THOUGHTS = 240
 const MAX_PROVIDER_THOUGHTS = 36
 
@@ -512,6 +512,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gemini: { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
     grok: { id: 'grok-3-mini', name: 'Grok 3 Mini' },
     ollama: { id: 'glm-5.1:cloud', name: 'GLM-5.1' },
+    openrouter: { id: 'moonshotai/kimi-k2.6:free', name: 'Kimi K2.6 (Free)' },
   },
   balanced: {
     claude: { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
@@ -519,6 +520,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gemini: { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     grok: { id: 'grok-3', name: 'Grok 3' },
     ollama: { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
+    openrouter: { id: 'deepseek/deepseek-v3.2', name: 'DeepSeek V3.2' },
   },
   max: {
     claude: { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
@@ -526,6 +528,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gemini: { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     grok: { id: 'grok-3', name: 'Grok 3' },
     ollama: { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6' },
+    openrouter: { id: 'openai/gpt-5.5', name: 'GPT-5.5' },
   },
 }
 
@@ -602,12 +605,21 @@ const PROVIDER_UI: Record<SupportedBuildProvider, {
     titleClass: 'text-cyan-100',
     dotClass: 'bg-cyan-300',
   },
+  openrouter: {
+    label: 'OpenRouter',
+    badgeClass: 'border-violet-500/60 text-violet-300 bg-violet-500/10',
+    cardClass: 'border-violet-500/35 bg-gradient-to-br from-violet-950/55 via-black to-violet-950/25',
+    activeClass: 'shadow-[0_0_28px_rgba(139,92,246,0.18)]',
+    titleClass: 'text-violet-200',
+    dotClass: 'bg-violet-400',
+  },
 }
 
 const normalizeProviderKey = (provider?: string): SupportedBuildProvider | null => {
   const value = String(provider || '').toLowerCase()
   if (value === 'gpt' || value === 'gpt4' || value === 'openai') return 'gpt4'
   if (value === 'ollama' || value === 'local' || value === 'kimi' || value === 'kimi-k2.6') return 'ollama'
+  if (value === 'openrouter') return 'openrouter'
   if (value === 'claude' || value === 'gemini' || value === 'grok') return value
   return null
 }
@@ -615,7 +627,7 @@ const normalizeProviderKey = (provider?: string): SupportedBuildProvider | null 
 const getModelTier = (mode: 'fast' | 'balanced' | 'max') => POWER_MODE_MODEL_CATALOG[mode]
 
 const getPowerModeModelSummary = (mode: 'fast' | 'balanced' | 'max') =>
-  MODEL_PANEL_ORDER.map((provider) => getModelTier(mode)[provider].name).join(' / ')
+  MODEL_PANEL_ORDER.filter(p => p !== 'openrouter').map((provider) => getModelTier(mode)[provider].name).join(' / ')
 
 const DEFAULT_PROVIDER_MODEL_SELECTIONS: Record<SupportedBuildProvider, string> = {
   claude: 'auto',
@@ -623,6 +635,7 @@ const DEFAULT_PROVIDER_MODEL_SELECTIONS: Record<SupportedBuildProvider, string> 
   gemini: 'auto',
   grok: 'auto',
   ollama: 'auto',
+  openrouter: 'auto',
 }
 
 const canonicalizeModelId = (model?: string) => {
@@ -680,6 +693,8 @@ const canonicalizeModelId = (model?: string) => {
 const providerForModelId = (model?: string): SupportedBuildProvider | null => {
   const canonicalModel = canonicalizeModelId(model)
   if (!canonicalModel) return null
+  // OpenRouter model IDs use org/model-name format
+  if (canonicalModel.includes('/')) return 'openrouter'
   if (
     canonicalModel.endsWith(':cloud') &&
     [
@@ -765,6 +780,8 @@ const constrainProviderModelForPowerMode = (
   model: string,
   mode: 'fast' | 'balanced' | 'max'
 ) => {
+  // OpenRouter models are user-picked — pass through without catalog constraints
+  if (provider === 'openrouter') return model
   if (mode === 'max' && provider !== 'ollama' && model !== POWER_MODE_MODEL_CATALOG.max[provider].id) {
     return POWER_MODE_MODEL_CATALOG.max[provider].id
   }
@@ -776,8 +793,9 @@ const constrainProviderModelForPowerMode = (
 
 const serializeProviderModelOverrides = (
   overrides: Record<SupportedBuildProvider, string>,
-  mode: 'fast' | 'balanced' | 'max'
+  mode: 'fast' | 'balanced' | 'max' | 'auto'
 ): Record<string, string> | undefined => {
+  if (mode === 'auto') return undefined
   const serialized = MODEL_PANEL_ORDER.reduce<Record<string, string>>((acc, provider) => {
     const model = constrainProviderModelForPowerMode(provider, canonicalizeModelId(overrides[provider]), mode)
     if (model && model !== 'auto' && modelBelongsToProvider(provider, model)) {
@@ -1126,12 +1144,12 @@ const FAST_BUILD_PROMPT_MAX_LENGTH = 2000
 const BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH = 25000
 const FULL_BUILD_PROMPT_MAX_LENGTH = 50000
 
-const getBuildPromptMaxLength = (mode: BuildMode, powerMode: 'fast' | 'balanced' | 'max') =>
+const getBuildPromptMaxLength = (mode: BuildMode, powerMode: 'fast' | 'balanced' | 'max' | 'auto') =>
   mode !== 'full'
     ? FAST_BUILD_PROMPT_MAX_LENGTH
     : powerMode === 'max'
       ? FULL_BUILD_PROMPT_MAX_LENGTH
-      : powerMode === 'balanced'
+      : powerMode === 'balanced' || powerMode === 'auto'
         ? BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH
         : FAST_BUILD_PROMPT_MAX_LENGTH
 
@@ -2090,7 +2108,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [telemetryNow, setTelemetryNow] = useState(() => Date.now())
   const AUTO_STACK_ID = 'auto'
   const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set([AUTO_STACK_ID]))
-  const [powerMode, setPowerMode] = useState<'fast' | 'balanced' | 'max'>('balanced')
+  const [powerMode, setPowerMode] = useState<'fast' | 'balanced' | 'max' | 'auto'>('balanced')
   const promptMaxLength = getBuildPromptMaxLength(buildMode, powerMode)
   const maxPowerPromptLimitEnabled = buildMode === 'full' && powerMode === 'max'
   const balancedPromptLimitEnabled = buildMode === 'full' && powerMode === 'balanced'
@@ -2146,6 +2164,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     gemini: null,
     grok: null,
     ollama: null,
+    openrouter: null,
   })
   const previewPreparedRef = useRef(false)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
@@ -2480,6 +2499,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       .filter((thought): thought is AIThought => thought !== null)
   }, [])
   const activePowerMode = buildState?.powerMode || powerMode
+  // Resolve 'auto' to 'balanced' for catalog/display lookups that don't support 'auto'
+  const resolvedPowerMode: 'fast' | 'balanced' | 'max' =
+    activePowerMode === 'auto' ? 'balanced' : (activePowerMode as 'fast' | 'balanced' | 'max')
   const activeProviderModelOverrides = buildState?.providerModelOverrides
     ? normalizeProviderModelOverrides(buildState.providerModelOverrides)
     : providerModelOverrides
@@ -2585,7 +2607,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   }, [qualityGateLabel])
   const providerPanels = useMemo<ProviderPanelState[]>(() => {
-    const configuredTier = getModelTier(activePowerMode)
+    const configuredTier = getModelTier(resolvedPowerMode)
     const availableProviders = new Set(
       (buildState?.availableProviders || [])
         .map((provider) => normalizeProviderKey(provider))
@@ -2597,7 +2619,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       const configuredModel = manualModel !== 'auto' && modelBelongsToProvider(provider, manualModel)
         ? {
             id: manualModel,
-            name: getModelDisplayName(manualModel, activePowerMode) || manualModel,
+            name: getModelDisplayName(manualModel, resolvedPowerMode) || manualModel,
           }
         : configuredTier[provider]
       const providerAgents = (buildState?.agents || []).filter((agent) => normalizeProviderKey(agent.provider) === provider)
@@ -2658,7 +2680,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         provider,
         configuredModel,
         liveModelId,
-        liveModelName: getModelDisplayName(liveModelId, activePowerMode) || configuredModel.name,
+        liveModelName: getModelDisplayName(liveModelId, resolvedPowerMode) || configuredModel.name,
         available,
         status,
         statusLabel,
@@ -3911,7 +3933,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           data.provider,
           data.model,
           'action',
-          `${formatRole(data.role)} agent joined with ${humanizeIdentifier(data.provider) || 'configured provider'}${data.model ? ` / ${getModelDisplayName(data.model, activePowerMode) || data.model}` : ''}`,
+          `${formatRole(data.role)} agent joined with ${humanizeIdentifier(data.provider) || 'configured provider'}${data.model ? ` / ${getModelDisplayName(data.model, resolvedPowerMode) || data.model}` : ''}`,
           { eventType: 'agent:spawned' }
         )
         break
@@ -4618,7 +4640,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         const oldProvider = data.old_provider || data.failed_provider || data.provider || 'unknown'
         const newProvider = data.new_provider || data.fallback_provider || 'unknown'
         const nextModel = data.model || data.new_model
-        const nextModelLabel = nextModel ? ` / ${getModelDisplayName(String(nextModel), activePowerMode) || nextModel}` : ''
+        const nextModelLabel = nextModel ? ` / ${getModelDisplayName(String(nextModel), resolvedPowerMode) || nextModel}` : ''
         addSystemMessage(`${data.agent_role || 'Agent'} switched provider: ${humanizeIdentifier(oldProvider)} -> ${humanizeIdentifier(newProvider)}${nextModelLabel}`)
         setBuildState(prev => {
           if (!prev) return null
@@ -6325,7 +6347,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       addSystemMessage('Mobile scope: Expo/React Native source and export metadata. Native EAS builds, signing, and store submission remain gated stages.')
     }
     addSystemMessage(`Tech stack: ${buildTechStackSummary()}`)
-    addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER' : powerMode === 'balanced' ? 'Balanced' : 'Fast'} (${getPowerModeModelSummary(powerMode)})`)
+    addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER' : powerMode === 'balanced' ? 'Balanced' : powerMode === 'auto' ? 'Auto ✦' : 'Fast'} (${powerMode === 'auto' ? 'GPT-5.5 dispatcher via OpenRouter' : getPowerModeModelSummary(powerMode)})`)
 
     try {
       // Preflight: verify hosted platform providers before starting build.
@@ -6559,7 +6581,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       if (canonicalizeModelId(model) === 'auto') {
         addSystemMessage(`${humanizeIdentifier(provider)} returned to Auto model selection`)
       } else {
-        addSystemMessage(`${humanizeIdentifier(provider)} locked to ${getModelDisplayName(model, activePowerMode) || model}`)
+        addSystemMessage(`${humanizeIdentifier(provider)} locked to ${getModelDisplayName(model, resolvedPowerMode) || model}`)
       }
     } catch (error) {
       setProviderModelOverrides(normalizeProviderModelOverrides(buildState.providerModelOverrides))
@@ -7372,11 +7394,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       </div>
                       <Sparkles className="h-5 w-5 text-cyan-300" />
                     </div>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       {([
                         { id: 'fast' as const, label: 'Efficient', icon: <Zap className="h-5 w-5" />, desc: getPowerModeModelSummary('fast'), tone: 'emerald', cost: '1.5x', perBuild: 'Lowest cost' },
                         { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="h-5 w-5" />, desc: getPowerModeModelSummary('balanced'), tone: 'cyan', cost: '1.68x', perBuild: 'Best balance' },
                         { id: 'max' as const, label: 'Flagship', icon: <Rocket className="h-5 w-5" />, desc: getPowerModeModelSummary('max'), tone: 'sky', cost: '1.88x', perBuild: 'Highest quality' },
+                        { id: 'auto' as const, label: 'Auto ❆', icon: <Bot className="h-5 w-5" />, desc: 'GPT-5.5 dispatches the right model per task', tone: 'violet', cost: 'smart', perBuild: 'Adaptive routing' },
                       ]).map((mode) => (
                         <button
                           key={mode.id}
@@ -7389,7 +7412,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                                 ? 'border-emerald-300/55 bg-emerald-400/10 text-white shadow-lg shadow-emerald-500/10'
                                 : mode.tone === 'cyan'
                                   ? 'border-cyan-300/55 bg-cyan-400/10 text-white shadow-lg shadow-cyan-500/10'
-                                  : 'border-sky-300/55 bg-sky-400/10 text-white shadow-lg shadow-sky-500/10'
+                                  : mode.tone === 'sky'
+                                    ? 'border-sky-300/55 bg-sky-400/10 text-white shadow-lg shadow-sky-500/10'
+                                    : 'border-violet-300/55 bg-violet-400/10 text-white shadow-lg shadow-violet-500/10'
                               : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20'
                           )}
                         >
@@ -7646,11 +7671,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     <Sparkles className="w-6 h-6 text-red-400" />
                     AI Power Mode
                   </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {([
                       { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: getPowerModeModelSummary('fast'), color: 'green', cost: '1.5x', multiplier: '1.5x', perBuild: 'Lowest cost' },
                       { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: getPowerModeModelSummary('balanced'), color: 'yellow', cost: '1.68x', multiplier: '1.68x', perBuild: 'Best balance' },
                       { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: getPowerModeModelSummary('max'), color: 'red', cost: '1.88x', multiplier: '1.88x', perBuild: 'Highest quality' },
+                      { id: 'auto' as const, label: 'Auto ❆', icon: <Bot className="w-5 h-5" />, desc: 'GPT-5.5 dispatches the right model per task', color: 'violet', cost: 'smart', multiplier: 'varies', perBuild: 'Adaptive routing' },
                     ]).map((mode) => (
                       <button
                         key={mode.id}
@@ -7661,7 +7687,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                           powerMode === mode.id
                             ? mode.color === 'green' ? 'border-green-500/60 bg-green-500/10 shadow-lg shadow-green-500/10'
                               : mode.color === 'yellow' ? 'border-yellow-500/60 bg-yellow-500/10 shadow-lg shadow-yellow-500/10'
-                              : 'border-red-500/60 bg-red-500/10 shadow-lg shadow-red-500/10'
+                              : mode.color === 'red' ? 'border-red-500/60 bg-red-500/10 shadow-lg shadow-red-500/10'
+                              : 'border-violet-500/60 bg-violet-500/10 shadow-lg shadow-violet-500/10'
                             : 'border-gray-700/50 bg-gray-900/30 hover:border-gray-600/60'
                         )}
                       >
@@ -7671,7 +7698,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                             powerMode === mode.id
                               ? mode.color === 'green' ? 'text-green-400'
                                 : mode.color === 'yellow' ? 'text-yellow-400'
-                                : 'text-red-400'
+                                : mode.color === 'red' ? 'text-red-400'
+                                : 'text-violet-400'
                               : 'text-gray-500'
                           )}>
                             {mode.icon}
@@ -7684,7 +7712,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                           </span>
                           <span className={cn(
                             'ml-auto text-xs font-mono font-bold shrink-0',
-                            mode.color === 'green' ? 'text-green-400' : mode.color === 'yellow' ? 'text-yellow-400' : 'text-red-400'
+                            mode.color === 'green' ? 'text-green-400' : mode.color === 'yellow' ? 'text-yellow-400' : mode.color === 'red' ? 'text-red-400' : 'text-violet-400'
                           )}>
                             {mode.cost}
                           </span>
@@ -7704,6 +7732,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       {powerMode === 'max' && <span className="text-red-400/80"> Max Power models: {getPowerModeModelSummary('max')}.</span>}
                       {powerMode === 'balanced' && <span className="text-yellow-400/80"> Balanced models: {getPowerModeModelSummary('balanced')}.</span>}
                       {powerMode === 'fast' && <span className="text-green-400/80"> Fast models: {getPowerModeModelSummary('fast')}.</span>}
+                      {powerMode === 'auto' && <span className="text-violet-400/80"> Auto mode: GPT-5.5 dispatcher picks the optimal model per task from 300+ OpenRouter models.</span>}
                       <span className="text-gray-500"> BYOK uses your own keys plus a small routing fee ($0.25 per MTok).</span>
                     </p>
                   </div>

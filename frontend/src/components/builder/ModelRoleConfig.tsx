@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { cn } from '@/lib/utils'
 import {
   Card,
@@ -13,7 +13,10 @@ import {
   Settings,
   AlertCircle,
   Check,
+  ChevronDown,
+  Bot,
 } from 'lucide-react'
+import OpenRouterModelPicker from './OpenRouterModelPicker'
 
 // User-facing role categories (maps to backend UserRoleCategory)
 const ROLE_CATEGORIES = [
@@ -32,7 +35,8 @@ const PLATFORM_PROVIDERS = [
 ] as const
 
 const OLLAMA_PROVIDER = { id: 'ollama', label: 'Ollama', subtitle: 'Kimi K2.6 Cloud/BYOK', letter: 'O', borderActive: 'border-cyan-500/60', bgActive: 'bg-cyan-500/10', text: 'text-cyan-400', shadow: 'shadow-cyan-500/10' } as const
-type RoutedProviderId = typeof PLATFORM_PROVIDERS[number]['id'] | typeof OLLAMA_PROVIDER['id']
+const OPENROUTER_PROVIDER = { id: 'openrouter', label: 'OpenRouter', subtitle: '300+ models', letter: 'R', borderActive: 'border-violet-500/60', bgActive: 'bg-violet-500/10', text: 'text-violet-300', shadow: 'shadow-violet-500/10' } as const
+type RoutedProviderId = typeof PLATFORM_PROVIDERS[number]['id'] | typeof OLLAMA_PROVIDER['id'] | typeof OPENROUTER_PROVIDER['id']
 
 // Default assignments matching backend policy
 const DEFAULT_ASSIGNMENTS: Record<string, string> = {
@@ -48,6 +52,7 @@ const AUTO_PROVIDER_ROUTES: Record<RoutedProviderId, string> = {
   gemini: 'Testing, validation, fast checks',
   grok: 'Risk review, alternate repair',
   ollama: 'Open-model orchestration and fallback',
+  openrouter: 'Smart dispatch across 300+ models',
 }
 
 // Chip color classes per role
@@ -80,7 +85,9 @@ export default function ModelRoleConfig({
   modelOptions = {},
   onModelSelect,
 }: ModelRoleConfigProps) {
-  const visibleProviders = [...PLATFORM_PROVIDERS, OLLAMA_PROVIDER]
+  const visibleProviders = [...PLATFORM_PROVIDERS, OLLAMA_PROVIDER, OPENROUTER_PROVIDER]
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerTargetRole, setPickerTargetRole] = useState<string | null>(null)
 
   const isValid = 'architect' in assignments && 'coder' in assignments
 
@@ -235,8 +242,53 @@ export default function ModelRoleConfig({
           /* Manual Mode: provider cards with role chips */
           <div>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-              Click a role chip to assign it to a model. Each role can only be assigned to one model. Ollama appears beside the hosted providers and can route through hosted Ollama Cloud or BYOK when available.
+              Click a role chip to assign it to a provider. OpenRouter lets you pick any of 300+ models per role. Ollama routes through hosted Ollama Cloud or BYOK when available.
             </p>
+
+            {/* Auto ✦ quick-assign strip */}
+            <div className="mb-4 p-3 rounded-xl border border-violet-500/20 bg-violet-500/5">
+              <div className="flex items-center gap-2 mb-2">
+                <Bot className="w-4 h-4 text-violet-400" />
+                <span className="text-xs font-bold text-violet-300 uppercase tracking-wide">Auto ✦ — Assign role to OpenRouter dispatcher</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {ROLE_CATEGORIES.map((cat) => {
+                  const isAutoAssigned = assignments[cat.id] === 'openrouter'
+                  const Icon = cat.icon
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => {
+                        const updated = { ...assignments }
+                        if (isAutoAssigned) {
+                          delete updated[cat.id]
+                        } else {
+                          updated[cat.id] = 'openrouter'
+                        }
+                        onAssignmentsChange(updated)
+                        if (!isAutoAssigned) onModelSelect?.('openrouter' as RoutedProviderId, 'auto')
+                      }}
+                      className={cn(
+                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border',
+                        isAutoAssigned
+                          ? 'border-violet-500/70 bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/30'
+                          : 'border-gray-700/50 bg-gray-800/40 text-gray-500 hover:border-violet-500/40 hover:text-violet-400'
+                      )}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {cat.label}
+                      {isAutoAssigned && <Sparkles className="w-3 h-3 ml-0.5" />}
+                    </button>
+                  )
+                })}
+                <button
+                  onClick={() => { setPickerTargetRole(null); setPickerOpen(true) }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition-colors"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />Pick specific model
+                </button>
+              </div>
+            </div>
 
             <div className="space-y-3">
               {visibleProviders.map((provider) => {
@@ -313,35 +365,52 @@ export default function ModelRoleConfig({
 
                     <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-3">
                       <label className="mb-2 flex items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-500">
-                        <span>{provider.id === 'ollama' ? 'Ollama Cloud Model' : 'Model Override'}</span>
+                        <span>{provider.id === 'ollama' ? 'Ollama Cloud Model' : provider.id === 'openrouter' ? 'OpenRouter Model' : 'Model Override'}</span>
                         {selectedModel !== 'auto' && (
                           <span className={cn('rounded-full border px-2 py-0.5 normal-case tracking-normal', provider.borderActive, provider.text)}>
                             Locked
                           </span>
                         )}
                       </label>
-                      <select
-                        value={selectedModel}
-                        disabled={!available || !onModelSelect}
-                        onChange={(event) => onModelSelect?.(provider.id, event.target.value)}
-                        className={cn(
-                          'w-full rounded-lg border border-slate-700/80 bg-slate-950/90 px-3 py-2 text-sm text-slate-100 outline-none transition-colors',
-                          'focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-400/15',
-                          (!available || !onModelSelect) && 'cursor-not-allowed opacity-50'
-                        )}
-                      >
-                        <option value="auto">Auto — Apex chooses per task</option>
-                        {providerModelOptions.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.name}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="mt-2 text-[11px] leading-5 text-gray-600">
-                        {provider.id === 'ollama'
-                          ? 'Hosted Ollama Cloud choices include Kimi, GLM, DeepSeek, Qwen, and Devstral routes; BYOK/local endpoints can still use their configured model.'
-                          : 'Leave on Auto unless you want this provider locked to a specific tier for the next build.'}
-                      </p>
+                      {provider.id === 'openrouter' ? (
+                        <div className="space-y-2">
+                          <button
+                            disabled={!available}
+                            onClick={() => { setPickerTargetRole(null); setPickerOpen(true) }}
+                            className={cn(
+                              'w-full flex items-center justify-between gap-2 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-sm transition-colors',
+                              available ? 'text-violet-200 hover:bg-violet-500/20' : 'opacity-50 cursor-not-allowed text-gray-600'
+                            )}
+                          >
+                            <span className="truncate">{selectedModel === 'auto' ? 'Auto — dispatcher chooses per task' : selectedModel}</span>
+                            <ChevronDown className="w-4 h-4 shrink-0" />
+                          </button>
+                          <p className="text-[11px] leading-5 text-gray-600">Browse 300+ models. GPT-5.5 auto-dispatches when set to Auto.</p>
+                        </div>
+                      ) : (
+                        <>
+                          <select
+                            value={selectedModel}
+                            disabled={!available || !onModelSelect}
+                            onChange={(event) => onModelSelect?.(provider.id, event.target.value)}
+                            className={cn(
+                              'w-full rounded-lg border border-slate-700/80 bg-slate-950/90 px-3 py-2 text-sm text-slate-100 outline-none transition-colors',
+                              'focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-400/15',
+                              (!available || !onModelSelect) && 'cursor-not-allowed opacity-50'
+                            )}
+                          >
+                            <option value="auto">Auto — Apex chooses per task</option>
+                            {providerModelOptions.map((model) => (
+                              <option key={model.id} value={model.id}>{model.name}</option>
+                            ))}
+                          </select>
+                          <p className="mt-2 text-[11px] leading-5 text-gray-600">
+                            {provider.id === 'ollama'
+                              ? 'Hosted Ollama Cloud choices include Kimi, GLM, DeepSeek, Qwen, and Devstral routes; BYOK/local endpoints can still use their configured model.'
+                              : 'Leave on Auto unless you want this provider locked to a specific tier for the next build.'}
+                          </p>
+                        </>
+                      )}
                     </div>
                   </div>
                 )
@@ -360,6 +429,19 @@ export default function ModelRoleConfig({
           </div>
         )}
       </CardContent>
+
+      <OpenRouterModelPicker
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Pick an OpenRouter Model"
+        onSelect={(modelId, _modelName) => {
+          onModelSelect?.('openrouter' as RoutedProviderId, modelId)
+          if (pickerTargetRole) {
+            onAssignmentsChange({ ...assignments, [pickerTargetRole]: 'openrouter' })
+          }
+          setPickerTargetRole(null)
+        }}
+      />
     </Card>
   )
 }
