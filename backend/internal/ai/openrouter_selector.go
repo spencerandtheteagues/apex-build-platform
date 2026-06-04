@@ -26,7 +26,7 @@ const (
 
 	// dispatcherTimeout is the hard deadline for a routing decision.
 	// If the dispatcher exceeds this, we fall back to catalog selection instantly.
-	dispatcherTimeout = 3 * time.Second
+	dispatcherTimeout = 8 * time.Second // per-dispatcher budget; primary + fallback each get independent 8s
 )
 
 // DispatchResult is the structured response from the LLM dispatcher.
@@ -68,11 +68,11 @@ func (s *AutoSelector) Select(ctx context.Context, req *AIRequest, freeOnly bool
 		return s.catalogSelect(req, true)
 	}
 
-	// Try LLM dispatcher with a tight deadline.
-	dispCtx, cancel := context.WithTimeout(ctx, dispatcherTimeout)
-	defer cancel()
+	// Try LLM dispatcher — each call gets its own independent timeout budget.
+	primaryCtx, cancelPrimary := context.WithTimeout(ctx, dispatcherTimeout)
+	defer cancelPrimary()
 
-	model, err := s.dispatcherSelect(dispCtx, req, dispatcherModel)
+	model, err := s.dispatcherSelect(primaryCtx, req, dispatcherModel)
 	if err == nil && model != "" {
 		log.Printf("[openrouter] dispatcher selected: %s", model)
 		return model
@@ -80,7 +80,9 @@ func (s *AutoSelector) Select(ctx context.Context, req *AIRequest, freeOnly bool
 	log.Printf("[openrouter] primary dispatcher failed (%v), trying fallback", err)
 
 	// Fallback dispatcher: deepseek-v4-pro via OpenRouter.
-	model, err = s.dispatcherSelect(dispCtx, req, dispatcherModelFallback)
+	fallbackCtx, cancelFallback := context.WithTimeout(ctx, dispatcherTimeout)
+	defer cancelFallback()
+	model, err = s.dispatcherSelect(fallbackCtx, req, dispatcherModelFallback)
 	if err == nil && model != "" {
 		log.Printf("[openrouter] fallback dispatcher selected: %s", model)
 		return model
@@ -88,8 +90,8 @@ func (s *AutoSelector) Select(ctx context.Context, req *AIRequest, freeOnly bool
 	log.Printf("[openrouter] fallback dispatcher failed (%v), trying Ollama DeepSeek", err)
 
 	// Ollama cloud fallback: use DeepSeek via subscription Ollama API.
-	// This only kicks in if the OpenRouter API itself is unreachable.
-	if s.ollamaFB != nil {
+	// Skip if the Ollama client points at the placeholder ollama.com URL.
+	if s.ollamaFB != nil && !strings.Contains(s.ollamaFB.baseURL, "ollama.com") {
 		model = s.ollamaDispatcherSelect(ctx, req)
 		if model != "" {
 			log.Printf("[openrouter] ollama dispatcher selected: %s", model)
