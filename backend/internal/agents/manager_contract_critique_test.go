@@ -462,6 +462,7 @@ func TestShouldRunFailureConsensusSkipsFirstFastCriticalCodeFailures(t *testing.
 	build := &Build{PowerMode: PowerFast}
 	task := &Task{
 		RetryCount: 1,
+		MaxRetries: 3,
 		Input: map[string]any{
 			"work_order_artifact": WorkOrder{RiskLevel: RiskCritical},
 		},
@@ -477,6 +478,7 @@ func TestShouldRunFailureConsensusKeepsFastCriticalProviderEscalations(t *testin
 	build := &Build{PowerMode: PowerFast}
 	task := &Task{
 		RetryCount: 1,
+		MaxRetries: 3,
 		Input: map[string]any{
 			"work_order_artifact": WorkOrder{RiskLevel: RiskCritical},
 		},
