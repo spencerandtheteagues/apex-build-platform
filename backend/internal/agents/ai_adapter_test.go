@@ -52,6 +52,14 @@ func TestAIRouterAdapterConfiguredProvidersDoNotDependOnHealthProbe(t *testing.T
 	}
 }
 
+func TestMapAgentProviderToAIProviderKeepsOpenRouterPinned(t *testing.T) {
+	t.Parallel()
+
+	if got := mapAgentProviderToAIProvider(ai.ProviderOpenRouter); got != ai.ProviderOpenRouter {
+		t.Fatalf("OpenRouter agent provider mapped to %s, want %s", got, ai.ProviderOpenRouter)
+	}
+}
+
 func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 	t.Setenv("OLLAMA_API_KEY", "")
 

@@ -113,6 +113,25 @@ func selectModelForPowerMode(provider ai.AIProvider, mode PowerMode) string {
 	return "" // Empty string = let the AI client pick its own default
 }
 
+func mapAgentProviderToAIProvider(provider ai.AIProvider) ai.AIProvider {
+	switch provider {
+	case ai.ProviderClaude:
+		return ai.ProviderClaude
+	case ai.ProviderGPT4:
+		return ai.ProviderGPT4
+	case ai.ProviderGemini:
+		return ai.ProviderGemini
+	case ai.ProviderGrok:
+		return ai.ProviderGrok
+	case ai.ProviderOpenRouter:
+		return ai.ProviderOpenRouter
+	case ai.ProviderOllama:
+		return ai.ProviderOllama
+	default:
+		return ai.ProviderOllama
+	}
+}
+
 func isOpenRouterFreeModel(model string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(model))
 	return normalized == "openrouter/free" || strings.Contains(normalized, ":free")
@@ -548,21 +567,7 @@ For code files, use this exact format:
 	}
 
 	// Map agent provider to AI package provider
-	var aiProvider ai.AIProvider
-	switch provider {
-	case ai.ProviderClaude:
-		aiProvider = ai.ProviderClaude
-	case ai.ProviderGPT4:
-		aiProvider = ai.ProviderGPT4
-	case ai.ProviderGemini:
-		aiProvider = ai.ProviderGemini
-	case ai.ProviderGrok:
-		aiProvider = ai.ProviderGrok
-	case ai.ProviderOllama:
-		aiProvider = ai.ProviderOllama
-	default:
-		aiProvider = ai.ProviderOllama // Safer default: prefer local model over broken cloud fallback
-	}
+	aiProvider := mapAgentProviderToAIProvider(provider)
 	log.Printf("Mapped agent provider %s to AI provider %s", provider, aiProvider)
 
 	// Ensure reasonable token limits
