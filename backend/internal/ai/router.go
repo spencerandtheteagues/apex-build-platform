@@ -535,7 +535,7 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 			}
 		} else {
 			status := r.healthStatus[requested]
-			knownBad := status == "no_credits" || status == "auth_error"
+			knownBad := status == "auth_error" || (status == "no_credits" && !isOpenRouterFreeRequest(req, requested))
 			if knownBad {
 				if req.DisableFallback {
 					return "", fmt.Errorf("provider %s unhealthy: %s", requested, status)
@@ -598,6 +598,18 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 
 	// If no fallbacks work, use load balancing among healthy providers
 	return r.selectByLoadBalancing(req)
+}
+
+func isOpenRouterFreeRequest(req *AIRequest, provider AIProvider) bool {
+	if req == nil || provider != ProviderOpenRouter {
+		return false
+	}
+	return isOpenRouterFreeModelID(req.Model)
+}
+
+func isOpenRouterFreeModelID(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return normalized == "openrouter/free" || strings.Contains(normalized, ":free")
 }
 
 func (r *AIRouter) providerAllowedByCost(req *AIRequest, provider AIProvider) (bool, float64, float64) {

@@ -381,6 +381,60 @@ func TestGenerateWithDisabledFallbackRejectsUnhealthyExplicitProvider(t *testing
 	}
 }
 
+func TestGenerateWithDisabledFallbackAllowsOpenRouterFreeModelDespiteNoCreditsHealth(t *testing.T) {
+	t.Parallel()
+
+	openRouterCalls := 0
+	fallbackCalls := 0
+
+	router := &AIRouter{
+		clients: map[AIProvider]AIClient{
+			ProviderOpenRouter: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					openRouterCalls++
+					return &AIResponse{Provider: req.Provider, Content: "free openrouter ok"}, nil
+				},
+			},
+			ProviderGPT4: &routerStubClient{
+				generate: func(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+					fallbackCalls++
+					return &AIResponse{Provider: req.Provider, Content: "fallback should not run"}, nil
+				},
+			},
+		},
+		config: DefaultRouterConfig(),
+		healthStatus: map[AIProvider]string{
+			ProviderOpenRouter: "no_credits",
+			ProviderGPT4:       "ok",
+		},
+		healthCheck: map[AIProvider]bool{
+			ProviderOpenRouter: false,
+			ProviderGPT4:       true,
+		},
+	}
+
+	resp, err := router.Generate(context.Background(), &AIRequest{
+		ID:              "no-fallback-openrouter-free-despite-no-credits-health",
+		Provider:        ProviderOpenRouter,
+		Model:           "moonshotai/kimi-k2.6:free",
+		Capability:      CapabilityCodeGeneration,
+		Prompt:          "Build a dashboard",
+		DisableFallback: true,
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if resp == nil || resp.Provider != ProviderOpenRouter {
+		t.Fatalf("response = %+v, want openrouter", resp)
+	}
+	if openRouterCalls != 1 {
+		t.Fatalf("openrouter calls = %d, want 1", openRouterCalls)
+	}
+	if fallbackCalls != 0 {
+		t.Fatalf("fallback calls = %d, want 0 when fallback is disabled", fallbackCalls)
+	}
+}
+
 func TestGenerateReroutesWhenDefaultProviderExceedsCostThreshold(t *testing.T) {
 	t.Parallel()
 
