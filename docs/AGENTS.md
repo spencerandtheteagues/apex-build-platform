@@ -13,6 +13,7 @@ This file is the level 1 docs contract. Add child docs if a documentation subtre
 ## Owned Files And Surfaces
 
 - `architecture.md`, `api.md`, `development.md`, `deployment.md`: stable human-readable technical maps.
+- `RATE_LIMIT_BACKPRESSURE_POLICY.md`: operational rate-limiting and backpressure rules (scopes, limits, burst allowances, degradation priority, env vars).
 - `launch-readiness-tracker.md`, `launch-runbook.md`, `builder-hardening-plan.md`, `canary-reliability-handoff.md`: launch evidence, blockers, runbook, and reliability handoff docs.
 - `replit-overtake-roadmap.md`, `contract-first-orchestration-plan.md`, `mobile-app-builder-architecture.md`, `stripe-pricing-runbook.md`: strategy and subsystem plans.
 - `architecture-intelligence/`: AI-oriented repo maps and analysis artifacts.

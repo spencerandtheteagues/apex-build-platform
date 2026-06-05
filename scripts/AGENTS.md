@@ -11,6 +11,10 @@ This file is the level 1 scripts contract. Add child docs if script families gro
 ## Owned Files And Surfaces
 
 - `run_live_golden_build.mjs`, `run_live_golden_canary_matrix.sh`, `run_live_prompt_matrix.sh`, `run_platform_build_smoke.sh`, `run_platform_canary_matrix.sh`: live and local build quality gates.
+- `runtime_stability_checklist.sh`: 10-gate runtime stability verification (health, readiness, deep health, features, metrics, frontend shell, CORS, security headers, panic recovery, goroutine sanity).
+- `heartbeat_deadagent_check.sh`: heartbeat and dead-agent detection verification (WebSocket, agent services, build snapshot heartbeat, rate-limit backpressure, auth brute-force protection, dead-agent takeover code contracts).
+- `rate_limit_backpressure_test.sh`: live rate-limit behavior verification (general API burst, auth burst, 429 response shape, build-start burst, CORS exemption, /health stability under load).
+- `smoke_test_suite.sh`: unified orchestrator that runs the above three suites in sequence.
 - `verify_render_launch_env.mjs`: Render blueprint, service, env, health, and readiness verification.
 - `run_render_rollback_drill.mjs`: dry-run-first Render rollback and roll-forward drill. It must use Render's `/services/{serviceId}/rollback` endpoint with exact deploy-id confirmation before execution, never placeholder commit/deploy-trigger rollback behavior.
 - `verify_stripe_launch.mjs`: Stripe billing readiness, config, webhook, checkout, and portal verification.
